@@ -20,6 +20,7 @@ public:
     void text(int i, const juce::String& v) { check(sqlite3_bind_text(s, i, v.toRawUTF8(), -1, SQLITE_TRANSIENT)); }
     void integer(int i, int64_t v) { check(sqlite3_bind_int64(s, i, v)); }
     void real(int i, double v) { check(sqlite3_bind_double(s, i, v)); }
+    void reset() { sqlite3_reset(s); sqlite3_clear_bindings(s); }
     bool step()
     {
         auto rc = sqlite3_step(s);

@@ -106,6 +106,33 @@ std::vector<SampleRecord> SampleRepository::page(int limit, int offset) const
     while (s.step()) out.push_back(read(s));
     return out;
 }
+std::vector<PathEntry> SampleRepository::pathsAfterId(int64_t lastId, int limit) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,"SELECT id,path,missing FROM samples WHERE id>? ORDER BY id LIMIT ?");
+    s.integer(1,juce::jmax<int64_t>(0,lastId)); s.integer(2,juce::jlimit(0,50000,limit));
+    std::vector<PathEntry> out;
+    while (s.step())
+        out.push_back({s.integer(0), s.text(1), s.integer(2) != 0});
+    return out;
+}
+void SampleRepository::setMissing(const std::vector<int64_t>& ids)
+{
+    if (ids.empty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle,"BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement s(db.handle,"UPDATE samples SET missing=1 WHERE id=?");
+        for (auto id : ids) { s.integer(1,id); s.step(); s.reset(); }
+        detail::exec(db.handle,"COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle,"ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
 int SampleRepository::count() const
 {
     std::lock_guard lock(db.mutex);

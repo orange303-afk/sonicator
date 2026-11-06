@@ -89,6 +89,27 @@ TEST_CASE("Schema v1 migrates in place, keeps rows, and backs up once", "[databa
     { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.count() == 2); }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
 }
+TEST_CASE("Path stream walks by primary key and marks missing in batches", "[database]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("c.sqlite")); SampleRepository repo(db); repo.createTables();
+    SampleRecord r; r.filePath = "/x/c.wav"; r.fileName = "c.wav"; r.fileHash = "hc";
+    auto idC = repo.upsert(r);
+    REQUIRE(idC > 0);
+    r.filePath = "/x/a.wav"; r.fileName = "a.wav"; r.fileHash = "ha"; auto idA = repo.upsert(r);
+    r.filePath = "/x/b.wav"; r.fileName = "b.wav"; r.fileHash = "hb"; auto idB = repo.upsert(r);
+    auto first = repo.pathsAfterId(0, 2);
+    REQUIRE(first.size() == 2);
+    REQUIRE(first[0].id < first[1].id);
+    auto second = repo.pathsAfterId(first.back().id, 2);
+    REQUIRE(second.size() == 1);
+    REQUIRE(second[0].path == "/x/b.wav");
+    repo.setMissing({idA, idB});
+    REQUIRE(repo.findByPath("/x/a.wav")->missing);
+    REQUIRE(repo.findByPath("/x/b.wav")->missing);
+    REQUIRE_FALSE(repo.findByPath("/x/c.wav")->missing);
+    repo.setMissing({});
+    REQUIRE(repo.findByPath("/x/a.wav")->missing);
+}
 TEST_CASE("Database open failure is reported", "[database]")
 {
     REQUIRE_THROWS(Database(juce::File::getSpecialLocation(juce::File::tempDirectory)));
