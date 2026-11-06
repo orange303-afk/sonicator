@@ -8,6 +8,7 @@ struct AppSettings
     ThemeMode theme = ThemeMode::System;
     int scalePercent = 100;
     juce::String language = "English";
+    int pageSize = 10000; // 0 means every match on one virtual page
     juce::String databasePath; // empty means the default catalog location
     int windowX = 0, windowY = 0, windowWidth = 0, windowHeight = 0;
     bool hasWindowBounds() const { return windowWidth > 0 && windowHeight > 0; }

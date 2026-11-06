@@ -52,3 +52,15 @@ TEST_CASE("Independent settings updates do not overwrite each other", "[settings
     REQUIRE(afterWindow.windowWidth == 900); REQUIRE(afterWindow.windowX == 40);
     REQUIRE(afterWindow.databasePath == "/catalogs/main.sqlite");
 }
+TEST_CASE("Page size persists and invalid values fall back", "[settings][paging]")
+{
+    TestDirectory t; auto file = t.dir.getChildFile("settings.json");
+    SettingsStore store(file);
+    AppSettings settings; settings.pageSize = 0;
+    store.save(settings);
+    REQUIRE(store.load().pageSize == 0);
+    settings.pageSize = 100; store.save(settings);
+    REQUIRE(store.load().pageSize == 100);
+    file.replaceWithText("{\"pageSize\":7}");
+    REQUIRE(store.load().pageSize == 10000);
+}

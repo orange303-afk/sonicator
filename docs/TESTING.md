@@ -74,6 +74,18 @@ Windows / Intel macOS execution, ASan, concurrent UI-writer stress, hardware lat
 - Debug/Release `codesign --verify --verbose`: valid on disk and designated requirement satisfied (ad-hoc).
 - `git diff --check`: clean.
 
+## Page sizes and virtual all view (2026-11-06)
+
+- Default suite: **73 cases / 695 assertions passed** in Debug and Release; Debug and Release CTest 1/1; Release ad-hoc bundle signature verified.
+- New coverage: settings persistence for 100/1000/10000/All with invalid-value fallback; ID queries and batched records preserve catalog order and ignore missing IDs; virtual rows load on demand with tags, stars and duplicate counts; multi-selection survives a virtual refresh; the shell switches 100→All→100, loads row 119 on demand, pages to the remaining 20 and persists the choice.
+- `[.scale]` with 300k rows: unfiltered ID query **34.4 ms**, filtered ID query **128.2 ms**, a 400-row block **1.9 ms**; whole-catalog search and duplicate refresh unchanged.
+- Scrolling uses JUCE's virtualized table plus a 4000-row cache; no 300k-record vector is built.
+
+### Known limits after this stage
+
+- A filter or sort change still performs one synchronous ID query; on 300k rows this can be a brief ~130 ms hitch in Debug. Scrolling and record loading are block-based.
+- Very fast scrollbar drags across the whole catalog may fetch several blocks, each a few milliseconds.
+
 ## UI polish: resize, warm palette and search field (2026-11-06)
 
 - Fixed the window resize regression: `Window::resized()` had overridden the base implementation and only scheduled geometry saving, so the content component kept its initial size while the window grew. It now calls `DocumentWindow::resized()` before scheduling the save.

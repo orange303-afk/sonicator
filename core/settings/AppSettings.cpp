@@ -38,6 +38,9 @@ AppSettings SettingsStore::load() const
     settings.scalePercent = AppSettings::clampScale((int) object->getProperty("scale"));
     const auto language = object->getProperty("language").toString();
     if (language.isNotEmpty()) settings.language = language;
+    const int pageSize = (int) object->getProperty("pageSize");
+    settings.pageSize = (pageSize == 100 || pageSize == 1000 || pageSize == 10000 || pageSize == 0)
+        ? pageSize : 10000;
     settings.databasePath = object->getProperty("database").toString();
     settings.windowX = (int) object->getProperty("windowX");
     settings.windowY = (int) object->getProperty("windowY");
@@ -53,6 +56,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("theme", AppSettings::themeToString(settings.theme));
     object->setProperty("scale", AppSettings::clampScale(settings.scalePercent));
     object->setProperty("language", settings.language);
+    object->setProperty("pageSize", settings.pageSize);
     object->setProperty("database", settings.databasePath);
     object->setProperty("windowX", settings.windowX);
     object->setProperty("windowY", settings.windowY);

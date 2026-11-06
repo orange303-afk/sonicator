@@ -39,7 +39,7 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 2. Indexing runs in the background; **Pause / Resume / Cancel** control it. Completed file results remain saved on cancellation.
 3. Select a row to immediately preview its original file. Use **Play / Pause / Stop / Loop**, volume and click/drag in the waveform to seek.
 4. Keyboard: **Space** play/pause, **Left / Right** seek one second, **Escape** stop (when not consumed by an editing control).
-5. Search covers the entire catalog by filename and path. Typing is debounced by 250 ms; Enter applies immediately and Escape clears it. Header clicks sort the whole result, not the current page. Pages contain at most 10,000 records; use **< / >** to navigate.
+5. Search covers the entire catalog by filename and path. Typing is debounced by 250 ms; Enter applies immediately and Escape clears it. Header clicks sort the whole result, not the current page. Choose **100 / 1 000 / 10 000 / All** from the menu next to the **< / >** arrows. **All** is virtualized: only matching IDs are prepared, and records are fetched in small blocks as you scroll, so a 300k catalog stays responsive.
 6. **Tags** and **Starred** filter the catalog. Select a sample and **Edit tags...** to assign tags; create, rename, recolour and delete tags from the tag menu.
 7. Select several rows with **Cmd-click** (toggle) or **Shift-click** (range). Right-click any row for **Copy** (files on macOS, paths on other platforms), **Tag** (coloured submenu, applies to the whole selection), **Star/Unstar** and **Open in Finder** (**Explorer** on Windows).
 8. **Hide duplicates** hides byte-identical copies (same full SHA-256 and size) and keeps one catalog-wide representative. The `COPIES` column shows `×N`; right-click **Show all copies** reveals the whole group. Nothing is deleted.
@@ -70,7 +70,7 @@ core/audio/                  preview transport, sample-rate conversion, read-ahe
 core/indexing/               background import, pause/cancel, incremental updates
 core/settings/               persisted application settings
 ui/shell/                    shared dark theme
-ui/library/                  global search, tags and paged library
+ui/library/                  global search, tags and paged/virtualized library
 ui/waveform/                 asynchronous thumbnail and bounded disk cache
 ui/preview/                  transport and keyboard controls
 ui/settings/                 Settings dialog, catalogue switching and About links
@@ -119,6 +119,7 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - Interface scale is limited to 100%, 110%, 125% and 150%. Only English is available; the language setting is stored for future translations. **Move catalog** leaves the previous database file in place instead of deleting it.
 - `Copy` writes real file references only on macOS; other platforms fall back to newline-separated paths until a native file clipboard is added. Multi-selection covers the current 10,000-row page. **Open in Finder/Explorer** reveals the clicked row's file, not every selected file.
 - **Hide duplicates** compares full file bytes only (SHA-256 + size); different containers or metadata with identical decoded audio are not grouped. The representative is chosen across the whole catalog, so inside a folder view the visible copy may be the one from another folder; **Show all copies** reveals it. No file is deleted or moved.
+- With **All**, changing the filter or sort runs one ID query over the whole catalog (measured ~35 ms for 300k rows by name and ~130 ms with a text filter in Debug); rows themselves are loaded in 400-row blocks (~2 ms) and cached around the viewport. The list is never materialized as 300k full records.
 - A saved catalog that is missing or is not a SONICATOR catalog falls back to the default location at startup; the fallback is written to the log.
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.

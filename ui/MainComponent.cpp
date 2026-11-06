@@ -55,8 +55,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     theme::apply(appSettings.theme);
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,30>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
-         &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&hideDuplicates,&clearFilters,&editTags,&previousPage,&nextPage,&heading,&subtitle,
+    for (auto* c : std::array<juce::Component*,31>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
+         &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&hideDuplicates,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel})
         if (c != nullptr) addAndMakeVisible(c);
@@ -155,6 +155,21 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         pageOffset = 0; reloadLibrary();
     };
     editTags.onClick = [this] { showEditTagsMenu(); };
+    pageSize = appSettings.pageSize;
+    pageSizeBox.setComponentID("pageSize");
+    pageSizeBox.addItem("100",100); pageSizeBox.addItem("1 000",1000);
+    pageSizeBox.addItem("10 000",10000); pageSizeBox.addItem("All",1000000);
+    pageSizeBox.setSelectedId(pageSize == 0 ? 1000000 : pageSize,juce::dontSendNotification);
+    pageSizeBox.setTooltip("Rows shown on one page");
+    pageSizeBox.onChange = [this]
+    {
+        const auto selected = pageSizeBox.getSelectedId();
+        pageSize = selected == 1000000 ? 0 : selected;
+        pageOffset = 0;
+        try { settingsStore.update([this](AppSettings& saved) { saved.pageSize = pageSize; }); } catch (...) {}
+        reloadLibrary();
+        if (isShowing()) library.focusForNavigation();
+    };
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
     preview.onAction = [this] { library.focusForNavigation(); };
@@ -297,6 +312,7 @@ juce::File MainComponent::backupCatalog()
 bool MainComponent::refreshIfCatalogChanged()
 {
     if (! readRepo) return false;
+    if (pageSize == 0 && indexer != nullptr && indexer->progress().running) return false;
     try { if (readRepo->count() == totalCatalogCount) return false; }
     catch (const std::exception&) { return false; }
     reloadLibrary();
@@ -309,30 +325,55 @@ void MainComponent::reloadLibrary()
     {
         totalCatalogCount = readRepo->count();
         filter.folder = selectedFolder;
-        auto page = readRepo->query(filter, pageSize, pageOffset);
-        if (pageOffset > 0 && pageOffset >= page.total)
+        int shown = 0;
+        if (pageSize == 0)
         {
-            pageOffset = page.total > 0 ? ((page.total - 1) / pageSize) * pageSize : 0;
-            page = readRepo->query(filter, pageSize, pageOffset);
+            auto ids = readRepo->queryIds(filter);
+            catalogCount = (int) ids.size();
+            shown = catalogCount;
+            library.setVirtualSamples(std::move(ids), [this](const std::vector<int64_t>& pageIds)
+            {
+                FileListPanel::LoadedRows loaded;
+                if (readRepo != nullptr)
+                {
+                    loaded.records = readRepo->recordsByIds(pageIds);
+                    loaded.tags = readRepo->tagsForSamples(pageIds);
+                    loaded.duplicates = readRepo->duplicateCounts(pageIds);
+                }
+                return loaded;
+            });
+            countLabel.setText(juce::String(catalogCount) + (filter.hasTextOrTagFilter() ? " matching" : " samples")
+                + "  |  all on one page",juce::dontSendNotification);
+            previousPage.setEnabled(false); nextPage.setEnabled(false);
         }
-        catalogCount = page.total;
-        std::vector<int64_t> ids;
-        ids.reserve(page.samples.size());
-        for (const auto& sample : page.samples) ids.push_back(sample.id);
-        const int shown = (int) page.samples.size();
-        library.setSamples(std::move(page.samples));
-        library.setRowTags(readRepo->tagsForSamples(ids));
-        library.setDuplicateCounts(readRepo->duplicateCounts(ids));
+        else
+        {
+            auto page = readRepo->query(filter, pageSize, pageOffset);
+            if (pageOffset > 0 && pageOffset >= page.total)
+            {
+                pageOffset = page.total > 0 ? ((page.total - 1) / pageSize) * pageSize : 0;
+                page = readRepo->query(filter, pageSize, pageOffset);
+            }
+            catalogCount = page.total;
+            shown = (int) page.samples.size();
+            std::vector<int64_t> ids;
+            ids.reserve(page.samples.size());
+            for (const auto& sample : page.samples) ids.push_back(sample.id);
+            library.setSamples(std::move(page.samples));
+            library.setRowTags(readRepo->tagsForSamples(ids));
+            library.setDuplicateCounts(readRepo->duplicateCounts(ids));
+            juce::String text = juce::String(catalogCount) + (filter.hasTextOrTagFilter() ? " matching" : " samples")
+                + "  |  " + juce::String(shown) + " on page " + juce::String(pageOffset/pageSize+1);
+            if (filter.matchAnyTag && ! filter.includeTags.empty()) text += "  |  any tag";
+            countLabel.setText(text,juce::dontSendNotification);
+            previousPage.setEnabled(pageOffset > 0); nextPage.setEnabled(pageOffset+pageSize < catalogCount);
+        }
         allTags = readRepo->tags();
         updateTagControls();
-        juce::String text = juce::String(catalogCount) + (filter.hasTextOrTagFilter() ? " matching" : " samples")
-            + "  |  " + juce::String(shown) + " on page " + juce::String(pageOffset/pageSize+1);
-        if (filter.matchAnyTag && ! filter.includeTags.empty()) text += "  |  any tag";
-        countLabel.setText(text,juce::dontSendNotification);
         rootsLabel.setText(readRepo->roots().isEmpty() ? "No sample folders yet.\n\nOriginal files stay untouched."
             : "FOLDERS\n\n" + readRepo->roots().joinIntoString("\n\n"),juce::dontSendNotification);
-        previousPage.setEnabled(pageOffset > 0); nextPage.setEnabled(pageOffset+pageSize < catalogCount);
         updateSelectedTags();
+        (void) shown;
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
 }
@@ -949,6 +990,7 @@ void MainComponent::resized()
     analysisViewport.setBounds(analysis);
     analysisDetails.setBounds(0,0,juce::jmax(1,analysis.getWidth()-14),550);
     auto list = r.reduced(14,14); auto bar = list.removeFromTop(32);
+    pageSizeBox.setBounds(bar.removeFromRight(92)); bar.removeFromRight(8);
     nextPage.setBounds(bar.removeFromRight(30)); bar.removeFromRight(4);
     previousPage.setBounds(bar.removeFromRight(30)); countLabel.setBounds(bar);
     list.removeFromTop(4);

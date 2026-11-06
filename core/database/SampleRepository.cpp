@@ -96,6 +96,78 @@ juce::String orderBy(LibrarySort sort, bool ascending)
     }
     return column + (ascending ? " ASC" : " DESC") + ", samples.id ASC";
 }
+struct FilterSql
+{
+    juce::String where = " WHERE 1";
+    std::vector<std::variant<juce::String, int64_t>> params;
+};
+FilterSql buildFilterSql(const LibraryFilter& filter)
+{
+    FilterSql sql;
+    auto addText = [&](const juce::String& text, juce::String value)
+    {
+        sql.where += text; sql.params.emplace_back(std::move(value));
+    };
+    auto addInt = [&](const juce::String& text, int64_t value)
+    {
+        sql.where += text; sql.params.emplace_back(value);
+    };
+    if (filter.text.trim().isNotEmpty())
+    {
+        auto tokens = juce::StringArray::fromTokens(filter.text.trim(), " \t\r\n", "");
+        for (const auto& token : tokens)
+        {
+            if (token.isEmpty()) continue;
+            addText(" AND samples.search_key LIKE ? ESCAPE '\\'",
+                    "%" + escapeLike(foldForSearch(token)) + "%");
+        }
+    }
+    if (filter.folder.isNotEmpty())
+    {
+        auto [lower, upper] = folderRange(filter.folder);
+        addText(" AND samples.path>=?", lower);
+        addText(" AND samples.path<?", upper);
+    }
+    if (! filter.includeTags.empty())
+    {
+        if (! filter.matchAnyTag)
+        {
+            for (auto id : filter.includeTags)
+                addInt(" AND EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
+        }
+        else
+        {
+            juce::String placeholders;
+            for (size_t i = 0; i < filter.includeTags.size(); ++i)
+            {
+                if (i != 0) placeholders += ",";
+                placeholders += "?";
+                sql.params.emplace_back(filter.includeTags[i]);
+            }
+            sql.where += " AND EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id IN ("
+                + placeholders + "))";
+        }
+    }
+    for (auto id : filter.excludeTags)
+        addInt(" AND NOT EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
+    if (filter.starredOnly) sql.where += " AND samples.starred=1";
+    if (filter.hideDuplicates)
+        sql.where += " AND NOT EXISTS(SELECT 1 FROM duplicates d WHERE d.sample_id=samples.id AND d.is_representative=0)";
+    if (filter.duplicateHash.isNotEmpty())
+        addText(" AND samples.hash=?", filter.duplicateHash);
+    return sql;
+}
+int bindFilter(detail::Statement& statement, const FilterSql& sql)
+{
+    int index = 1;
+    for (const auto& param : sql.params)
+    {
+        if (const auto* text = std::get_if<juce::String>(&param)) statement.text(index, *text);
+        else statement.integer(index, std::get<int64_t>(param));
+        ++index;
+    }
+    return index;
+}
 Tag readTag(const detail::Statement& s, int offset, int countColumn = -1)
 {
     Tag tag;
@@ -332,84 +404,63 @@ std::vector<SampleRecord> SampleRepository::pageInFolder(const juce::String& fol
 LibraryPage SampleRepository::query(const LibraryFilter& filter, int limit, int offset) const
 {
     std::lock_guard lock(db.mutex);
-    using Param = std::variant<juce::String, int64_t>;
-    std::vector<Param> params;
-    juce::String where = " WHERE 1";
-    auto addText = [&](const juce::String& sql, juce::String value) { where += sql; params.emplace_back(std::move(value)); };
-    auto addInt = [&](const juce::String& sql, int64_t value) { where += sql; params.emplace_back(value); };
-
-    if (filter.text.trim().isNotEmpty())
-    {
-        auto tokens = juce::StringArray::fromTokens(filter.text.trim(), " \t\r\n", "");
-        for (const auto& token : tokens)
-        {
-            if (token.isEmpty()) continue;
-            addText(" AND samples.search_key LIKE ? ESCAPE '\\'",
-                    "%" + escapeLike(foldForSearch(token)) + "%");
-        }
-    }
-    if (filter.folder.isNotEmpty())
-    {
-        auto [lower, upper] = folderRange(filter.folder);
-        addText(" AND samples.path>=?", lower);
-        addText(" AND samples.path<?", upper);
-    }
-    if (! filter.includeTags.empty())
-    {
-        if (! filter.matchAnyTag)
-        {
-            for (auto id : filter.includeTags)
-                addInt(" AND EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
-        }
-        else
-        {
-            juce::String placeholders;
-            for (size_t i = 0; i < filter.includeTags.size(); ++i)
-            {
-                if (i != 0) placeholders += ",";
-                placeholders += "?";
-                params.emplace_back(filter.includeTags[i]);
-            }
-            where += " AND EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id IN ("
-                + placeholders + "))";
-        }
-    }
-    for (auto id : filter.excludeTags)
-        addInt(" AND NOT EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
-    if (filter.starredOnly) where += " AND samples.starred=1";
-    if (filter.hideDuplicates)
-        where += " AND NOT EXISTS(SELECT 1 FROM duplicates d WHERE d.sample_id=samples.id AND d.is_representative=0)";
-    if (filter.duplicateHash.isNotEmpty())
-        addText(" AND samples.hash=?", filter.duplicateHash);
-
-    auto bind = [&params](detail::Statement& s)
-    {
-        int index = 1;
-        for (const auto& param : params)
-        {
-            if (const auto* text = std::get_if<juce::String>(&param)) s.text(index, *text);
-            else s.integer(index, std::get<int64_t>(param));
-            ++index;
-        }
-        return index;
-    };
-
+    const auto parts = buildFilterSql(filter);
     LibraryPage result;
     {
-        auto sql = "SELECT COUNT(*) FROM samples" + where;
-        detail::Statement s(db.handle, sql.toRawUTF8()); bind(s);
+        auto sql = "SELECT COUNT(*) FROM samples" + parts.where;
+        detail::Statement s(db.handle, sql.toRawUTF8()); bindFilter(s, parts);
         if (s.step()) result.total = (int) s.integer(0);
     }
     {
-        auto sql = "SELECT " + juce::String(columns) + " FROM samples" + where
+        auto sql = "SELECT " + juce::String(columns) + " FROM samples" + parts.where
             + " ORDER BY " + orderBy(filter.sort, filter.ascending) + " LIMIT ? OFFSET ?";
         detail::Statement s(db.handle, sql.toRawUTF8());
-        const int next = bind(s);
+        const int next = bindFilter(s, parts);
         s.integer(next, juce::jlimit(0, 50000, limit));
         s.integer(next + 1, juce::jmax(0, offset));
         while (s.step()) result.samples.push_back(read(s));
     }
     return result;
+}
+std::vector<int64_t> SampleRepository::queryIds(const LibraryFilter& filter) const
+{
+    std::lock_guard lock(db.mutex);
+    const auto parts = buildFilterSql(filter);
+    auto sql = "SELECT samples.id FROM samples" + parts.where
+        + " ORDER BY " + orderBy(filter.sort, filter.ascending);
+    detail::Statement s(db.handle, sql.toRawUTF8()); bindFilter(s, parts);
+    std::vector<int64_t> ids;
+    while (s.step()) ids.push_back(s.integer(0));
+    return ids;
+}
+std::vector<SampleRecord> SampleRepository::recordsByIds(const std::vector<int64_t>& ids) const
+{
+    std::lock_guard lock(db.mutex);
+    std::map<int64_t, SampleRecord> byId;
+    constexpr size_t chunkSize = 400;
+    for (size_t start = 0; start < ids.size(); start += chunkSize)
+    {
+        const size_t end = std::min(ids.size(), start + chunkSize);
+        juce::String placeholders;
+        for (size_t i = start; i < end; ++i) placeholders += (i == start ? "?" : ",?");
+        auto sql = "SELECT " + juce::String(columns) + " FROM samples WHERE id IN (" + placeholders + ")";
+        detail::Statement s(db.handle, sql.toRawUTF8());
+        int index = 1;
+        for (size_t i = start; i < end; ++i) s.integer(index++, ids[i]);
+        while (s.step())
+        {
+            auto record = read(s);
+            byId[record.id] = std::move(record);
+        }
+    }
+    std::vector<SampleRecord> out;
+    out.reserve(ids.size());
+    for (auto id : ids)
+    {
+        const auto found = byId.find(id);
+        if (found != byId.end()) out.push_back(found->second);
+    }
+    return out;
 }
 int SampleRepository::countHash(const juce::String& hash) const
 {

@@ -1,5 +1,8 @@
 #include "FileListPanel.h"
 #include "ui/shell/Theme.h"
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 namespace sonicator {
 namespace {
 void drawStar(juce::Graphics& g, juce::Rectangle<float> r, bool filled)
@@ -50,38 +53,118 @@ void FileListPanel::refreshTheme()
 void FileListPanel::selectRows(const std::vector<int>& rows)
 {
     table.deselectAllRows();
-    for (auto row : rows) if (row >= 0 && row < (int) visible.size()) table.selectRow(row, true, false);
+    for (auto row : rows) if (row >= 0 && row < getNumRows()) table.selectRow(row, true, false);
 }
-std::vector<SampleRecord> FileListPanel::getSelectedSamples() const
+int64_t FileListPanel::idAt(int row) const
+{
+    const int total = virtualMode ? (int) virtualIds.size() : (int) visible.size();
+    if (row < 0 || row >= total) return 0;
+    return virtualMode ? virtualIds[(size_t) row] : visible[(size_t) row].id;
+}
+const SampleRecord* FileListPanel::recordAt(int row)
+{
+    if (row < 0 || row >= getNumRows()) return nullptr;
+    if (! virtualMode) return &visible[(size_t) row];
+    const auto found = virtualRows.find(row);
+    if (found != virtualRows.end()) return &found->second;
+    loadVirtualBlock(row);
+    const auto loaded = virtualRows.find(row);
+    return loaded != virtualRows.end() ? &loaded->second : nullptr;
+}
+std::vector<SampleRecord> FileListPanel::getSelectedSamples()
 {
     std::vector<SampleRecord> out;
     const auto rows = table.getSelectedRows();
     for (int i = 0; i < rows.size(); ++i)
-    {
-        const int row = rows[i];
-        if (row >= 0 && row < (int) visible.size()) out.push_back(visible[(size_t) row]);
-    }
+        if (const auto* record = recordAt(rows[i])) out.push_back(*record);
     return out;
+}
+void FileListPanel::loadVirtualBlock(int row)
+{
+    if (! rowLoader || virtualIds.empty()) return;
+    const int total = (int) virtualIds.size();
+    int start = juce::jmax(0, row - 100);
+    int end = juce::jmin(total, start + 400);
+    if (end - start < 400) start = juce::jmax(0, end - 400);
+    std::vector<int64_t> ids(virtualIds.begin() + start, virtualIds.begin() + end);
+    LoadedRows loaded;
+    try { loaded = rowLoader(ids); }
+    catch (...) { return; }
+    std::map<int64_t, SampleRecord> byId;
+    for (auto& record : loaded.records) byId[record.id] = std::move(record);
+    for (int i = start; i < end; ++i)
+    {
+        const auto found = byId.find(virtualIds[(size_t) i]);
+        if (found != byId.end()) virtualRows[i] = found->second;
+    }
+    for (auto& [id, tags] : loaded.tags) rowTags[id] = std::move(tags);
+    for (auto& [id, count] : loaded.duplicates) duplicateCounts[id] = count;
+    evictVirtualRows(row);
+}
+void FileListPanel::evictVirtualRows(int centreRow)
+{
+    if (virtualRows.size() <= 4000) return;
+    for (auto it = virtualRows.begin(); it != virtualRows.end();)
+    {
+        if (std::abs(it->first - centreRow) > 2000)
+        {
+            rowTags.erase(it->second.id);
+            duplicateCounts.erase(it->second.id);
+            it = virtualRows.erase(it);
+        }
+        else ++it;
+    }
+}
+void FileListPanel::setVirtualSamples(std::vector<int64_t> orderedIds, RowLoader loader)
+{
+    std::vector<int64_t> selectedIds;
+    int64_t leadId = 0;
+    const auto selectedRows = table.getSelectedRows();
+    for (int i = 0; i < selectedRows.size(); ++i) selectedIds.push_back(idAt(selectedRows[i]));
+    const int leadRow = table.getLastRowSelected();
+    if (leadRow >= 0 && leadRow < getNumRows()) leadId = idAt(leadRow);
+    const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
+    virtualMode = true;
+    virtualIds = std::move(orderedIds);
+    virtualRows.clear();
+    all.clear(); visible.clear(); search.clear();
+    rowTags.clear(); duplicateCounts.clear();
+    rowLoader = std::move(loader);
+    table.deselectAllRows();
+    table.updateContent();
+    int restoredLead = -1;
+    for (int row = 0; row < (int) virtualIds.size(); ++row)
+    {
+        const auto id = virtualIds[(size_t) row];
+        if (std::find(selectedIds.begin(), selectedIds.end(), id) == selectedIds.end()) continue;
+        table.selectRow(row, true, false);
+        if (id == leadId) restoredLead = row;
+    }
+    if (restoredLead >= 0)
+    {
+        table.selectRow(restoredLead, true, false);
+        table.scrollToEnsureRowIsOnscreen(restoredLead);
+    }
+    else table.scrollToEnsureRowIsOnscreen(0);
+    repaint();
 }
 void FileListPanel::setSamples(std::vector<SampleRecord> records)
 {
     std::vector<int64_t> selectedIds;
     int64_t leadId = 0;
     const auto selectedRows = table.getSelectedRows();
-    for (int i = 0; i < selectedRows.size(); ++i)
-    {
-        const int row = selectedRows[i];
-        if (row >= 0 && row < getNumRows()) selectedIds.push_back(visible[(size_t) row].id);
-    }
+    for (int i = 0; i < selectedRows.size(); ++i) selectedIds.push_back(idAt(selectedRows[i]));
     const int leadRow = table.getLastRowSelected();
-    if (leadRow >= 0 && leadRow < getNumRows()) leadId = visible[(size_t) leadRow].id;
+    if (leadRow >= 0 && leadRow < getNumRows()) leadId = idAt(leadRow);
     const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
+    virtualMode = false; virtualIds.clear(); virtualRows.clear(); rowLoader = nullptr;
+    rowTags.clear(); duplicateCounts.clear();
     all = std::move(records); rebuild();
     if (selectedIds.empty()) return;
     int restoredLead = -1;
     for (int row = 0; row < getNumRows(); ++row)
     {
-        const auto id = visible[(size_t) row].id;
+        const auto id = idAt(row);
         if (std::find(selectedIds.begin(), selectedIds.end(), id) == selectedIds.end()) continue;
         table.selectRow(row, true, false);
         if (id == leadId) restoredLead = row;
@@ -98,7 +181,11 @@ void FileListPanel::setDuplicateCounts(std::map<int64_t, int> counts)
     duplicateCounts = std::move(counts);
     table.repaint();
 }
-void FileListPanel::setSearchText(const juce::String& text) { search = text.trim(); rebuild(); }
+void FileListPanel::setSearchText(const juce::String& text)
+{
+    if (virtualMode) return; // whole-catalog search is executed in SQL by the owner
+    search = text.trim(); rebuild();
+}
 void FileListPanel::rebuild()
 {
     visible.clear();
@@ -144,8 +231,9 @@ void FileListPanel::paintRowBackground(juce::Graphics& g,int row,int width,int h
 }
 void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool)
 {
-    if (row < 0 || row >= getNumRows()) return;
-    const auto& r = visible[(size_t) row];
+    const auto* record = recordAt(row);
+    if (record == nullptr) return;
+    const auto& r = *record;
     if (col == 8)
     {
         const auto area = juce::Rectangle<float>(0, 0, (float) w, (float) h).withSizeKeepingCentre(14.0f, 14.0f);
@@ -211,10 +299,12 @@ void FileListPanel::cellClicked(int row, int, const juce::MouseEvent& event)
     if (! event.mods.isPopupMenu() || row < 0 || row >= getNumRows() || ! onContextMenu) return;
     if (! table.isRowSelected(row)) table.selectRow(row, true);
     const auto selection = getSelectedSamples();
-    if (! selection.empty()) onContextMenu(selection, visible[(size_t) row], event.getScreenPosition());
+    const auto* lead = recordAt(row);
+    if (lead != nullptr && ! selection.empty()) onContextMenu(selection, *lead, event.getScreenPosition());
 }
 void FileListPanel::selectedRowsChanged(int row)
 {
-    if (! restoringSelection && row >= 0 && row < getNumRows() && onSelected) onSelected(visible[(size_t) row]);
+    if (restoringSelection || row < 0 || row >= getNumRows() || ! onSelected) return;
+    if (const auto* record = recordAt(row)) onSelected(*record);
 }
 } // namespace sonicator

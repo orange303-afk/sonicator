@@ -52,6 +52,7 @@ private:
     juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" }, hideDuplicates { "Hide duplicates" },
                      clearFilters { "Clear filters" }, editTags { "Edit tags..." };
     juce::TextButton previousPage { "<" }, nextPage { ">" };
+    juce::ComboBox pageSizeBox;
     juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel;
     TagStrip selectedTags;
     juce::Viewport analysisViewport;
@@ -61,7 +62,7 @@ private:
     std::unique_ptr<IndexingService> indexer;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog;
-    int pageOffset = 0, catalogCount = 0;
+    int pageOffset = 0, catalogCount = 0, pageSize = 10000;
     bool wasRunning = false;
     uint32_t lastRefreshMs = 0, lastSearchChange = 0;
     juce::String pendingSearch;

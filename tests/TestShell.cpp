@@ -375,3 +375,47 @@ TEST_CASE("Hide duplicates shows one byte-identical copy", "[ui][duplicates]")
     clear->onClick();
     REQUIRE(library->getNumRows() == 3);
 }
+TEST_CASE("Page size options page or virtualize the library", "[ui][paging]")
+{
+    TestDirectory t; auto dbPath = t.dir.getChildFile("paging.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        for (int i = 0; i < 120; ++i)
+        {
+            SampleRecord r;
+            r.fileName = "sample_" + juce::String(i).paddedLeft('0', 3) + ".wav";
+            r.filePath = "/virtual/" + r.fileName;
+            r.fileHash = "hash" + juce::String(i); r.format = "WAV"; r.version = basicFeaturesVersion;
+            repo.upsert(r);
+        }
+    }
+    auto settingsFile = t.dir.getChildFile("settings.json");
+    AppSettings settings; settings.pageSize = 100;
+    MainComponent app(dbPath,false,settings,settingsFile);
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 100);
+    auto* pageSize = dynamic_cast<juce::ComboBox*>(app.findChildWithID("pageSize"));
+    REQUIRE(pageSize != nullptr);
+    pageSize->setSelectedId(1000000, juce::sendNotificationSync);
+    REQUIRE(library->getNumRows() == 120);
+    REQUIRE(SettingsStore(settingsFile).load().pageSize == 0);
+    library->selectRow(119);
+    const auto selected = library->getSelectedSamples();
+    REQUIRE(selected.size() == 1);
+    REQUIRE(selected[0].fileName == "sample_119.wav");
+    const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_PAGING_SCREENSHOT",{});
+    if (shot.isNotEmpty())
+    {
+        app.setBounds(0,0,1440,900);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
+        juce::PNGImageFormat png;
+        REQUIRE(png.writeImageToStream(app.createComponentSnapshot(app.getLocalBounds()),*stream));
+    }
+    pageSize->setSelectedId(100, juce::sendNotificationSync);
+    REQUIRE(library->getNumRows() == 100);
+    auto* next = shellButton(app,">");
+    REQUIRE(next != nullptr);
+    next->onClick();
+    REQUIRE(library->getNumRows() == 20);
+}

@@ -87,6 +87,26 @@ TEST_CASE("Three hundred thousand rows finalize quickly with correct missing fla
         REQUIRE(searchMs < 500.0);
         f.text.clear(); f.folder = audio.getFullPathName();
         REQUIRE(repo.query(f, 10000, 0).total == 300001);
+        f.text.clear(); f.folder.clear();
+        const auto allIdsStart = juce::Time::getMillisecondCounterHiRes();
+        auto allIds = repo.queryIds(f);
+        std::cout << "300k unfiltered id query: "
+                  << (juce::Time::getMillisecondCounterHiRes() - allIdsStart) << " ms\n";
+        REQUIRE(allIds.size() == 300001);
+        f.text = "ghost";
+        const auto idsStart = juce::Time::getMillisecondCounterHiRes();
+        auto ids = repo.queryIds(f);
+        const auto idsMs = juce::Time::getMillisecondCounterHiRes() - idsStart;
+        REQUIRE(ids.size() == 300000);
+        std::cout << "300k virtual id query: " << idsMs << " ms\n";
+        REQUIRE(idsMs < 2000.0);
+        std::vector<int64_t> blockIds(ids.begin() + 150000, ids.begin() + 150400);
+        const auto blockStart = juce::Time::getMillisecondCounterHiRes();
+        auto block = repo.recordsByIds(blockIds);
+        const auto blockMs = juce::Time::getMillisecondCounterHiRes() - blockStart;
+        REQUIRE(block.size() == 400);
+        std::cout << "400 virtual rows: " << blockMs << " ms\n";
+        REQUIRE(blockMs < 500.0);
     }
     {
         // Simulate the first launch of this build against an existing 300k catalog.

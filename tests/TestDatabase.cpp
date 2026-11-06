@@ -369,3 +369,23 @@ TEST_CASE("Byte-identical duplicates group, hide and prefer the right representa
     repo.refreshDuplicates();
     REQUIRE(repo.duplicateCounts({ a, b, d })[a] == 3);
 }
+TEST_CASE("ID queries and record batching preserve the catalog order", "[database][paging]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("ids.sqlite")); SampleRepository repo(db); repo.createTables();
+    std::vector<int64_t> ids;
+    for (const auto& name : { "c.wav", "a.wav", "b.wav", "d.wav" })
+        ids.push_back(repo.upsert(sample(juce::String("/lib/") + name, name)));
+    LibraryFilter filter;
+    auto ordered = repo.queryIds(filter);
+    REQUIRE(ordered.size() == 4);
+    auto page = repo.query(filter, 4, 0);
+    REQUIRE(page.samples.size() == ordered.size());
+    for (size_t i = 0; i < ordered.size(); ++i) REQUIRE(page.samples[i].id == ordered[i]);
+    std::vector<int64_t> requested { ordered[2], ordered[0], ordered[3] };
+    auto records = repo.recordsByIds(requested);
+    REQUIRE(records.size() == 3);
+    REQUIRE(records[0].id == requested[0]);
+    REQUIRE(records[1].id == requested[1]);
+    REQUIRE(records[2].id == requested[2]);
+    REQUIRE(repo.recordsByIds({ 999999 }).empty());
+}

@@ -143,3 +143,14 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 - Theme: replaced the blue-violet dark palette with neutral graphite and an orange accent; the light theme uses neutral light gray with a burnt-orange accent. Tag colours remain semantic. Selection uses neutral gray, not purple or brown.
 - Search: `Justification::centredLeft` plus a 10 px left indent centres the placeholder and typed text vertically in the 34 px field.
 - Verification: **69 cases / 664 assertions** in Debug and Release; CTest 1/1; Release signature verified; rendered dark and light snapshots inspected. Manual resize/restore is the remaining visual check.
+
+## Page sizes and virtual all view (2026-11-06)
+
+- Scope: page-size menu 100 / 1 000 / 10 000 / All next to the pagination arrows, persisted in settings, with a virtualized All mode. No schema change.
+- Ruling: All is not "fetch 300k records". `queryIds` computes only ordered primary keys; the table row count is that list, and records are fetched in 400-row blocks on demand (`recordsByIds` plus tags/duplicates). A 4000-row cache keeps ±2000 rows around the viewport. Cost: a brief synchronous ID query when the filter/sort changes; no full-record vector.
+- Ruling: selection is preserved by sample ID and a reload scrolls to the selected row rather than resetting to the top; if the selection is gone, it returns to row 0.
+- Ruling: page size is a persisted display preference (`settings.json`), defaulting to 10 000 and falling back to it for unknown values.
+- Ruling: intermediate refreshes during indexing are skipped in All mode and the list reloads once the scan ends, avoiding repeated full ID queries and scroll jumps.
+- Verification: **73 cases / 695 assertions** in Debug and Release; CTest 1/1; Release ad-hoc signature verified. New coverage: page-size persistence, ordered ID queries and batched records, virtual row loading with metadata, selection across virtual refresh, shell switching 100→All→100, on-demand row 119, next-page 20, persisted All.
+- `[.scale]` 300k: unfiltered ID query 34.4 ms, filtered 128.2 ms, 400-row block 1.9 ms; reconciliation 4.70 s, unchanged rescan 0.77 s, search 105.2 ms.
+- Not verified: Windows/Intel paging, a 300k real scroll-drag trace, or moving the ID query to a background thread.

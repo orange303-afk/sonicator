@@ -28,6 +28,9 @@ public:
     // Whole-catalog query. Text, folder and tags are combined with AND; the returned total is the
     // full match count, independent of the requested page.
     LibraryPage query(const LibraryFilter&, int limit = 10000, int offset = 0) const;
+    // Every matching ID in the same order as query(). Used by the virtual all-on-one-page view.
+    std::vector<int64_t> queryIds(const LibraryFilter&) const;
+    std::vector<SampleRecord> recordsByIds(const std::vector<int64_t>&) const;
     int countHash(const juce::String&) const;
     void addRoot(const juce::String&);
     juce::StringArray roots() const;

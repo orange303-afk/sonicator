@@ -224,3 +224,33 @@ TEST_CASE("Multiple selected rows keep their identities across a refresh", "[ui]
     list.setBounds(0, 0, 900, 300);
     REQUIRE(list.createComponentSnapshot(list.getLocalBounds()).isValid());
 }
+TEST_CASE("Virtual sample rows load in blocks and keep multi-selection", "[ui][virtual]")
+{
+    FileListPanel list;
+    const std::vector<int64_t> ids { 30, 10, 20 };
+    int loads = 0;
+    FileListPanel::RowLoader loader = [&](const std::vector<int64_t>& requested)
+    {
+        ++loads;
+        FileListPanel::LoadedRows loaded;
+        for (auto id : requested)
+        {
+            SampleRecord r; r.id = id; r.fileName = "s" + juce::String(id) + ".wav";
+            if (id == 10) r.starred = true;
+            loaded.records.push_back(r);
+            if (id == 20) { Tag tag; tag.id = 1; tag.name = "Kick"; loaded.tags[id] = { tag }; }
+            if (id == 30) loaded.duplicates[id] = 2;
+        }
+        return loaded;
+    };
+    list.setVirtualSamples(ids, loader);
+    REQUIRE(list.getNumRows() == 3);
+    list.setBounds(0, 0, 900, 260);
+    REQUIRE(list.createComponentSnapshot(list.getLocalBounds()).isValid());
+    REQUIRE(loads > 0);
+    list.selectRows({ 0, 2 });
+    REQUIRE(list.getSelectedSamples().size() == 2);
+    REQUIRE(list.getSelectedSamples()[0].id == 30);
+    REQUIRE(list.getSelectedSamples()[1].id == 20);
+    REQUIRE(list.getSelectedSamples()[0].fileName == "s30.wav");
+}
