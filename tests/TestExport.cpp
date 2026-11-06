@@ -1,0 +1,225 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include "core/export/AudioExporter.h"
+#include "core/export/SelectionExporter.h"
+#include "core/scanner/FileScanner.h"
+#include "TestHelpers.h"
+#include <cmath>
+#include <limits>
+using namespace sonicator;
+namespace
+{
+juce::File writeWav(const juce::File& file, int channels, int bits, bool floating, int frames)
+{
+    file.deleteFile();
+    std::unique_ptr<juce::OutputStream> stream(file.createOutputStream());
+    juce::WavAudioFormat wav;
+    auto options = juce::AudioFormatWriterOptions{}.withSampleRate(44100.0)
+        .withNumChannels(channels).withBitsPerSample(bits)
+        .withSampleFormat(floating ? juce::AudioFormatWriterOptions::SampleFormat::floatingPoint
+                                   : juce::AudioFormatWriterOptions::SampleFormat::integral);
+    auto writer = wav.createWriterFor(stream, options);
+    if (writer == nullptr) return {};
+    juce::AudioBuffer<float> buffer(channels, frames);
+    for (int c = 0; c < channels; ++c)
+        for (int i = 0; i < frames; ++i)
+            buffer.setSample(c, i, (c % 2 == 0 ? 1.0f : -1.0f) * 0.5f
+                * std::sin(2.0f * juce::MathConstants<float>::pi * 440.0f * (float) i / 44100.0f));
+    writer->writeFromAudioSampleBuffer(buffer, 0, frames);
+    return file;
+}
+juce::AudioFormatManager& formats()
+{
+    static juce::AudioFormatManager manager;
+    static const bool registered = [] { manager.registerBasicFormats(); return true; }();
+    juce::ignoreUnused(registered);
+    return manager;
+}
+std::unique_ptr<juce::AudioFormatReader> readerFor(const juce::File& file)
+{
+    return std::unique_ptr<juce::AudioFormatReader>(formats().createReaderFor(file));
+}
+}
+TEST_CASE("Export preserves rate, channels, bit depth, frame count and samples", "[export]")
+{
+    TestDirectory t;
+    auto source = t.wave("source.wav", 440, 2, 44100 * 2);
+    const auto size = source.getSize();
+    const auto modified = source.getLastModificationTime().toMilliseconds();
+    const auto hash = FileScanner::computeFileHash(source);
+    const auto destination = t.dir.getChildFile("out.wav");
+    AudioExporter exporter;
+    const auto result = exporter.exportRange(source, 0.2, 0.5, destination);
+    REQUIRE(result.success); REQUIRE(result.error.isEmpty()); REQUIRE(result.file == destination);
+    auto input = readerFor(source); auto output = readerFor(destination);
+    REQUIRE(input != nullptr); REQUIRE(output != nullptr);
+    REQUIRE(output->sampleRate == 44100);
+    REQUIRE(output->numChannels == 2);
+    REQUIRE(output->bitsPerSample == 16);
+    REQUIRE_FALSE(output->usesFloatingPointData);
+    REQUIRE(output->lengthInSamples == 13230);
+    juce::AudioBuffer<float> expected(2, 2), actual(2, 2);
+    REQUIRE(input->read(&expected, 0, 2, 8820, true, true));
+    REQUIRE(output->read(&actual, 0, 2, 0, true, true));
+    for (int c = 0; c < 2; ++c)
+        REQUIRE(actual.getSample(c, 0) == Catch::Approx(expected.getSample(c, 0)).margin(1.0 / 32768.0));
+    REQUIRE(input->read(&expected, 0, 2, 22049, true, true));
+    REQUIRE(output->read(&actual, 0, 2, 13229, true, true));
+    for (int c = 0; c < 2; ++c)
+        REQUIRE(actual.getSample(c, 1) == Catch::Approx(expected.getSample(c, 1)).margin(1.0 / 32768.0));
+    REQUIRE(source.getSize() == size);
+    REQUIRE(source.getLastModificationTime().toMilliseconds() == modified);
+    REQUIRE(FileScanner::computeFileHash(source) == hash);
+}
+TEST_CASE("Export clamps ranges to the file and rejects invalid sources", "[export]")
+{
+    TestDirectory t;
+    auto source = t.wave("src.wav", 440, 1, 44100);
+    const auto folder = t.dir.getChildFile("exports");
+    AudioExporter exporter;
+    const auto clamped = folder.getChildFile("clamped.wav");
+    const auto result = exporter.exportRange(source, -1.0, 0.1, clamped);
+    REQUIRE(result.success);
+    auto reader = readerFor(clamped); REQUIRE(reader != nullptr);
+    REQUIRE(reader->lengthInSamples == 4410);
+    const auto rejected = folder.getChildFile("rejected.wav");
+    REQUIRE_FALSE(exporter.exportRange(source, 0.5, 0.5, rejected).success);
+    REQUIRE_FALSE(exporter.exportRange(source, 0.7, 0.2, rejected).success);
+    REQUIRE_FALSE(exporter.exportRange(source, std::numeric_limits<double>::quiet_NaN(), 0.2, rejected).success);
+    REQUIRE_FALSE(exporter.exportRange(folder.getChildFile("missing.wav"), 0.0, 0.2, rejected).success);
+    REQUIRE_FALSE(rejected.existsAsFile());
+    REQUIRE_FALSE(juce::File(rejected.getFullPathName() + ".part").existsAsFile());
+}
+TEST_CASE("Export maps integer, float and compressed sources to documented WAV formats", "[export]")
+{
+    TestDirectory t;
+    const auto folder = t.dir.getChildFile("exports");
+    folder.createDirectory();
+    AudioExporter exporter;
+    auto int24 = writeWav(folder.getChildFile("int24.wav"), 2, 24, false, 4410);
+    REQUIRE(int24.existsAsFile());
+    auto int24Out = folder.getChildFile("int24-out.wav");
+    REQUIRE(exporter.exportRange(int24, 0.0, 0.05, int24Out).success);
+    auto int24Reader = readerFor(int24Out); REQUIRE(int24Reader != nullptr);
+    REQUIRE(int24Reader->sampleRate == 44100); REQUIRE(int24Reader->numChannels == 2);
+    REQUIRE(int24Reader->bitsPerSample == 24); REQUIRE_FALSE(int24Reader->usesFloatingPointData);
+    auto floatIn = writeWav(folder.getChildFile("float.wav"), 2, 32, true, 4410);
+    REQUIRE(floatIn.existsAsFile());
+    auto floatOut = folder.getChildFile("float-out.wav");
+    REQUIRE(exporter.exportRange(floatIn, 0.0, 0.05, floatOut).success);
+    auto floatReader = readerFor(floatOut); REQUIRE(floatReader != nullptr);
+    REQUIRE(floatReader->bitsPerSample == 32); REQUIRE(floatReader->usesFloatingPointData);
+    auto compressed = juce::File(SONICATOR_FIXTURE_DIR).getChildFile("tone.flac");
+    REQUIRE(compressed.existsAsFile());
+    auto compressedReader = readerFor(compressed); REQUIRE(compressedReader != nullptr);
+    const double end = juce::jmin(0.1, (double) compressedReader->lengthInSamples / compressedReader->sampleRate);
+    auto compressedOut = folder.getChildFile("flac-out.wav");
+    REQUIRE(exporter.exportRange(compressed, 0.0, end, compressedOut).success);
+    auto converted = readerFor(compressedOut); REQUIRE(converted != nullptr);
+    REQUIRE(converted->sampleRate == compressedReader->sampleRate);
+    REQUIRE(converted->numChannels == compressedReader->numChannels);
+    REQUIRE(converted->bitsPerSample == 24);
+    REQUIRE_FALSE(converted->usesFloatingPointData);
+}
+TEST_CASE("Export refuses more than 64 channels without a partial file", "[export]")
+{
+    TestDirectory t;
+    auto wide = t.wave("wide.wav", 440, 65, 100);
+    const auto destination = t.dir.getChildFile("exports/wide-out.wav");
+    const auto result = AudioExporter().exportRange(wide, 0.0, 0.001, destination);
+    REQUIRE_FALSE(result.success);
+    REQUIRE(result.error.contains("64"));
+    REQUIRE_FALSE(destination.existsAsFile());
+    REQUIRE_FALSE(juce::File(destination.getFullPathName() + ".part").existsAsFile());
+}
+TEST_CASE("Export names are sanitized, bounded and unique", "[export]")
+{
+    REQUIRE(AudioExporter::sanitizeStem("../../Kick 01:*?") == "Kick_01");
+    REQUIRE(AudioExporter::sanitizeStem("") == "audio");
+    REQUIRE(AudioExporter::sanitizeStem(juce::String::repeatedString("a", 200)).length() == 48);
+    REQUIRE(AudioExporter::rangeSuffix(0.25, 1.1) == "0250-1100");
+    TestDirectory t;
+    auto source = t.wave("Kick 01.wav", 440, 1, 44100);
+    const auto folder = t.dir.getChildFile("exports");
+    AudioExporter exporter;
+    const auto first = exporter.exportSelection(source, 0.25, 1.1, folder);
+    const auto second = exporter.exportSelection(source, 0.25, 1.1, folder);
+    REQUIRE(first.success); REQUIRE(second.success);
+    REQUIRE(first.file.getParentDirectory() == folder);
+    REQUIRE(second.file.getParentDirectory() == folder);
+    REQUIRE(first.file.getFileName().startsWith("Kick_01_0250-1100_"));
+    REQUIRE(second.file.getFileName().startsWith("Kick_01_0250-1100_"));
+    REQUIRE(first.file != second.file);
+    REQUIRE(first.file.existsAsFile()); REQUIRE(second.file.existsAsFile());
+    REQUIRE_FALSE(first.file.getFileName().contains("/"));
+}
+TEST_CASE("Long exports run in bounded chunks and cancel cleanly", "[export]")
+{
+    TestDirectory t;
+    auto source = t.wave("long.wav", 440, 1, 44100 * 10);
+    const auto destination = t.dir.getChildFile("exports/long-out.wav");
+    AudioExporter exporter;
+    int checks = 0;
+    const auto completed = exporter.exportRange(source, 0.0, 10.0, destination,
+        [&] { ++checks; return false; });
+    REQUIRE(completed.success);
+    const auto frames = (juce::int64) 44100 * 10;
+    REQUIRE(checks == (int) ((frames + AudioExporter::exportChunkFrames - 1) / AudioExporter::exportChunkFrames));
+    const auto cancelledDestination = t.dir.getChildFile("exports/cancelled.wav");
+    const auto cancelled = exporter.exportRange(source, 0.0, 10.0, cancelledDestination,
+        [] { return true; });
+    REQUIRE_FALSE(cancelled.success);
+    REQUIRE(cancelled.error.containsIgnoreCase("cancel"));
+    REQUIRE_FALSE(cancelledDestination.existsAsFile());
+    REQUIRE_FALSE(juce::File(cancelledDestination.getFullPathName() + ".part").existsAsFile());
+}
+TEST_CASE("Selection export prepares a ready WAV in the background", "[export][worker]")
+{
+    TestDirectory t;
+    auto source = t.wave("prep.wav", 440, 1, 44100 * 2);
+    SelectionExporter exporter(t.dir.getChildFile("exports"));
+    exporter.prepare(source, 0.2, 0.5);
+    REQUIRE(exporter.waitUntilFinished(5000));
+    const auto last = exporter.state();
+    REQUIRE(last.isReady());
+    REQUIRE(last.generation == 1);
+    REQUIRE(last.start == Catch::Approx(0.2));
+    REQUIRE(last.end == Catch::Approx(0.5));
+    auto reader = readerFor(last.file); REQUIRE(reader != nullptr);
+    REQUIRE(reader->lengthInSamples == 13230);
+}
+TEST_CASE("A newer selection supersedes an older preparation", "[export][worker]")
+{
+    TestDirectory t;
+    auto source = t.wave("supersede.wav", 440, 1, 44100 * 2);
+    SelectionExporter exporter(t.dir.getChildFile("exports"));
+    exporter.prepare(source, 0.1, 0.2);
+    exporter.prepare(source, 0.6, 0.9);
+    REQUIRE(exporter.waitUntilFinished(5000));
+    const auto last = exporter.state();
+    REQUIRE(last.isReady());
+    REQUIRE(last.generation == 2);
+    REQUIRE(last.start == Catch::Approx(0.6));
+    REQUIRE(last.end == Catch::Approx(0.9));
+}
+TEST_CASE("A failed preparation exposes an error and no file", "[export][worker]")
+{
+    TestDirectory t;
+    SelectionExporter exporter(t.dir.getChildFile("exports"));
+    exporter.prepare(t.dir.getChildFile("missing.wav"), 0.0, 1.0);
+    REQUIRE(exporter.waitUntilFinished(5000));
+    const auto last = exporter.state();
+    REQUIRE(last.status == SelectionExporter::Status::failed);
+    REQUIRE(last.error.isNotEmpty());
+    REQUIRE(last.file == juce::File());
+}
+TEST_CASE("Cancelling a preparation clears its state", "[export][worker]")
+{
+    TestDirectory t;
+    auto source = t.wave("cancel.wav", 440, 1, 44100);
+    SelectionExporter exporter(t.dir.getChildFile("exports"));
+    exporter.prepare(source, 0.0, 0.5);
+    exporter.cancel();
+    REQUIRE(exporter.waitUntilFinished(5000));
+    REQUIRE(exporter.state().status == SelectionExporter::Status::idle);
+}

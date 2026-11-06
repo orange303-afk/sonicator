@@ -1,6 +1,7 @@
 #pragma once
 #include "core/database/LibraryQuery.h"
 #include "core/database/SampleRecord.h"
+#include "core/export/ExternalFileDrag.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <map>
 #include <vector>
@@ -26,6 +27,9 @@ public:
     void selectRow(int row) { table.selectRow(row); }
     void selectRows(const std::vector<int>& rows);
     std::vector<SampleRecord> getSelectedSamples();
+    juce::StringArray dragPaths();
+    int prepareRowDrag(int row, bool addToSelection = false);
+    void setExternalDragHandler(ExternalFileDrag::DragFunction handler) { externalDrag = std::move(handler); }
     bool isRowSelected(int row) const { return table.isRowSelected(row); }
     int getSelectedRow() const { return table.getSelectedRow(); }
     void focusForNavigation() { table.grabKeyboardFocus(); }
@@ -42,8 +46,30 @@ public:
     // Header clicks also change the whole-catalog order; the owner re-runs the SQL query.
     std::function<void(int,bool)> onSortChanged;
     std::function<void(const std::vector<SampleRecord>&, const SampleRecord&, juce::Point<int>)> onContextMenu;
+    std::function<void(juce::String)> onDragMessage;
 private:
-    juce::TableListBox table { "Sample library", this };
+    class DragTable final : public juce::TableListBox
+    {
+    public:
+        using juce::TableListBox::TableListBox;
+        std::function<void(const juce::MouseEvent&)> onPress, onDrag, onRelease;
+        void mouseDown(const juce::MouseEvent& e) override
+        {
+            juce::TableListBox::mouseDown(e);
+            if (onPress) onPress(e);
+        }
+        void mouseDrag(const juce::MouseEvent& e) override
+        {
+            juce::TableListBox::mouseDrag(e);
+            if (onDrag) onDrag(e);
+        }
+        void mouseUp(const juce::MouseEvent& e) override
+        {
+            juce::TableListBox::mouseUp(e);
+            if (onRelease) onRelease(e);
+        }
+    };
+    DragTable table { "Sample library", this };
     std::vector<SampleRecord> all, visible;
     bool virtualMode = false;
     std::vector<int64_t> virtualIds;
@@ -55,11 +81,18 @@ private:
     int sortColumn = 1;
     bool ascending = true;
     bool restoringSelection = false;
+    juce::Point<int> dragOrigin;
+    int pressedRow = -1;
+    bool dragArmed = false, dragStarted = false;
+    ExternalFileDrag::DragFunction externalDrag;
     void rebuild();
     void sortVisible(int column, bool forwards);
     int64_t idAt(int row) const;
     const SampleRecord* recordAt(int row);
     void loadVirtualBlock(int row);
     void evictVirtualRows(int centreRow);
+    void handlePress(const juce::MouseEvent&);
+    void handleDrag(const juce::MouseEvent&);
+    void handleRelease();
 };
 } // namespace sonicator

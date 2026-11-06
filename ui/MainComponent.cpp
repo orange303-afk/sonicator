@@ -105,6 +105,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     selectedTags.setComponentID("selectedTags");
     library.setComponentID("library"); status.setComponentID("importStatus"); analysisDetails.setComponentID("analysisDetails");
     library.onSelected = [this](const SampleRecord& r) { selectSample(r); };
+    library.onDragMessage = [this](const juce::String& message) { status.setText(message,juce::dontSendNotification); };
     library.onContextMenu = [this](const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> position)
     {
         showSampleContextMenu(selection, lead, position);

@@ -30,6 +30,9 @@ FileListPanel::FileListPanel()
     addAndMakeVisible(table); table.setRowHeight(34);
     refreshTheme();
     table.setMultipleSelectionEnabled(true);
+    table.onPress = [this](const juce::MouseEvent& e) { handlePress(e); };
+    table.onDrag = [this](const juce::MouseEvent& e) { handleDrag(e); };
+    table.onRelease = [this](const juce::MouseEvent&) { handleRelease(); };
     auto& h = table.getHeader();
     h.addColumn("",8,30,24,40);
     h.addColumn("SAMPLE",1,250,120,1200);
@@ -78,6 +81,48 @@ std::vector<SampleRecord> FileListPanel::getSelectedSamples()
     for (int i = 0; i < rows.size(); ++i)
         if (const auto* record = recordAt(rows[i])) out.push_back(*record);
     return out;
+}
+juce::StringArray FileListPanel::dragPaths()
+{
+    juce::StringArray candidates;
+    for (const auto& record : getSelectedSamples()) candidates.add(record.filePath);
+    return ExternalFileDrag::existingPaths(candidates);
+}
+int FileListPanel::prepareRowDrag(int row, bool addToSelection)
+{
+    if (row < 0 || row >= getNumRows()) return row;
+    if (! table.isRowSelected(row)) table.selectRow(row, true, ! addToSelection);
+    return row;
+}
+void FileListPanel::handlePress(const juce::MouseEvent& e)
+{
+    const auto pos = e.getEventRelativeTo(&table).getPosition();
+    dragOrigin = pos;
+    dragStarted = false;
+    pressedRow = table.getRowContainingPosition(pos.x, pos.y);
+    dragArmed = pressedRow >= 0;
+    if (dragArmed) prepareRowDrag(pressedRow, e.mods.isCommandDown() || e.mods.isShiftDown());
+}
+void FileListPanel::handleDrag(const juce::MouseEvent& e)
+{
+    if (! dragArmed || dragStarted) return;
+    const auto pos = e.getEventRelativeTo(&table).getPosition();
+    if (! ExternalFileDrag::exceedsThreshold(pos.x - dragOrigin.x, pos.y - dragOrigin.y)) return;
+    dragStarted = true;
+    dragArmed = false;
+    const auto paths = dragPaths();
+    if (paths.isEmpty())
+    {
+        if (onDragMessage) onDragMessage("Selected files are missing or unavailable");
+        return;
+    }
+    ExternalFileDrag::start(paths, &table, externalDrag);
+}
+void FileListPanel::handleRelease()
+{
+    dragArmed = false;
+    dragStarted = false;
+    pressedRow = -1;
 }
 void FileListPanel::loadVirtualBlock(int row)
 {
