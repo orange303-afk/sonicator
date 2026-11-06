@@ -16,15 +16,15 @@ inline void apply(ThemeMode mode)
     isDark = mode == ThemeMode::Dark || (mode == ThemeMode::System && systemPrefersDark());
     if (isDark)
     {
-        background = juce::Colour(0xff121110); panel = juce::Colour(0xff1a1815); raised = juce::Colour(0xff26221e);
-        text = juce::Colour(0xfff0eae2); muted = juce::Colour(0xffa2988c); accent = juce::Colour(0xffe8873c);
-        line = juce::Colour(0xff3a332c); selection = juce::Colour(0xff3d2a1b);
+        background = juce::Colour(0xff121212); panel = juce::Colour(0xff1b1b1b); raised = juce::Colour(0xff272727);
+        text = juce::Colour(0xfff0f0f0); muted = juce::Colour(0xffa2a2a2); accent = juce::Colour(0xffe8873c);
+        line = juce::Colour(0xff3a3a3a); selection = juce::Colour(0xff333333);
     }
     else
     {
-        background = juce::Colour(0xfff5f2ee); panel = juce::Colour(0xffffffff); raised = juce::Colour(0xffeae4dc);
-        text = juce::Colour(0xff211d19); muted = juce::Colour(0xff6d6358); accent = juce::Colour(0xffc2621f);
-        line = juce::Colour(0xffddd5cb); selection = juce::Colour(0xfff4e3d3);
+        background = juce::Colour(0xfff4f4f4); panel = juce::Colour(0xffffffff); raised = juce::Colour(0xffe8e8e8);
+        text = juce::Colour(0xff1d1d1d); muted = juce::Colour(0xff666666); accent = juce::Colour(0xffc2621f);
+        line = juce::Colour(0xffd9d9d9); selection = juce::Colour(0xffececec);
     }
 }
 // Tag colours are chosen for dots and borders; their label needs extra contrast on light panels.

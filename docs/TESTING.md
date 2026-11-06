@@ -77,7 +77,7 @@ Windows / Intel macOS execution, ASan, concurrent UI-writer stress, hardware lat
 ## UI polish: resize, warm palette and search field (2026-11-06)
 
 - Fixed the window resize regression: `Window::resized()` had overridden the base implementation and only scheduled geometry saving, so the content component kept its initial size while the window grew. It now calls `DocumentWindow::resized()` before scheduling the save.
-- Reworked both themes around warm neutrals: dark charcoal/graphite with an orange accent and warm brown selection; light warm off-white with a burnt-orange accent. Tag colours remain semantic.
+- Reworked both themes around neutral grays: dark graphite with an orange accent and neutral gray selection; light neutral gray with a burnt-orange accent. Tag colours remain semantic.
 - The library search field now uses `Justification::centredLeft` and a 10 px left indent, so placeholder and typed text are vertically centred.
 - Default suite unchanged: **69 cases / 664 assertions** in Debug and Release; Debug and Release CTest 1/1; Release ad-hoc signature verified. Rendered dark and light snapshots at 1200x800 were inspected.
 - Manual check after relaunch: drag-resize both dimensions and confirm the sidebar, table, inspector and preview fill the window; the last geometry is restored on the next launch.

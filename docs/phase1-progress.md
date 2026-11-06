@@ -140,6 +140,6 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 ## UI polish stage (2026-11-06)
 
 - Bug: the window grew but its content kept the initial 1280x800 layout. Cause: `Window::resized()` overrode `DocumentWindow::resized()` without calling the base, so the content component was never laid out in the new area. Ruling: always call the base resize before scheduling the debounced geometry save. Cost: none; the same path now also lays out a restored, non-default window size.
-- Theme: replaced the blue-violet dark palette with warm charcoal/graphite and an orange accent; the light theme uses warm off-white with a burnt-orange accent. Tag colours remain semantic. Selection uses a warm brown, not purple.
+- Theme: replaced the blue-violet dark palette with neutral graphite and an orange accent; the light theme uses neutral light gray with a burnt-orange accent. Tag colours remain semantic. Selection uses neutral gray, not purple or brown.
 - Search: `Justification::centredLeft` plus a 10 px left indent centres the placeholder and typed text vertically in the 34 px field.
 - Verification: **69 cases / 664 assertions** in Debug and Release; CTest 1/1; Release signature verified; rendered dark and light snapshots inspected. Manual resize/restore is the remaining visual check.
