@@ -13,7 +13,7 @@ FetchContent_Declare(JUCE
 FetchContent_MakeAvailable(JUCE)
 add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/database/Database.cpp core/database/SampleRepository.cpp
-    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/audio/AudioEngine.cpp
+    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/audio/AudioEngine.cpp core/audio/ContainerValidation.cpp
     core/indexing/IndexingService.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
@@ -27,6 +27,15 @@ juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
     BUNDLE_ID "com.sonicator.browser" MICROPHONE_PERMISSION_ENABLED FALSE)
 target_sources(Sonicator PRIVATE app/Main.cpp)
 target_link_libraries(Sonicator PRIVATE SonicatorUI)
+if(APPLE)
+    # The linker's signature covers only the Mach-O; seal the complete local app bundle.
+    # This is an ad-hoc development signature, not Developer ID signing/notarization.
+    add_custom_command(TARGET Sonicator POST_BUILD
+        COMMAND ${CMAKE_COMMAND} "-DAPP_BUNDLE=$<TARGET_BUNDLE_DIR:Sonicator>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PrepareMacBundle.cmake"
+        COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Sonicator>"
+        VERBATIM)
+endif()
 include(CTest)
 if(BUILD_TESTING)
     FetchContent_Declare(Catch2

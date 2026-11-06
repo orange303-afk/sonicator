@@ -8,5 +8,6 @@ class BasicAnalyzer
 {
 public:
     SampleRecord analyze(const juce::File&, CancelCheck = {}) const;
+    SampleRecord analyzeAndHash(const juce::File&, CancelCheck = {}) const;
 };
 }

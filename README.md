@@ -31,7 +31,7 @@ ctest --test-dir build -C Debug --output-on-failure
 & .\build\Sonicator_artefacts\Debug\SONICATOR.exe
 ```
 
-This is an unsigned development application, not an installer/notarized release.
+macOS builds receive a local ad-hoc bundle signature. This is not Developer ID signing, a Windows signature, an installer or a notarized release.
 
 ## Use
 
@@ -79,10 +79,23 @@ Architectural details and numerical conventions: [ARCHITECTURE.md](docs/ARCHITEC
 cmake --build build --parallel 6
 ctest --test-dir build --output-on-failure
 build/tests/SonicatorTests '[.benchmark]'
+build/tests/SonicatorTests '[.large-file]'
 ```
 
 The optional benchmark creates/imports/reopens/rescans 10,000 actual short synthetic WAV files in a temporary directory. Its timings do not predict a real mixed-format library's analysis time.
 All test audio is synthetic. Fixtures for WAV/AIFF/FLAC/MP3 are checked in; FFmpeg is not needed to build/run tests.
+
+Opt-in real-library tests are separate from the synthetic suite:
+
+```sh
+SONICATOR_EXTERNAL_ROOT=/Volumes/1TBSSD/samples build/tests/SonicatorTests '[.external-scan]'
+SONICATOR_EXTERNAL_MANIFEST=/absolute/path/to/selection.json \
+SONICATOR_EXTERNAL_OUTPUT=/absolute/path/to/separate/output \
+build/tests/SonicatorTests '[.external]'
+```
+
+The selection manifest is a JSON array of objects with absolute `path` strings. The external test reads those originals, checks unchanged size/mtime/full SHA-256, limits each analysis to 10 seconds, and writes a separate SQLite database and JSON report to the output directory. Never choose an output directory inside the sample library. Local validation artifacts are ignored under `build/manual-validation/`.
+The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancels; it verifies bounded/cancellable access, **not** full-length analysis of a real 1.2 GB recording.
 
 ## Limits / next stage
 
@@ -90,9 +103,10 @@ All test audio is synthetic. Fixtures for WAV/AIFF/FLAC/MP3 are checked in; FFmp
 - DSP currently measures duration, sample rate, applicable bit depth, channels, linear peak/RMS, power spectral centroid, 85% power rolloff and power spectral flatness. Not LUFS, spectral density/bands, attack/decay or transient/rhythm analysis yet.
 - FFT size 2048, Hann window, non-overlapping frames. These are engineering descriptors, not calibrated semantic labels or a perceptual similarity model.
 - Analysis supports up to 64 channels; preview uses the first two channels, not a surround downmix. Compressed bit depth can be unavailable.
-- No filesystem watcher; folder changes are discovered by manual rescan. Symbolic directory links are deliberately not followed. Path aliases/case aliases are not merged.
+- No filesystem watcher; folder changes are discovered by manual rescan. Symbolic directory links are deliberately not followed. AppleDouble metadata forks are excluded by their magic bytes, not merely a filename prefix. Path aliases/case aliases are not merged.
 - Waveform cache holds at most 64 thumbnails. UI sorting/filtering is page-local. No 500,000-file or GPU/60 FPS claim is made.
 - Files with decode errors are retried on rescan. Missing roots abort that scan with a visible message; records are not deleted.
+- WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.
 - Windows, Intel macOS, DAW integrations, physical listening/latency and release packaging still need platform/user verification.
 

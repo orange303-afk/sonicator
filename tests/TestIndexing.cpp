@@ -29,6 +29,24 @@ TEST_CASE("Indexer persists, skips unchanged files, detects duplicates and retri
     REQUIRE(index.start(roots, true)); REQUIRE(index.waitUntilFinished(10000));
     REQUIRE(index.progress().skipped == 0);
 }
+TEST_CASE("Missing-file restoration and analyzer-version invalidation keep stable identities", "[indexing]")
+{
+    TestDirectory t; auto file = t.wave("audio/tone.wav");
+    Database db(t.dir.getChildFile("catalog.sqlite")); SampleRepository repo(db); repo.createTables();
+    IndexingService index(repo); juce::StringArray roots { file.getParentDirectory().getFullPathName() };
+    REQUIRE(index.start(roots)); REQUIRE(index.waitUntilFinished(10000));
+    auto original = repo.findByPath(file.getFullPathName()); REQUIRE(original);
+    auto obsolete = *original; obsolete.version = analysisVersion-1; repo.upsert(obsolete);
+    REQUIRE(index.start(roots)); REQUIRE(index.waitUntilFinished(10000));
+    REQUIRE(index.progress().analyzed == 1); REQUIRE(index.progress().skipped == 0);
+    REQUIRE(file.deleteFile());
+    REQUIRE(index.start(roots)); REQUIRE(index.waitUntilFinished(10000));
+    REQUIRE(repo.findByPath(file.getFullPathName())->missing);
+    t.wave("audio/tone.wav");
+    REQUIRE(index.start(roots)); REQUIRE(index.waitUntilFinished(10000));
+    auto restored = repo.findByPath(file.getFullPathName()); REQUIRE(restored);
+    REQUIRE_FALSE(restored->missing); REQUIRE(restored->id == original->id);
+}
 TEST_CASE("Indexer cancellation and unavailable folders are explicit", "[indexing]")
 {
     TestDirectory t; Database db(t.dir.getChildFile("catalog.sqlite"));

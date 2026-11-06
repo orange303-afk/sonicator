@@ -60,17 +60,8 @@ void IndexingService::run()
             {
                 std::lock_guard lock(stateMutex); ++state.processed; ++state.skipped; continue;
             }
-            auto result = BasicAnalyzer().analyze(file, [this] { return checkpoint(); });
+            auto result = BasicAnalyzer().analyzeAndHash(file, [this] { return checkpoint(); });
             if (cancelled) break;
-            if (result.error.isEmpty())
-            {
-                result.fileHash = FileScanner::computeFileHash(file, [this] { return checkpoint(); });
-                if (file.getSize() != entry.fileSize || file.getLastModificationTime().toMilliseconds() != entry.dateModified)
-                {
-                    result.error = "File changed during analysis; rescan to retry"; result.version = 0;
-                    result.fileHash.clear();
-                }
-            }
             repo.upsert(result);
             bool duplicate = result.fileHash.isNotEmpty() && repo.countHash(result.fileHash) > 1;
             std::lock_guard lock(stateMutex);

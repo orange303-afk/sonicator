@@ -22,6 +22,8 @@ Schema `user_version=1`. Stable numeric ID, unique path, full SHA-256, file size
 
 Upsert by path preserves sample ID. Two files with the same content keep independent paths. Skip only when size/time and successful analyzer version match. Files changed during analysis are marked for retry, not recorded as successful. Startup reads the database; it does not initiate reanalysis.
 
+Analyzer version 2 adds WAV/AIFF physical audio-payload validation, invalidating earlier cached successes on explicit rescan. It deliberately tolerates incorrect outer container sizes seen in real commercial sample packs. AppleDouble forks are excluded by a filename-prefix fast path plus a magic-byte check. Per-file hashing I/O failures become error records and do not abort the rest of an import.
+
 Future machine predictions and user overrides must be stored independently of these measured file records. Model upgrades must not overwrite user annotations.
 
 ## DSP conventions

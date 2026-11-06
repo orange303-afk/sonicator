@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "ContainerValidation.h"
 #include <cmath>
 namespace sonicator {
 AudioEngine::AudioEngine(bool openDevice) : deviceMode(openDevice)
@@ -29,6 +30,8 @@ void AudioEngine::attach()
 bool AudioEngine::loadFile(const juce::File& file)
 {
     source.stop(); source.setSource(nullptr); reader.reset();
+    lastError = validateContainer(file);
+    if (lastError.isNotEmpty()) return false;
     std::unique_ptr<juce::AudioFormatReader> decoded(formats.createReaderFor(file));
     if (! decoded || decoded->sampleRate <= 0 || decoded->lengthInSamples <= 0)
     {

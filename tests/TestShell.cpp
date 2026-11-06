@@ -31,3 +31,18 @@ TEST_CASE("Application shell restores the catalog and paints at minimum size", "
         REQUIRE(png.writeImageToStream(image,*output));
     }
 }
+TEST_CASE("Audio settings dialog is destroyed before the application's audio engine", "[ui][dialog]")
+{
+    TestDirectory t;
+    auto app = std::make_unique<MainComponent>(t.dir.getChildFile("library.sqlite"),false);
+    juce::TextButton* settings = nullptr;
+    for (auto* child : app->getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*>(child))
+            if (button->getButtonText() == "Audio settings") settings = button;
+    REQUIRE(settings != nullptr);
+    settings->onClick();
+    juce::Component::SafePointer<juce::Component> dialog(juce::Component::getCurrentlyModalComponent());
+    REQUIRE(dialog != nullptr);
+    app.reset();
+    REQUIRE(dialog == nullptr);
+}

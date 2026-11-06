@@ -1,7 +1,7 @@
 #pragma once
 #include <juce_core/juce_core.h>
 namespace sonicator {
-inline constexpr int analysisVersion = 1;
+inline constexpr int analysisVersion = 2;
 struct SampleRecord
 {
     int64_t id = 0;

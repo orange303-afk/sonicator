@@ -15,6 +15,33 @@ TEST_CASE("Scanner recurses, filters case-insensitively and handles empty folder
     REQUIRE_FALSE(FileScanner::isSupportedFormat(t.dir.getChildFile("x.txt")));
     REQUIRE(FileScanner::scanDirectory(t.dir, [] { return true; }).empty());
 }
+TEST_CASE("Cancellation checkpoints include directory-only traversal", "[scanner]")
+{
+    TestDirectory t;
+    for (auto name : {"a/b/c", "d/e/f", "g/h/i"}) t.dir.getChildFile(name).createDirectory();
+    int checkpoints = 0;
+    auto files = FileScanner::scanDirectory(t.dir,[&] { ++checkpoints; return checkpoints >= 3; });
+    REQUIRE(files.empty());
+    REQUIRE(checkpoints >= 3);
+}
+TEST_CASE("AppleDouble resource forks are not mistaken for audio but real dot-underscore audio is kept", "[scanner]")
+{
+    TestDirectory t; t.wave("._real.wav"); t.wave("regular.wav");
+    auto fork = t.dir.getChildFile("._metadata.wav");
+    {
+        auto output = fork.createOutputStream(); output->writeIntBigEndian(0x00051607); output->writeInt(0);
+    }
+    REQUIRE_FALSE(FileScanner::isSupportedFormat(fork));
+    REQUIRE(FileScanner::isSupportedFormat(t.dir.getChildFile("._real.wav")));
+    auto files = FileScanner::scanDirectory(t.dir);
+    bool regularFound = false;
+    for (auto& entry : files)
+    {
+        REQUIRE(entry.file != fork);
+        if (entry.file.getFileName() == "regular.wav") regularFound = true;
+    }
+    REQUIRE(regularFound); // macOS native enumeration itself may hide ._ names.
+}
 TEST_CASE("Full file hash distinguishes files with identical prefixes and lengths", "[scanner]")
 {
     TestDirectory t;

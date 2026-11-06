@@ -3,18 +3,29 @@
 namespace sonicator {
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {
-    return f.hasFileExtension("wav;aif;aiff;flac;mp3");
+    if (! f.hasFileExtension("wav;aif;aiff;flac;mp3")) return false;
+    if (f.getFileName().startsWith("._"))
+        if (auto input = f.createInputStream())
+            if (input->readIntBigEndian() == 0x00051607) return false; // AppleDouble, not audio.
+    return true;
 }
 std::vector<AudioFileInfo> FileScanner::scanDirectory(const juce::File& dir, CancelCheck cancel)
 {
     if (! dir.isDirectory()) throw std::runtime_error("Library folder is unavailable");
     std::vector<AudioFileInfo> out;
-    for (const auto& entry : juce::RangedDirectoryIterator(dir, true, "*", juce::File::findFiles,
-                                                         juce::File::FollowSymlinks::no))
+    std::vector<juce::File> pending { dir };
+    while (! pending.empty())
     {
-        if (cancel && cancel()) break;
-        auto f = entry.getFile();
-        if (isSupportedFormat(f)) out.push_back({f, f.getSize(), f.getLastModificationTime().toMilliseconds()});
+        if (cancel && cancel()) return out;
+        auto folder = pending.back(); pending.pop_back();
+        for (const auto& entry : juce::RangedDirectoryIterator(folder, false, "*", juce::File::findFilesAndDirectories,
+                                                             juce::File::FollowSymlinks::no))
+        {
+            if (cancel && cancel()) return out;
+            auto f = entry.getFile();
+            if (f.isDirectory()) { if (! f.isSymbolicLink()) pending.push_back(f); }
+            else if (isSupportedFormat(f)) out.push_back({f,f.getSize(),f.getLastModificationTime().toMilliseconds()});
+        }
     }
     return out;
 }

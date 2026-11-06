@@ -31,6 +31,7 @@ private:
     std::unique_ptr<SampleRepository> readRepo, writeRepo;
     std::unique_ptr<IndexingService> indexer;
     std::unique_ptr<juce::FileChooser> chooser;
+    juce::Component::SafePointer<juce::DialogWindow> audioDialog;
     int pageOffset = 0, catalogCount = 0;
     bool wasRunning = false;
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;

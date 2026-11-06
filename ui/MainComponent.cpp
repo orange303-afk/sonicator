@@ -61,7 +61,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
 }
 MainComponent::~MainComponent()
 {
-    stopTimer(); chooser.reset(); indexer.reset(); setLookAndFeel(nullptr);
+    stopTimer(); chooser.reset(); audioDialog.deleteAndZero(); indexer.reset(); setLookAndFeel(nullptr);
 }
 void MainComponent::chooseFolder()
 {
@@ -143,12 +143,13 @@ void MainComponent::timerCallback()
 }
 void MainComponent::showAudioSettings()
 {
+    if (audioDialog != nullptr) { audioDialog->toFront(true); return; }
     auto* selector = new juce::AudioDeviceSelectorComponent(engine.deviceManager(),0,0,0,2,false,false,true,false);
     selector->setSize(460,360);
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned(selector); options.dialogTitle = "Audio output";
     options.dialogBackgroundColour = theme::panel; options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true; options.resizable = false; options.launchAsync();
+    options.useNativeTitleBar = true; options.resizable = false; audioDialog = options.launchAsync();
 }
 void MainComponent::paint(juce::Graphics& g)
 {

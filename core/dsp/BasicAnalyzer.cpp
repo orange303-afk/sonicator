@@ -1,4 +1,5 @@
 #include "BasicAnalyzer.h"
+#include "core/audio/ContainerValidation.h"
 #include <array>
 #include <cmath>
 namespace sonicator {
@@ -8,6 +9,8 @@ SampleRecord BasicAnalyzer::analyze(const juce::File& file, CancelCheck cancel) 
     r.filePath = file.getFullPathName(); r.fileName = file.getFileName();
     r.format = file.getFileExtension().trimCharactersAtStart(".").toUpperCase();
     r.fileSize = file.getSize(); r.dateModified = file.getLastModificationTime().toMilliseconds();
+    r.error = validateContainer(file);
+    if (r.error.isNotEmpty()) return r;
     juce::AudioFormatManager formats; formats.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
     if (! reader || reader->sampleRate <= 0 || reader->lengthInSamples <= 0
@@ -68,6 +71,20 @@ SampleRecord BasicAnalyzer::analyze(const juce::File& file, CancelCheck cancel) 
         r.spectralFlatness = juce::jlimit(0.0, 1.0, std::exp(logSum / bins) / (total / bins));
     }
     r.dateAnalyzed = juce::Time::currentTimeMillis(); r.version = analysisVersion;
+    return r;
+}
+SampleRecord BasicAnalyzer::analyzeAndHash(const juce::File& file, CancelCheck cancel) const
+{
+    auto r = analyze(file,cancel);
+    if (r.error.isNotEmpty()) return r;
+    try
+    {
+        r.fileHash = FileScanner::computeFileHash(file,cancel);
+        if (file.getSize() != r.fileSize || file.getLastModificationTime().toMilliseconds() != r.dateModified)
+            r.error = "File changed during analysis; rescan to retry";
+    }
+    catch (const std::exception& e) { r.error = juce::String::fromUTF8(e.what()); }
+    if (r.error.isNotEmpty()) { r.version = 0; r.fileHash.clear(); }
     return r;
 }
 }

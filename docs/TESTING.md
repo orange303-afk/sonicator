@@ -1,0 +1,57 @@
+# Phase 1 verification
+
+Environment: macOS, native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5. Tests render actual audio buffers; no mocked decoder or invented classification data.
+
+## Automated coverage
+
+- SQLite persistence/reopen, stable upserts, duplicate paths, Unicode strings and open errors.
+- Recursive scanner, format filtering, directory-only cancellation, full SHA-256 and AppleDouble exclusion.
+- Sine/silence/short-file DSP, anti-phase stereo, corruption, physical truncation and inaccurate outer RIFF sizes.
+- WAV/AIFF/FLAC/MP3 decoding and actual preview rendering; resampling, looping, transport, gain and missing-file errors.
+- Incremental import, failed-file retry, force reanalysis, cancel, missing-file restoration and analyzer-version invalidation.
+- UI filtering/sorting/selection, keyboard transport, persisted startup, minimum/large layout snapshots, Unicode filesystem→index→reopen→preview, settings-dialog teardown.
+
+Final default suite: **23 cases / 205 assertions passed**. CTest: **1/1 passed**, 5.09 s.
+
+## Scale and large files
+
+- 10,000 generated real short WAV files, final version: initial index **12.6964 s**, unchanged rescan **0.98047 s**; **10,011 assertions passed**. Reopening the database restored all 10,000 records. These are tiny identical synthetic files, **not** representative mixed-library throughput.
+- Sparse WAV of 1,200,000,044 bytes: decoded eight 2048-frame blocks, cooperatively cancelled on the ninth checkpoint; 6 assertions passed, elapsed 0.17 s, max RSS 43,728,896 bytes. This proves early bounded access/cancellation, not full real-recording decode throughput.
+
+## Real library supplied by the owner
+
+Read-only source: `/Volumes/1TBSSD/samples`. All manifests, SQLite databases and logs are under `build/manual-validation/`, outside the original library and ignored by Git.
+
+- Filesystem inventory: **615,431 total files**, **322,946 supported-extension candidates** (319,111 WAV, 2,199 AIF, 1,636 MP3). No FLAC was found; FLAC remains covered by synthetic decoder fixtures.
+- Extension-only counting includes AppleDouble/resource forks; it is not the same as real audio count. Final production scanner enumerated **299,057** candidates in **46.523 s**, max RSS **92,651,520 bytes**; **2 assertions passed**. This is enumeration, not full DSP analysis of every file.
+- Selected 65 candidates using deterministic format/size-stratified sampling, including the largest discovered file (127,533,560 bytes). This is a diagnostic selection, not a statistically representative classification benchmark.
+- Initial sample run exposed 5 metadata forks plus 5 complete WAVs with malformed outer container sizes. FFprobe independently confirmed the latter's decodable payloads; validation was corrected and given a synthetic regression test. No original file was repaired or rewritten.
+- Each selected audio file is checked for unchanged size, mtime and full SHA-256 before/after analysis. Ten-second per-file analysis limit; database/report writes are separate.
+- Final selected run: **60 analyzed, 0 decode errors, 0 time-limited, 5 metadata forks excluded**; **492 assertions passed**, total **63.99 s**, max RSS **35,749,888 bytes**. Actual audio durations ranged from **0.02728 s to 562.266 s**. Sample rates included 25 kHz, 27.778 kHz, 44.1 kHz, 48 kHz and 96 kHz, mono/stereo. All checked original sizes/mtimes/SHA-256 values remained unchanged.
+
+## Build and GUI
+
+- Debug and Release application targets built on native arm64.
+- Complete macOS app bundle ad-hoc signature verified with `codesign --verify --verbose`.
+- Development application launched natively. Offscreen snapshots use real measured synthetic audio, not a UI-only mockup.
+- System Events interaction timed out; native folder-chooser automation and physical listening were **not** established.
+
+## Independent review
+
+One fresh reviewer checked all first-party code. No Critical findings; four user-visible issues were fixed with regression tests in one pass (container truncation, dialog lifetime, directory-only cancellation, per-file hash failure). No review minors deferred. Added real-corpus compatibility fixes were verified with failing synthetic tests and a repeated read-only corpus sample run.
+
+## Not established
+
+Windows / Intel macOS execution, ASan, concurrent UI-writer stress, hardware latency/listening/device switching, full analysis of all ~299k audio candidates, real >1 GB recordings, 500k interactive rendering, notarization/installers, or ML quality. Later-phase functions remain absent rather than simulated.
+
+## Final run
+
+- `cmake --build build -j 6` and `cmake --build build-release --target Sonicator -j 6`: success.
+- `build/tests/SonicatorTests`: 23/23 cases, 205/205 assertions.
+- `ctest --test-dir build --output-on-failure`: 1/1, 5.09 s.
+- `[.benchmark]`: 10,011 assertions, 12.6964 s initial / 0.98047 s unchanged rescan.
+- `[.large-file]`: 6 assertions, 0.17 s, bounded/cancelled sparse-file access.
+- `[.external]`: 492 assertions; 60 real audio files, no errors or timeouts, 5 metadata forks excluded.
+- `[.external-scan]`: 2 assertions; 299,057 candidates enumerated.
+- Debug/Release `codesign --verify --verbose`: valid on disk and designated requirement satisfied (ad-hoc).
+- `git diff --check`: clean.
