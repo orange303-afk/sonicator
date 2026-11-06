@@ -17,6 +17,7 @@ public:
     bool keyPressed(const juce::KeyPress& k) override { return preview.keyPressed(k); }
     void beginImport(const juce::File&);
     bool refreshIfCatalogChanged();
+    juce::File backupCatalog();
     // Applies a whole-catalog search immediately (typing uses a 250 ms debounce instead).
     void searchLibrary(const juce::String&);
     void setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny = false);
@@ -34,8 +35,8 @@ private:
     int totalCatalogCount = 0;
     int64_t selectedSampleId = 0;
     juce::TextEditor search;
-    juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan library" }, reanalyze { "Reanalyze all" };
-    juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Audio settings" };
+    juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" };
+    juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Audio settings" }, backup { "Backup" };
     juce::TextButton tagFilter { "Tags" }, clearFilters { "Clear filters" }, editTags { "Edit tags..." };
     juce::TextButton previousPage { "<" }, nextPage { ">" };
     juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel;
@@ -54,7 +55,8 @@ private:
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
     void timerCallback() override;
     void chooseFolder();
-    void scanRoots(bool force);
+    void requestScan(bool reanalyze);
+    void scanRoots(bool force, bool newOnly = false);
     void reloadLibrary();
     void updateTagControls();
     void selectSample(const SampleRecord&);

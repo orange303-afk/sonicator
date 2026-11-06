@@ -4,9 +4,17 @@ namespace sonicator {
 IndexingService::~IndexingService() { cancel(); waitForThreadToExit(-1); }
 bool IndexingService::start(const juce::StringArray& roots, bool force)
 {
+    return beginScan(roots, force, ScanMode::Full);
+}
+bool IndexingService::startNewOnly(const juce::StringArray& roots)
+{
+    return beginScan(roots, false, ScanMode::NewOnly);
+}
+bool IndexingService::beginScan(const juce::StringArray& roots, bool force, ScanMode mode)
+{
     if (isThreadRunning()) return false;
     waitForThreadToExit(-1);
-    folders = roots; forceAnalysis = force; cancelled = false;
+    folders = roots; forceAnalysis = force; scanMode = mode; cancelled = false;
     { std::lock_guard lock(pauseMutex); paused = false; }
     { std::lock_guard lock(stateMutex); state = {}; state.running = true; state.message = "Discovering audio files..."; }
     if (! startThread())
@@ -66,13 +74,19 @@ void IndexingService::run()
             for (auto& f : found)
                 if (foundPaths.insert(f.file.getFullPathName().toStdString()).second) files.push_back(std::move(f));
         }
-        { std::lock_guard lock(stateMutex); state.total = (int) files.size(); state.message = "Analyzing"; }
+        { std::lock_guard lock(stateMutex); state.total = (int) files.size();
+          state.message = scanMode == ScanMode::NewOnly ? "Analyzing new files" : "Analyzing"; }
         for (const auto& entry : files)
         {
             if (checkpoint()) break;
             const auto& file = entry.file;
             { std::lock_guard lock(stateMutex); state.current = file.getFileName(); }
             auto previous = repo.findByPath(file.getFullPathName());
+            if (scanMode == ScanMode::NewOnly && previous)
+            {
+                // Additive scan: a known path is never reanalyzed, even when changed or failed.
+                std::lock_guard lock(stateMutex); ++state.processed; ++state.skipped; continue;
+            }
             if (! forceAnalysis && previous && previous->error.isEmpty() && ! previous->missing
                 && previous->fileSize == entry.fileSize && previous->dateModified == entry.dateModified
                 && previous->version == basicFeaturesVersion)
@@ -88,7 +102,7 @@ void IndexingService::run()
             if (result.error.isEmpty()) ++state.analyzed; else ++state.failed;
             if (duplicate) ++state.duplicates;
         }
-        if (! cancelled)
+        if (! cancelled && scanMode != ScanMode::NewOnly)
         {
             // Paths under a scanned root that discovery did not return are checked against the disk
             // before they are marked missing. No sort, no offset paging.
@@ -106,7 +120,8 @@ void IndexingService::run()
             { std::lock_guard lock(stateMutex); state.finalizing = false; }
         }
         std::lock_guard lock(stateMutex);
-        state.message = cancelled ? "Cancelled; completed results were saved" : "Scan complete";
+        state.message = cancelled ? "Cancelled; completed results were saved"
+            : (scanMode == ScanMode::NewOnly ? "New-file scan complete" : "Scan complete");
     }
     catch (const std::exception& e)
     {

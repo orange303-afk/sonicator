@@ -14,7 +14,7 @@ TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation",
     for (auto* child : app.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    REQUIRE(buttons == 11);
+    REQUIRE(buttons == 13);
 }
 TEST_CASE("Large catalog startup restores the actual page and folder tree", "[.catalog-ui]")
 {
@@ -172,4 +172,59 @@ TEST_CASE("Whole-catalog search and tag filters drive the shell library", "[ui][
         juce::PNGImageFormat png;
         REQUIRE(png.writeImageToStream(app.createComponentSnapshot(app.getLocalBounds()),*stream));
     }
+}
+namespace {
+juce::Button* shellButton(MainComponent& app, const juce::String& text)
+{
+    for (auto* child : app.getChildren())
+        if (auto* button = dynamic_cast<juce::Button*>(child))
+            if (button->getButtonText() == text) return button;
+    return nullptr;
+}
+}
+TEST_CASE("Rescan and Reanalyze ask before starting", "[ui][maintenance]")
+{
+    TestDirectory t; auto audio = t.wave("a.wav"); auto dbPath = t.dir.getChildFile("library.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        auto r = BasicAnalyzer().analyze(audio); repo.upsert(r); repo.addRoot(t.dir.getFullPathName());
+    }
+    MainComponent app(dbPath,false);
+    auto* rescan = shellButton(app,"Rescan");
+    REQUIRE(rescan != nullptr);
+    rescan->onClick();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    auto* dialog = dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
+    REQUIRE(dialog != nullptr);
+    REQUIRE(dialog->getName() == "Rescan library");
+    dialog->exitModalState(0);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    REQUIRE(juce::Component::getCurrentlyModalComponent() == nullptr);
+
+    auto* reanalyze = shellButton(app,"Reanalyze all");
+    REQUIRE(reanalyze != nullptr);
+    reanalyze->onClick();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    auto* warning = dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
+    REQUIRE(warning != nullptr);
+    REQUIRE(warning->getName() == "Reanalyze all");
+    warning->exitModalState(0);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+}
+TEST_CASE("Backup button writes a consistent copy beside the database", "[ui][maintenance]")
+{
+    TestDirectory t; auto audio = t.wave("a.wav"); auto dbPath = t.dir.getChildFile("library.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        auto r = BasicAnalyzer().analyze(audio); repo.upsert(r); repo.addRoot(t.dir.getFullPathName());
+    }
+    MainComponent app(dbPath,false);
+    auto* backup = shellButton(app,"Backup");
+    REQUIRE(backup != nullptr);
+    backup->onClick();
+    auto copies = t.dir.getChildFile("backups").findChildFiles(juce::File::findFiles,false,"sonicator-*.sqlite");
+    REQUIRE(copies.size() == 1);
+    Database copy(copies[0]); SampleRepository copyRepo(copy); copyRepo.createTables();
+    REQUIRE(copyRepo.count() == 1);
+    REQUIRE_FALSE(copies[0].isDirectory());
 }

@@ -89,3 +89,14 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 - Scale: `[.scale]` 300,000 rows — worst-case search 105.85 ms; simulated v2→v3 upgrade including the online backup and 300k-row backfill **6.86 s** (Debug). Reconciliation 4.66 s and unchanged rescan 0.72 s remain unchanged.
 - The owner's real catalog was **not opened, migrated or rescanned** in this stage. Its first launch of this build will write the usual migration backup and backfill `search_key`.
 - Deferred: saved filters, tag import/export and tag hierarchy; search-index tuning only if real use shows the scan is slow.
+
+## Library maintenance stage (2026-11-06)
+
+- Scope: confirmation before Rescan/Reanalyze, additive **New files** scan, consistent user backup, cancellation guarantees. No DSP/analysis-version change.
+- Ruling: `Rescan` confirms with wording "new, changed or previously failed files"; `Reanalyze all` uses a stronger warning because it recomputes everything. Buttons show the operation name and Cancel; no scan starts before confirmation. Cost: one extra click per maintenance action.
+- Ruling: `New files` (`ScanMode::NewOnly`) is additive by design. It discovers the registered roots, skips every known path (changed, failed or older-version included), and deliberately skips missing-file reconciliation. Cost: a file that moved or changed needs **Rescan**, not **New files**.
+- Ruling: a cancelled analysis never reaches `upsert`. Cancellation is checked during discovery, hashing and each decode/FFT chunk; the previous successful row stays intact and no "Cancelled" error is stored. Completed results remain saved.
+- Ruling: user backups use SQLite's backup API into `<database folder>/backups/sonicator-<timestamp>.sqlite`; the destination must not exist and cannot be the live database. WAL is therefore included consistently. No automatic deletion or rotation. Cost: the copy runs synchronously under the repository mutex, so a very large catalog can pause the UI while it copies.
+- UI: sidebar row `Rescan` / `New files`, full-width `Reanalyze all`, footer `Backup`. All buttons keep keyboard focus in the library; confirmation dialogs and the audio dialog remain focus exceptions.
+- Verification: **57 cases / 540 assertions** in Debug and Release; CTest 1/1; Release ad-hoc signature verified. New coverage: additive-scan counters and untouched missing/known rows, known changed files skipped, cancelled reanalysis of a 600-second sparse WAV keeps the original hash/duration and stores no cancellation error, backup reopens with the same rows/tags/schema and rejects the live database or an existing file, both confirmation dialogs appear and cancel cleanly, and the Backup button writes a readable copy beside the database.
+- Not verified in this stage: native folder-chooser interaction, backup of a real 150+ MB catalog timing, or Windows/Intel. No user database was opened, migrated or backed up.

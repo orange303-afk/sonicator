@@ -41,8 +41,9 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 4. Keyboard: **Space** play/pause, **Left / Right** seek one second, **Escape** stop (when not consumed by an editing control).
 5. Search covers the entire catalog by filename and path. Typing is debounced by 250 ms; Enter applies immediately and Escape clears it. Header clicks sort the whole result, not the current page. Pages contain at most 10,000 records; use **< / >** to navigate.
 6. **Tags** filters the catalog by standard or custom tags: include, exclude, and match all/any. Select a sample and **Edit tags...** to assign tags; create, rename, recolour and delete tags from the tag menu.
-7. **Rescan library** skips unchanged successfully analyzed files. **Reanalyze all** explicitly recomputes them. Missing files remain marked in the catalog; corrupt files show an error rather than invented features.
-8. **Audio settings** selects the output device. No microphone input is opened.
+7. **Rescan** asks for confirmation, then analyzes new, changed and previously failed files; unchanged analyzed files are skipped. **New files** is the additive scan: it walks the folders but analyzes only paths that are not in the catalog yet, without reconciling missing records. **Reanalyze all** asks for a stronger confirmation and recomputes every file. Cancel keeps completed results and never stores a partial row.
+8. **Backup** writes a consistent SQLite copy to `Sonicator/backups/` beside the database. The live database and its WAL are never copied as raw files.
+9. **Audio settings** selects the output device. No microphone input is opened.
 
 ## Data
 
@@ -106,7 +107,8 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - Analysis supports up to 64 channels; preview uses the first two channels, not a surround downmix. Compressed bit depth can be unavailable.
 - No filesystem watcher; folder changes are discovered by manual rescan. Symbolic directory links are deliberately not followed. AppleDouble metadata forks are excluded by their magic bytes, not merely a filename prefix. Path aliases/case aliases are not merged.
 - Waveform cache holds at most 64 thumbnails. Search, sorting and tag filters run over the whole catalog; a page still contains at most 10,000 rows. Text search folds ASCII, Latin, Greek and Cyrillic case; scripts without case (CJK) match literally. No 500,000-file or GPU/60 FPS claim is made.
-- Files with decode errors are retried on rescan. Missing roots abort that scan with a visible message; records are not deleted.
+- Files with decode errors are retried on rescan. Missing roots abort that scan with a visible message; records are not deleted. The additive **New files** scan deliberately does not mark missing records.
+- The manual **Backup** copy runs through SQLite's backup API on the UI thread, so a very large catalog can pause the window briefly while it copies. No automatic rotation or deletion of user backups is performed.
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.
 - Windows, Intel macOS, DAW integrations, physical listening/latency and release packaging still need platform/user verification.

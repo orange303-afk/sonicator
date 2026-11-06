@@ -413,6 +413,14 @@ juce::StringArray SampleRepository::roots() const
     while (s.step()) out.add(s.text(0));
     return out;
 }
+void SampleRepository::backupTo(const juce::File& destination)
+{
+    std::lock_guard lock(db.mutex);
+    if (destination == db.file()) throw std::runtime_error("Backup destination must differ from the live database");
+    if (destination.existsAsFile()) throw std::runtime_error("Backup destination already exists");
+    if (! destination.getParentDirectory().createDirectory()) throw std::runtime_error("Cannot create backup directory");
+    backupDatabase(db.handle, destination);
+}
 std::vector<Tag> SampleRepository::tags() const
 {
     std::lock_guard lock(db.mutex);

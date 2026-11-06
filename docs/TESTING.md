@@ -74,6 +74,20 @@ Windows / Intel macOS execution, ASan, concurrent UI-writer stress, hardware lat
 - Debug/Release `codesign --verify --verbose`: valid on disk and designated requirement satisfied (ad-hoc).
 - `git diff --check`: clean.
 
+## Library maintenance stage (2026-11-06)
+
+Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.
+
+- Default suite: **57 cases / 540 assertions passed** in Debug and Release; Debug and Release CTest 1/1; Release ad-hoc bundle signature verified.
+- New coverage: `NewOnly` analyzes only unknown paths, counts known files as skipped, leaves missing records unreconciled and does not reanalyze a known file changed on disk; a cancelled reanalysis of a 600-second sparse WAV keeps the previous hash/duration and stores no "Cancelled"; user backup reopens with the same rows, tag assignments and `user_version`, and refuses the live database or an existing destination; Rescan/Reanalyze confirmation dialogs open and cancel without starting a scan; the Backup button creates a readable copy in `<db folder>/backups/`.
+- UI snapshots at 880x580 and 1440x900 include the new `Rescan` / `New files` row and footer `Backup` button.
+
+### Known limits after this stage
+
+- `New files` never reconciles missing paths and never updates known files; use **Rescan** for that.
+- A user backup runs on the UI thread and may pause the window while a very large database is copied.
+- User backups are never rotated or deleted automatically.
+
 ## Search and tags stage (2026-11-06)
 
 Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.

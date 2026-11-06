@@ -269,3 +269,25 @@ TEST_CASE("Schema v2 migrates to tags and a backfilled Unicode search key", "[da
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "v2.sqlite.backup-*").size() == 1);
     { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.tags().size() == 15); }
 }
+TEST_CASE("User backup is a consistent copy and refuses unsafe destinations", "[database][backup]")
+{
+    TestDirectory t; const auto file = t.dir.getChildFile("live.sqlite");
+    Database db(file); SampleRepository repo(db); repo.createTables();
+    auto record = sample("/backup/sample.wav", "sample.wav");
+    const auto id = repo.upsert(record);
+    const auto tag = repo.createTag("Keep", 0xff112233);
+    repo.setSampleTag(id, tag, true);
+
+    const auto backup = t.dir.getChildFile("backups/copy.sqlite");
+    repo.backupTo(backup);
+    REQUIRE(backup.existsAsFile());
+    {
+        Database copy(backup); SampleRepository copyRepo(copy); copyRepo.createTables();
+        REQUIRE(copyRepo.count() == 1);
+        REQUIRE(copyRepo.findByPath("/backup/sample.wav")->fileHash == "h");
+        REQUIRE(copyRepo.tagsForSample(id).size() == 1);
+        REQUIRE(rawScalar(backup, "PRAGMA user_version") == 3);
+    }
+    REQUIRE_THROWS(repo.backupTo(file));
+    REQUIRE_THROWS(repo.backupTo(backup));
+}

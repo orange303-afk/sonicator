@@ -31,6 +31,8 @@ public:
     int countHash(const juce::String&) const;
     void addRoot(const juce::String&);
     juce::StringArray roots() const;
+    // Consistent SQLite backup through the backup API (WAL-safe). The destination must be new.
+    void backupTo(const juce::File& destination);
     std::vector<Tag> tags() const;
     std::vector<Tag> tagsForSample(int64_t sampleId) const;
     std::map<int64_t, std::vector<Tag>> tagsForSamples(const std::vector<int64_t>& sampleIds) const;

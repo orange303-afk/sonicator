@@ -23,8 +23,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
 {
     setLookAndFeel(&look); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,26>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,
-         &pause,&cancel,&settings,&tagFilter,&clearFilters,&editTags,&previousPage,&nextPage,&heading,&subtitle,
+    for (auto* c : std::array<juce::Component*,28>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
+         &pause,&cancel,&settings,&backup,&tagFilter,&clearFilters,&editTags,&previousPage,&nextPage,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel})
         if (c != nullptr) addAndMakeVisible(c);
@@ -87,7 +87,15 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     addAndMakeVisible(folders); rootsLabel.setVisible(false);
     folders.onFolder = [this](juce::String path) { selectedFolder = std::move(path); pageOffset = 0; reloadLibrary(); };
     addFolder.onClick = [this] { chooseFolder(); };
-    rescan.onClick = [this] { scanRoots(false); }; reanalyze.onClick = [this] { scanRoots(true); };
+    rescan.onClick = [this] { requestScan(false); };
+    newFiles.onClick = [this] { scanRoots(false, true); };
+    reanalyze.onClick = [this] { requestScan(true); };
+    backup.onClick = [this]
+    {
+        try { backupCatalog(); }
+        catch (const std::exception& e) { status.setText("Backup failed: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+    };
+    backup.setTooltip("Save a consistent copy of the catalog database");
     pause.onClick = [this] { if (indexer) indexer->setPaused(! indexer->progress().paused); };
     cancel.onClick = [this] { if (indexer) indexer->cancel(); };
     settings.onClick = [this] { showAudioSettings(); };
@@ -102,13 +110,13 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
     preview.onAction = [this] { library.focusForNavigation(); };
-    for (auto* button : std::array<juce::Button*,11>{&addFolder,&rescan,&reanalyze,&pause,&cancel,&settings,
+    for (auto* button : std::array<juce::Button*,13>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
           &tagFilter,&clearFilters,&editTags,&previousPage,&nextPage})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         if (button == &addFolder || button == &settings) continue; // Modal dialogs must retain their own focus.
         auto action = button->onClick;
-        button->onClick = [this,action] { if (action) action(); library.focusForNavigation(); };
+        button->onClick = [this,action] { if (action) action(); if (isShowing()) library.focusForNavigation(); };
     }
     editTags.setEnabled(false);
     clearFilters.setEnabled(false);
@@ -130,7 +138,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     catch (const std::exception& e) { status.setText("Database error: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
     if (engine.error().isNotEmpty()) status.setText("Audio device: " + engine.error(),juce::dontSendNotification);
     pause.setEnabled(false); cancel.setEnabled(false);
-    addFolder.setEnabled(indexer != nullptr); rescan.setEnabled(indexer != nullptr); reanalyze.setEnabled(indexer != nullptr);
+    addFolder.setEnabled(indexer != nullptr); rescan.setEnabled(indexer != nullptr);
+    reanalyze.setEnabled(indexer != nullptr); newFiles.setEnabled(indexer != nullptr);
+    backup.setEnabled(indexer != nullptr);
     startTimerHz(10);
 }
 MainComponent::~MainComponent()
@@ -182,16 +192,54 @@ void MainComponent::beginImport(const juce::File& folder)
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
 }
-void MainComponent::scanRoots(bool force)
+void MainComponent::requestScan(bool reanalyzeAll)
+{
+    if (! indexer || indexer->progress().running || ! readRepo) return;
+    juce::StringArray roots;
+    try { roots = readRepo->roots(); }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
+    if (roots.isEmpty()) { status.setText("Add a folder first.",juce::dontSendNotification); return; }
+    const auto safe = juce::Component::SafePointer<MainComponent>(this);
+    if (! reanalyzeAll)
+    {
+        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::QuestionIcon)
+            .withTitle("Rescan library")
+            .withMessage("Walk every registered folder and analyze files that are new, changed or previously failed. Unchanged analyzed files are skipped.\n\nA large library can take a long time.")
+            .withButton("Rescan", 1).withButton("Cancel", 0),
+            [safe](int choice) { if (safe != nullptr && choice == 1) safe->scanRoots(false); });
+        return;
+    }
+    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::WarningIcon)
+        .withTitle("Reanalyze all")
+        .withMessage("Recompute the measured features of every file in the catalog, including files that have not changed.\n\nOn a large library this can take a long time. Completed results are saved if you cancel.")
+        .withButton("Reanalyze", 1).withButton("Cancel", 0),
+        [safe](int choice) { if (safe != nullptr && choice == 1) safe->scanRoots(true); });
+}
+void MainComponent::scanRoots(bool force, bool newOnly)
 {
     if (! indexer || indexer->progress().running) return;
     try
     {
         auto roots = readRepo->roots();
         if (roots.isEmpty()) { status.setText("Add a folder first.",juce::dontSendNotification); return; }
-        if (indexer->start(roots,force)) { wasRunning = true; reloadLibrary(); }
+        const bool started = newOnly ? indexer->startNewOnly(roots) : indexer->start(roots,force);
+        if (started) { wasRunning = true; reloadLibrary(); }
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+}
+juce::File MainComponent::backupCatalog()
+{
+    auto* repo = writeRepo != nullptr ? writeRepo.get() : readRepo.get();
+    if (repo == nullptr) throw std::runtime_error("Database is not open");
+    auto folder = dbPath.getParentDirectory().getChildFile("backups");
+    const auto stamp = juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S");
+    auto target = folder.getChildFile("sonicator-" + stamp + ".sqlite").getNonexistentSibling();
+    repo->backupTo(target);
+    status.setText("Backup saved: " + target.getFullPathName(),juce::dontSendNotification);
+    status.setTooltip(target.getFullPathName());
+    return target;
 }
 bool MainComponent::refreshIfCatalogChanged()
 {
@@ -453,7 +501,8 @@ void MainComponent::timerCallback()
     if (! indexer) return;
     auto p = indexer->progress();
     pause.setEnabled(p.running); cancel.setEnabled(p.running);
-    addFolder.setEnabled(! p.running); rescan.setEnabled(! p.running); reanalyze.setEnabled(! p.running);
+    addFolder.setEnabled(! p.running); rescan.setEnabled(! p.running);
+    reanalyze.setEnabled(! p.running); newFiles.setEnabled(! p.running);
     pause.setButtonText(p.paused ? "Resume" : "Pause");
     if (p.running || wasRunning)
     {
@@ -510,12 +559,15 @@ void MainComponent::resized()
     preview.setBounds(r.removeFromBottom(156));
     auto footer = r.removeFromBottom(42).reduced(12,5);
     cancel.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
-    pause.setBounds(footer.removeFromRight(70)); status.setBounds(footer);
+    pause.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
+    backup.setBounds(footer.removeFromRight(70)); status.setBounds(footer);
     sidebarBounds = r.removeFromLeft(getWidth() < 1100 ? 190 : 240); analysisBounds = r.removeFromRight(getWidth() < 1100 ? 230 : 270);
     auto sidebar = sidebarBounds.reduced(14,16);
     libraryHeading.setBounds(sidebar.removeFromTop(30)); sidebar.removeFromTop(12);
     addFolder.setBounds(sidebar.removeFromTop(36)); sidebar.removeFromTop(10);
-    rescan.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(8);
+    auto scanRow = sidebar.removeFromTop(32);
+    rescan.setBounds(scanRow.removeFromLeft((scanRow.getWidth() - 6) / 2)); scanRow.removeFromLeft(6);
+    newFiles.setBounds(scanRow); sidebar.removeFromTop(8);
     reanalyze.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(24);
     folders.setBounds(sidebar);
     auto analysis = analysisBounds.reduced(16,16);

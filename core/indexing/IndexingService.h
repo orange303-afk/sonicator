@@ -18,12 +18,16 @@ struct IndexingProgress
 std::vector<int64_t> findMissingIds(const std::vector<PathEntry>& rows,
                                     const std::unordered_set<std::string>& discoveredPaths,
                                     const juce::StringArray& roots);
+enum class ScanMode { Full, NewOnly };
 class IndexingService final : private juce::Thread
 {
 public:
     explicit IndexingService(SampleRepository& r) : Thread("Library indexing"), repo(r) {}
     ~IndexingService();
     bool start(const juce::StringArray& roots, bool force = false);
+    // Discovers the registered folders but analyzes only paths that are not in the catalog yet.
+    // Known files are left untouched, including changed, failed and older-version records.
+    bool startNewOnly(const juce::StringArray& roots);
     void cancel();
     void setPaused(bool);
     IndexingProgress progress() const;
@@ -32,12 +36,14 @@ private:
     SampleRepository& repo;
     juce::StringArray folders;
     bool forceAnalysis = false;
+    ScanMode scanMode = ScanMode::Full;
     mutable std::mutex stateMutex;
     IndexingProgress state;
     std::atomic<bool> cancelled { false };
     std::mutex pauseMutex;
     std::condition_variable pauseCondition;
     bool paused = false;
+    bool beginScan(const juce::StringArray& roots, bool force, ScanMode mode);
     bool checkpoint();
     void run() override;
 };
