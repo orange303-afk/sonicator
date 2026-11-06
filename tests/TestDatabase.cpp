@@ -406,3 +406,95 @@ TEST_CASE("ID queries and record batching preserve the catalog order", "[databas
     REQUIRE(records[2].id == requested[2]);
     REQUIRE(repo.recordsByIds({ 999999 }).empty());
 }
+TEST_CASE("Relocating a root rewrites paths, keeps identity and leaves other roots alone",
+          "[database][relocation]")
+{
+    TestDirectory t;
+    auto oldRoot = t.dir.getChildFile("old-root"); oldRoot.createDirectory();
+    auto newRoot = t.dir.getChildFile("new-root"); newRoot.createDirectory();
+    Database db(t.dir.getChildFile("relocate.sqlite")); SampleRepository repo(db); repo.createTables();
+
+    SampleRecord first; first.filePath = oldRoot.getChildFile("Kick/01.wav").getFullPathName();
+    first.fileName = "01.wav"; first.fileHash = "h1"; first.version = basicFeaturesVersion;
+    const auto firstId = repo.upsert(first);
+    SampleRecord second; second.filePath = oldRoot.getChildFile("Snare/02.wav").getFullPathName();
+    second.fileName = "02.wav"; second.fileHash = "h2"; second.version = basicFeaturesVersion;
+    const auto secondId = repo.upsert(second);
+    SampleRecord foreign; foreign.filePath = oldRoot.getFullPathName() + "\\Foreign\\x.wav";
+    foreign.fileName = "x.wav"; foreign.fileHash = "h3"; const auto foreignId = repo.upsert(foreign);
+    SampleRecord outside; outside.filePath = t.dir.getChildFile("elsewhere/out.wav").getFullPathName();
+    outside.fileName = "out.wav"; outside.fileHash = "h4"; const auto outsideId = repo.upsert(outside);
+    repo.addRoot(oldRoot.getFullPathName()); repo.addRoot(t.dir.getFullPathName());
+    const auto tag = repo.createTag("Keep", 0xff112233);
+    repo.setSampleTag(firstId, tag, true);
+    repo.setStarred({ firstId }, true);
+    repo.setMissing({ secondId });
+    REQUIRE(repo.countUnderRoot(oldRoot.getFullPathName()) == 3);
+
+    const auto result = repo.relocateRoots({{ oldRoot.getFullPathName(), newRoot.getFullPathName() }});
+    REQUIRE(result.movedFiles == 3);
+    REQUIRE(result.conflicts == 0);
+
+    REQUIRE_FALSE(repo.findByPath(first.filePath).has_value());
+    const auto moved = repo.findByPath(newRoot.getChildFile("Kick/01.wav").getFullPathName());
+    REQUIRE(moved.has_value());
+    REQUIRE(moved->id == firstId);
+    REQUIRE(moved->fileHash == "h1");
+    REQUIRE(moved->starred);
+    REQUIRE(repo.tagsForSample(firstId).size() == 1);
+    REQUIRE(repo.findByPath(newRoot.getChildFile("Snare/02.wav").getFullPathName())->id == secondId);
+    REQUIRE(repo.findByPath(newRoot.getChildFile("Snare/02.wav").getFullPathName())->missing);
+    REQUIRE(repo.findByPath(newRoot.getChildFile("Foreign/x.wav").getFullPathName())->id == foreignId);
+    REQUIRE(repo.findByPath(outside.filePath)->id == outsideId);
+    REQUIRE(repo.roots().contains(newRoot.getFullPathName()));
+    REQUIRE_FALSE(repo.roots().contains(oldRoot.getFullPathName()));
+    REQUIRE(repo.roots().contains(t.dir.getFullPathName()));
+
+    LibraryFilter filter; filter.text = "new-root";
+    REQUIRE(repo.query(filter).total == 3);
+}
+
+TEST_CASE("A relocation collision keeps tags and stars from both rows", "[database][relocation]")
+{
+    TestDirectory t;
+    auto oldRoot = t.dir.getChildFile("old"); oldRoot.createDirectory();
+    auto newRoot = t.dir.getChildFile("new"); newRoot.createDirectory();
+    Database db(t.dir.getChildFile("collision.sqlite")); SampleRepository repo(db); repo.createTables();
+    const auto movingPath = oldRoot.getChildFile("Kick/same.wav").getFullPathName();
+    const auto existingPath = newRoot.getChildFile("Kick/same.wav").getFullPathName();
+    SampleRecord moving; moving.filePath = movingPath; moving.fileName = "same.wav"; moving.fileHash = "m";
+    const auto movingId = repo.upsert(moving);
+    SampleRecord existing; existing.filePath = existingPath; existing.fileName = "same.wav"; existing.fileHash = "e";
+    const auto existingId = repo.upsert(existing);
+    repo.addRoot(oldRoot.getFullPathName());
+    const auto movingTag = repo.createTag("Moving", 0xff111111);
+    const auto existingTag = repo.createTag("Existing", 0xff222222);
+    repo.setSampleTag(movingId, movingTag, true);
+    repo.setSampleTag(existingId, existingTag, true);
+    repo.setStarred({ movingId }, true);
+
+    const auto result = repo.relocateRoots({{ oldRoot.getFullPathName(), newRoot.getFullPathName() }});
+    REQUIRE(result.conflicts == 1);
+    REQUIRE_FALSE(repo.findByPath(movingPath).has_value());
+    const auto survivor = repo.findByPath(existingPath);
+    REQUIRE(survivor.has_value());
+    REQUIRE(survivor->id == existingId);
+    REQUIRE(survivor->starred);
+    auto tags = repo.tagsForSample(existingId);
+    REQUIRE(tags.size() == 2);
+}
+
+TEST_CASE("A relocation with a missing target changes nothing", "[database][relocation]")
+{
+    TestDirectory t;
+    auto oldRoot = t.dir.getChildFile("old"); oldRoot.createDirectory();
+    Database db(t.dir.getChildFile("rollback.sqlite")); SampleRepository repo(db); repo.createTables();
+    SampleRecord row; row.filePath = oldRoot.getChildFile("a.wav").getFullPathName();
+    row.fileName = "a.wav"; row.fileHash = "h"; const auto id = repo.upsert(row);
+    repo.addRoot(oldRoot.getFullPathName());
+    const auto absent = t.dir.getChildFile("absent");
+    REQUIRE_THROWS(repo.relocateRoots({{ oldRoot.getFullPathName(), absent.getFullPathName() }}));
+    REQUIRE(repo.findByPath(row.filePath)->id == id);
+    REQUIRE(repo.roots().contains(oldRoot.getFullPathName()));
+    REQUIRE_FALSE(repo.roots().contains(absent.getFullPathName()));
+}

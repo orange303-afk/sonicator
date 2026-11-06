@@ -12,6 +12,14 @@ struct PathEntry
     juce::String path;
     bool missing = false;
 };
+struct RootRelocation
+{
+    juce::String oldRoot, newRoot;
+};
+struct RelocationResult
+{
+    int64_t movedFiles = 0, conflicts = 0;
+};
 class SampleRepository
 {
 public:
@@ -34,6 +42,10 @@ public:
     int countHash(const juce::String&) const;
     void addRoot(const juce::String&);
     juce::StringArray roots() const;
+    int countUnderRoot(const juce::String& root) const;
+    // Rewrites every sample path below each old root to the matching new root, preserving the
+    // relative structure. Runs in one transaction and keeps ids, tags, stars and analysis data.
+    RelocationResult relocateRoots(const std::vector<RootRelocation>&);
     // Consistent SQLite backup through the backup API (WAL-safe). The destination must be new.
     void backupTo(const juce::File& destination);
     // True only for an existing SONICATOR catalog (samples and roots tables with a schema version).

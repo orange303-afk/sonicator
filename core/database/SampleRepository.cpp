@@ -1,4 +1,5 @@
 #include "SampleRepository.h"
+#include "PathRelocation.h"
 #include "SqliteHelpers.h"
 #include <algorithm>
 #include <variant>
@@ -480,6 +481,95 @@ juce::StringArray SampleRepository::roots() const
     detail::Statement s(db.handle,"SELECT path FROM roots ORDER BY path"); juce::StringArray out;
     while (s.step()) out.add(s.text(0));
     return out;
+}
+int SampleRepository::countUnderRoot(const juce::String& root) const
+{
+    std::lock_guard lock(db.mutex);
+    const auto trimmed = pathrelocation::trimTrailingSeparators(root);
+    const auto slash = escapeLike(pathrelocation::withSeparator(trimmed, '/')) + "%";
+    const auto backslash = escapeLike(pathrelocation::withSeparator(trimmed, '\\')) + "%";
+    detail::Statement s(db.handle,
+        "SELECT COUNT(*) FROM samples WHERE path LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\'");
+    s.text(1, slash); s.text(2, backslash);
+    return s.step() ? (int) s.integer(0) : 0;
+}
+RelocationResult SampleRepository::relocateRoots(const std::vector<RootRelocation>& relocations)
+{
+    std::lock_guard lock(db.mutex);
+    for (const auto& relocation : relocations)
+    {
+        if (relocation.oldRoot.isEmpty()) throw std::runtime_error("Old folder is empty");
+        if (relocation.newRoot.isEmpty() || ! juce::File(relocation.newRoot).isDirectory())
+            throw std::runtime_error("New folder does not exist: " + relocation.newRoot.toStdString());
+    }
+    RelocationResult result;
+    if (relocations.empty()) return result;
+
+    detail::exec(db.handle, "BEGIN IMMEDIATE");
+    try
+    {
+        struct Row { int64_t id = 0; juce::String name, path; };
+        detail::Statement rows(db.handle, "SELECT id,name,path FROM samples WHERE id>? ORDER BY id LIMIT 2000");
+        detail::Statement update(db.handle, "UPDATE OR IGNORE samples SET path=?, search_key=? WHERE id=?");
+        detail::Statement target(db.handle, "SELECT id FROM samples WHERE path=?");
+        detail::Statement mergeTags(db.handle,
+            "INSERT OR IGNORE INTO sample_tags(sample_id,tag_id) SELECT ?,tag_id FROM sample_tags WHERE sample_id=?");
+        detail::Statement mergeStar(db.handle,
+            "UPDATE samples SET starred = starred | COALESCE((SELECT starred FROM samples WHERE id=?),0) WHERE id=?");
+        detail::Statement deleteOld(db.handle, "DELETE FROM samples WHERE id=?");
+        int64_t lastId = 0;
+        for (;;)
+        {
+            rows.reset(); rows.integer(1, lastId);
+            std::vector<Row> batch;
+            while (rows.step()) batch.push_back({ rows.integer(0), rows.text(1), rows.text(2) });
+            if (batch.empty()) break;
+            for (const auto& row : batch)
+            {
+                const RootRelocation* best = nullptr;
+                for (const auto& relocation : relocations)
+                    if (pathrelocation::isUnder(row.path, relocation.oldRoot)
+                        && (best == nullptr || relocation.oldRoot.length() > best->oldRoot.length()))
+                        best = &relocation;
+                if (best == nullptr) continue;
+                const auto newPath = pathrelocation::remap(row.path, best->oldRoot, best->newRoot);
+                if (newPath == row.path) continue;
+                update.reset(); update.text(1, newPath);
+                update.text(2, searchKey(row.name, newPath)); update.integer(3, row.id); update.step();
+                if (sqlite3_changes(db.handle) == 0)
+                {
+                    // The target path already exists: keep that row and move the user's tags and
+                    // star onto it, then remove the duplicate. Analysis already belongs to the row.
+                    target.reset(); target.text(1, newPath);
+                    if (! target.step()) throw std::runtime_error("Cannot relocate a catalog path");
+                    const auto existingId = target.integer(0);
+                    mergeTags.reset(); mergeTags.integer(1, existingId); mergeTags.integer(2, row.id); mergeTags.step();
+                    mergeStar.reset(); mergeStar.integer(1, row.id); mergeStar.integer(2, existingId); mergeStar.step();
+                    deleteOld.reset(); deleteOld.integer(1, row.id); deleteOld.step();
+                    ++result.conflicts;
+                }
+                else
+                {
+                    ++result.movedFiles;
+                }
+            }
+            lastId = batch.back().id;
+        }
+        detail::Statement deleteRoot(db.handle, "DELETE FROM roots WHERE path=?");
+        detail::Statement insertRoot(db.handle, "INSERT OR IGNORE INTO roots(path) VALUES(?)");
+        for (const auto& relocation : relocations)
+        {
+            deleteRoot.reset(); deleteRoot.text(1, relocation.oldRoot); deleteRoot.step();
+            insertRoot.reset(); insertRoot.text(1, relocation.newRoot); insertRoot.step();
+        }
+        detail::exec(db.handle, "COMMIT");
+        return result;
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK"); } catch (...) {}
+        throw;
+    }
 }
 bool SampleRepository::isCatalog(const juce::File& file)
 {
