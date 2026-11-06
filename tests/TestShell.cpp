@@ -4,7 +4,27 @@
 #include "core/database/SampleRepository.h"
 #include "core/dsp/BasicAnalyzer.h"
 #include "TestHelpers.h"
+#include <iostream>
 using namespace sonicator;
+TEST_CASE("Large catalog startup restores the actual page and folder tree", "[.catalog-ui]")
+{
+    const auto fixture = juce::SystemStats::getEnvironmentVariable("SONICATOR_CATALOG_FIXTURE",{});
+    REQUIRE(fixture.isNotEmpty());
+    // Explicit scratch fixture only; copy again so the test cannot modify the supplied fixture.
+    TestDirectory t; auto dbPath = t.dir.getChildFile("fixture.sqlite");
+    REQUIRE(juce::File(fixture).copyFileTo(dbPath));
+    const auto start = juce::Time::getMillisecondCounterHiRes();
+    MainComponent app(dbPath,false);
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 10000);
+    std::cout << "Large catalog and tree startup: " << (juce::Time::getMillisecondCounterHiRes()-start)/1000 << " s\n";
+    const auto screenshot = juce::SystemStats::getEnvironmentVariable("SONICATOR_CATALOG_SCREENSHOT",{});
+    if (screenshot.isNotEmpty())
+    {
+        auto stream = juce::File(screenshot).createOutputStream(); REQUIRE(stream != nullptr);
+        juce::PNGImageFormat png; REQUIRE(png.writeImageToStream(app.createComponentSnapshot(app.getLocalBounds()),*stream));
+    }
+}
 TEST_CASE("Application shell restores the catalog and paints at minimum size", "[ui][integration]")
 {
     TestDirectory t; auto audio = t.wave(); auto dbPath = t.dir.getChildFile("library.sqlite");

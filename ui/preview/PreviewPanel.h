@@ -13,10 +13,13 @@ public:
     bool keyPressed(const juce::KeyPress&) override;
 private:
     AudioEngine& engine;
+    juce::File loadedFile;
+    int64_t loadedSize = 0, loadedModified = 0;
     WaveformDisplay waveform;
     juce::Label filename, time;
     juce::TextButton play { "Play" }, stop { "Stop" };
     juce::ToggleButton loop { "Loop" };
+    juce::ToggleButton midi { "MIDI Preview" }, skipSilence { "Skip Silence" };
     juce::Slider volume;
     void timerCallback() override;
     void togglePlayback();

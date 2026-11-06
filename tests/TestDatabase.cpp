@@ -4,6 +4,18 @@
 #include "TestHelpers.h"
 #include <sqlite3.h>
 using namespace sonicator;
+TEST_CASE("Folder queries include every descendant but not sibling prefixes", "[database][folders]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("folders.sqlite")); SampleRepository repo(db); repo.createTables();
+    for (auto path : {"/lib/Drums/k.wav", "/lib/Drums/deep/more/s.wav", "/lib/Drums2/no.wav", "/lib/other.wav"})
+    {
+        SampleRecord r; r.filePath = path; r.fileName = juce::File(path).getFileName(); repo.upsert(r);
+    }
+    REQUIRE(repo.countInFolder("/lib/Drums") == 2);
+    REQUIRE(repo.pageInFolder("/lib/Drums",1,1).size() == 1);
+    REQUIRE(repo.countInFolder("/absent") == 0);
+    REQUIRE(repo.countInFolder({}) == 4);
+}
 TEST_CASE("Repository persists Unicode paths, metrics, and upserts without losing identity", "[database]")
 {
     const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)

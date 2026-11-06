@@ -1,5 +1,15 @@
 # Phase 1 verification
 
+## Preview, folders and MIDI (2026-11-06)
+
+- Debug and Release: **41 cases / 335 assertions**, all passed. Debug CTest 1/1, 4.55 s. Release bundle ad-hoc signature verified.
+- Regression tests first reproduced unwanted selection callbacks and resetting an unchanged preview to zero. Refresh now preserves selection without replay; ordinary non-looping audio reaches EOF and stays silent.
+- Recursive folder queries exclude sibling prefixes, retain deep descendants, and paginate from the whole catalog. Tree tests cover Left/Right navigation, selection preservation and overlapping registered roots.
+- Real catalog UI check uses an SQLite backup fixture only: 299,918 rows, 10,000 displayed, catalog-derived tree startup **3.16 s Debug / 1.61 s Release**. Owner database was not rescanned or migrated by this stage.
+- Rendered MIDI tests cover two simultaneous voices, the 16-voice bound, 2 ms attack / 20 ms release, octave pitch ratio, velocity, buffer offsets, all-notes-off, nonzero onset in the second channel, all-silent samples, Skip Silence next-trigger semantics and explicit 128 MiB rejection with a sparse WAV. Input tests cover ignored 20 kB SysEx and bounded queue overflow.
+- Independent review: fixed transport stop-after-output-detach timeout; replaced unrestricted collector with a preallocated bounded queue. Overlapping-root concern was tested: the shared hierarchy retains the nested root's children. No confirmed memory-safety defect.
+- Hardware MIDI, audible transient/loop tests, input hot-plug, Windows and Intel macOS are **not verified**. MIDI uses linear interpolation (high upward shifts may alias), 128 MiB decoded mono/stereo limit, and block-quantised MIDI timing. See `docs/PREVIEW.md`.
+
 Environment: macOS, native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5. Tests render actual audio buffers; no mocked decoder or invented classification data.
 
 ## Automated coverage

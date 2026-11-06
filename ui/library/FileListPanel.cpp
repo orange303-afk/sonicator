@@ -19,6 +19,7 @@ void FileListPanel::setSamples(std::vector<SampleRecord> records)
 {
     const auto selectedRow = table.getSelectedRow();
     const int64_t selectedId = (selectedRow >= 0 && selectedRow < getNumRows()) ? visible[(size_t) selectedRow].id : 0;
+    const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
     all = std::move(records); rebuild();
     if (selectedId == 0) return;
     for (int row = 0; row < getNumRows(); ++row)
@@ -74,6 +75,6 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
 }
 void FileListPanel::selectedRowsChanged(int row)
 {
-    if (row >= 0 && row < getNumRows() && onSelected) onSelected(visible[(size_t) row]);
+    if (! restoringSelection && row >= 0 && row < getNumRows() && onSelected) onSelected(visible[(size_t) row]);
 }
 }

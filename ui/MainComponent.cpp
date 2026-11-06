@@ -42,6 +42,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     search.onTextChange = [this] { library.setSearchText(search.getText()); };
     library.setComponentID("library"); status.setComponentID("importStatus"); analysisDetails.setComponentID("analysisDetails");
     library.onSelected = [this](const SampleRecord& r) { selectSample(r); };
+    addAndMakeVisible(folders); rootsLabel.setVisible(false);
+    folders.onFolder = [this](juce::String path) { selectedFolder = std::move(path); pageOffset = 0; reloadLibrary(); };
     addFolder.onClick = [this] { chooseFolder(); };
     rescan.onClick = [this] { scanRoots(false); }; reanalyze.onClick = [this] { scanRoots(true); };
     pause.onClick = [this] { if (indexer) indexer->setPaused(! indexer->progress().paused); };
@@ -55,6 +57,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
         writeRepo->createTables();
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         indexer = std::make_unique<IndexingService>(*writeRepo);
+        folders.refresh(*readRepo);
         reloadLibrary();
         status.setText(catalogCount > 0
             ? juce::String(catalogCount) + " samples loaded"
@@ -83,7 +86,12 @@ void MainComponent::chooseFolder()
 void MainComponent::beginImport(const juce::File& folder)
 {
     if (! indexer || indexer->progress().running) return;
-    if (indexer->start({folder.getFullPathName()})) { wasRunning = true; reloadLibrary(); }
+    try
+    {
+        writeRepo->addRoot(folder.getFullPathName()); folders.refresh(*readRepo);
+        if (indexer->start({folder.getFullPathName()})) { wasRunning = true; reloadLibrary(); }
+    }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
 }
 void MainComponent::scanRoots(bool force)
 {
@@ -99,7 +107,7 @@ void MainComponent::scanRoots(bool force)
 bool MainComponent::refreshIfCatalogChanged()
 {
     if (! readRepo) return false;
-    try { if (readRepo->count() == catalogCount) return false; }
+    try { if (readRepo->count() == totalCatalogCount) return false; }
     catch (const std::exception&) { return false; }
     reloadLibrary();
     return true;
@@ -109,9 +117,10 @@ void MainComponent::reloadLibrary()
     if (! readRepo) return;
     try
     {
-        catalogCount = readRepo->count();
+        totalCatalogCount = readRepo->count();
+        catalogCount = readRepo->countInFolder(selectedFolder);
         if (pageOffset >= catalogCount) pageOffset = 0;
-        auto samples = readRepo->page(10000,pageOffset);
+        auto samples = readRepo->pageInFolder(selectedFolder,10000,pageOffset);
         int shown = (int) samples.size(); library.setSamples(std::move(samples));
         countLabel.setText(juce::String(catalogCount) + " samples  |  " + juce::String(shown)
             + " on page " + juce::String(pageOffset/10000+1),juce::dontSendNotification);
@@ -158,14 +167,14 @@ void MainComponent::timerCallback()
         const auto now = juce::Time::getMillisecondCounter();
         if (now - lastRefreshMs >= 1500) { lastRefreshMs = now; refreshIfCatalogChanged(); }
     }
-    if (wasRunning && ! p.running) reloadLibrary();
+    if (wasRunning && ! p.running) { reloadLibrary(); folders.refresh(*readRepo); }
     wasRunning = p.running;
 }
 void MainComponent::showAudioSettings()
 {
     if (audioDialog != nullptr) { audioDialog->toFront(true); return; }
-    auto* selector = new juce::AudioDeviceSelectorComponent(engine.deviceManager(),0,0,0,2,false,false,true,false);
-    selector->setSize(460,360);
+    auto* selector = new juce::AudioDeviceSelectorComponent(engine.deviceManager(),0,0,0,2,true,false,true,false);
+    selector->setSize(460,500);
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned(selector); options.dialogTitle = "Audio output";
     options.dialogBackgroundColour = theme::panel; options.escapeKeyTriggersCloseButton = true;
@@ -198,13 +207,13 @@ void MainComponent::resized()
     auto footer = r.removeFromBottom(42).reduced(12,5);
     cancel.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
     pause.setBounds(footer.removeFromRight(70)); status.setBounds(footer);
-    sidebarBounds = r.removeFromLeft(180); analysisBounds = r.removeFromRight(getWidth() < 1100 ? 230 : 270);
+    sidebarBounds = r.removeFromLeft(getWidth() < 1100 ? 190 : 240); analysisBounds = r.removeFromRight(getWidth() < 1100 ? 230 : 270);
     auto sidebar = sidebarBounds.reduced(14,16);
     libraryHeading.setBounds(sidebar.removeFromTop(30)); sidebar.removeFromTop(12);
     addFolder.setBounds(sidebar.removeFromTop(36)); sidebar.removeFromTop(10);
     rescan.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(8);
     reanalyze.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(24);
-    rootsLabel.setBounds(sidebar);
+    folders.setBounds(sidebar);
     auto analysis = analysisBounds.reduced(16,16);
     analysisHeading.setBounds(analysis.removeFromTop(30)); analysis.removeFromTop(12);
     stageLabel.setBounds(analysis.removeFromBottom(getHeight() < 700 ? 58 : 90));

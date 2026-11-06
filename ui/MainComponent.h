@@ -1,6 +1,7 @@
 #pragma once
 #include "ui/shell/Theme.h"
 #include "ui/library/FileListPanel.h"
+#include "ui/library/FolderTree.h"
 #include "ui/preview/PreviewPanel.h"
 #include "core/indexing/IndexingService.h"
 namespace sonicator {
@@ -22,6 +23,9 @@ private:
     AudioEngine engine;
     PreviewPanel preview;
     FileListPanel library;
+    FolderTree folders;
+    juce::String selectedFolder;
+    int totalCatalogCount = 0;
     juce::TextEditor search;
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan library" }, reanalyze { "Reanalyze all" };
     juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Audio settings" };

@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
+#include "MidiSampler.h"
 namespace sonicator {
 // Control methods are message-thread only. transport() also permits offline rendering.
 class AudioEngine
@@ -14,6 +15,10 @@ public:
     void seek(double seconds);
     void setVolume(float);
     void setLooping(bool);
+    bool setMidiPreview(bool);
+    bool isMidiPreview() const { return output.midi.load(); }
+    void setSkipSilence(bool enabled) { skipSilence = enabled; sampler.skipSilence = enabled; }
+    bool isSkipSilence() const { return skipSilence; }
     bool isPlaying() const { return source.isPlaying(); }
     bool isLooping() const { return looping; }
     float getVolume() const { return source.getGain(); }
@@ -24,6 +29,9 @@ public:
     juce::AudioDeviceManager& deviceManager() { return devices; }
 private:
     bool deviceMode, looping = false;
+    bool skipSilence = false, startAtNextPlay = true, midiInputsConnected = false;
+    double audibleStart = -1;
+    juce::File loadedFile;
     double inputRate = 0;
     juce::String lastError;
     juce::AudioFormatManager formats;
@@ -31,6 +39,8 @@ private:
     juce::TimeSliceThread readAhead { "Preview read-ahead" };
     std::unique_ptr<juce::AudioFormatReaderSource> reader;
     juce::AudioTransportSource source;
+    MidiSampler sampler;
+    PreviewOutput output {source,sampler};
     juce::AudioSourcePlayer player;
     void attach();
 };

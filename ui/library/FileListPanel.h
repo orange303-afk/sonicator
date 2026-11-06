@@ -24,6 +24,7 @@ private:
     juce::String search;
     int sortColumn = 1;
     bool ascending = true;
+    bool restoringSelection = false;
     void rebuild();
 };
 }

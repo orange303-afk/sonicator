@@ -162,6 +162,35 @@ int SampleRepository::count() const
     detail::Statement s(db.handle,"SELECT COUNT(*) FROM samples");
     return s.step() ? (int) s.integer(0) : 0;
 }
+namespace {
+std::pair<juce::String,juce::String> folderRange(const juce::String& folder)
+{
+    auto prefix = juce::File(folder).getFullPathName();
+    if (! prefix.endsWithChar(juce::File::getSeparatorChar())) prefix += juce::File::getSeparatorString();
+    return {prefix, prefix.dropLastCharacters(1) + juce::String::charToString(juce::File::getSeparatorChar()+1)};
+}
+}
+int SampleRepository::countInFolder(const juce::String& folder) const
+{
+    if (folder.isEmpty()) return count();
+    std::lock_guard lock(db.mutex);
+    auto [lower,upper] = folderRange(folder);
+    detail::Statement s(db.handle,"SELECT COUNT(*) FROM samples WHERE path>=? AND path<?");
+    s.text(1,lower); s.text(2,upper);
+    return s.step() ? (int) s.integer(0) : 0;
+}
+std::vector<SampleRecord> SampleRepository::pageInFolder(const juce::String& folder,int limit,int offset) const
+{
+    if (folder.isEmpty()) return page(limit,offset);
+    std::lock_guard lock(db.mutex);
+    auto [lower,upper] = folderRange(folder);
+    auto sql = "SELECT " + juce::String(columns) + " FROM samples WHERE path>=? AND path<? ORDER BY name COLLATE NOCASE,id LIMIT ? OFFSET ?";
+    detail::Statement s(db.handle,sql.toRawUTF8());
+    s.text(1,lower); s.text(2,upper); s.integer(3,juce::jlimit(0,50000,limit)); s.integer(4,juce::jmax(0,offset));
+    std::vector<SampleRecord> records;
+    while (s.step()) records.push_back(read(s));
+    return records;
+}
 int SampleRepository::countHash(const juce::String& hash) const
 {
     std::lock_guard lock(db.mutex);
