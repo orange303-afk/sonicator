@@ -1,9 +1,11 @@
 #include "SampleRepository.h"
 #include "SqliteHelpers.h"
+#include <algorithm>
+#include <variant>
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing";
-constexpr int schemaVersion = 2;
+constexpr int schemaVersion = 3;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -15,6 +17,91 @@ SampleRecord read(const detail::Statement& s)
     r.peakLevel = s.real(14); r.rmsLevel = s.real(15); r.spectralCentroid = s.real(16);
     r.spectralRolloff = s.real(17); r.spectralFlatness = s.real(18); r.missing = s.integer(19) != 0;
     return r;
+}
+struct StandardTag { const char* name; uint32_t colour; };
+constexpr StandardTag standardTags[] = {
+    { "Kick", 0xffe05a5a }, { "Snare", 0xffe08a45 }, { "Clap", 0xffe0b84a },
+    { "Hat", 0xffd7dd6a }, { "Percussion", 0xff8fd06a }, { "Bass", 0xff4fb8c8 },
+    { "Sub", 0xff4f8fd0 }, { "Lead", 0xff7a6aea }, { "Pad", 0xffa96ae0 },
+    { "Keys", 0xffd06ab8 }, { "Guitar", 0xffd06a7a }, { "Vocal", 0xff6ad0a0 },
+    { "FX", 0xff8a8f9c }, { "Loop", 0xff9ad06a }, { "One-shot", 0xffc8a06a }
+};
+std::pair<juce::String,juce::String> folderRange(const juce::String& folder)
+{
+    auto prefix = juce::File(folder).getFullPathName();
+    if (! prefix.endsWithChar(juce::File::getSeparatorChar())) prefix += juce::File::getSeparatorString();
+    return {prefix, prefix.dropLastCharacters(1) + juce::String::charToString(juce::File::getSeparatorChar()+1)};
+}
+juce::String escapeLike(const juce::String& value)
+{
+    juce::String out;
+    for (auto c : value)
+    {
+        if (c == '\\' || c == '%' || c == '_') out += juce::String::charToString('\\');
+        out += juce::String::charToString(c);
+    }
+    return out;
+}
+// C-locale towlower folds ASCII only, so Cyrillic and Greek names would not match a lower-case
+// query. Cover the case-bearing ranges that sample libraries actually use; scripts without case
+// (CJK, Arabic, Hebrew) pass through unchanged.
+juce::juce_wchar foldCase(juce::juce_wchar c)
+{
+    if (c >= 'A' && c <= 'Z') return c + 32;
+    if (c >= 0x00C0 && c <= 0x00DE && c != 0x00D7) return c + 32;
+    if (c == 0x0178) return 0x00FF;
+    if (c >= 0x0391 && c <= 0x03A9 && c != 0x03A2) return c + 32;
+    switch (c)
+    {
+        case 0x0386: return 0x03AC; case 0x0388: return 0x03AD; case 0x0389: return 0x03AE;
+        case 0x038A: return 0x03AF; case 0x038C: return 0x03CC; case 0x038E: return 0x03CD;
+        case 0x038F: return 0x03CE; default: break;
+    }
+    if (c >= 0x0410 && c <= 0x042F) return c + 32;
+    if (c >= 0x0400 && c <= 0x040F) return c + 80;
+    if (c >= 0x0460 && c <= 0x0481 && (c & 1) == 0) return c + 1;
+    if (c >= 0x048A && c <= 0x04BF && (c & 1) == 0) return c + 1;
+    if (c >= 0x04C1 && c <= 0x04CE && (c & 1) == 1) return c + 1;
+    if (c >= 0x04D0 && c <= 0x052F && (c & 1) == 0) return c + 1;
+    if (c >= 0x03DA && c <= 0x03EF && (c & 1) == 0) return c + 1;
+    if (c >= 0x0100 && c <= 0x0177)
+    {
+        if (c == 0x0130 || c == 0x0131) return 'i';
+        if (c == 0x0138 || c == 0x0149) return c;
+        const bool upper = (c <= 0x0137) ? ((c & 1) == 0) : ((c <= 0x0148) ? ((c & 1) == 1) : ((c & 1) == 0));
+        return upper ? c + 1 : c;
+    }
+    return c;
+}
+juce::String foldForSearch(const juce::String& text)
+{
+    juce::String out;
+    out.preallocateBytes(text.getNumBytesAsUTF8());
+    for (auto c : text) out += juce::String::charToString(foldCase(c));
+    return out;
+}
+juce::String orderBy(LibrarySort sort, bool ascending)
+{
+    juce::String column;
+    switch (sort)
+    {
+        case LibrarySort::Format:   column = "samples.format COLLATE NOCASE"; break;
+        case LibrarySort::Duration: column = "samples.duration"; break;
+        case LibrarySort::Rate:     column = "samples.sampleRate"; break;
+        case LibrarySort::Channels: column = "samples.numChannels"; break;
+        case LibrarySort::Status:   column = "samples.error COLLATE NOCASE"; break;
+        case LibrarySort::Name:
+        default:                    column = "samples.name COLLATE NOCASE"; break;
+    }
+    return column + (ascending ? " ASC" : " DESC") + ", samples.id ASC";
+}
+Tag readTag(const detail::Statement& s, int offset, int countColumn = -1)
+{
+    Tag tag;
+    tag.id = s.integer(offset); tag.name = s.text(offset + 1);
+    tag.colour = (uint32_t) s.integer(offset + 2); tag.builtin = s.integer(offset + 3) != 0;
+    if (countColumn >= 0) tag.sampleCount = (int) s.integer(countColumn);
+    return tag;
 }
 void backupDatabase(sqlite3* source, const juce::File& destination)
 {
@@ -54,6 +141,10 @@ void backupDatabase(sqlite3* source, const juce::File& destination)
     }
 }
 }
+juce::String SampleRepository::searchKey(const juce::String& name, const juce::String& path)
+{
+    return foldForSearch(name) + "\n" + foldForSearch(path);
+}
 void SampleRepository::createTables()
 {
     std::lock_guard lock(db.mutex);
@@ -78,14 +169,56 @@ void SampleRepository::createTables()
             "CREATE TABLE IF NOT EXISTS samples (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
             "name TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, error TEXT NOT NULL,"
             "size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
-            "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER);"
+            "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER,"
+            "search_key TEXT NOT NULL DEFAULT '');"
             "CREATE INDEX IF NOT EXISTS samples_hash ON samples(hash);"
             "CREATE INDEX IF NOT EXISTS samples_name_id ON samples(name COLLATE NOCASE, id);"
             "CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY);"
-            "PRAGMA user_version=2;");
+            "CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,"
+            "colour INTEGER NOT NULL, builtin INTEGER NOT NULL DEFAULT 0);"
+            "CREATE TABLE IF NOT EXISTS sample_tags (sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
+            "tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY(sample_id, tag_id)) WITHOUT ROWID;"
+            "CREATE INDEX IF NOT EXISTS sample_tags_tag ON sample_tags(tag_id, sample_id);");
+        // Databases created before schema 3 predate the folded search column.
+        bool hasSearchKey = false;
+        {
+            detail::Statement info(db.handle, "PRAGMA table_info(samples)");
+            while (info.step()) if (info.text(1) == "search_key") hasSearchKey = true;
+        }
+        if (! hasSearchKey) detail::exec(db.handle, "ALTER TABLE samples ADD COLUMN search_key TEXT NOT NULL DEFAULT '';");
         // Rows written by the build that bumped the version to 2 measured the same feature set, so
         // they are relabelled rather than reanalyzed. Only during this one-time upgrade.
         if (current >= 1 && current < 2) detail::exec(db.handle, "UPDATE samples SET version=1 WHERE version=2;");
+        if (current < 3)
+        {
+            // SQL lower() only folds ASCII, so the key is built with the same fold used by queries.
+            detail::Statement rows(db.handle, "SELECT id,name,path FROM samples WHERE id>? ORDER BY id LIMIT 2000");
+            detail::Statement update(db.handle, "UPDATE samples SET search_key=? WHERE id=?");
+            int64_t lastId = 0;
+            for (;;)
+            {
+                rows.reset(); rows.integer(1, lastId);
+                std::vector<std::pair<int64_t, juce::String>> batch;
+                while (rows.step())
+                    batch.emplace_back(rows.integer(0), searchKey(rows.text(1), rows.text(2)));
+                if (batch.empty()) break;
+                for (const auto& [id, key] : batch)
+                {
+                    update.reset(); update.text(1, key); update.integer(2, id); update.step();
+                }
+                lastId = batch.back().first;
+            }
+            detail::Statement tagCount(db.handle, "SELECT COUNT(*) FROM tags");
+            if (tagCount.step() && tagCount.integer(0) == 0)
+            {
+                detail::Statement insert(db.handle, "INSERT OR IGNORE INTO tags(name,colour,builtin) VALUES(?,?,1)");
+                for (const auto& tag : standardTags)
+                {
+                    insert.reset(); insert.text(1, tag.name); insert.integer(2, (int64_t) tag.colour); insert.step();
+                }
+            }
+        }
+        detail::exec(db.handle, "PRAGMA user_version=3;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -98,17 +231,19 @@ int64_t SampleRepository::upsert(const SampleRecord& r)
 {
     std::lock_guard lock(db.mutex);
     detail::Statement s(db.handle,
-        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
+        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
         "name=excluded.name,hash=excluded.hash,format=excluded.format,error=excluded.error,size=excluded.size,"
         "modified=excluded.modified,analyzed=excluded.analyzed,duration=excluded.duration,rate=excluded.rate,"
         "bits=excluded.bits,channels=excluded.channels,version=excluded.version,peak=excluded.peak,rms=excluded.rms,"
-        "centroid=excluded.centroid,rolloff=excluded.rolloff,flatness=excluded.flatness,missing=excluded.missing RETURNING id");
+        "centroid=excluded.centroid,rolloff=excluded.rolloff,flatness=excluded.flatness,missing=excluded.missing,"
+        "search_key=excluded.search_key RETURNING id");
     s.text(1,r.filePath); s.text(2,r.fileName); s.text(3,r.fileHash); s.text(4,r.format); s.text(5,r.error);
     s.integer(6,r.fileSize); s.integer(7,r.dateModified); s.integer(8,r.dateAnalyzed);
     s.real(9,r.duration); s.real(10,r.sampleRate); s.integer(11,r.bitsPerSample); s.integer(12,r.numChannels);
     s.integer(13,r.version); s.real(14,r.peakLevel); s.real(15,r.rmsLevel); s.real(16,r.spectralCentroid);
     s.real(17,r.spectralRolloff); s.real(18,r.spectralFlatness); s.integer(19,r.missing ? 1 : 0);
+    s.text(20,searchKey(r.fileName,r.filePath));
     if (! s.step()) throw std::runtime_error("Insert did not return a sample ID");
     return s.integer(0);
 }
@@ -162,14 +297,6 @@ int SampleRepository::count() const
     detail::Statement s(db.handle,"SELECT COUNT(*) FROM samples");
     return s.step() ? (int) s.integer(0) : 0;
 }
-namespace {
-std::pair<juce::String,juce::String> folderRange(const juce::String& folder)
-{
-    auto prefix = juce::File(folder).getFullPathName();
-    if (! prefix.endsWithChar(juce::File::getSeparatorChar())) prefix += juce::File::getSeparatorString();
-    return {prefix, prefix.dropLastCharacters(1) + juce::String::charToString(juce::File::getSeparatorChar()+1)};
-}
-}
 int SampleRepository::countInFolder(const juce::String& folder) const
 {
     if (folder.isEmpty()) return count();
@@ -191,6 +318,83 @@ std::vector<SampleRecord> SampleRepository::pageInFolder(const juce::String& fol
     while (s.step()) records.push_back(read(s));
     return records;
 }
+LibraryPage SampleRepository::query(const LibraryFilter& filter, int limit, int offset) const
+{
+    std::lock_guard lock(db.mutex);
+    using Param = std::variant<juce::String, int64_t>;
+    std::vector<Param> params;
+    juce::String where = " WHERE 1";
+    auto addText = [&](const juce::String& sql, juce::String value) { where += sql; params.emplace_back(std::move(value)); };
+    auto addInt = [&](const juce::String& sql, int64_t value) { where += sql; params.emplace_back(value); };
+
+    if (filter.text.trim().isNotEmpty())
+    {
+        auto tokens = juce::StringArray::fromTokens(filter.text.trim(), " \t\r\n", "");
+        for (const auto& token : tokens)
+        {
+            if (token.isEmpty()) continue;
+            addText(" AND samples.search_key LIKE ? ESCAPE '\\'",
+                    "%" + escapeLike(foldForSearch(token)) + "%");
+        }
+    }
+    if (filter.folder.isNotEmpty())
+    {
+        auto [lower, upper] = folderRange(filter.folder);
+        addText(" AND samples.path>=?", lower);
+        addText(" AND samples.path<?", upper);
+    }
+    if (! filter.includeTags.empty())
+    {
+        if (! filter.matchAnyTag)
+        {
+            for (auto id : filter.includeTags)
+                addInt(" AND EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
+        }
+        else
+        {
+            juce::String placeholders;
+            for (size_t i = 0; i < filter.includeTags.size(); ++i)
+            {
+                if (i != 0) placeholders += ",";
+                placeholders += "?";
+                params.emplace_back(filter.includeTags[i]);
+            }
+            where += " AND EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id IN ("
+                + placeholders + "))";
+        }
+    }
+    for (auto id : filter.excludeTags)
+        addInt(" AND NOT EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
+
+    auto bind = [&params](detail::Statement& s)
+    {
+        int index = 1;
+        for (const auto& param : params)
+        {
+            if (const auto* text = std::get_if<juce::String>(&param)) s.text(index, *text);
+            else s.integer(index, std::get<int64_t>(param));
+            ++index;
+        }
+        return index;
+    };
+
+    LibraryPage result;
+    {
+        auto sql = "SELECT COUNT(*) FROM samples" + where;
+        detail::Statement s(db.handle, sql.toRawUTF8()); bind(s);
+        if (s.step()) result.total = (int) s.integer(0);
+    }
+    {
+        auto sql = "SELECT " + juce::String(columns) + " FROM samples" + where
+            + " ORDER BY " + orderBy(filter.sort, filter.ascending) + " LIMIT ? OFFSET ?";
+        detail::Statement s(db.handle, sql.toRawUTF8());
+        const int next = bind(s);
+        s.integer(next, juce::jlimit(0, 50000, limit));
+        s.integer(next + 1, juce::jmax(0, offset));
+        while (s.step()) result.samples.push_back(read(s));
+    }
+    return result;
+}
 int SampleRepository::countHash(const juce::String& hash) const
 {
     std::lock_guard lock(db.mutex);
@@ -209,4 +413,95 @@ juce::StringArray SampleRepository::roots() const
     while (s.step()) out.add(s.text(0));
     return out;
 }
+std::vector<Tag> SampleRepository::tags() const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT t.id,t.name,t.colour,t.builtin,COUNT(st.sample_id) FROM tags t"
+        " LEFT JOIN sample_tags st ON st.tag_id=t.id GROUP BY t.id ORDER BY t.name COLLATE NOCASE");
+    std::vector<Tag> out;
+    while (s.step()) out.push_back(readTag(s, 0, 4));
+    return out;
 }
+std::vector<Tag> SampleRepository::tagsForSample(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT t.id,t.name,t.colour,t.builtin FROM tags t JOIN sample_tags st ON st.tag_id=t.id"
+        " WHERE st.sample_id=? ORDER BY t.name COLLATE NOCASE");
+    s.integer(1, sampleId);
+    std::vector<Tag> out;
+    while (s.step()) out.push_back(readTag(s, 0));
+    return out;
+}
+std::map<int64_t, std::vector<Tag>> SampleRepository::tagsForSamples(const std::vector<int64_t>& sampleIds) const
+{
+    std::lock_guard lock(db.mutex);
+    std::map<int64_t, std::vector<Tag>> out;
+    constexpr size_t chunkSize = 400;
+    for (size_t start = 0; start < sampleIds.size(); start += chunkSize)
+    {
+        const size_t end = std::min(sampleIds.size(), start + chunkSize);
+        juce::String placeholders;
+        for (size_t i = start; i < end; ++i) placeholders += (i == start ? "?" : ",?");
+        auto sql = "SELECT st.sample_id,t.id,t.name,t.colour,t.builtin FROM sample_tags st"
+            " JOIN tags t ON t.id=st.tag_id WHERE st.sample_id IN (" + placeholders + ")"
+            " ORDER BY t.name COLLATE NOCASE";
+        detail::Statement s(db.handle, sql.toRawUTF8());
+        int index = 1;
+        for (size_t i = start; i < end; ++i) s.integer(index++, sampleIds[i]);
+        while (s.step())
+            out[s.integer(0)].push_back(readTag(s, 1));
+    }
+    return out;
+}
+int64_t SampleRepository::createTag(const juce::String& name, uint32_t colour)
+{
+    const auto trimmed = name.trim();
+    if (trimmed.isEmpty()) throw std::runtime_error("Tag name cannot be empty");
+    std::lock_guard lock(db.mutex);
+    {
+        detail::Statement insert(db.handle, "INSERT OR IGNORE INTO tags(name,colour,builtin) VALUES(?,?,0)");
+        insert.text(1, trimmed); insert.integer(2, (int64_t) colour); insert.step();
+    }
+    detail::Statement select(db.handle, "SELECT id FROM tags WHERE name=?");
+    select.text(1, trimmed);
+    if (! select.step()) throw std::runtime_error("Cannot create tag");
+    return select.integer(0);
+}
+void SampleRepository::setTagColour(int64_t tagId, uint32_t colour)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "UPDATE tags SET colour=? WHERE id=?");
+    s.integer(1, (int64_t) colour); s.integer(2, tagId); s.step();
+}
+bool SampleRepository::renameTag(int64_t tagId, const juce::String& name)
+{
+    const auto trimmed = name.trim();
+    if (trimmed.isEmpty()) return false;
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "UPDATE OR IGNORE tags SET name=? WHERE id=?");
+    s.text(1, trimmed); s.integer(2, tagId); s.step();
+    return sqlite3_changes(db.handle) > 0;
+}
+void SampleRepository::deleteTag(int64_t tagId)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "DELETE FROM tags WHERE id=?");
+    s.integer(1, tagId); s.step();
+}
+void SampleRepository::setSampleTag(int64_t sampleId, int64_t tagId, bool assigned)
+{
+    std::lock_guard lock(db.mutex);
+    if (assigned)
+    {
+        detail::Statement s(db.handle, "INSERT OR IGNORE INTO sample_tags(sample_id,tag_id) VALUES(?,?)");
+        s.integer(1, sampleId); s.integer(2, tagId); s.step();
+    }
+    else
+    {
+        detail::Statement s(db.handle, "DELETE FROM sample_tags WHERE sample_id=? AND tag_id=?");
+        s.integer(1, sampleId); s.integer(2, tagId); s.step();
+    }
+}
+} // namespace sonicator

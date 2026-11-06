@@ -6,7 +6,7 @@
 
 ## Threads and lifecycle
 
-- Message thread: controls, device setup, file selection/reader replacement, paged catalog queries, rendering.
+- Message thread: controls, device setup, file selection/reader replacement, debounced whole-catalog queries, rendering. Search, sorting and tag filtering stay on this thread because the measured 300k-row query is below a perceptible hitch; no UI-queue callbacks are posted per keypress.
 - Indexing thread: directory enumeration, chunked analysis, full-file hashing, database writes, reconciliation of missing paths.
 - Dedicated preview read-ahead thread: JUCE buffering source, independent of the analyzer.
 - Dedicated thumbnail cache thread: waveform extraction, independent of preview.
@@ -18,7 +18,7 @@ Shutdown stops the UI timer, cancels/joins indexing without force-killing a thre
 
 ## Storage
 
-Schema `user_version=2`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, feature-set version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten. Version 2 adds `samples_name_id`, an index on `(name COLLATE NOCASE, id)` that matches the UI sort, so paged reads no longer build a temporary B-tree. Upgrading from version 1 first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages.
+Schema `user_version=3`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, feature-set version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten. Version 2 adds `samples_name_id`, an index on `(name COLLATE NOCASE, id)` that matches the UI sort, so paged reads no longer build a temporary B-tree. Version 3 adds `samples.search_key` (Unicode-folded name + path for whole-catalog text search), `tags` and `sample_tags`. Standard tags are seeded only when the tag table is created, so a rename is not undone; sample IDs are stable across upserts, so assignments survive rescan and reanalysis. Upgrading first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages.
 
 Upsert by path preserves sample ID. Two files with the same content keep independent paths. Skip only when size/time and the feature-set version match. Files changed during analysis are marked for retry, not recorded as successful. Startup reads the database; it does not initiate reanalysis.
 

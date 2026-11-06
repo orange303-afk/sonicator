@@ -39,9 +39,10 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 2. Indexing runs in the background; **Pause / Resume / Cancel** control it. Completed file results remain saved on cancellation.
 3. Select a row to immediately preview its original file. Use **Play / Pause / Stop / Loop**, volume and click/drag in the waveform to seek.
 4. Keyboard: **Space** play/pause, **Left / Right** seek one second, **Escape** stop (when not consumed by an editing control).
-5. Header clicks sort the current page; search filters filenames on the current page. Pages contain at most 10,000 records; use **< / >** to navigate larger catalogs.
-6. **Rescan library** skips unchanged successfully analyzed files. **Reanalyze all** explicitly recomputes them. Missing files remain marked in the catalog; corrupt files show an error rather than invented features.
-7. **Audio settings** selects the output device. No microphone input is opened.
+5. Search covers the entire catalog by filename and path. Typing is debounced by 250 ms; Enter applies immediately and Escape clears it. Header clicks sort the whole result, not the current page. Pages contain at most 10,000 records; use **< / >** to navigate.
+6. **Tags** filters the catalog by standard or custom tags: include, exclude, and match all/any. Select a sample and **Edit tags...** to assign tags; create, rename, recolour and delete tags from the tag menu.
+7. **Rescan library** skips unchanged successfully analyzed files. **Reanalyze all** explicitly recomputes them. Missing files remain marked in the catalog; corrupt files show an error rather than invented features.
+8. **Audio settings** selects the output device. No microphone input is opened.
 
 ## Data
 
@@ -63,7 +64,7 @@ core/dsp/                    chunked audio decoding and measured descriptors
 core/audio/                  preview transport, sample-rate conversion, read-ahead
 core/indexing/               background import, pause/cancel, incremental updates
 ui/shell/                    shared dark theme
-ui/library/                  sortable paged library
+ui/library/                  global search, tags and paged library
 ui/waveform/                 asynchronous thumbnail and bounded disk cache
 ui/preview/                  transport and keyboard controls
 ui/MainComponent.*           orchestration, inspector, device settings
@@ -104,7 +105,7 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - FFT size 2048, Hann window, non-overlapping frames. These are engineering descriptors, not calibrated semantic labels or a perceptual similarity model.
 - Analysis supports up to 64 channels; preview uses the first two channels, not a surround downmix. Compressed bit depth can be unavailable.
 - No filesystem watcher; folder changes are discovered by manual rescan. Symbolic directory links are deliberately not followed. AppleDouble metadata forks are excluded by their magic bytes, not merely a filename prefix. Path aliases/case aliases are not merged.
-- Waveform cache holds at most 64 thumbnails. UI sorting/filtering is page-local. No 500,000-file or GPU/60 FPS claim is made.
+- Waveform cache holds at most 64 thumbnails. Search, sorting and tag filters run over the whole catalog; a page still contains at most 10,000 rows. Text search folds ASCII, Latin, Greek and Cyrillic case; scripts without case (CJK) match literally. No 500,000-file or GPU/60 FPS claim is made.
 - Files with decode errors are retried on rescan. Missing roots abort that scan with a visible message; records are not deleted.
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.

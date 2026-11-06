@@ -15,8 +15,8 @@ TEST_CASE("Three hundred thousand rows finalize quickly with correct missing fla
         sqlite3* raw = nullptr; REQUIRE(sqlite3_open(dbPath.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
         REQUIRE(sqlite3_exec(raw, "BEGIN", nullptr, nullptr, nullptr) == SQLITE_OK);
         sqlite3_stmt* s = nullptr;
-        REQUIRE(sqlite3_prepare_v2(raw, "INSERT INTO samples(path,name,hash,format,error,size,modified,version,missing)"
-            " VALUES(?,?,'h','WAV','',0,0,1,0)", -1, &s, nullptr) == SQLITE_OK);
+        REQUIRE(sqlite3_prepare_v2(raw, "INSERT INTO samples(path,name,hash,format,error,size,modified,version,missing,search_key)"
+            " VALUES(?,?,'h','WAV','',0,0,1,0,?)", -1, &s, nullptr) == SQLITE_OK);
         int failedInserts = 0;
         for (int i = 0; i < 300000; ++i)
         {
@@ -24,6 +24,8 @@ TEST_CASE("Three hundred thousand rows finalize quickly with correct missing fla
             const auto path = audio.getChildFile(name).getFullPathName();
             sqlite3_bind_text(s, 1, path.toRawUTF8(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(s, 2, name.toRawUTF8(), -1, SQLITE_TRANSIENT);
+            const auto key = SampleRepository::searchKey(name, path);
+            sqlite3_bind_text(s, 3, key.toRawUTF8(), -1, SQLITE_TRANSIENT);
             if (sqlite3_step(s) != SQLITE_DONE) ++failedInserts;
             sqlite3_reset(s);
         }
@@ -72,6 +74,34 @@ TEST_CASE("Three hundred thousand rows finalize quickly with correct missing fla
     REQUIRE(repo.findByPath(audio.getChildFile("ghost_150000.wav").getFullPathName())->missing);
     REQUIRE(rescanSeconds < 60.0);
     std::cout << "300k unchanged rescan: " << rescanSeconds << " s\n";
+    {
+        LibraryFilter f; f.text = "ghost";
+        const auto searchStart = juce::Time::getMillisecondCounterHiRes();
+        auto matches = repo.query(f, 10000, 0);
+        const auto searchMs = juce::Time::getMillisecondCounterHiRes() - searchStart;
+        REQUIRE(matches.total == 300000);
+        REQUIRE(matches.samples.size() == 10000);
+        f.text = "ghost_150000";
+        REQUIRE(repo.query(f, 10000, 0).total == 1);
+        std::cout << "300k whole-catalog search: " << searchMs << " ms\n";
+        REQUIRE(searchMs < 500.0);
+        f.text.clear(); f.folder = audio.getFullPathName();
+        REQUIRE(repo.query(f, 10000, 0).total == 300001);
+    }
+    {
+        // Simulate the first launch of this build against an existing 300k catalog.
+        sqlite3* raw = nullptr; REQUIRE(sqlite3_open(dbPath.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        REQUIRE(sqlite3_exec(raw, "PRAGMA user_version=2", nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(raw);
+        const auto migrateStart = juce::Time::getMillisecondCounterHiRes();
+        repo.createTables();
+        const auto migrateSeconds = (juce::Time::getMillisecondCounterHiRes() - migrateStart) / 1000.0;
+        std::cout << "300k v2->v3 search backfill: " << migrateSeconds << " s\n";
+        REQUIRE(migrateSeconds < 60.0);
+        LibraryFilter f; f.text = "ghost_150000";
+        REQUIRE(repo.query(f, 10000, 0).total == 1);
+        REQUIRE(repo.tags().size() == 15);
+    }
 }
 TEST_CASE("Index and reopen ten thousand real WAV files", "[.benchmark]")
 {

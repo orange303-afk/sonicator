@@ -100,7 +100,7 @@ TEST_CASE("Schema v1 migrates in place, keeps rows, and backs up once", "[databa
     REQUIRE(backups.size() == 1);
     REQUIRE(rawScalar(backups[0], "SELECT COUNT(*) FROM samples") == 3);
     REQUIRE(rawScalar(backups[0], "PRAGMA user_version") == 1);
-    REQUIRE(rawScalar(file, "PRAGMA user_version") == 2);
+    REQUIRE(rawScalar(file, "PRAGMA user_version") == 3);
     REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='samples_name_id'") == 1);
     { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.count() == 3); }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
@@ -129,4 +129,143 @@ TEST_CASE("Path stream walks by primary key and marks missing in batches", "[dat
 TEST_CASE("Database open failure is reported", "[database]")
 {
     REQUIRE_THROWS(Database(juce::File::getSpecialLocation(juce::File::tempDirectory)));
+}
+namespace {
+SampleRecord sample(const juce::String& path, const juce::String& name, double duration = 1.0)
+{
+    SampleRecord r; r.filePath = path; r.fileName = name; r.fileHash = "h"; r.format = "WAV";
+    r.duration = duration; r.version = basicFeaturesVersion; return r;
+}
+}
+TEST_CASE("Whole-catalog search is case-insensitive, token-based and escapes wildcards", "[database][search]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("search.sqlite")); SampleRepository repo(db); repo.createTables();
+    const auto kick1 = repo.upsert(sample("/lib/Drums/Kick_01.wav", "Kick_01.wav", 2.0));
+    repo.upsert(sample("/lib/Drums/Kick_02.wav", "Kick_02.wav", 1.0));
+    repo.upsert(sample("/lib/Bass/Sub_Bass.wav", "Sub_Bass.wav"));
+    repo.upsert(sample(juce::String::fromUTF8("/Тест/Файлы/Бас_Тест.wav"), juce::String::fromUTF8("Бас_Тест.wav")));
+    repo.upsert(sample("/lib/FX/100%_noise.wav", "100%_noise.wav"));
+    repo.upsert(sample("/lib/FX/under_score.wav", "under_score.wav"));
+    repo.upsert(sample(juce::String::fromUTF8("/Greek/ΔΟΚΙΜΗ.wav"), juce::String::fromUTF8("ΔΟΚΙΜΗ.wav")));
+
+    LibraryFilter f;
+    f.text = "kick";
+    auto page = repo.query(f);
+    REQUIRE(page.total == 2);
+    REQUIRE(page.samples.size() == 2);
+    REQUIRE(page.samples.front().fileName.compareIgnoreCase("Kick_01.wav") == 0);
+    f.text = "KICK 02"; REQUIRE(repo.query(f).total == 1);
+    f.text = "kick bass"; REQUIRE(repo.query(f).total == 0);
+    f.text = juce::String::fromUTF8("тест"); REQUIRE(repo.query(f).total == 1);
+    f.text = juce::String::fromUTF8("δοκιμη"); REQUIRE(repo.query(f).total == 1);
+    f.text = "%"; REQUIRE(repo.query(f).total == 1);
+    f.text = "_01"; REQUIRE(repo.query(f).total == 1);
+    f.text = "score"; REQUIRE(repo.query(f).total == 1);
+
+    f.text = "kick"; f.folder = "/lib/Drums"; REQUIRE(repo.query(f).total == 2);
+    f.folder = "/lib/Bass"; REQUIRE(repo.query(f).total == 0);
+    f.folder.clear();
+    f.text.clear(); f.sort = LibrarySort::Duration; f.ascending = false;
+    auto sorted = repo.query(f);
+    REQUIRE(sorted.total == 7);
+    REQUIRE(sorted.samples.front().id == kick1);
+    auto secondPage = repo.query(f, 1, 1);
+    REQUIRE(secondPage.total == 7);
+    REQUIRE(secondPage.samples.size() == 1);
+    REQUIRE(secondPage.samples.front().duration == 1.0);
+}
+TEST_CASE("Tags seed once, combine as all/any/exclude and survive reanalysis and reopen", "[database][tags]")
+{
+    TestDirectory t; const auto file = t.dir.getChildFile("tags.sqlite");
+    int64_t kickId = 0, loopId = 0, customId = 0, sampleA = 0, sampleC = 0;
+    {
+        Database db(file); SampleRepository repo(db); repo.createTables();
+        auto seeded = repo.tags();
+        REQUIRE(seeded.size() == 15);
+        REQUIRE(seeded.front().builtin);
+        for (const auto& tag : seeded)
+            if (tag.name == "Kick") kickId = tag.id;
+            else if (tag.name == "Loop") loopId = tag.id;
+        REQUIRE(kickId > 0); REQUIRE(loopId > 0);
+        customId = repo.createTag("My Tag", 0xff123456);
+        REQUIRE(customId > 0);
+        REQUIRE(repo.createTag("my tag", 0xff654321) == customId);
+        REQUIRE(repo.tags().size() == 16);
+
+        sampleA = repo.upsert(sample("/a.wav", "a.wav"));
+        const auto sampleB = repo.upsert(sample("/b.wav", "b.wav"));
+        sampleC = repo.upsert(sample("/c.wav", "c.wav"));
+        repo.setSampleTag(sampleA, kickId, true);
+        repo.setSampleTag(sampleA, loopId, true);
+        repo.setSampleTag(sampleB, kickId, true);
+        repo.setSampleTag(sampleC, customId, true);
+        REQUIRE(repo.tagsForSample(sampleA).size() == 2);
+
+        LibraryFilter f;
+        f.includeTags = { kickId, loopId };
+        REQUIRE(repo.query(f).total == 1);
+        f.matchAnyTag = true;
+        REQUIRE(repo.query(f).total == 2);
+        f.includeTags.clear(); f.matchAnyTag = false;
+        f.excludeTags = { kickId };
+        REQUIRE(repo.query(f).total == 1);
+        f.excludeTags.clear(); f.includeTags = { customId };
+        REQUIRE(repo.query(f).total == 1);
+        f.text = "c"; REQUIRE(repo.query(f).total == 1);
+        f.text = "zz"; REQUIRE(repo.query(f).total == 0);
+
+        repo.setTagColour(customId, 0xff00ff00);
+        for (const auto& tag : repo.tags()) if (tag.id == customId) REQUIRE(tag.colour == 0xff00ff00);
+        REQUIRE(repo.tagsForSamples({ sampleA, sampleC }).size() == 2);
+
+        auto updated = sample("/a.wav", "a.wav"); updated.duration = 9.0;
+        REQUIRE(repo.upsert(updated) == sampleA);
+        REQUIRE(repo.tagsForSample(sampleA).size() == 2);
+        REQUIRE(repo.renameTag(customId, "Renamed"));
+    }
+    {
+        Database db(file); SampleRepository repo(db); repo.createTables();
+        REQUIRE(repo.tags().size() == 16);
+        bool renamed = false;
+        for (const auto& tag : repo.tags()) if (tag.name == "Renamed") renamed = true;
+        REQUIRE(renamed);
+        REQUIRE(repo.tagsForSample(sampleA).size() == 2);
+        repo.deleteTag(repo.createTag("Temporary", 0xff010203));
+        REQUIRE(repo.tags().size() == 16);
+        repo.deleteTag(customId);
+        REQUIRE(repo.tags().size() == 15);
+        REQUIRE(repo.tagsForSample(sampleC).empty());
+    }
+}
+TEST_CASE("Schema v2 migrates to tags and a backfilled Unicode search key", "[database][migration][tags]")
+{
+    TestDirectory t; const auto file = t.dir.getChildFile("v2.sqlite");
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        execRaw(raw, "CREATE TABLE samples (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
+                     "name TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, error TEXT NOT NULL,"
+                     "size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
+                     "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL,"
+                     "flatness REAL, missing INTEGER);");
+        const juce::String insertRows = juce::String("INSERT INTO samples(path,name,hash,format,error,version) VALUES('/")
+            + juce::String::fromUTF8("Тест/Бас.wav") + "','" + juce::String::fromUTF8("Бас.wav") + "','h1','WAV','',1),"
+            + "('/lib/kick.wav','Kick.wav','h2','WAV','',1);";
+        execRaw(raw, insertRows.toRawUTF8());
+        execRaw(raw, "CREATE INDEX samples_name_id ON samples(name COLLATE NOCASE, id);");
+        execRaw(raw, "PRAGMA user_version=2;");
+        sqlite3_close(raw);
+    }
+    {
+        Database db(file); SampleRepository repo(db); repo.createTables();
+        REQUIRE(repo.count() == 2);
+        LibraryFilter f; f.text = juce::String::fromUTF8("тест");
+        REQUIRE(repo.query(f).total == 1);
+        f.text = "kick"; REQUIRE(repo.query(f).total == 1);
+        REQUIRE(repo.tags().size() == 15);
+        REQUIRE(rawScalar(file, "PRAGMA user_version") == 3);
+        REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM samples WHERE version=1") == 2);
+    }
+    REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "v2.sqlite.backup-*").size() == 1);
+    { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.tags().size() == 15); }
 }

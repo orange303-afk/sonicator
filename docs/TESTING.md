@@ -74,6 +74,21 @@ Windows / Intel macOS execution, ASan, concurrent UI-writer stress, hardware lat
 - Debug/Release `codesign --verify --verbose`: valid on disk and designated requirement satisfied (ad-hoc).
 - `git diff --check`: clean.
 
+## Search and tags stage (2026-11-06)
+
+Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.
+
+- Default suite: **52 cases / 480 assertions passed** in Debug and Release; Debug and Release CTest 1/1; Release ad-hoc bundle signature verified.
+- New coverage: whole-catalog substring search (ASCII/Unicode case, multiple AND tokens), `%`/`_` escaping, folder+tag+text combinations, all/any/exclude tags, whole-result sort and paging, tag CRUD, assignment survival across upsert/reopen, tag seeding without duplication, schema v2→v3 migration with preserved rows and a backfilled search key, header-sort callback without a page-reload loop, debounced typing through the real shell, and tag-strip snapshots at 880x580 and 1440x900.
+- `[.scale]` 300,000 rows: worst-case search (**all rows match**, 10,000-row page) **105.85 ms**; simulated v2→v3 upgrade including online backup and backfill **6.86 s** Debug. Existing reconciliation **4.66 s**, unchanged rescan **0.72 s**.
+- The owner's real database was not opened for writing in this stage. First launch of this build will back it up and backfill `search_key` once.
+
+### Known limits after this stage
+
+- Search folding covers ASCII, Latin, Greek and Cyrillic; other case-bearing scripts are compared as written. Case-less scripts (CJK) need no folding.
+- Tag filters are not saved between launches; tag data itself is persisted.
+- A 300k-row first index upgrade needs roughly the database size in free space for the migration backup.
+
 ## Library stability stage (2026-11-06)
 
 Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.
@@ -86,7 +101,6 @@ Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE
 
 ### Known limits after this stage
 
-- Search and column sorting still apply to the loaded 10,000-row page, not the whole catalog.
 - The first launch of the new build writes a ~150 MB backup beside the database before migrating. To restore it: quit the app, delete the database's `-wal` and `-shm` files, then copy the backup over the database file.
 - A file created between discovery and reconciliation is reported missing until the next scan, then restored automatically.
 - A record that disappears between discovery and reconciliation is confirmed with a single filesystem probe before it is marked missing.

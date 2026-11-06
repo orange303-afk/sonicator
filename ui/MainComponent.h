@@ -2,6 +2,7 @@
 #include "ui/shell/Theme.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/library/FolderTree.h"
+#include "ui/library/TagStrip.h"
 #include "ui/preview/PreviewPanel.h"
 #include "core/indexing/IndexingService.h"
 namespace sonicator {
@@ -16,6 +17,9 @@ public:
     bool keyPressed(const juce::KeyPress& k) override { return preview.keyPressed(k); }
     void beginImport(const juce::File&);
     bool refreshIfCatalogChanged();
+    // Applies a whole-catalog search immediately (typing uses a 250 ms debounce instead).
+    void searchLibrary(const juce::String&);
+    void setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny = false);
 private:
     SonicatorLookAndFeel look;
     juce::Image logoWordmark;
@@ -25,12 +29,17 @@ private:
     FileListPanel library;
     FolderTree folders;
     juce::String selectedFolder;
+    LibraryFilter filter;
+    std::vector<Tag> allTags;
     int totalCatalogCount = 0;
+    int64_t selectedSampleId = 0;
     juce::TextEditor search;
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan library" }, reanalyze { "Reanalyze all" };
     juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Audio settings" };
+    juce::TextButton tagFilter { "Tags" }, clearFilters { "Clear filters" }, editTags { "Edit tags..." };
     juce::TextButton previousPage { "<" }, nextPage { ">" };
-    juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails;
+    juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel;
+    TagStrip selectedTags;
     juce::Viewport analysisViewport;
     juce::Label stageLabel;
     std::unique_ptr<Database> readDb, writeDb;
@@ -40,13 +49,22 @@ private:
     juce::Component::SafePointer<juce::DialogWindow> audioDialog;
     int pageOffset = 0, catalogCount = 0;
     bool wasRunning = false;
-    uint32_t lastRefreshMs = 0;
+    uint32_t lastRefreshMs = 0, lastSearchChange = 0;
+    juce::String pendingSearch;
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
     void timerCallback() override;
     void chooseFolder();
     void scanRoots(bool force);
     void reloadLibrary();
+    void updateTagControls();
     void selectSample(const SampleRecord&);
+    void updateSelectedTags();
     void showAudioSettings();
+    void showTagFilterMenu();
+    void showTagColourMenu(int64_t tagId);
+    void showEditTagsMenu();
+    void promptTagName(const juce::String& title, const juce::String& initial, std::function<void(juce::String)> onAccept);
+    static bool contains(const std::vector<int64_t>& values, int64_t id);
+    static void toggle(std::vector<int64_t>& values, int64_t id);
 };
-}
+} // namespace sonicator

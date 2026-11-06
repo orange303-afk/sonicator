@@ -2,6 +2,7 @@
 #include "ui/library/FileListPanel.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/library/FolderTree.h"
+#include "ui/library/TagStrip.h"
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
 using namespace sonicator;
@@ -119,4 +120,33 @@ TEST_CASE("Preview loads real audio and keyboard toggles playback", "[ui]")
     preview.setBounds(0,0,900,156);
     auto image = preview.createComponentSnapshot(preview.getLocalBounds());
     REQUIRE(image.isValid());
+}
+TEST_CASE("Header sorting requests a whole-catalog order without looping on page reload", "[ui][search]")
+{
+    FileListPanel list;
+    SampleRecord a, b; a.id = 1; a.fileName = "Kick.wav"; a.duration = 2;
+    b.id = 2; b.fileName = "Bass.wav"; b.duration = 1;
+    int calls = 0, lastColumn = 0; bool lastAscending = true;
+    list.onSortChanged = [&](int column, bool ascending) { ++calls; lastColumn = column; lastAscending = ascending; };
+    list.setSamples({a,b});
+    REQUIRE(calls == 0);
+    list.sortOrderChanged(3,false);
+    REQUIRE(calls == 1); REQUIRE(lastColumn == 3); REQUIRE_FALSE(lastAscending);
+    list.setSamples({b,a});
+    REQUIRE(calls == 1);
+}
+TEST_CASE("Tag strip lays out coloured chips and reports its height", "[ui][tags]")
+{
+    TagStrip strip;
+    REQUIRE(strip.getPreferredHeight(200) == 24);
+    Tag kick; kick.id = 1; kick.name = "Kick"; kick.colour = 0xffe05a5a;
+    Tag loop; loop.id = 2; loop.name = "Loop"; loop.colour = 0xff9ad06a;
+    strip.setTags({kick,loop});
+    REQUIRE(strip.getTags().size() == 2);
+    const int height = strip.getPreferredHeight(200);
+    REQUIRE(height >= 22);
+    strip.setSize(200,height);
+    REQUIRE(strip.createComponentSnapshot(strip.getLocalBounds()).isValid());
+    strip.setTags({});
+    REQUIRE(strip.getPreferredHeight(200) == 24);
 }

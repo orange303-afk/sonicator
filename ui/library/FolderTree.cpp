@@ -20,6 +20,8 @@ public:
         if (! open || getNumSubItems() != 0) return;
         if (all) { for (const auto& p : owner.roots) addSubItem(new Item(owner,p)); }
         else { for (const auto& p : owner.children[path]) addSubItem(new Item(owner,p)); }
+        // JUCE notifies before this callback runs, so the newly added rows need another update.
+        treeHasChanged();
     }
 private:
     FolderTree& owner;
@@ -33,6 +35,7 @@ FolderTree::FolderTree()
     tree.setIndentSize(14); tree.setWantsKeyboardFocus(true);
 }
 FolderTree::~FolderTree() { tree.setRootItem(nullptr); }
+void FolderTree::resized() { tree.setBounds(getLocalBounds()); }
 void FolderTree::refresh(SampleRepository& repo)
 {
     const juce::ScopedValueSetter<bool> restoreGuard(restoring,true);

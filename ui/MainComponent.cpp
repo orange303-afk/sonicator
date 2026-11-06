@@ -1,6 +1,18 @@
 #include "MainComponent.h"
 #include "BinaryData.h"
+#include <algorithm>
+#include <iterator>
 namespace sonicator {
+namespace {
+struct PaletteColour { const char* name; uint32_t colour; };
+constexpr PaletteColour tagPalette[] = {
+    { "Red", 0xffe05a5a }, { "Orange", 0xffe08a45 }, { "Yellow", 0xffe0b84a },
+    { "Lime", 0xff9ad06a }, { "Green", 0xff6ad0a0 }, { "Teal", 0xff4fb8c8 },
+    { "Blue", 0xff4f8fd0 }, { "Violet", 0xff7a6aea }, { "Purple", 0xffa96ae0 },
+    { "Pink", 0xffd06ab8 }, { "Rose", 0xffd06a7a }, { "Grey", 0xff8a8f9c }
+};
+constexpr int pageSize = 10000;
+}
 juce::File MainComponent::defaultDatabaseFile()
 {
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
@@ -11,9 +23,10 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
 {
     setLookAndFeel(&look); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,20>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,
-         &pause,&cancel,&settings,&previousPage,&nextPage,&heading,&subtitle,&libraryHeading,&rootsLabel,
-         &status,&countLabel,&analysisHeading,&analysisViewport,&stageLabel})
+    for (auto* c : std::array<juce::Component*,26>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,
+         &pause,&cancel,&settings,&tagFilter,&clearFilters,&editTags,&previousPage,&nextPage,&heading,&subtitle,
+         &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
+         &selectedTags,&analysisViewport,&stageLabel})
         if (c != nullptr) addAndMakeVisible(c);
     heading.setText("SONICATOR",juce::dontSendNotification);
     heading.setFont(juce::FontOptions(24,juce::Font::bold));
@@ -37,10 +50,40 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     stageLabel.setJustificationType(juce::Justification::topLeft);
     status.setFont(juce::FontOptions(12)); status.setColour(juce::Label::textColourId,theme::muted);
     countLabel.setFont(juce::FontOptions(12));
-    search.setTextToShowWhenEmpty("Search filenames in this page...",theme::muted);
-    search.onTextChange = [this] { library.setSearchText(search.getText()); };
+    tagsLabel.setText("TAGS",juce::dontSendNotification);
+    tagsLabel.setFont(juce::FontOptions(11)); tagsLabel.setColour(juce::Label::textColourId,theme::muted);
+    search.setTextToShowWhenEmpty("Search entire library...",theme::muted);
+    search.onTextChange = [this]
+    {
+        pendingSearch = search.getText();
+        lastSearchChange = juce::Time::getMillisecondCounter();
+    };
+    search.onReturnKey = [this]
+    {
+        pendingSearch = search.getText();
+        filter.text = pendingSearch.trim(); pageOffset = 0; reloadLibrary();
+    };
+    search.onEscapeKey = [this]
+    {
+        search.clear(); pendingSearch.clear(); filter.text.clear(); pageOffset = 0; reloadLibrary();
+    };
+    search.setComponentID("search");
+    selectedTags.setComponentID("selectedTags");
     library.setComponentID("library"); status.setComponentID("importStatus"); analysisDetails.setComponentID("analysisDetails");
     library.onSelected = [this](const SampleRecord& r) { selectSample(r); };
+    library.onSortChanged = [this](int column, bool ascending)
+    {
+        switch (column)
+        {
+            case 2: filter.sort = LibrarySort::Format; break;
+            case 3: filter.sort = LibrarySort::Duration; break;
+            case 4: filter.sort = LibrarySort::Rate; break;
+            case 5: filter.sort = LibrarySort::Channels; break;
+            case 6: filter.sort = LibrarySort::Status; break;
+            default: filter.sort = LibrarySort::Name; break;
+        }
+        filter.ascending = ascending; pageOffset = 0; reloadLibrary();
+    };
     addAndMakeVisible(folders); rootsLabel.setVisible(false);
     folders.onFolder = [this](juce::String path) { selectedFolder = std::move(path); pageOffset = 0; reloadLibrary(); };
     addFolder.onClick = [this] { chooseFolder(); };
@@ -48,16 +91,30 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     pause.onClick = [this] { if (indexer) indexer->setPaused(! indexer->progress().paused); };
     cancel.onClick = [this] { if (indexer) indexer->cancel(); };
     settings.onClick = [this] { showAudioSettings(); };
-    previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-10000); reloadLibrary(); };
-    nextPage.onClick = [this] { pageOffset += 10000; reloadLibrary(); };
+    tagFilter.onClick = [this] { showTagFilterMenu(); };
+    clearFilters.onClick = [this]
+    {
+        search.clear(); pendingSearch.clear();
+        filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear(); filter.matchAnyTag = false;
+        pageOffset = 0; reloadLibrary();
+    };
+    editTags.onClick = [this] { showEditTagsMenu(); };
+    previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
+    nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
     preview.onAction = [this] { library.focusForNavigation(); };
-    for (auto* button : std::array<juce::Button*,8>{&addFolder,&rescan,&reanalyze,&pause,&cancel,&settings,&previousPage,&nextPage})
+    for (auto* button : std::array<juce::Button*,11>{&addFolder,&rescan,&reanalyze,&pause,&cancel,&settings,
+          &tagFilter,&clearFilters,&editTags,&previousPage,&nextPage})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         if (button == &addFolder || button == &settings) continue; // Modal dialogs must retain their own focus.
         auto action = button->onClick;
         button->onClick = [this,action] { if (action) action(); library.focusForNavigation(); };
     }
+    editTags.setEnabled(false);
+    clearFilters.setEnabled(false);
+    // Lay out before the first tree build: JUCE sizes a TreeView's scrollable content when items
+    // are created, so a tree populated while it is still 0x0 keeps truncating its rows.
+    setSize(1280,800);
     try
     {
         writeDb = std::make_unique<Database>(dbPath); writeRepo = std::make_unique<SampleRepository>(*writeDb);
@@ -74,11 +131,36 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     if (engine.error().isNotEmpty()) status.setText("Audio device: " + engine.error(),juce::dontSendNotification);
     pause.setEnabled(false); cancel.setEnabled(false);
     addFolder.setEnabled(indexer != nullptr); rescan.setEnabled(indexer != nullptr); reanalyze.setEnabled(indexer != nullptr);
-    setSize(1280,800); startTimerHz(10);
+    startTimerHz(10);
 }
 MainComponent::~MainComponent()
 {
     stopTimer(); chooser.reset(); audioDialog.deleteAndZero(); indexer.reset(); setLookAndFeel(nullptr);
+}
+bool MainComponent::contains(const std::vector<int64_t>& values, int64_t id)
+{
+    return std::find(values.begin(), values.end(), id) != values.end();
+}
+void MainComponent::toggle(std::vector<int64_t>& values, int64_t id)
+{
+    const auto found = std::find(values.begin(), values.end(), id);
+    if (found == values.end()) values.push_back(id); else values.erase(found);
+}
+void MainComponent::searchLibrary(const juce::String& text)
+{
+    pendingSearch = text;
+    filter.text = text.trim();
+    lastSearchChange = juce::Time::getMillisecondCounter();
+    pageOffset = 0;
+    reloadLibrary();
+}
+void MainComponent::setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny)
+{
+    filter.includeTags = std::move(include);
+    filter.excludeTags = std::move(exclude);
+    filter.matchAnyTag = matchAny;
+    pageOffset = 0;
+    reloadLibrary();
 }
 void MainComponent::chooseFolder()
 {
@@ -125,20 +207,55 @@ void MainComponent::reloadLibrary()
     try
     {
         totalCatalogCount = readRepo->count();
-        catalogCount = readRepo->countInFolder(selectedFolder);
-        if (pageOffset >= catalogCount) pageOffset = 0;
-        auto samples = readRepo->pageInFolder(selectedFolder,10000,pageOffset);
-        int shown = (int) samples.size(); library.setSamples(std::move(samples));
-        countLabel.setText(juce::String(catalogCount) + " samples  |  " + juce::String(shown)
-            + " on page " + juce::String(pageOffset/10000+1),juce::dontSendNotification);
+        filter.folder = selectedFolder;
+        auto page = readRepo->query(filter, pageSize, pageOffset);
+        if (pageOffset > 0 && pageOffset >= page.total)
+        {
+            pageOffset = page.total > 0 ? ((page.total - 1) / pageSize) * pageSize : 0;
+            page = readRepo->query(filter, pageSize, pageOffset);
+        }
+        catalogCount = page.total;
+        std::vector<int64_t> ids;
+        ids.reserve(page.samples.size());
+        for (const auto& sample : page.samples) ids.push_back(sample.id);
+        const int shown = (int) page.samples.size();
+        library.setSamples(std::move(page.samples));
+        library.setRowTags(readRepo->tagsForSamples(ids));
+        allTags = readRepo->tags();
+        updateTagControls();
+        juce::String text = juce::String(catalogCount) + (filter.hasTextOrTagFilter() ? " matching" : " samples")
+            + "  |  " + juce::String(shown) + " on page " + juce::String(pageOffset/pageSize+1);
+        if (filter.matchAnyTag && ! filter.includeTags.empty()) text += "  |  any tag";
+        countLabel.setText(text,juce::dontSendNotification);
         rootsLabel.setText(readRepo->roots().isEmpty() ? "No sample folders yet.\n\nOriginal files stay untouched."
             : "FOLDERS\n\n" + readRepo->roots().joinIntoString("\n\n"),juce::dontSendNotification);
-        previousPage.setEnabled(pageOffset > 0); nextPage.setEnabled(pageOffset+10000 < catalogCount);
+        previousPage.setEnabled(pageOffset > 0); nextPage.setEnabled(pageOffset+pageSize < catalogCount);
+        updateSelectedTags();
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
 }
+void MainComponent::updateTagControls()
+{
+    const auto active = (int) (filter.includeTags.size() + filter.excludeTags.size());
+    tagFilter.setButtonText(active > 0 ? "Tags (" + juce::String(active) + ")" : "Tags");
+    tagFilter.setToggleState(active > 0 || filter.matchAnyTag, juce::dontSendNotification);
+    clearFilters.setEnabled(filter.hasTextOrTagFilter());
+}
+void MainComponent::updateSelectedTags()
+{
+    if (selectedSampleId <= 0 || ! readRepo)
+    {
+        selectedTags.setTags({});
+        editTags.setEnabled(false);
+        return;
+    }
+    selectedTags.setTags(readRepo->tagsForSample(selectedSampleId));
+    editTags.setEnabled(true);
+    resized();
+}
 void MainComponent::selectSample(const SampleRecord& r)
 {
+    selectedSampleId = r.id;
     auto dbfs = [](double v) { return v > 0 ? juce::String(juce::Decibels::gainToDecibels(v),1) + " dBFS" : "-inf dBFS"; };
     juce::String details = r.fileName + "\n\n" + r.format + "  /  " + juce::String(r.numChannels) + " channels\n\n"
         + "Length      " + juce::String(r.duration,3) + " s\n\n"
@@ -152,7 +269,184 @@ void MainComponent::selectSample(const SampleRecord& r)
     if (r.error.isNotEmpty()) details += "\n\n" + r.error;
     analysisDetails.setText(details,juce::dontSendNotification);
     analysisDetails.setTooltip(r.filePath);
+    updateSelectedTags();
     if (! preview.loadFile(juce::File(r.filePath))) status.setText(engine.error(),juce::dontSendNotification);
+}
+void MainComponent::showTagFilterMenu()
+{
+    if (! readRepo) return;
+    try { allTags = readRepo->tags(); }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
+    juce::PopupMenu menu, excludes, manage;
+    if (allTags.empty()) menu.addSectionHeader("No tags yet");
+    for (int i = 0; i < (int) allTags.size(); ++i)
+    {
+        const auto& tag = allTags[(size_t) i];
+        menu.addItem(1000+i, tag.name + "  (" + juce::String(tag.sampleCount) + ")", true, contains(filter.includeTags, tag.id));
+        excludes.addItem(2000+i, tag.name, true, contains(filter.excludeTags, tag.id));
+        juce::PopupMenu actions;
+        actions.addItem(4000+i*10, "Change colour...");
+        actions.addItem(4000+i*10+1, "Rename...");
+        if (! tag.builtin) actions.addItem(4000+i*10+2, "Delete");
+        manage.addSubMenu(tag.name, actions);
+    }
+    menu.addSeparator();
+    menu.addSubMenu("Exclude tags", excludes);
+    menu.addItem(3000, "Match all selected", true, ! filter.matchAnyTag);
+    menu.addItem(3001, "Match any selected", true, filter.matchAnyTag);
+    menu.addSeparator();
+    menu.addItem(3010, "New tag...");
+    if (! allTags.empty()) menu.addSubMenu("Manage tags", manage);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&tagFilter),
+        [safe = juce::Component::SafePointer<MainComponent>(this)](int result)
+        {
+            if (safe == nullptr || result == 0) return;
+            auto& f = safe->filter;
+            if (result >= 1000 && result < 2000)
+            {
+                const size_t index = (size_t) (result - 1000);
+                if (index >= safe->allTags.size()) return;
+                const auto id = safe->allTags[index].id;
+                const auto excluded = std::find(f.excludeTags.begin(), f.excludeTags.end(), id);
+                if (excluded != f.excludeTags.end()) f.excludeTags.erase(excluded);
+                toggle(f.includeTags, id);
+            }
+            else if (result >= 2000 && result < 3000)
+            {
+                const size_t index = (size_t) (result - 2000);
+                if (index >= safe->allTags.size()) return;
+                const auto id = safe->allTags[index].id;
+                const auto included = std::find(f.includeTags.begin(), f.includeTags.end(), id);
+                if (included != f.includeTags.end()) f.includeTags.erase(included);
+                toggle(f.excludeTags, id);
+            }
+            else if (result == 3000) f.matchAnyTag = false;
+            else if (result == 3001) f.matchAnyTag = true;
+            else if (result == 3010)
+            {
+                safe->promptTagName("New tag", {}, [safe](juce::String name)
+                {
+                    if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr) return;
+                    try
+                    {
+                        const auto colour = tagPalette[safe->allTags.size() % std::size(tagPalette)].colour;
+                        safe->writeRepo->createTag(name, colour);
+                        safe->reloadLibrary();
+                    }
+                    catch (const std::exception& e) { safe->status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+                });
+                return;
+            }
+            else if (result >= 4000)
+            {
+                const size_t index = (size_t) (result - 4000) / 10;
+                const int action = (result - 4000) % 10;
+                if (index >= safe->allTags.size()) return;
+                const auto tag = safe->allTags[index];
+                if (action == 0) { safe->showTagColourMenu(tag.id); return; }
+                if (action == 2 && ! tag.builtin)
+                {
+                    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+                        .withIconType(juce::MessageBoxIconType::WarningIcon)
+                        .withTitle("Delete tag")
+                        .withMessage("Remove \"" + tag.name + "\" from every sample?")
+                        .withButton("Delete", 1).withButton("Cancel", 0),
+                        [safe, id = tag.id](int choice)
+                        {
+                            if (safe == nullptr || choice != 1) return;
+                            try { safe->writeRepo->deleteTag(id); safe->reloadLibrary(); }
+                            catch (const std::exception& e) { safe->status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+                        });
+                    return;
+                }
+                if (action == 1)
+                {
+                    safe->promptTagName("Rename tag", tag.name, [safe, id = tag.id](juce::String name)
+                    {
+                        if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr) return;
+                        if (! safe->writeRepo->renameTag(id, name))
+                            safe->status.setText("That tag name is already in use.",juce::dontSendNotification);
+                        safe->reloadLibrary();
+                    });
+                    return;
+                }
+            }
+            safe->pageOffset = 0;
+            safe->reloadLibrary();
+        });
+}
+void MainComponent::showTagColourMenu(int64_t tagId)
+{
+    juce::PopupMenu menu;
+    for (int i = 0; i < (int) std::size(tagPalette); ++i) menu.addItem(i+1, tagPalette[i].name);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&tagFilter),
+        [safe = juce::Component::SafePointer<MainComponent>(this), tagId](int result)
+        {
+            if (safe == nullptr || result <= 0 || result > (int) std::size(tagPalette) || safe->writeRepo == nullptr) return;
+            safe->writeRepo->setTagColour(tagId, tagPalette[result-1].colour);
+            safe->reloadLibrary();
+        });
+}
+void MainComponent::showEditTagsMenu()
+{
+    if (! readRepo || selectedSampleId <= 0)
+        return;
+    const auto sampleId = selectedSampleId;
+    auto assigned = readRepo->tagsForSample(sampleId);
+    juce::PopupMenu menu;
+    for (int i = 0; i < (int) allTags.size(); ++i)
+    {
+        bool isAssigned = false;
+        for (const auto& tag : assigned) if (tag.id == allTags[(size_t) i].id) isAssigned = true;
+        menu.addItem(6000+i, allTags[(size_t) i].name, true, isAssigned);
+    }
+    if (allTags.empty()) menu.addSectionHeader("No tags yet");
+    menu.addSeparator();
+    menu.addItem(6999, "New tag...");
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&editTags),
+        [safe = juce::Component::SafePointer<MainComponent>(this), sampleId](int result)
+        {
+            if (safe == nullptr || result == 0 || safe->writeRepo == nullptr) return;
+            if (result == 6999)
+            {
+                safe->promptTagName("New tag", {}, [safe, sampleId](juce::String name)
+                {
+                    if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr) return;
+                    try
+                    {
+                        const auto colour = tagPalette[safe->allTags.size() % std::size(tagPalette)].colour;
+                        const auto id = safe->writeRepo->createTag(name, colour);
+                        safe->writeRepo->setSampleTag(sampleId, id, true);
+                        safe->reloadLibrary();
+                    }
+                    catch (const std::exception& e) { safe->status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+                });
+                return;
+            }
+            const size_t index = (size_t) (result - 6000);
+            if (index >= safe->allTags.size()) return;
+            const auto tag = safe->allTags[index];
+            bool isAssigned = false;
+            for (const auto& current : safe->readRepo->tagsForSample(sampleId))
+                if (current.id == tag.id) isAssigned = true;
+            safe->writeRepo->setSampleTag(sampleId, tag.id, ! isAssigned);
+            safe->reloadLibrary();
+        });
+}
+void MainComponent::promptTagName(const juce::String& title, const juce::String& initial,
+                                  std::function<void(juce::String)> onAccept)
+{
+    auto* window = new juce::AlertWindow(title, "Tag name:", juce::MessageBoxIconType::NoIcon);
+    window->addTextEditor("name", initial);
+    window->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    window->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<juce::AlertWindow> safeWindow(window);
+    window->enterModalState(true, juce::ModalCallbackFunction::create(
+        [safeWindow, callback = std::move(onAccept)](int result) mutable
+        {
+            if (safeWindow == nullptr || result == 0 || callback == nullptr) return;
+            callback(safeWindow->getTextEditorContents("name"));
+        }), true);
 }
 void MainComponent::timerCallback()
 {
@@ -176,6 +470,13 @@ void MainComponent::timerCallback()
     }
     if (wasRunning && ! p.running) { reloadLibrary(); folders.refresh(*readRepo); }
     wasRunning = p.running;
+    const auto now = juce::Time::getMillisecondCounter();
+    if (pendingSearch.trim() != filter.text && now - lastSearchChange >= 250)
+    {
+        filter.text = pendingSearch.trim();
+        pageOffset = 0;
+        reloadLibrary();
+    }
 }
 void MainComponent::showAudioSettings()
 {
@@ -218,13 +519,21 @@ void MainComponent::resized()
     reanalyze.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(24);
     folders.setBounds(sidebar);
     auto analysis = analysisBounds.reduced(16,16);
-    analysisHeading.setBounds(analysis.removeFromTop(30)); analysis.removeFromTop(12);
+    analysisHeading.setBounds(analysis.removeFromTop(30)); analysis.removeFromTop(8);
+    editTags.setBounds(analysis.removeFromTop(30)); analysis.removeFromTop(10);
+    tagsLabel.setBounds(analysis.removeFromTop(16)); analysis.removeFromTop(4);
+    selectedTags.setBounds(analysis.removeFromTop(selectedTags.getPreferredHeight(analysis.getWidth(), 2)));
+    analysis.removeFromTop(8);
     stageLabel.setBounds(analysis.removeFromBottom(getHeight() < 700 ? 58 : 90));
     analysisViewport.setBounds(analysis);
     analysisDetails.setBounds(0,0,juce::jmax(1,analysis.getWidth()-14),550);
     auto list = r.reduced(14,14); auto bar = list.removeFromTop(32);
     nextPage.setBounds(bar.removeFromRight(30)); bar.removeFromRight(4);
     previousPage.setBounds(bar.removeFromRight(30)); countLabel.setBounds(bar);
-    list.removeFromTop(12); library.setBounds(list);
+    list.removeFromTop(4);
+    auto filterBar = list.removeFromTop(30);
+    tagFilter.setBounds(filterBar.removeFromLeft(90)); filterBar.removeFromLeft(8);
+    clearFilters.setBounds(filterBar.removeFromLeft(110));
+    list.removeFromTop(8); library.setBounds(list);
 }
-}
+} // namespace sonicator

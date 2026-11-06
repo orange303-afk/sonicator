@@ -11,7 +11,7 @@ public:
     FolderTree();
     ~FolderTree() override;
     void refresh(SampleRepository&);
-    void resized() override { tree.setBounds(getLocalBounds()); }
+    void resized() override;
     std::function<void(juce::String)> onFolder;
 private:
     class Item;
