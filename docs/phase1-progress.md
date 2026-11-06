@@ -113,3 +113,15 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 - Settings: theme, scale and language changes apply immediately and persist; a missing or invalid saved catalog falls back to the default catalog at startup (logged).
 - Verification: **62 cases / 593 assertions** in Debug and Release; CTest 1/1; Release ad-hoc signature verified. New coverage: JSON settings round-trip and invalid values; theme/scale callback; all four support URLs; dialog destruction; catalog switch, copy and rejection of foreign/missing files without altering them; light and dark snapshots; saved path persistence.
 - Not verified: physical scale changes on Windows/Intel macOS, real browser opening from the About links, or a live system dark-mode change during a session (the listener is wired but not automated).
+
+## Context menu, stars and window geometry (2026-11-06)
+
+- Scope: right-click menu (Copy / Tag / Star / Open in Finder), Cmd/Shift multi-selection, starred samples with a filter, and persisted window position/size. No DSP change.
+- Ruling: stars are a schema-v4 sample column, not a tag. Analysis upserts do not update `starred`, so a rescan or forced reanalysis cannot clear a user's favourite. Cost: one more user-data field on the samples table.
+- Ruling: the menu acts on the whole selection. Tag ticks mean "present on every selected sample"; a mixed selection has no tick and clicking adds the tag to all. Batch assignment and starring run in one transaction. Cost: no per-row mixed-state indicator inside the menu.
+- Ruling: multi-selection uses JUCE's native Cmd/Shift behaviour and is restored by stable sample ID after a refresh, within the current page. Cost: selection does not span pages.
+- Ruling: Copy writes real file URLs through `NSPasteboard` on macOS; other platforms copy newline-separated paths until a native file clipboard is implemented. Cost: Windows `Copy` is not yet a Finder/DAW file paste.
+- Ruling: `Open in Finder`/`Open in Explorer` reveals the clicked row's file through `File::revealToUser()`; a missing file falls back to its parent folder.
+- Ruling: window geometry lives in `settings.json` and is written debounced after move/resize and at shutdown. Settings writers use load-modify-save updates so theme/catalog changes never erase geometry (and vice versa). Saved bounds are validated against connected displays, clamped to 880x580 and the work area, and off-screen bounds are recentred. Cost: OS maximised state is not restored separately; the saved bounds are.
+- Verification: **67 cases / 637 assertions** in Debug and Release; CTest 1/1; Release ad-hoc signature verified. New coverage: v4 migration and star defaults, batched stars and filter, star survival through upsert, batch tags, multi-selection across a refresh, starred filter in the shell, window-bound resolver and independent settings updates.
+- Not verified: the macOS clipboard contents in an automated test (manual check), context-menu screenshots, Windows file copy, or live move/resize persistence across a real relaunch.

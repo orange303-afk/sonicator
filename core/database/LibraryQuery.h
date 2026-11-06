@@ -18,10 +18,10 @@ struct LibraryFilter
     juce::String folder;
     std::vector<int64_t> includeTags;
     std::vector<int64_t> excludeTags;
-    bool matchAnyTag = false;
+    bool matchAnyTag = false, starredOnly = false;
     LibrarySort sort = LibrarySort::Name;
     bool ascending = true;
-    bool hasTextOrTagFilter() const { return text.isNotEmpty() || ! includeTags.empty() || ! excludeTags.empty(); }
+    bool hasTextOrTagFilter() const { return text.isNotEmpty() || ! includeTags.empty() || ! excludeTags.empty() || starredOnly; }
 };
 struct LibraryPage
 {

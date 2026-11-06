@@ -43,6 +43,8 @@ public:
     bool renameTag(int64_t tagId, const juce::String& name);
     void deleteTag(int64_t tagId);
     void setSampleTag(int64_t sampleId, int64_t tagId, bool assigned);
+    void setSampleTag(const std::vector<int64_t>& sampleIds, int64_t tagId, bool assigned);
+    void setStarred(const std::vector<int64_t>& sampleIds, bool starred);
     // Lower-cased name + newline + lower-cased path, used by whole-catalog text search.
     static juce::String searchKey(const juce::String& name, const juce::String& path);
 private:

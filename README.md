@@ -40,11 +40,12 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 3. Select a row to immediately preview its original file. Use **Play / Pause / Stop / Loop**, volume and click/drag in the waveform to seek.
 4. Keyboard: **Space** play/pause, **Left / Right** seek one second, **Escape** stop (when not consumed by an editing control).
 5. Search covers the entire catalog by filename and path. Typing is debounced by 250 ms; Enter applies immediately and Escape clears it. Header clicks sort the whole result, not the current page. Pages contain at most 10,000 records; use **< / >** to navigate.
-6. **Tags** filters the catalog by standard or custom tags: include, exclude, and match all/any. Select a sample and **Edit tags...** to assign tags; create, rename, recolour and delete tags from the tag menu.
-7. **Rescan** asks for confirmation, then analyzes new, changed and previously failed files; unchanged analyzed files are skipped. **New files** is the additive scan: it walks the folders but analyzes only paths that are not in the catalog yet, without reconciling missing records. **Reanalyze all** asks for a stronger confirmation and recomputes every file. Cancel keeps completed results and never stores a partial row.
-8. **Backup** writes a consistent SQLite copy to `Sonicator/backups/` beside the database. The live database and its WAL are never copied as raw files.
-9. **Settings** opens the theme (system/dark/light), interface scale, catalog location, audio output and the About/support links. Theme, scale, language and catalog path persist between launches.
-10. **Audio output** inside Settings selects the output device. No microphone input is opened.
+6. **Tags** and **Starred** filter the catalog. Select a sample and **Edit tags...** to assign tags; create, rename, recolour and delete tags from the tag menu.
+7. Select several rows with **Cmd-click** (toggle) or **Shift-click** (range). Right-click any row for **Copy** (files on macOS, paths on other platforms), **Tag** (coloured submenu, applies to the whole selection), **Star/Unstar** and **Open in Finder** (**Explorer** on Windows).
+8. **Rescan** asks for confirmation, then analyzes new, changed and previously failed files; unchanged analyzed files are skipped. **New files** is the additive scan: it walks the folders but analyzes only paths that are not in the catalog yet, without reconciling missing records. **Reanalyze all** asks for a stronger confirmation and recomputes every file. Cancel keeps completed results and never stores a partial row.
+9. **Backup** writes a consistent SQLite copy to `Sonicator/backups/` beside the database. The live database and its WAL are never copied as raw files.
+10. **Settings** opens the theme (system/dark/light), interface scale, catalog location, audio output and the About/support links. Theme, scale, language, catalog path and the last window position/size persist between launches.
+11. **Audio output** inside Settings selects the output device. No microphone input is opened.
 
 ## Data
 
@@ -52,7 +53,7 @@ Database and bounded waveform cache live in JUCE's user application-data locatio
 
 - macOS: `~/Library/Sonicator/sonicator.sqlite` (JUCE `userApplicationDataDirectory`).
 - Windows: `%APPDATA%\Sonicator\sonicator.sqlite`.
-- Settings: `Sonicator/settings.json` in the same application-data location. It stores theme, scale, language and an optional catalog path.
+- Settings: `Sonicator/settings.json` in the same application-data location. It stores theme, scale, language, an optional catalog path and the last window geometry.
 
 No original audio is changed, renamed or deleted. Duplicate copies remain distinct file-path records, identified by full SHA-256.
 Do not delete a live SQLite database or its `-wal`/`-shm` sidecars. Close the application before making filesystem backups.
@@ -72,6 +73,7 @@ ui/library/                  global search, tags and paged library
 ui/waveform/                 asynchronous thumbnail and bounded disk cache
 ui/preview/                  transport and keyboard controls
 ui/settings/                 Settings dialog, catalogue switching and About links
+ui/platform/                 native file clipboard (macOS) with a text-path fallback
 ui/MainComponent.*           orchestration, inspector, device settings
 resources/sqlite/            official SQLite amalgamation
 tests/                       core, audio-render, UI and integration tests
@@ -114,6 +116,7 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - Files with decode errors are retried on rescan. Missing roots abort that scan with a visible message; records are not deleted. The additive **New files** scan deliberately does not mark missing records.
 - The manual **Backup** copy runs through SQLite's backup API on the UI thread, so a very large catalog can pause the window briefly while it copies. No automatic rotation or deletion of user backups is performed.
 - Interface scale is limited to 100%, 110%, 125% and 150%. Only English is available; the language setting is stored for future translations. **Move catalog** leaves the previous database file in place instead of deleting it.
+- `Copy` writes real file references only on macOS; other platforms fall back to newline-separated paths until a native file clipboard is added. Multi-selection covers the current 10,000-row page. **Open in Finder/Explorer** reveals the clicked row's file, not every selected file.
 - A saved catalog that is missing or is not a SONICATOR catalog falls back to the default location at startup; the fallback is written to the log.
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.

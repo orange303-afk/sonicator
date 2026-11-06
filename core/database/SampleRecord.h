@@ -14,6 +14,6 @@ struct SampleRecord
     int bitsPerSample = 0, numChannels = 0, version = 0;
     double peakLevel = 0, rmsLevel = 0;
     double spectralCentroid = 0, spectralRolloff = 0, spectralFlatness = 0;
-    bool missing = false;
+    bool missing = false, starred = false;
 };
 }

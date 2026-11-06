@@ -1,8 +1,11 @@
 #include "MainComponent.h"
 #include "BinaryData.h"
 #include "ui/settings/SettingsPanel.h"
+#include "ui/platform/FileClipboard.h"
 #include <algorithm>
+#include <cmath>
 #include <iterator>
+#include <map>
 namespace sonicator {
 namespace {
 struct PaletteColour { const char* name; uint32_t colour; };
@@ -13,6 +16,31 @@ constexpr PaletteColour tagPalette[] = {
     { "Pink", 0xffd06ab8 }, { "Rose", 0xffd06a7a }, { "Grey", 0xff8a8f9c }
 };
 constexpr int pageSize = 10000;
+juce::Image tagDotImage(uint32_t colour)
+{
+    juce::Image image(juce::Image::ARGB, 14, 14, true);
+    juce::Graphics g(image);
+    g.setColour(juce::Colour(colour)); g.fillEllipse(2.0f, 2.0f, 10.0f, 10.0f);
+    g.setColour(juce::Colours::white.withAlpha(0.3f)); g.drawEllipse(2.5f, 2.5f, 9.0f, 9.0f, 1.0f);
+    return image;
+}
+juce::Image starMenuImage()
+{
+    juce::Image image(juce::Image::ARGB, 14, 14, true);
+    juce::Graphics g(image);
+    juce::Path path;
+    const auto centre = juce::Point<float>(7.0f, 7.0f);
+    for (int i = 0; i < 10; ++i)
+    {
+        const float angle = -juce::MathConstants<float>::halfPi + i * juce::MathConstants<float>::pi / 5.0f;
+        const float radius = (i % 2 == 0) ? 6.0f : 2.7f;
+        const juce::Point<float> point(centre.x + std::cos(angle) * radius, centre.y + std::sin(angle) * radius);
+        if (i == 0) path.startNewSubPath(point); else path.lineTo(point);
+    }
+    path.closeSubPath();
+    g.setColour(juce::Colour(0xffe0b84a)); g.fillPath(path);
+    return image;
+}
 }
 juce::File MainComponent::defaultDatabaseFile()
 {
@@ -27,8 +55,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     theme::apply(appSettings.theme);
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,28>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
-         &pause,&cancel,&settings,&backup,&tagFilter,&clearFilters,&editTags,&previousPage,&nextPage,&heading,&subtitle,
+    for (auto* c : std::array<juce::Component*,29>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
+         &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&clearFilters,&editTags,&previousPage,&nextPage,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel})
         if (c != nullptr) addAndMakeVisible(c);
@@ -75,6 +103,10 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     selectedTags.setComponentID("selectedTags");
     library.setComponentID("library"); status.setComponentID("importStatus"); analysisDetails.setComponentID("analysisDetails");
     library.onSelected = [this](const SampleRecord& r) { selectSample(r); };
+    library.onContextMenu = [this](const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> position)
+    {
+        showSampleContextMenu(selection, lead, position);
+    };
     library.onSortChanged = [this](int column, bool ascending)
     {
         switch (column)
@@ -104,18 +136,23 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     cancel.onClick = [this] { if (indexer) indexer->cancel(); };
     settings.onClick = [this] { showSettings(); };
     tagFilter.onClick = [this] { showTagFilterMenu(); };
+    starredButton.onClick = [this]
+    {
+        filter.starredOnly = ! filter.starredOnly; pageOffset = 0; reloadLibrary();
+    };
     clearFilters.onClick = [this]
     {
         search.clear(); pendingSearch.clear();
-        filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear(); filter.matchAnyTag = false;
+        filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
+        filter.matchAnyTag = false; filter.starredOnly = false;
         pageOffset = 0; reloadLibrary();
     };
     editTags.onClick = [this] { showEditTagsMenu(); };
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
     preview.onAction = [this] { library.focusForNavigation(); };
-    for (auto* button : std::array<juce::Button*,13>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
-          &tagFilter,&clearFilters,&editTags,&previousPage,&nextPage})
+    for (auto* button : std::array<juce::Button*,14>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
+          &tagFilter,&starredButton,&clearFilters,&editTags,&previousPage,&nextPage})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         if (button == &addFolder || button == &settings) continue; // Modal dialogs must retain their own focus.
@@ -295,6 +332,7 @@ void MainComponent::updateTagControls()
     const auto active = (int) (filter.includeTags.size() + filter.excludeTags.size());
     tagFilter.setButtonText(active > 0 ? "Tags (" + juce::String(active) + ")" : "Tags");
     tagFilter.setToggleState(active > 0 || filter.matchAnyTag, juce::dontSendNotification);
+    starredButton.setToggleState(filter.starredOnly,juce::dontSendNotification);
     clearFilters.setEnabled(filter.hasTextOrTagFilter());
 }
 void MainComponent::updateSelectedTags()
@@ -489,6 +527,114 @@ void MainComponent::showEditTagsMenu()
             safe->reloadLibrary();
         });
 }
+void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selection,
+                                          const SampleRecord& lead,
+                                          juce::Point<int> screenPosition)
+{
+    if (selection.empty() || readRepo == nullptr) return;
+    try { allTags = readRepo->tags(); }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
+    std::vector<int64_t> ids;
+    bool allStarred = true, anyExisting = false;
+    for (const auto& record : selection)
+    {
+        ids.push_back(record.id);
+        allStarred = allStarred && record.starred;
+        anyExisting = anyExisting || juce::File(record.filePath).existsAsFile();
+    }
+    const auto assignments = readRepo->tagsForSamples(ids);
+    std::map<int64_t, bool> allHave;
+    for (const auto& tag : allTags)
+    {
+        bool every = true;
+        for (auto id : ids)
+        {
+            bool has = false;
+            const auto found = assignments.find(id);
+            if (found != assignments.end())
+                for (const auto& assigned : found->second)
+                    if (assigned.id == tag.id) { has = true; break; }
+            if (! has) { every = false; break; }
+        }
+        allHave[tag.id] = every;
+    }
+
+    juce::PopupMenu menu, tagsMenu;
+    menu.addItem(9000, "Copy", anyExisting);
+    for (int i = 0; i < (int) allTags.size(); ++i)
+        tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
+                         allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
+    if (! allTags.empty()) tagsMenu.addSeparator();
+    tagsMenu.addItem(9003, "New tag...");
+    menu.addSubMenu("Tag", tagsMenu);
+    menu.addItem(9001, allStarred ? "Unstar" : "Star", true, false, starMenuImage());
+#if JUCE_MAC
+    const juce::String openLabel = "Open in Finder";
+#elif JUCE_WINDOWS
+    const juce::String openLabel = "Open in Explorer";
+#else
+    const juce::String openLabel = "Open folder";
+#endif
+    const juce::File leadFile(lead.filePath);
+    menu.addItem(9002, openLabel, leadFile.existsAsFile() || leadFile.getParentDirectory().isDirectory());
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ screenPosition.x, screenPosition.y, 1, 1 }),
+        [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave,
+         files = selection, leadPath = lead.filePath](int result)
+        {
+            if (safe == nullptr || result == 0) return;
+            try
+            {
+                if (result == 9000)
+                {
+                    juce::Array<juce::File> selected;
+                    for (const auto& record : files)
+                        if (juce::File(record.filePath).existsAsFile()) selected.add(juce::File(record.filePath));
+                    if (selected.isEmpty()) { safe->status.setText("No existing files to copy.",juce::dontSendNotification); return; }
+                    const bool native = copyFilesToClipboard(selected);
+                    safe->status.setText(native ? "Copied " + juce::String(selected.size()) + " file(s)"
+                                                : "Copied " + juce::String(selected.size()) + " path(s)",juce::dontSendNotification);
+                }
+                else if (result == 9001)
+                {
+                    safe->writeRepo->setStarred(ids, ! allStarred);
+                    safe->reloadLibrary();
+                }
+                else if (result == 9002)
+                {
+                    const juce::File file(leadPath);
+                    if (file.existsAsFile()) file.revealToUser();
+                    else if (file.getParentDirectory().isDirectory()) file.getParentDirectory().revealToUser();
+                    else safe->status.setText("Folder is not available.",juce::dontSendNotification);
+                }
+                else if (result == 9003)
+                {
+                    safe->promptTagName("New tag", {}, [safe, ids](juce::String name)
+                    {
+                        if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr) return;
+                        try
+                        {
+                            const auto colour = tagPalette[safe->allTags.size() % std::size(tagPalette)].colour;
+                            const auto id = safe->writeRepo->createTag(name, colour);
+                            safe->writeRepo->setSampleTag(ids, id, true);
+                            safe->reloadLibrary();
+                        }
+                        catch (const std::exception& e) { safe->status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+                    });
+                }
+                else if (result >= 10000)
+                {
+                    const size_t index = (size_t) (result - 10000);
+                    if (index >= safe->allTags.size()) return;
+                    const auto tag = safe->allTags[index];
+                    const auto state = allHave.find(tag.id);
+                    const bool assign = state == allHave.end() || ! state->second;
+                    safe->writeRepo->setSampleTag(ids, tag.id, assign);
+                    safe->reloadLibrary();
+                }
+            }
+            catch (const std::exception& e) { safe->status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+        });
+}
 void MainComponent::promptTagName(const juce::String& title, const juce::String& initial,
                                   std::function<void(juce::String)> onAccept)
 {
@@ -568,7 +714,15 @@ void MainComponent::applySettings(const AppSettings& next)
     refreshTheme();
     juce::Desktop::getInstance().setGlobalScaleFactor(
         juce::jlimit(0.75f, 2.0f, appSettings.scalePercent / 100.0f));
-    try { settingsStore.save(appSettings); }
+    try
+    {
+        settingsStore.update([this](AppSettings& saved)
+        {
+            saved.theme = appSettings.theme;
+            saved.scalePercent = appSettings.scalePercent;
+            saved.language = appSettings.language;
+        });
+    }
     catch (const std::exception& e)
     {
         status.setText("Settings applied but not saved: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification);
@@ -670,7 +824,8 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     const auto isDefault = dbPath.getFullPathName() == defaultDatabaseFile().getFullPathName();
     appSettings.databasePath = isDefault ? juce::String() : dbPath.getFullPathName();
     selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
-    filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear(); filter.matchAnyTag = false;
+    filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
+    filter.matchAnyTag = false; filter.starredOnly = false;
     search.clear(); pendingSearch.clear();
     analysisDetails.setText("Select a sample to inspect its measured audio features.",juce::dontSendNotification);
     selectedTags.setTags({});
@@ -678,7 +833,10 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     reloadLibrary();
     juce::String message = "Catalog: " + dbPath.getFullPathName();
     if (moveCurrent) message += "  |  previous catalog kept at " + previous.getFullPathName();
-    try { settingsStore.save(appSettings); }
+    try
+    {
+        settingsStore.update([this](AppSettings& saved) { saved.databasePath = appSettings.databasePath; });
+    }
     catch (const std::exception& e)
     {
         message += "  |  settings were not saved: " + juce::String::fromUTF8(e.what());
@@ -744,7 +902,8 @@ void MainComponent::resized()
     previousPage.setBounds(bar.removeFromRight(30)); countLabel.setBounds(bar);
     list.removeFromTop(4);
     auto filterBar = list.removeFromTop(30);
-    tagFilter.setBounds(filterBar.removeFromLeft(90)); filterBar.removeFromLeft(8);
+    tagFilter.setBounds(filterBar.removeFromLeft(90)); filterBar.removeFromLeft(6);
+    starredButton.setBounds(filterBar.removeFromLeft(104)); filterBar.removeFromLeft(6);
     clearFilters.setBounds(filterBar.removeFromLeft(110));
     list.removeFromTop(8); library.setBounds(list);
 }

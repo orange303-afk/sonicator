@@ -74,6 +74,22 @@ Windows / Intel macOS execution, ASan, concurrent UI-writer stress, hardware lat
 - Debug/Release `codesign --verify --verbose`: valid on disk and designated requirement satisfied (ad-hoc).
 - `git diff --check`: clean.
 
+## Context menu, stars and window geometry (2026-11-06)
+
+Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.
+
+- Default suite: **67 cases / 637 assertions passed** in Debug and Release; Debug and Release CTest 1/1; Release ad-hoc bundle signature verified.
+- New coverage: schema v1/v2 upgrades now reach version 4 with `starred` defaulting to false; batched star assignment and the `Starred` filter; a reanalysis upsert preserves the star; batch tag assignment; multi-row selection preserved by ID across a sorted refresh; the starred filter in the real shell; window geometry clamping, off-screen recentring, minimum size and display fit; independent settings updates keep window fields, theme and catalog path.
+- The native macOS file clipboard is not asserted automatically because a test would overwrite the user's clipboard. Manual check is required.
+
+### Known limits after this stage
+
+- `Copy` produces real file references only on macOS; elsewhere it writes paths as text.
+- Multi-selection covers the current 10,000-row page.
+- `Open in Finder/Explorer` reveals the clicked row's file only; other selected folders are not opened.
+- A right-click on an unselected row selects it and therefore triggers the normal auto-preview.
+- The context menu itself is built in the shell and is not screenshot-tested; its database actions are covered.
+
 ## Settings and About stage (2026-11-06)
 
 Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.

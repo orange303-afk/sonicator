@@ -14,7 +14,7 @@ TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation",
     for (auto* child : app.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    REQUIRE(buttons == 13);
+    REQUIRE(buttons == 14);
 }
 TEST_CASE("Large catalog startup restores the actual page and folder tree", "[.catalog-ui]")
 {
@@ -296,4 +296,38 @@ TEST_CASE("Light and dark themes apply without invalid rendering", "[ui][theme]"
         REQUIRE(dark.createComponentSnapshot(dark.getLocalBounds()).isValid());
     }
     theme::apply(ThemeMode::Dark);
+}
+TEST_CASE("Starred filter shows only favourites", "[ui][starred]")
+{
+    TestDirectory t;
+    auto a = t.wave("a.wav"); auto b = t.wave("b.wav");
+    auto dbPath = t.dir.getChildFile("library.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        for (const auto& file : { a, b }) { auto r = BasicAnalyzer().analyze(file); repo.upsert(r); }
+        repo.addRoot(t.dir.getFullPathName());
+        const auto record = repo.findByPath(a.getFullPathName());
+        REQUIRE(record.has_value());
+        repo.setStarred({ record->id }, true);
+    }
+    MainComponent app(dbPath,false);
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 2);
+    auto* starred = shellButton(app,"Starred");
+    REQUIRE(starred != nullptr);
+    starred->onClick();
+    REQUIRE(library->getNumRows() == 1);
+    REQUIRE(library->getSelectedSamples().empty());
+    const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_STAR_SCREENSHOT",{});
+    if (shot.isNotEmpty())
+    {
+        app.setBounds(0,0,1440,900);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        library->selectRow(0);
+        auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
+        juce::PNGImageFormat png;
+        REQUIRE(png.writeImageToStream(app.createComponentSnapshot(app.getLocalBounds()),*stream));
+    }
+    starred->onClick();
+    REQUIRE(library->getNumRows() == 2);
 }

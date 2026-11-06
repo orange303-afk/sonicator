@@ -4,6 +4,7 @@
 #include "ui/library/FolderTree.h"
 #include "ui/library/TagStrip.h"
 #include "ui/settings/SettingsPanel.h"
+#include "ui/shell/WindowBounds.h"
 #include <set>
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
@@ -181,4 +182,45 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
         auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
         juce::PNGImageFormat png; REQUIRE(png.writeImageToStream(image,*stream));
     }
+}
+
+TEST_CASE("Saved window geometry is clamped and off-screen bounds are recentred", "[ui][window]")
+{
+    const juce::Rectangle<int> area { 0, 0, 1440, 900 };
+    const auto same = resolveWindowBounds({ 100, 80, 1200, 700 }, area);
+    REQUIRE(same == juce::Rectangle<int>(100, 80, 1200, 700));
+    const auto offscreen = resolveWindowBounds({ 3000, 2000, 1200, 700 }, area);
+    REQUIRE(area.contains(offscreen));
+    REQUIRE(offscreen.getWidth() == 1200);
+    REQUIRE(offscreen.getHeight() == 700);
+    const auto small = resolveWindowBounds({ 10, 10, 100, 100 }, area);
+    REQUIRE(small.getWidth() == 880);
+    REQUIRE(small.getHeight() == 580);
+    const auto empty = resolveWindowBounds({ 0, 0, 0, 0 }, area);
+    REQUIRE(empty.getWidth() == 1280);
+    REQUIRE(empty.getHeight() == 800);
+    REQUIRE(area.contains(empty));
+    const auto large = resolveWindowBounds({ 0, 0, 3000, 2000 }, area);
+    REQUIRE(large.getWidth() == 1440);
+    REQUIRE(large.getHeight() == 900);
+}
+TEST_CASE("Multiple selected rows keep their identities across a refresh", "[ui][selection]")
+{
+    FileListPanel list;
+    SampleRecord a, b, c;
+    a.id = 1; a.fileName = "a.wav"; a.starred = true;
+    b.id = 2; b.fileName = "b.wav";
+    c.id = 3; c.fileName = "c.wav";
+    list.setSamples({ a, b, c });
+    list.selectRows({ 0, 2 });
+    REQUIRE(list.getSelectedSamples().size() == 2);
+    REQUIRE(list.getSelectedSamples()[0].id == 1);
+    REQUIRE(list.getSelectedSamples()[1].id == 3);
+    list.setSamples({ c, a, b });
+    REQUIRE(list.getSelectedSamples().size() == 2);
+    // The panel sorts by name: a.wav (1) then c.wav (3), regardless of insertion order.
+    REQUIRE(list.getSelectedSamples()[0].id == 1);
+    REQUIRE(list.getSelectedSamples()[1].id == 3);
+    list.setBounds(0, 0, 900, 300);
+    REQUIRE(list.createComponentSnapshot(list.getLocalBounds()).isValid());
 }

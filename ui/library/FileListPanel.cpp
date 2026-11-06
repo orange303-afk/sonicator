@@ -1,11 +1,34 @@
 #include "FileListPanel.h"
 #include "ui/shell/Theme.h"
 namespace sonicator {
+namespace {
+void drawStar(juce::Graphics& g, juce::Rectangle<float> r, bool filled)
+{
+    juce::Path path;
+    const auto centre = r.getCentre();
+    const float outer = juce::jmin(r.getWidth(), r.getHeight()) / 2.0f;
+    const float inner = outer * 0.45f;
+    for (int i = 0; i < 10; ++i)
+    {
+        const float angle = -juce::MathConstants<float>::halfPi
+            + i * juce::MathConstants<float>::pi / 5.0f;
+        const float radius = (i % 2 == 0) ? outer : inner;
+        const juce::Point<float> point(centre.x + std::cos(angle) * radius,
+                                       centre.y + std::sin(angle) * radius);
+        if (i == 0) path.startNewSubPath(point); else path.lineTo(point);
+    }
+    path.closeSubPath();
+    if (filled) g.fillPath(path);
+    else g.strokePath(path, juce::PathStrokeType(1.0f));
+}
+}
 FileListPanel::FileListPanel()
 {
     addAndMakeVisible(table); table.setRowHeight(34);
     refreshTheme();
+    table.setMultipleSelectionEnabled(true);
     auto& h = table.getHeader();
+    h.addColumn("",8,30,24,40);
     h.addColumn("SAMPLE",1,265,120,1200);
     h.addColumn("FORMAT",2,70,55,120);
     h.addColumn("LENGTH",3,85,60,140);
@@ -23,15 +46,46 @@ void FileListPanel::refreshTheme()
     table.setColour(juce::ListBox::textColourId,theme::text);
     table.repaint();
 }
+void FileListPanel::selectRows(const std::vector<int>& rows)
+{
+    table.deselectAllRows();
+    for (auto row : rows) if (row >= 0 && row < (int) visible.size()) table.selectRow(row, true, false);
+}
+std::vector<SampleRecord> FileListPanel::getSelectedSamples() const
+{
+    std::vector<SampleRecord> out;
+    const auto rows = table.getSelectedRows();
+    for (int i = 0; i < rows.size(); ++i)
+    {
+        const int row = rows[i];
+        if (row >= 0 && row < (int) visible.size()) out.push_back(visible[(size_t) row]);
+    }
+    return out;
+}
 void FileListPanel::setSamples(std::vector<SampleRecord> records)
 {
-    const auto selectedRow = table.getSelectedRow();
-    const int64_t selectedId = (selectedRow >= 0 && selectedRow < getNumRows()) ? visible[(size_t) selectedRow].id : 0;
+    std::vector<int64_t> selectedIds;
+    int64_t leadId = 0;
+    const auto selectedRows = table.getSelectedRows();
+    for (int i = 0; i < selectedRows.size(); ++i)
+    {
+        const int row = selectedRows[i];
+        if (row >= 0 && row < getNumRows()) selectedIds.push_back(visible[(size_t) row].id);
+    }
+    const int leadRow = table.getLastRowSelected();
+    if (leadRow >= 0 && leadRow < getNumRows()) leadId = visible[(size_t) leadRow].id;
     const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
     all = std::move(records); rebuild();
-    if (selectedId == 0) return;
+    if (selectedIds.empty()) return;
+    int restoredLead = -1;
     for (int row = 0; row < getNumRows(); ++row)
-        if (visible[(size_t) row].id == selectedId) { table.selectRow(row, true); break; }
+    {
+        const auto id = visible[(size_t) row].id;
+        if (std::find(selectedIds.begin(), selectedIds.end(), id) == selectedIds.end()) continue;
+        table.selectRow(row, true, false);
+        if (id == leadId) restoredLead = row;
+    }
+    if (restoredLead >= 0) table.selectRow(restoredLead, true, false);
 }
 void FileListPanel::setRowTags(std::map<int64_t, std::vector<Tag>> tags)
 {
@@ -48,7 +102,7 @@ void FileListPanel::rebuild()
 }
 void FileListPanel::sortOrderChanged(int column, bool forwards)
 {
-    if (column == 7)
+    if (column == 7 || column == 8)
     {
         // Tags are shown for context but are not a sort key; keep the header arrow on the real one.
         const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
@@ -86,6 +140,13 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
 {
     if (row < 0 || row >= getNumRows()) return;
     const auto& r = visible[(size_t) row];
+    if (col == 8)
+    {
+        const auto area = juce::Rectangle<float>(0, 0, (float) w, (float) h).withSizeKeepingCentre(14.0f, 14.0f);
+        g.setColour(r.starred ? juce::Colour(0xffe0b84a) : theme::muted.withAlpha(0.55f));
+        drawStar(g, area, r.starred);
+        return;
+    }
     if (col == 7)
     {
         const auto found = rowTags.find(r.id);
@@ -122,6 +183,13 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
     }
     g.setColour(col == 1 ? theme::text : theme::muted); g.setFont(juce::FontOptions(13));
     g.drawText(value,10,0,w-16,h,juce::Justification::centredLeft,true);
+}
+void FileListPanel::cellClicked(int row, int, const juce::MouseEvent& event)
+{
+    if (! event.mods.isPopupMenu() || row < 0 || row >= getNumRows() || ! onContextMenu) return;
+    if (! table.isRowSelected(row)) table.selectRow(row, true);
+    const auto selection = getSelectedSamples();
+    if (! selection.empty()) onContextMenu(selection, visible[(size_t) row], event.getScreenPosition());
 }
 void FileListPanel::selectedRowsChanged(int row)
 {

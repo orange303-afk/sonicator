@@ -39,6 +39,10 @@ AppSettings SettingsStore::load() const
     const auto language = object->getProperty("language").toString();
     if (language.isNotEmpty()) settings.language = language;
     settings.databasePath = object->getProperty("database").toString();
+    settings.windowX = (int) object->getProperty("windowX");
+    settings.windowY = (int) object->getProperty("windowY");
+    settings.windowWidth = juce::jmax(0, (int) object->getProperty("windowWidth"));
+    settings.windowHeight = juce::jmax(0, (int) object->getProperty("windowHeight"));
     return settings;
 }
 void SettingsStore::save(const AppSettings& settings) const
@@ -50,9 +54,19 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("scale", AppSettings::clampScale(settings.scalePercent));
     object->setProperty("language", settings.language);
     object->setProperty("database", settings.databasePath);
+    object->setProperty("windowX", settings.windowX);
+    object->setProperty("windowY", settings.windowY);
+    object->setProperty("windowWidth", settings.windowWidth);
+    object->setProperty("windowHeight", settings.windowHeight);
     const auto text = juce::JSON::toString(juce::var(object.get()), false);
     juce::TemporaryFile temporary(path);
     if (! temporary.getFile().replaceWithText(text) || ! temporary.overwriteTargetFileWithTemporary())
         throw std::runtime_error("Cannot save settings");
+}
+void SettingsStore::update(const std::function<void(AppSettings&)>& change) const
+{
+    auto settings = load();
+    change(settings);
+    save(settings);
 }
 } // namespace sonicator

@@ -49,7 +49,7 @@ private:
     juce::TextEditor search;
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" };
     juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" }, backup { "Backup" };
-    juce::TextButton tagFilter { "Tags" }, clearFilters { "Clear filters" }, editTags { "Edit tags..." };
+    juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" }, clearFilters { "Clear filters" }, editTags { "Edit tags..." };
     juce::TextButton previousPage { "<" }, nextPage { ">" };
     juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel;
     TagStrip selectedTags;
@@ -81,6 +81,7 @@ private:
     void showTagFilterMenu();
     void showTagColourMenu(int64_t tagId);
     void showEditTagsMenu();
+    void showSampleContextMenu(const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> screenPosition);
     void promptTagName(const juce::String& title, const juce::String& initial, std::function<void(juce::String)> onAccept);
     static bool contains(const std::vector<int64_t>& values, int64_t id);
     static void toggle(std::vector<int64_t>& values, int64_t id);

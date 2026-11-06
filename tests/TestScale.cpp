@@ -43,7 +43,7 @@ TEST_CASE("Three hundred thousand rows finalize quickly with correct missing fla
             if (juce::String((const char*) sqlite3_column_text(s, 3)).containsIgnoreCase("TEMP B-TREE")) tempSort = true;
         sqlite3_finalize(s);
         REQUIRE(sqlite3_prepare_v2(raw, "EXPLAIN QUERY PLAN SELECT id,path,name,hash,format,error,size,modified,analyzed,"
-            "duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing"
+            "duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred"
             " FROM samples ORDER BY name COLLATE NOCASE,id LIMIT 10000", -1, &s, nullptr) == SQLITE_OK);
         bool usesSortIndex = false, pageTempSort = false;
         while (sqlite3_step(s) == SQLITE_ROW)

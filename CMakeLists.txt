@@ -23,7 +23,12 @@ target_link_libraries(SonicatorCore PUBLIC
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography)
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png)
-add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/settings/SettingsPanel.cpp)
+add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/settings/SettingsPanel.cpp ui/shell/WindowBounds.cpp)
+if(APPLE)
+    target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.mm)
+else()
+    target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.cpp)
+endif()
 target_link_libraries(SonicatorUI PUBLIC SonicatorCore PRIVATE SonicatorAssets)
 juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
     BUNDLE_ID "com.sonicator.browser" MICROPHONE_PERMISSION_ENABLED FALSE

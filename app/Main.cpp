@@ -1,4 +1,5 @@
 #include "ui/MainComponent.h"
+#include "ui/shell/WindowBounds.h"
 #include "core/settings/AppSettings.h"
 #include "core/database/SampleRepository.h"
 
@@ -20,28 +21,65 @@ public:
         {
             juce::Logger::writeToLog("Saved catalog is missing or invalid; using the default catalog: " + database.getFullPathName());
             settings.databasePath.clear();
-            try { sonicator::SettingsStore().save(settings); } catch (...) {}
+            try { sonicator::SettingsStore().update([](sonicator::AppSettings& saved) { saved.databasePath.clear(); }); } catch (...) {}
             database = sonicator::MainComponent::defaultDatabaseFile();
         }
         window = std::make_unique<Window>(std::move(settings), std::move(database));
     }
-    void shutdown() override { window.reset(); }
+    void shutdown() override
+    {
+        if (window != nullptr) window->persistGeometry();
+        window.reset();
+    }
     void systemRequestedQuit() override { quit(); }
 private:
-    class Window final : public juce::DocumentWindow
+    class Window final : public juce::DocumentWindow, private juce::Timer
     {
     public:
         Window(sonicator::AppSettings settings, juce::File database)
-            : DocumentWindow("SONICATOR - Intelligent Sample Explorer", sonicator::theme::background, allButtons)
+            : DocumentWindow("SONICATOR - Intelligent Sample Explorer", sonicator::theme::background, allButtons),
+              appSettings(std::move(settings))
         {
             setUsingNativeTitleBar(true);
-            setContentOwned(new sonicator::MainComponent(database, true, std::move(settings)), true);
+            setContentOwned(new sonicator::MainComponent(database, true, appSettings), true);
             setResizable(true, false);
             setResizeLimits(880, 580, 3840, 2160);
-            centreWithSize(1280, 800);
+            const auto displays = juce::Desktop::getInstance().getDisplays();
+            const juce::Rectangle<int> saved { appSettings.windowX, appSettings.windowY,
+                                               appSettings.windowWidth, appSettings.windowHeight };
+            juce::Rectangle<int> area;
+            if (const auto* display = displays.getDisplayForRect(saved)) area = display->userArea;
+            else if (const auto* primary = displays.getPrimaryDisplay()) area = primary->userArea;
+            setBounds(sonicator::resolveWindowBounds(saved, area));
             setVisible(true);
+            geometryReady = true;
         }
-        void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
+        void persistGeometry()
+        {
+            if (! geometryReady) return;
+            try
+            {
+                store.update([this](sonicator::AppSettings& saved)
+                {
+                    const auto bounds = getBounds();
+                    saved.windowX = bounds.getX(); saved.windowY = bounds.getY();
+                    saved.windowWidth = bounds.getWidth(); saved.windowHeight = bounds.getHeight();
+                });
+            }
+            catch (...) {}
+        }
+        void closeButtonPressed() override
+        {
+            persistGeometry();
+            juce::JUCEApplication::getInstance()->systemRequestedQuit();
+        }
+    private:
+        void moved() override { if (geometryReady) startTimer(500); }
+        void resized() override { if (geometryReady) startTimer(500); }
+        void timerCallback() override { stopTimer(); persistGeometry(); }
+        sonicator::SettingsStore store;
+        sonicator::AppSettings appSettings;
+        bool geometryReady = false;
     };
     std::unique_ptr<Window> window;
 };

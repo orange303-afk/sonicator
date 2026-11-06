@@ -32,3 +32,23 @@ TEST_CASE("Settings persist theme, scale, language and catalog path", "[settings
     REQUIRE(AppSettings::clampScale(0) == 100);
     REQUIRE(AppSettings::clampScale(1000) == 100);
 }
+TEST_CASE("Independent settings updates do not overwrite each other", "[settings]")
+{
+    TestDirectory t; auto file = t.dir.getChildFile("settings.json");
+    SettingsStore store(file);
+    AppSettings initial;
+    initial.theme = ThemeMode::Light; initial.scalePercent = 125;
+    initial.databasePath = "/catalogs/main.sqlite";
+    initial.windowX = 120; initial.windowY = 80; initial.windowWidth = 1100; initial.windowHeight = 700;
+    store.save(initial);
+    store.update([](AppSettings& saved) { saved.theme = ThemeMode::Dark; saved.scalePercent = 100; });
+    auto afterTheme = store.load();
+    REQUIRE(afterTheme.theme == ThemeMode::Dark);
+    REQUIRE(afterTheme.windowX == 120); REQUIRE(afterTheme.windowWidth == 1100);
+    REQUIRE(afterTheme.databasePath == "/catalogs/main.sqlite");
+    store.update([](AppSettings& saved) { saved.windowWidth = 900; saved.windowX = 40; });
+    auto afterWindow = store.load();
+    REQUIRE(afterWindow.theme == ThemeMode::Dark);
+    REQUIRE(afterWindow.windowWidth == 900); REQUIRE(afterWindow.windowX == 40);
+    REQUIRE(afterWindow.databasePath == "/catalogs/main.sqlite");
+}

@@ -14,6 +14,9 @@ public:
     void setRowTags(std::map<int64_t, std::vector<Tag>>);
     void setSearchText(const juce::String&);
     void selectRow(int row) { table.selectRow(row); }
+    void selectRows(const std::vector<int>& rows);
+    std::vector<SampleRecord> getSelectedSamples() const;
+    bool isRowSelected(int row) const { return table.isRowSelected(row); }
     int getSelectedRow() const { return table.getSelectedRow(); }
     void focusForNavigation() { table.grabKeyboardFocus(); }
     int getNumRows() override { return (int) visible.size(); }
@@ -21,12 +24,14 @@ public:
     void paintCell(juce::Graphics&,int,int,int,int,bool) override;
     void selectedRowsChanged(int) override;
     void sortOrderChanged(int,bool) override;
+    void cellClicked(int row,int column,const juce::MouseEvent&) override;
     void resized() override { table.setBounds(getLocalBounds()); }
     void lookAndFeelChanged() override;
     void refreshTheme();
     std::function<void(const SampleRecord&)> onSelected;
     // Header clicks also change the whole-catalog order; the owner re-runs the SQL query.
     std::function<void(int,bool)> onSortChanged;
+    std::function<void(const std::vector<SampleRecord>&, const SampleRecord&, juce::Point<int>)> onContextMenu;
 private:
     juce::TableListBox table { "Sample library", this };
     std::vector<SampleRecord> all, visible;

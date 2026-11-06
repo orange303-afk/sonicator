@@ -18,7 +18,7 @@ Shutdown stops the UI timer, cancels/joins indexing without force-killing a thre
 
 ## Storage
 
-Schema `user_version=3`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, feature-set version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten. Version 2 adds `samples_name_id`, an index on `(name COLLATE NOCASE, id)` that matches the UI sort, so paged reads no longer build a temporary B-tree. Version 3 adds `samples.search_key` (Unicode-folded name + path for whole-catalog text search), `tags` and `sample_tags`. Standard tags are seeded only when the tag table is created, so a rename is not undone; sample IDs are stable across upserts, so assignments survive rescan and reanalysis. Upgrading first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages. A user-triggered backup uses the same API into `Sonicator/backups/sonicator-<timestamp>.sqlite` and refuses to overwrite an existing file or the live database.
+Schema `user_version=4`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, feature-set version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten. Version 2 adds `samples_name_id`, an index on `(name COLLATE NOCASE, id)` that matches the UI sort, so paged reads no longer build a temporary B-tree. Version 3 adds `samples.search_key` (Unicode-folded name + path for whole-catalog text search), `tags` and `sample_tags`. Version 4 adds `samples.starred`, a user favourite flag; analysis upserts deliberately do not update it, so a rescan can never clear a star. Standard tags are seeded only when the tag table is created, so a rename is not undone; sample IDs are stable across upserts, so assignments survive rescan and reanalysis. Upgrading first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages. A user-triggered backup uses the same API into `Sonicator/backups/sonicator-<timestamp>.sqlite` and refuses to overwrite an existing file or the live database. Settings updates load-modify-save only the fields they own, so window geometry and theme/catalog writers do not overwrite each other. Saved window bounds are validated against connected displays and clamped to a minimum size and the current work area.
 
 Upsert by path preserves sample ID. Two files with the same content keep independent paths. Skip only when size/time and the feature-set version match. Files changed during analysis are marked for retry, not recorded as successful. Startup reads the database; it does not initiate reanalysis.
 
@@ -44,6 +44,16 @@ repository to it, or open an existing catalog. The old file is kept. Switching i
 indexing and for files that fail `SampleRepository::isCatalog` (a `samples` and `roots` schema with
 a nonzero `user_version`), so a foreign SQLite database is never altered. A saved catalog path that
 is missing, invalid or unreadable falls back to the default location at startup.
+
+## Selection, context menu and clipboard
+
+`TableListBox` uses JUCE's native multi-selection: Cmd toggles a row, Shift extends from the last
+lead row. Selection is restored by stable sample ID after a list refresh, so tagging or starring
+does not lose it. The context menu is built from the current selection: tag ticks mean the tag is
+present on every selected sample, and toggling applies to all of them in one transaction. Star is a
+sample field rather than a tag, so the two annotations stay independent. Copy uses `NSPasteboard`
+file URLs on macOS and newline-separated paths elsewhere; no decoder or database work happens on
+the audio thread.
 
 ## DSP conventions
 

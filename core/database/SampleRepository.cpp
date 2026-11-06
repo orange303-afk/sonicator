@@ -4,8 +4,8 @@
 #include <variant>
 namespace sonicator {
 namespace {
-constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing";
-constexpr int schemaVersion = 3;
+constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred";
+constexpr int schemaVersion = 4;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -16,6 +16,7 @@ SampleRecord read(const detail::Statement& s)
     r.numChannels = (int) s.integer(12); r.version = (int) s.integer(13);
     r.peakLevel = s.real(14); r.rmsLevel = s.real(15); r.spectralCentroid = s.real(16);
     r.spectralRolloff = s.real(17); r.spectralFlatness = s.real(18); r.missing = s.integer(19) != 0;
+    r.starred = s.integer(20) != 0;
     return r;
 }
 struct StandardTag { const char* name; uint32_t colour; };
@@ -170,7 +171,7 @@ void SampleRepository::createTables()
             "name TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, error TEXT NOT NULL,"
             "size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
             "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER,"
-            "search_key TEXT NOT NULL DEFAULT '');"
+            "search_key TEXT NOT NULL DEFAULT '', starred INTEGER NOT NULL DEFAULT 0);"
             "CREATE INDEX IF NOT EXISTS samples_hash ON samples(hash);"
             "CREATE INDEX IF NOT EXISTS samples_name_id ON samples(name COLLATE NOCASE, id);"
             "CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY);"
@@ -180,12 +181,17 @@ void SampleRepository::createTables()
             "tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY(sample_id, tag_id)) WITHOUT ROWID;"
             "CREATE INDEX IF NOT EXISTS sample_tags_tag ON sample_tags(tag_id, sample_id);");
         // Databases created before schema 3 predate the folded search column.
-        bool hasSearchKey = false;
+        bool hasSearchKey = false, hasStarred = false;
         {
             detail::Statement info(db.handle, "PRAGMA table_info(samples)");
             while (info.step()) if (info.text(1) == "search_key") hasSearchKey = true;
         }
         if (! hasSearchKey) detail::exec(db.handle, "ALTER TABLE samples ADD COLUMN search_key TEXT NOT NULL DEFAULT '';");
+        {
+            detail::Statement info(db.handle, "PRAGMA table_info(samples)");
+            while (info.step()) if (info.text(1) == "starred") hasStarred = true;
+        }
+        if (! hasStarred) detail::exec(db.handle, "ALTER TABLE samples ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;");
         // Rows written by the build that bumped the version to 2 measured the same feature set, so
         // they are relabelled rather than reanalyzed. Only during this one-time upgrade.
         if (current >= 1 && current < 2) detail::exec(db.handle, "UPDATE samples SET version=1 WHERE version=2;");
@@ -218,7 +224,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=3;");
+        detail::exec(db.handle, "PRAGMA user_version=4;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -231,8 +237,8 @@ int64_t SampleRepository::upsert(const SampleRecord& r)
 {
     std::lock_guard lock(db.mutex);
     detail::Statement s(db.handle,
-        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
+        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
         "name=excluded.name,hash=excluded.hash,format=excluded.format,error=excluded.error,size=excluded.size,"
         "modified=excluded.modified,analyzed=excluded.analyzed,duration=excluded.duration,rate=excluded.rate,"
         "bits=excluded.bits,channels=excluded.channels,version=excluded.version,peak=excluded.peak,rms=excluded.rms,"
@@ -243,7 +249,7 @@ int64_t SampleRepository::upsert(const SampleRecord& r)
     s.real(9,r.duration); s.real(10,r.sampleRate); s.integer(11,r.bitsPerSample); s.integer(12,r.numChannels);
     s.integer(13,r.version); s.real(14,r.peakLevel); s.real(15,r.rmsLevel); s.real(16,r.spectralCentroid);
     s.real(17,r.spectralRolloff); s.real(18,r.spectralFlatness); s.integer(19,r.missing ? 1 : 0);
-    s.text(20,searchKey(r.fileName,r.filePath));
+    s.text(20,searchKey(r.fileName,r.filePath)); s.integer(21,r.starred ? 1 : 0);
     if (! s.step()) throw std::runtime_error("Insert did not return a sample ID");
     return s.integer(0);
 }
@@ -365,6 +371,7 @@ LibraryPage SampleRepository::query(const LibraryFilter& filter, int limit, int 
     }
     for (auto id : filter.excludeTags)
         addInt(" AND NOT EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
+    if (filter.starredOnly) where += " AND samples.starred=1";
 
     auto bind = [&params](detail::Statement& s)
     {
@@ -529,6 +536,48 @@ void SampleRepository::setSampleTag(int64_t sampleId, int64_t tagId, bool assign
     {
         detail::Statement s(db.handle, "DELETE FROM sample_tags WHERE sample_id=? AND tag_id=?");
         s.integer(1, sampleId); s.integer(2, tagId); s.step();
+    }
+}
+void SampleRepository::setSampleTag(const std::vector<int64_t>& sampleIds, int64_t tagId, bool assigned)
+{
+    if (sampleIds.empty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement s(db.handle, assigned
+            ? "INSERT OR IGNORE INTO sample_tags(sample_id,tag_id) VALUES(?,?)"
+            : "DELETE FROM sample_tags WHERE sample_id=? AND tag_id=?");
+        for (auto id : sampleIds)
+        {
+            s.integer(1, id); s.integer(2, tagId); s.step(); s.reset();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+void SampleRepository::setStarred(const std::vector<int64_t>& sampleIds, bool starred)
+{
+    if (sampleIds.empty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement s(db.handle, "UPDATE samples SET starred=? WHERE id=?");
+        for (auto id : sampleIds)
+        {
+            s.integer(1, starred ? 1 : 0); s.integer(2, id); s.step(); s.reset();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
     }
 }
 } // namespace sonicator
