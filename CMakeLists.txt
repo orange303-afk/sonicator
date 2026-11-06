@@ -12,7 +12,7 @@ FetchContent_Declare(JUCE
     GIT_TAG 9.0.5 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
 add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
-    core/database/Database.cpp core/database/SampleRepository.cpp core/settings/AppSettings.cpp
+    core/database/Database.cpp core/database/PathRelocation.cpp core/database/SampleRepository.cpp core/settings/AppSettings.cpp
     core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/ContainerValidation.cpp
     core/export/AudioExporter.cpp core/export/SelectionExporter.cpp core/export/ExternalFileDrag.cpp
     core/indexing/IndexingService.cpp)
