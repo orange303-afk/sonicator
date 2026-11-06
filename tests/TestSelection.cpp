@@ -157,9 +157,12 @@ TEST_CASE("Loop wraps selection playback back to its start", "[selection][auditi
     TestDirectory t; AudioEngine engine(false);
     PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
     REQUIRE(preview.loadFile(t.wave("loop.wav", 440, 1, 44100 * 2))); engine.stop();
-    engine.setLooping(true);
     engine.transport().prepareToPlay(256, 44100);
     preview.selectRange(0.2, 0.35);
+    auto* loop = dynamic_cast<juce::ToggleButton*>(preview.findChildWithID("loop"));
+    REQUIRE(loop != nullptr);
+    loop->setToggleState(true, juce::sendNotificationSync);
+    REQUIRE_FALSE(engine.isLooping());
     REQUIRE(preview.keyPressed(juce::KeyPress(juce::KeyPress::spaceKey)));
     juce::AudioBuffer<float> buffer(2, 128);
     bool reachedEnd = false, wrapped = false;
@@ -199,4 +202,30 @@ TEST_CASE("Preview paints a visible selection", "[selection][snapshot]")
         juce::PNGImageFormat png;
         REQUIRE(png.writeImageToStream(image, *output));
     }
+}
+TEST_CASE("A selection ending at EOF loops back without playing the file start", "[selection][audition]")
+{
+    TestDirectory t; AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("eof.wav", 440, 1, 44100))); engine.stop();
+    engine.transport().prepareToPlay(256, 44100);
+    preview.selectRange(0.8, 1.0);
+    auto* loop = dynamic_cast<juce::ToggleButton*>(preview.findChildWithID("loop"));
+    REQUIRE(loop != nullptr);
+    loop->setToggleState(true, juce::sendNotificationSync);
+    REQUIRE(preview.keyPressed(juce::KeyPress(juce::KeyPress::spaceKey)));
+    juce::AudioBuffer<float> buffer(2, 128);
+    double lowest = 1.0;
+    bool wrapped = false;
+    for (int i = 0; i < 600; ++i)
+    {
+        engine.transport().getNextAudioBlock({&buffer, 0, 128});
+        preview.updateSelectionPlayback();
+        const auto p = engine.position();
+        lowest = juce::jmin(lowest, p);
+        if (i > 10 && p < 0.85) wrapped = true;
+    }
+    REQUIRE(wrapped); REQUIRE(engine.isPlaying());
+    REQUIRE(lowest >= 0.79);
+    engine.transport().releaseResources();
 }

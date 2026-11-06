@@ -6,6 +6,9 @@
 #include "TestHelpers.h"
 #include <cmath>
 #include <limits>
+#include <atomic>
+#include <condition_variable>
+#include <thread>
 using namespace sonicator;
 namespace
 {
@@ -109,17 +112,20 @@ TEST_CASE("Export maps integer, float and compressed sources to documented WAV f
     REQUIRE(exporter.exportRange(floatIn, 0.0, 0.05, floatOut).success);
     auto floatReader = readerFor(floatOut); REQUIRE(floatReader != nullptr);
     REQUIRE(floatReader->bitsPerSample == 32); REQUIRE(floatReader->usesFloatingPointData);
-    auto compressed = juce::File(SONICATOR_FIXTURE_DIR).getChildFile("tone.flac");
-    REQUIRE(compressed.existsAsFile());
-    auto compressedReader = readerFor(compressed); REQUIRE(compressedReader != nullptr);
-    const double end = juce::jmin(0.1, (double) compressedReader->lengthInSamples / compressedReader->sampleRate);
-    auto compressedOut = folder.getChildFile("flac-out.wav");
-    REQUIRE(exporter.exportRange(compressed, 0.0, end, compressedOut).success);
-    auto converted = readerFor(compressedOut); REQUIRE(converted != nullptr);
-    REQUIRE(converted->sampleRate == compressedReader->sampleRate);
-    REQUIRE(converted->numChannels == compressedReader->numChannels);
-    REQUIRE(converted->bitsPerSample == 24);
-    REQUIRE_FALSE(converted->usesFloatingPointData);
+    for (const auto* name : { "tone.flac", "tone.mp3" })
+    {
+        auto compressed = juce::File(SONICATOR_FIXTURE_DIR).getChildFile(name);
+        REQUIRE(compressed.existsAsFile());
+        auto compressedReader = readerFor(compressed); REQUIRE(compressedReader != nullptr);
+        const double end = juce::jmin(0.1, (double) compressedReader->lengthInSamples / compressedReader->sampleRate);
+        auto compressedOut = folder.getChildFile(juce::String(name) + "-out.wav");
+        REQUIRE(exporter.exportRange(compressed, 0.0, end, compressedOut).success);
+        auto converted = readerFor(compressedOut); REQUIRE(converted != nullptr);
+        REQUIRE(converted->sampleRate == compressedReader->sampleRate);
+        REQUIRE(converted->numChannels == compressedReader->numChannels);
+        REQUIRE(converted->bitsPerSample == 24);
+        REQUIRE_FALSE(converted->usesFloatingPointData);
+    }
 }
 TEST_CASE("Export refuses more than 64 channels without a partial file", "[export]")
 {
@@ -222,4 +228,64 @@ TEST_CASE("Cancelling a preparation clears its state", "[export][worker]")
     exporter.cancel();
     REQUIRE(exporter.waitUntilFinished(5000));
     REQUIRE(exporter.state().status == SelectionExporter::Status::idle);
+}
+TEST_CASE("Finalized WAV validation rejects a truncated export", "[export][finalize]")
+{
+    TestDirectory t;
+    auto source = t.wave("finalize.wav", 440, 2, 44100);
+    const auto folder = t.dir.getChildFile("exports");
+    AudioExporter exporter;
+    const auto result = exporter.exportRange(source, 0.0, 0.2, folder.getChildFile("final.wav"));
+    REQUIRE(result.success);
+    REQUIRE(AudioExporter::validateWavOutput(result.file, 8820, 44100, 2, 16, false).isEmpty());
+    juce::MemoryBlock bytes;
+    REQUIRE(result.file.loadFileAsData(bytes));
+    REQUIRE(bytes.getSize() > 100);
+    bytes.setSize(bytes.getSize() - 100);
+    const auto truncated = folder.getChildFile("truncated.wav");
+    REQUIRE(truncated.replaceWithData(bytes.getData(), bytes.getSize()));
+    REQUIRE(AudioExporter::validateWavOutput(truncated, 8820, 44100, 2, 16, false).isNotEmpty());
+}
+TEST_CASE("Replacing a selection does not block the caller on an in-flight export", "[export][worker]")
+{
+    TestDirectory t;
+    auto source = t.wave("blocking.wav", 440, 1, 44100);
+    const auto folder = t.dir.getChildFile("exports");
+    std::mutex gateMutex;
+    std::condition_variable gate;
+    bool started = false, release = false;
+    SelectionExporter exporter(folder, [&](const juce::File& file, double start, double end,
+                                           const juce::File& destination, CancelCheck)
+    {
+        {
+            std::unique_lock lock(gateMutex);
+            started = true;
+            gate.notify_all();
+            gate.wait(lock, [&] { return release; });
+        }
+        return AudioExporter().exportSelection(file, start, end, destination, {});
+    });
+    exporter.prepare(source, 0.0, 0.1);
+    {
+        std::unique_lock lock(gateMutex);
+        REQUIRE(gate.wait_for(lock, std::chrono::seconds(5), [&] { return started; }));
+    }
+    std::atomic<bool> returned { false };
+    std::thread replacer([&] { exporter.prepare(source, 0.5, 0.6); returned = true; });
+    const auto deadline = juce::Time::getMillisecondCounter() + 500;
+    while (! returned && juce::Time::getMillisecondCounter() < deadline) juce::Thread::sleep(5);
+    const bool quick = returned;
+    {
+        std::lock_guard lock(gateMutex);
+        release = true;
+    }
+    gate.notify_all();
+    replacer.join();
+    REQUIRE(quick);
+    REQUIRE(exporter.waitUntilFinished(5000));
+    const auto state = exporter.state();
+    REQUIRE(state.generation == 2);
+    REQUIRE(state.start == Catch::Approx(0.5));
+    REQUIRE(state.end == Catch::Approx(0.6));
+    REQUIRE(state.isReady());
 }

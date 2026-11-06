@@ -30,9 +30,7 @@ FileListPanel::FileListPanel()
     addAndMakeVisible(table); table.setRowHeight(34);
     refreshTheme();
     table.setMultipleSelectionEnabled(true);
-    table.onPress = [this](const juce::MouseEvent& e) { handlePress(e); };
-    table.onDrag = [this](const juce::MouseEvent& e) { handleDrag(e); };
-    table.onRelease = [this](const juce::MouseEvent&) { handleRelease(); };
+    table.addMouseListener(&rowDragListener, true);
     auto& h = table.getHeader();
     h.addColumn("",8,30,24,40);
     h.addColumn("SAMPLE",1,250,120,1200);

@@ -8,9 +8,12 @@ ExportResult failure(const juce::File& part, juce::String message)
     part.deleteFile();
     return { false, {}, std::move(message) };
 }
-bool isCompressedFormatName(const juce::String& name)
+bool isCompressedSource(const juce::File& source, const juce::String& formatName)
 {
-    return name.containsIgnoreCase("FLAC") || name.containsIgnoreCase("MP3");
+    const auto extension = source.getFileExtension().toLowerCase();
+    if (extension == ".wav" || extension == ".bwf" || extension == ".aif" || extension == ".aiff")
+        return false;
+    return ! (formatName.containsIgnoreCase("WAV") || formatName.containsIgnoreCase("AIFF"));
 }
 }
 juce::File AudioExporter::defaultExportFolder()
@@ -70,10 +73,11 @@ ExportResult AudioExporter::exportRange(const juce::File& source, double start, 
         endFrame = juce::jlimit<juce::int64>(0, reader->lengthInSamples, endFrame);
         if (endFrame <= startFrame)
             return failure(part, "The selection is shorter than one audio frame");
-        const bool floatingOutput = reader->usesFloatingPointData;
+        const bool compressed = isCompressedSource(source, reader->getFormatName());
+        const bool floatingOutput = ! compressed && reader->usesFloatingPointData;
         int bits = 24;
-        if (floatingOutput) bits = 32;
-        else if (isCompressedFormatName(reader->getFormatName())) bits = 24;
+        if (compressed) bits = 24;
+        else if (floatingOutput) bits = 32;
         else if (reader->bitsPerSample <= 16) bits = 16;
         part.deleteFile();
         std::unique_ptr<juce::OutputStream> stream(part.createOutputStream());
@@ -104,8 +108,10 @@ ExportResult AudioExporter::exportRange(const juce::File& source, double start, 
                 return failure(part, "Cannot write export audio: " + destination.getFileName());
             frame += count;
         }
-        writer->flush();
+        if (! writer->flush()) return failure(part, "Cannot finalise export file: " + destination.getFileName());
         writer.reset();
+        const auto validation = validateWavOutput(part, endFrame - startFrame, rate, channels, bits, floatingOutput);
+        if (validation.isNotEmpty()) return failure(part, validation);
         if (! part.existsAsFile() || part.getSize() <= 0)
             return failure(part, "Cannot finalise export file: " + destination.getFileName());
         if (! part.moveFileTo(destination))
@@ -120,6 +126,28 @@ ExportResult AudioExporter::exportRange(const juce::File& source, double start, 
     {
         return failure(part, "Unknown export error");
     }
+}
+juce::String AudioExporter::validateWavOutput(const juce::File& file, juce::int64 expectedFrames,
+                                              double sampleRate, int channels, int bits, bool floating)
+{
+    if (! file.existsAsFile()) return "Export file is missing";
+    const auto bytesPerSample = floating ? 4 : juce::jmax(1, bits / 8);
+    const auto minimumBytes = (juce::int64) 44 + expectedFrames * channels * bytesPerSample;
+    if (file.getSize() < minimumBytes) return "Export file is truncated";
+    auto stream = file.createInputStream();
+    if (stream == nullptr) return "Export file cannot be opened";
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::AudioFormatReader> reader(wav.createReaderFor(stream.release(), true));
+    if (reader == nullptr) return "Export file cannot be decoded";
+    if (reader->lengthInSamples != expectedFrames) return "Export file has the wrong frame count";
+    if (std::abs(reader->sampleRate - sampleRate) > 0.5) return "Export file has the wrong sample rate";
+    if ((int) reader->numChannels != channels) return "Export file has the wrong channel count";
+    if (reader->bitsPerSample != bits || reader->usesFloatingPointData != floating)
+        return "Export file has the wrong sample format";
+    juce::AudioBuffer<float> lastFrame(channels, 1);
+    if (! reader->read(lastFrame.getArrayOfWritePointers(), channels, expectedFrames - 1, 1))
+        return "Export file payload is unreadable";
+    return {};
 }
 ExportResult AudioExporter::exportSelection(const juce::File& source, double start, double end,
                                             const juce::File& folder, CancelCheck cancel) const

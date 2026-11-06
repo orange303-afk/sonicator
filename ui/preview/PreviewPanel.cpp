@@ -20,7 +20,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     waveform.onExternalDragRequested = [this] { beginExternalDrag(); };
     play.onClick = [this] { togglePlayback(); };
     stop.onClick = [this] { engine.stop(); };
-    loop.onClick = [this] { engine.setLooping(loop.getToggleState()); };
+    loop.onClick = [this] { applyTransportLooping(); };
     skipSilence.onClick = [this] { engine.setSkipSilence(skipSilence.getToggleState()); };
     skipSilence.setTooltip("Next trigger starts one frame before the first nonzero frame; original audio is unchanged");
     midi.setTooltip("16 voices; MIDI note 60 = original pitch; 2 ms attack / 20 ms release. Inputs: Audio settings");
@@ -31,6 +31,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
         else if (loadedFile != juce::File()) filename.setText(loadedFile.getFileName(),juce::dontSendNotification);
     };
     autoPreview.setComponentID("autoPreview");
+    loop.setComponentID("loop");
     autoPreview.setToggleState(true,juce::dontSendNotification);
     autoPreview.setTooltip("Automatically audition newly selected files, independently of MIDI Preview");
     clearSelectionButton.setComponentID("clearSelection");
@@ -74,11 +75,13 @@ void PreviewPanel::selectionChanged(selection::Range range)
         clearSelectionButton.setVisible(false);
         selectionStatus.setText({},juce::dontSendNotification);
         exporter.cancel();
+        applyTransportLooping();
         return;
     }
     clearSelectionButton.setVisible(true);
     selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
     exporter.prepare(loadedFile,range.start,range.end);
+    applyTransportLooping();
     refreshSelectionStatus();
 }
 void PreviewPanel::refreshSelectionStatus()
@@ -125,11 +128,28 @@ void PreviewPanel::togglePlayback()
     if (range.valid()) engine.seek(range.start);
     engine.play();
 }
+void PreviewPanel::applyTransportLooping()
+{
+    // Whole-file looping would wrap at EOF before the timer can see the selection boundary.
+    // A selection owns its own loop; the transport loop is restored when it is cleared.
+    const bool wanted = loop.getToggleState() && ! waveform.selection().valid();
+    if (engine.isLooping() != wanted) engine.setLooping(wanted);
+}
 void PreviewPanel::updateSelectionPlayback()
 {
     const auto range = waveform.selection();
-    if (! range.valid() || ! engine.isPlaying()) return;
-    const auto action = selectionBoundary(engine.position(),range.start,range.end,engine.isLooping());
+    if (! range.valid()) return;
+    const bool loopWanted = loop.getToggleState();
+    if (! engine.isPlaying())
+    {
+        if (loopWanted && engine.transport().hasStreamFinished())
+        {
+            engine.seek(range.start);
+            engine.play();
+        }
+        return;
+    }
+    const auto action = selectionBoundary(engine.position(),range.start,range.end,loopWanted);
     if (action == SelectionBoundary::restart) engine.seek(range.start);
     else if (action == SelectionBoundary::stop) engine.pause();
 }

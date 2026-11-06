@@ -65,3 +65,40 @@ TEST_CASE("FileListPanel prepares unselected rows and exposes multi-selected ori
     REQUIRE(list.prepareRowDrag(1) == 1);
     REQUIRE(list.getSelectedRow() == 1);
 }
+namespace sonicator
+{
+struct FileListPanelTestAccess
+{
+    static juce::TableListBox& table(FileListPanel& list) { return list.table; }
+    static void press(FileListPanel& list, const juce::MouseEvent& e) { list.rowDragListener.mouseDown(e); }
+    static void drag(FileListPanel& list, const juce::MouseEvent& e) { list.rowDragListener.mouseDrag(e); }
+};
+}
+TEST_CASE("Row gesture reaches the listener with the whole multi-selection", "[drag][library]")
+{
+    TestDirectory t; auto a = t.wave("a.wav"), b = t.wave("b.wav");
+    SampleRecord ra, rb; ra.id = 1; ra.filePath = a.getFullPathName(); ra.fileName = "a.wav";
+    rb.id = 2; rb.filePath = b.getFullPathName(); rb.fileName = "b.wav";
+    FileListPanel list; list.setBounds(0, 0, 800, 400); list.resized();
+    list.setSamples({ ra, rb });
+    list.createComponentSnapshot(list.getLocalBounds());
+    auto* row = FileListPanelTestAccess::table(list).getComponentForRowNumber(0);
+    REQUIRE(row != nullptr);
+    list.selectRows({ 0, 1 });
+    bool called = false, canMove = true; juce::StringArray seen;
+    list.setExternalDragHandler([&](const juce::StringArray& files, bool move, juce::Component*)
+    {
+        called = true; seen = files; canMove = move; return true;
+    });
+    const auto now = juce::Time::getCurrentTime();
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    juce::MouseEvent down(source, { 5.0f, 5.0f }, juce::ModifierKeys(), 1.0f, 0, 0, 0, 0,
+                          row, row, now, { 5.0f, 5.0f }, now, 1, false);
+    FileListPanelTestAccess::press(list, down);
+    juce::MouseEvent dragged(source, { 5.0f, 12.0f }, juce::ModifierKeys(), 1.0f, 0, 0, 0, 0,
+                             row, row, now, { 5.0f, 5.0f }, now, 1, true);
+    FileListPanelTestAccess::drag(list, dragged);
+    REQUIRE(called); REQUIRE_FALSE(canMove);
+    REQUIRE(seen.size() == 2);
+    REQUIRE(seen[0] == a.getFullPathName()); REQUIRE(seen[1] == b.getFullPathName());
+}

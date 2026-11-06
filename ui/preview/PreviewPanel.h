@@ -40,6 +40,7 @@ private:
     juce::Label selectionStatus;
     void timerCallback() override;
     void togglePlayback();
+    void applyTransportLooping();
     void selectionChanged(selection::Range);
     void refreshSelectionStatus();
     void beginExternalDrag();

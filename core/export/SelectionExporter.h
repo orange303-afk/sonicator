@@ -4,9 +4,9 @@
 #include <mutex>
 #include <thread>
 namespace sonicator {
-// Prepares one selection export at a time away from the message thread. A newer prepare()
-// invalidates the previous generation so a stale result is never exposed. The owner polls
-// state() (the preview uses its existing 30 Hz timer) or calls waitUntilFinished().
+// One persistent background worker prepares selection exports. prepare() never joins the message
+// thread; a newer request invalidates the running generation and is picked up next. The owner polls
+// state() (the preview uses its 30 Hz timer) or calls waitUntilFinished().
 class SelectionExporter
 {
 public:
@@ -20,23 +20,31 @@ public:
         juce::uint64 generation = 0;
         bool isReady() const { return status == Status::ready && file.existsAsFile(); }
     };
-    explicit SelectionExporter(juce::File exportFolder);
+    using ExportFunction = std::function<ExportResult(const juce::File&, double, double,
+                                                      const juce::File&, CancelCheck)>;
+    explicit SelectionExporter(juce::File exportFolder, ExportFunction exportFunction = {});
     ~SelectionExporter();
     void prepare(const juce::File& source, double start, double end);
     void cancel();
     State state() const;
-    // Joins the current job if it has already finished; returns false on timeout.
+    // Waits for the current generation to finish; returns false on timeout.
     bool waitUntilFinished(int timeoutMs);
 private:
+    struct Request
+    {
+        juce::File source;
+        double start = 0, end = 0;
+        juce::uint64 generation = 0;
+    };
     juce::File folder;
+    ExportFunction exporter;
     mutable std::mutex stateMutex;
-    std::condition_variable finishedCondition;
+    std::condition_variable workCondition, finishedCondition;
     State current;
-    juce::File requestSource;
-    double requestStart = 0, requestEnd = 0;
+    Request pendingRequest;
+    bool hasPendingRequest = false, stopping = false, jobFinished = true;
     juce::uint64 generation = 0;
-    bool jobFinished = true;
     std::thread worker;
-    void run(juce::uint64 jobGeneration);
+    void run();
 };
 } // namespace sonicator

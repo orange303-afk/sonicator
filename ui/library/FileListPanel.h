@@ -10,7 +10,11 @@ class FileListPanel final : public juce::Component, public juce::TableListBoxMod
 {
 public:
     FileListPanel();
-    ~FileListPanel() override { table.setModel(nullptr); }
+    ~FileListPanel() override
+    {
+        table.removeMouseListener(&rowDragListener);
+        table.setModel(nullptr);
+    }
     struct LoadedRows
     {
         std::vector<SampleRecord> records;
@@ -48,28 +52,19 @@ public:
     std::function<void(const std::vector<SampleRecord>&, const SampleRecord&, juce::Point<int>)> onContextMenu;
     std::function<void(juce::String)> onDragMessage;
 private:
-    class DragTable final : public juce::TableListBox
+    // Rows are child components, so a plain TableListBox override never sees their mouse events.
+    // A recursive listener receives the row gesture and maps it into table coordinates.
+    struct RowDragListener final : public juce::MouseListener
     {
-    public:
-        using juce::TableListBox::TableListBox;
-        std::function<void(const juce::MouseEvent&)> onPress, onDrag, onRelease;
-        void mouseDown(const juce::MouseEvent& e) override
-        {
-            juce::TableListBox::mouseDown(e);
-            if (onPress) onPress(e);
-        }
-        void mouseDrag(const juce::MouseEvent& e) override
-        {
-            juce::TableListBox::mouseDrag(e);
-            if (onDrag) onDrag(e);
-        }
-        void mouseUp(const juce::MouseEvent& e) override
-        {
-            juce::TableListBox::mouseUp(e);
-            if (onRelease) onRelease(e);
-        }
+        explicit RowDragListener(FileListPanel& o) : owner(o) {}
+        void mouseDown(const juce::MouseEvent& e) override { owner.handlePress(e); }
+        void mouseDrag(const juce::MouseEvent& e) override { owner.handleDrag(e); }
+        void mouseUp(const juce::MouseEvent&) override { owner.handleRelease(); }
+        FileListPanel& owner;
     };
-    DragTable table { "Sample library", this };
+    friend struct FileListPanelTestAccess;
+    juce::TableListBox table { "Sample library", this };
+    RowDragListener rowDragListener { *this };
     std::vector<SampleRecord> all, visible;
     bool virtualMode = false;
     std::vector<int64_t> virtualIds;

@@ -1,44 +1,48 @@
 #include "SelectionExporter.h"
 namespace sonicator {
-SelectionExporter::SelectionExporter(juce::File exportFolder) : folder(std::move(exportFolder))
+SelectionExporter::SelectionExporter(juce::File exportFolder, ExportFunction exportFunction)
+    : folder(std::move(exportFolder)), exporter(std::move(exportFunction))
 {
+    worker = std::thread([this] { run(); });
 }
 SelectionExporter::~SelectionExporter()
 {
     {
         std::lock_guard lock(stateMutex);
+        stopping = true;
+        hasPendingRequest = false;
         ++generation;
+        jobFinished = true;
     }
+    workCondition.notify_all();
+    finishedCondition.notify_all();
     if (worker.joinable()) worker.join();
 }
 void SelectionExporter::prepare(const juce::File& source, double start, double end)
 {
-    juce::uint64 jobGeneration = 0;
     {
         std::lock_guard lock(stateMutex);
-        jobGeneration = ++generation;
-    }
-    // The old worker checks the generation at every chunk boundary, so this join stays short.
-    if (worker.joinable()) worker.join();
-    {
-        std::lock_guard lock(stateMutex);
+        pendingRequest = { source, start, end, ++generation };
+        hasPendingRequest = true;
         jobFinished = false;
-        requestSource = source;
-        requestStart = start;
-        requestEnd = end;
         current = {};
         current.status = Status::preparing;
         current.start = start;
         current.end = end;
-        current.generation = jobGeneration;
+        current.generation = generation;
     }
-    worker = std::thread([this, jobGeneration] { run(jobGeneration); });
+    workCondition.notify_one();
 }
 void SelectionExporter::cancel()
 {
-    std::lock_guard lock(stateMutex);
-    ++generation;
-    current = {};
+    {
+        std::lock_guard lock(stateMutex);
+        ++generation;
+        hasPendingRequest = false;
+        current = {};
+        jobFinished = true;
+    }
+    finishedCondition.notify_all();
 }
 SelectionExporter::State SelectionExporter::state() const
 {
@@ -47,41 +51,42 @@ SelectionExporter::State SelectionExporter::state() const
 }
 bool SelectionExporter::waitUntilFinished(int timeoutMs)
 {
-    bool finished = false;
-    {
-        std::unique_lock lock(stateMutex);
-        finished = finishedCondition.wait_for(lock, std::chrono::milliseconds(timeoutMs),
-                                              [this] { return jobFinished; });
-    }
-    if (finished && worker.joinable()) worker.join();
-    return finished;
+    std::unique_lock lock(stateMutex);
+    return finishedCondition.wait_for(lock, std::chrono::milliseconds(timeoutMs),
+                                      [this] { return jobFinished; });
 }
-void SelectionExporter::run(juce::uint64 jobGeneration)
+void SelectionExporter::run()
 {
-    juce::File source;
-    double start = 0, end = 0;
+    for (;;)
     {
-        std::lock_guard lock(stateMutex);
-        source = requestSource;
-        start = requestStart;
-        end = requestEnd;
-    }
-    const auto cancel = [this, jobGeneration]
-    {
-        std::lock_guard lock(stateMutex);
-        return jobGeneration != generation;
-    };
-    const auto result = AudioExporter().exportSelection(source, start, end, folder, cancel);
-    {
-        std::lock_guard lock(stateMutex);
-        if (jobGeneration == generation)
+        Request request;
         {
-            current.status = result.success ? Status::ready : Status::failed;
-            current.file = result.file;
-            current.error = result.error;
+            std::unique_lock lock(stateMutex);
+            workCondition.wait(lock, [this] { return stopping || hasPendingRequest; });
+            if (stopping) return;
+            request = pendingRequest;
+            hasPendingRequest = false;
         }
-        jobFinished = true;
+        const auto jobGeneration = request.generation;
+        const auto cancelled = [this, jobGeneration]
+        {
+            std::lock_guard lock(stateMutex);
+            return stopping || jobGeneration != generation;
+        };
+        const auto result = exporter
+            ? exporter(request.source, request.start, request.end, folder, cancelled)
+            : AudioExporter().exportSelection(request.source, request.start, request.end, folder, cancelled);
+        {
+            std::lock_guard lock(stateMutex);
+            if (jobGeneration == generation)
+            {
+                current.status = result.success ? Status::ready : Status::failed;
+                current.file = result.file;
+                current.error = result.error;
+                jobFinished = true;
+            }
+        }
+        finishedCondition.notify_all();
     }
-    finishedCondition.notify_all();
 }
 } // namespace sonicator

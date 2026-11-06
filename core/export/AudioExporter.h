@@ -17,6 +17,9 @@ public:
     static juce::File defaultExportFolder();
     static juce::String sanitizeStem(const juce::String& sourceFileNameWithoutExtension);
     static juce::String rangeSuffix(double startSeconds, double endSeconds);
+    // Returns an empty string when the WAV has the expected format, frame count and payload bytes.
+    static juce::String validateWavOutput(const juce::File&, juce::int64 expectedFrames,
+                                          double sampleRate, int channels, int bits, bool floating);
     ExportResult exportRange(const juce::File& source, double start, double end,
                              const juce::File& destination, CancelCheck cancel = {}) const;
     ExportResult exportSelection(const juce::File& source, double start, double end,
