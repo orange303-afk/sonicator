@@ -161,14 +161,29 @@ void MidiSampler::render(juce::AudioBuffer<float>& out,int start,int count,const
 void PreviewOutput::prepareToPlay(int blockSize,double rate)
 {
     transport.prepareToPlay(blockSize,rate); sampler.prepare(rate); messages.ensureSize(65536);
+    midiBuffer.setSize(2,juce::jmax(1,blockSize));
     messages.clear(); collector.drain(messages); messages.clear();
 }
 void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
     messages.clear(); if (collector.drain(messages)) sampler.reset();
-    if (! midi.load()) { transport.getNextAudioBlock(info); return; }
-    sampler.render(*info.buffer,info.startSample,info.numSamples,messages);
-    info.buffer->applyGain(info.startSample,info.numSamples,gain.load());
+    const bool midiEnabled = midi.load();
+    // Chunk both paths: JUCE's resampler can otherwise resize its internal buffer for
+    // callbacks larger than prepareToPlay's block size, even though our MIDI scratch fits.
+    for (int offset = 0; offset < info.numSamples;)
+    {
+        const int count = juce::jmin(midiBuffer.getNumSamples(),info.numSamples-offset);
+        transport.getNextAudioBlock({info.buffer,info.startSample+offset,count});
+        if (midiEnabled)
+        {
+            sampler.render(midiBuffer,0,count,messages);
+            for (int ch = 0; ch < info.buffer->getNumChannels(); ++ch)
+                info.buffer->addFrom(ch,info.startSample+offset,midiBuffer,juce::jmin(ch,1),0,count,gain.load());
+        }
+        messages.clear(); // Input is block-quantised; never retrigger notes for later chunks.
+        offset += count;
+    }
+    if (! midiEnabled) return;
     // Smooth safety knee for dense chords; no hard clipping at the hardware output.
     for (int ch = 0; ch < info.buffer->getNumChannels(); ++ch)
         for (int i = info.startSample; i < info.startSample+info.numSamples; ++i)

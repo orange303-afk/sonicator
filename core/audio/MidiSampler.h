@@ -64,5 +64,6 @@ private:
     juce::AudioTransportSource& transport;
     MidiSampler& sampler;
     juce::MidiBuffer messages;
+    juce::AudioBuffer<float> midiBuffer;
 };
 }

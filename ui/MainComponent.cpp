@@ -10,7 +10,6 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     : dbPath(databaseFile), engine(openDevice), preview(engine,dbPath.getParentDirectory().getChildFile("cache"))
 {
     setLookAndFeel(&look); setWantsKeyboardFocus(true);
-    headerIcon = juce::ImageFileFormat::loadFrom(BinaryData::iconheader_png, BinaryData::iconheader_pngSize);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
     for (auto* c : std::array<juce::Component*,20>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,
          &pause,&cancel,&settings,&previousPage,&nextPage,&heading,&subtitle,&libraryHeading,&rootsLabel,
@@ -51,6 +50,14 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     settings.onClick = [this] { showAudioSettings(); };
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-10000); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += 10000; reloadLibrary(); };
+    preview.onAction = [this] { library.focusForNavigation(); };
+    for (auto* button : std::array<juce::Button*,8>{&addFolder,&rescan,&reanalyze,&pause,&cancel,&settings,&previousPage,&nextPage})
+    {
+        button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
+        if (button == &addFolder || button == &settings) continue; // Modal dialogs must retain their own focus.
+        auto action = button->onClick;
+        button->onClick = [this,action] { if (action) action(); library.focusForNavigation(); };
+    }
     try
     {
         writeDb = std::make_unique<Database>(dbPath); writeRepo = std::make_unique<SampleRepository>(*writeDb);
@@ -187,19 +194,15 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(theme::line); g.drawHorizontalLine(85,0,(float) getWidth());
     g.drawVerticalLine(sidebarBounds.getRight(),86,(float) sidebarBounds.getBottom());
     g.drawVerticalLine(analysisBounds.getX(),86,(float) analysisBounds.getBottom());
-    g.setColour(theme::accent);
-    if (! headerIcon.isValid()) { g.drawEllipse(20,23,28,28,1.5f); g.drawEllipse(14,31,40,12,1.0f); }
-    if (headerIcon.isValid())
-        g.drawImage(headerIcon, juce::Rectangle<float>(16,26,32,32), juce::RectanglePlacement::centred);
     if (logoWordmark.isValid())
-        g.drawImage(logoWordmark, juce::Rectangle<float>(58,10,230,66),
+        g.drawImage(logoWordmark, juce::Rectangle<float>(16,8,310,70),
                     juce::RectanglePlacement::onlyReduceInSize | juce::RectanglePlacement::centred);
 }
 void MainComponent::resized()
 {
     auto r = getLocalBounds(); headerBounds = r.removeFromTop(86);
-    auto header = headerBounds.reduced(16,14); header.removeFromLeft(46);
-    auto branding = header.removeFromLeft(280);
+    auto header = headerBounds.reduced(16,14);
+    auto branding = header.removeFromLeft(310); header.removeFromLeft(16);
     heading.setBounds(branding.removeFromTop(30)); subtitle.setBounds(branding);
     settings.setBounds(header.removeFromRight(115).withSizeKeepingCentre(115,32));
     header.removeFromRight(16); search.setBounds(header.withSizeKeepingCentre(header.getWidth(),34));

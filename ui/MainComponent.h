@@ -18,7 +18,7 @@ public:
     bool refreshIfCatalogChanged();
 private:
     SonicatorLookAndFeel look;
-    juce::Image headerIcon, logoWordmark;
+    juce::Image logoWordmark;
     juce::File dbPath;
     AudioEngine engine;
     PreviewPanel preview;

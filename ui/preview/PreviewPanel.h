@@ -8,6 +8,7 @@ public:
     PreviewPanel(AudioEngine&, const juce::File& cacheFolder);
     ~PreviewPanel() override { stopTimer(); }
     bool loadFile(const juce::File&);
+    std::function<void()> onAction;
     void resized() override;
     void paint(juce::Graphics&) override;
     bool keyPressed(const juce::KeyPress&) override;
@@ -20,6 +21,7 @@ private:
     juce::TextButton play { "Play" }, stop { "Stop" };
     juce::ToggleButton loop { "Loop" };
     juce::ToggleButton midi { "MIDI Preview" }, skipSilence { "Skip Silence" };
+    juce::ToggleButton autoPreview { "Auto Preview" };
     juce::Slider volume;
     void timerCallback() override;
     void togglePlayback();

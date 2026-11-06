@@ -4,6 +4,44 @@
 #include "core/audio/MidiSampler.h"
 #include "TestHelpers.h"
 using namespace sonicator;
+TEST_CASE("Oversized output callbacks chunk the transport as well as MIDI", "[audio][auto-preview]")
+{
+    struct Probe final : juce::PositionableAudioSource
+    {
+        int largest = 0, calls = 0; juce::int64 position = 0;
+        void prepareToPlay(int,double) override {} void releaseResources() override {}
+        void getNextAudioBlock(const juce::AudioSourceChannelInfo& info) override
+        { largest = juce::jmax(largest,info.numSamples); ++calls; position += info.numSamples; info.clearActiveBufferRegion(); }
+        void setNextReadPosition(juce::int64 p) override { position = p; }
+        juce::int64 getNextReadPosition() const override { return position; }
+        juce::int64 getTotalLength() const override { return 100000; }
+        bool isLooping() const override { return false; }
+    } probe;
+    juce::AudioTransportSource transport; transport.setSource(&probe);
+    MidiSampler sampler; PreviewOutput output(transport,sampler); output.prepareToPlay(64,44100);
+    transport.start(); juce::AudioBuffer<float> buffer(2,600);
+    buffer.setSample(0,0,0.123f); output.getNextAudioBlock({&buffer,16,512});
+    REQUIRE(probe.largest <= 64); REQUIRE(probe.calls == 8); REQUIRE(probe.position == 512);
+    REQUIRE(buffer.getSample(0,0) == 0.123f);
+    output.releaseResources(); transport.setSource(nullptr);
+}
+TEST_CASE("MIDI output mixes ordinary preview instead of silencing it", "[audio][auto-preview]")
+{
+    TestDirectory t; auto file = t.wave();
+    juce::AudioFormatManager formats; formats.registerBasicFormats();
+    juce::AudioFormatReaderSource reader(formats.createReaderFor(file),true);
+    juce::AudioTransportSource transport; transport.setSource(&reader,0,nullptr,44100);
+    MidiSampler sampler; REQUIRE(sampler.load(file).isEmpty());
+    PreviewOutput output(transport,sampler); output.prepareToPlay(128,44100); output.midi = true;
+    transport.start(); juce::AudioBuffer<float> buffer(2,512);
+    output.getNextAudioBlock({&buffer,0,512});
+    REQUIRE(buffer.getMagnitude(0,512) > 0.5f);
+    REQUIRE(transport.getCurrentPosition() > 0.01);
+    output.collector.push(juce::MidiMessage::noteOn(1,72,1.0f));
+    output.getNextAudioBlock({&buffer,0,512}); REQUIRE(sampler.activeVoices() == 1);
+    REQUIRE(transport.getCurrentPosition() > 0.02);
+    output.releaseResources(); transport.setSource(nullptr);
+}
 TEST_CASE("MIDI input rejects SysEx and bounds overflow without stuck notes", "[audio][midi]")
 {
     MidiEventQueue queue; juce::MidiBuffer midi; midi.ensureSize(65536);

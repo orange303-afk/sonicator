@@ -3,7 +3,7 @@
 namespace sonicator {
 PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder) : engine(audio),waveform(cacheFolder)
 {
-    for (auto* c : std::array<juce::Component*,9>{&waveform, &filename, &time, &play, &stop, &loop, &volume, &midi, &skipSilence})
+    for (auto* c : std::array<juce::Component*,10>{&waveform, &filename, &time, &play, &stop, &loop, &volume, &midi, &skipSilence, &autoPreview})
         addAndMakeVisible(c);
     filename.setText("No sample selected",juce::dontSendNotification);
     filename.setFont(juce::FontOptions(14,juce::Font::bold));
@@ -25,6 +25,16 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder) : e
         { midi.setToggleState(false,juce::dontSendNotification); filename.setText(engine.error(),juce::dontSendNotification); }
         else if (loadedFile != juce::File()) filename.setText(loadedFile.getFileName(),juce::dontSendNotification);
     };
+    autoPreview.setComponentID("autoPreview");
+    autoPreview.setToggleState(true,juce::dontSendNotification);
+    autoPreview.setTooltip("Automatically audition newly selected files, independently of MIDI Preview");
+    for (auto* button : std::array<juce::Button*,6>{&play,&stop,&loop,&midi,&skipSilence,&autoPreview})
+    {
+        button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
+        auto action = button->onClick;
+        button->onClick = [this,action] { if (action) action(); if (onAction) onAction(); };
+    }
+    volume.setWantsKeyboardFocus(false); volume.setMouseClickGrabsKeyboardFocus(false);
     setWantsKeyboardFocus(true); startTimerHz(30);
 }
 bool PreviewPanel::loadFile(const juce::File& file)
@@ -37,7 +47,7 @@ bool PreviewPanel::loadFile(const juce::File& file)
     loadedModified = success ? file.getLastModificationTime().toMilliseconds() : 0;
     filename.setText(success ? file.getFileName() : engine.error(),juce::dontSendNotification);
     waveform.setFile(success ? file : juce::File());
-    if (success && ! engine.isMidiPreview()) engine.play();
+    if (success && autoPreview.getToggleState()) engine.play();
     return success;
 }
 void PreviewPanel::togglePlayback() { if (engine.isPlaying()) engine.pause(); else engine.play(); }
@@ -53,7 +63,7 @@ void PreviewPanel::timerCallback()
 {
     waveform.setPosition(engine.position());
     time.setText(juce::String(engine.position(),2) + " / " + juce::String(engine.length(),2) + " s",juce::dontSendNotification);
-    play.setButtonText(engine.isPlaying() ? "Pause" : "Play"); play.setEnabled(! engine.isMidiPreview());
+    play.setButtonText(engine.isPlaying() ? "Pause" : "Play");
 }
 void PreviewPanel::paint(juce::Graphics& g)
 {
@@ -65,12 +75,13 @@ void PreviewPanel::resized()
     auto top = r.removeFromTop(24); filename.setBounds(top.removeFromLeft(juce::jmax(200,top.getWidth()-160)));
     time.setBounds(top);
     r.removeFromTop(8);
-    auto controls = r.removeFromRight(290); r.removeFromRight(16); waveform.setBounds(r);
+    auto controls = r.removeFromRight(330); r.removeFromRight(16); waveform.setBounds(r);
     auto modes = controls.removeFromTop(28);
     midi.setBounds(modes.removeFromLeft(145)); skipSilence.setBounds(modes);
-    auto buttons = controls.removeFromTop(36);
+    auto options = controls.removeFromTop(26);
+    autoPreview.setBounds(options.removeFromLeft(145)); loop.setBounds(options);
+    auto buttons = controls.removeFromTop(30);
     play.setBounds(buttons.removeFromLeft(78)); buttons.removeFromLeft(6);
-    stop.setBounds(buttons.removeFromLeft(60)); loop.setBounds(buttons);
-    controls.removeFromTop(12); volume.setBounds(controls.removeFromTop(26));
+    stop.setBounds(buttons.removeFromLeft(60)); buttons.removeFromLeft(12); volume.setBounds(buttons);
 }
 }

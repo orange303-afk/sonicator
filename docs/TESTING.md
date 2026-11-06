@@ -1,5 +1,13 @@
 # Phase 1 verification
 
+## Auto Preview, focus and enlarged branding (2026-11-06)
+
+- Debug and Release: **46 cases / 383 assertions**, all passed. Debug CTest 1/1, 5.88 s; Release ad-hoc signature verified.
+- New regression tests first failed for absent Auto Preview, buttons taking focus, and MIDI output silencing ordinary transport. Auto Preview now defaults on and operates independently of MIDI. Manual Play remains available with Auto Preview off.
+- Actual rendering tests exercise simultaneous ordinary transport and MIDI voice, including a 512-frame callback after preparation for 128 frames. Both render paths use preallocated chunking. Independent review found the transport also needed chunking to avoid JUCE resampler growth; a probe-source regression failed at 512 >64, then passed with eight 64-frame calls and preserved output offsets.
+- Preview and main toolbar tests verify click-focus and keyboard-focus policies. Modal dialogs/choosers remain exceptions; text search and folder-tree navigation are not globally intercepted.
+- Offscreen 1440x900 rendering inspected: larger wordmark, separate header icon removed, Auto Preview visible alongside MIDI Preview, Skip Silence and Loop. App bundle icon and branding originals unchanged.
+
 ## Preview, folders and MIDI (2026-11-06)
 
 - Debug and Release: **41 cases / 335 assertions**, all passed. Debug CTest 1/1, 4.55 s. Release bundle ad-hoc signature verified.

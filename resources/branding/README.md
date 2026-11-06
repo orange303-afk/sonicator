@@ -5,9 +5,9 @@ never overwrite an original.
 
 | Original | Source | Derived | Use |
 |---|---|---|---|
-| `originals/logo-silver-original.png` | user, 2026-11-06 | `logo-silver.png` (trimmed) | interface wordmark, light-on-dark use |
+| `originals/logo-silver-original.png` | user, 2026-11-06 | `logo-silver.png` (alpha >=16 visible bounds + 8px margin) | enlarged interface wordmark, light-on-dark use |
 | `originals/icon-mark-original.png` | user, 2026-11-06 | `icon-mark-1024.png` (trimmed, square canvas) | icon variant A, flat mark |
-| `originals/icon-tile-original.png` | user, 2026-11-06 | `icon-tile-1024.png`, `icon-header.png` | app icon and header mark |
+| `originals/icon-tile-original.png` | user, 2026-11-06 | `icon-tile-1024.png`, `icon-header.png` | app icon; header mark retained but no longer displayed |
 
 All three originals are 8-bit RGBA PNG with a transparent background.
 

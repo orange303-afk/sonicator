@@ -5,6 +5,25 @@
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
 using namespace sonicator;
+TEST_CASE("Auto Preview is independently switchable while MIDI remains enabled", "[ui][auto-preview]")
+{
+    TestDirectory t; AudioEngine engine(false); PreviewPanel preview(engine,t.dir.getChildFile("cache"));
+    auto* autoPreview = dynamic_cast<juce::ToggleButton*>(preview.findChildWithID("autoPreview"));
+    REQUIRE(autoPreview != nullptr); REQUIRE(autoPreview->getToggleState());
+    REQUIRE(engine.setMidiPreview(true));
+    REQUIRE(preview.loadFile(t.wave("a.wav"))); REQUIRE(engine.isPlaying()); REQUIRE(engine.isMidiPreview());
+    autoPreview->setToggleState(false,juce::sendNotificationSync);
+    REQUIRE(preview.loadFile(t.wave("b.wav"))); REQUIRE_FALSE(engine.isPlaying()); REQUIRE(engine.isMidiPreview());
+}
+TEST_CASE("Preview controls leave keyboard navigation with the library", "[ui][focus]")
+{
+    TestDirectory t; AudioEngine engine(false); PreviewPanel preview(engine,t.dir.getChildFile("cache"));
+    int buttons = 0;
+    for (auto* child : preview.getChildren())
+        if (auto* button = dynamic_cast<juce::Button*>(child))
+        { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
+    REQUIRE(buttons == 6);
+}
 TEST_CASE("Added folder tree includes deep descendants and responds to arrow keys", "[ui][folders]")
 {
     TestDirectory t; Database db(t.dir.getChildFile("tree.sqlite")); SampleRepository repo(db); repo.createTables();

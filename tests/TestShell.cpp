@@ -6,6 +6,15 @@
 #include "TestHelpers.h"
 #include <iostream>
 using namespace sonicator;
+TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation", "[ui][focus]")
+{
+    TestDirectory t; MainComponent app(t.dir.getChildFile("focus.sqlite"),false);
+    int buttons = 0;
+    for (auto* child : app.getChildren())
+        if (auto* button = dynamic_cast<juce::Button*>(child))
+        { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
+    REQUIRE(buttons == 8);
+}
 TEST_CASE("Large catalog startup restores the actual page and folder tree", "[.catalog-ui]")
 {
     const auto fixture = juce::SystemStats::getEnvironmentVariable("SONICATOR_CATALOG_FIXTURE",{});

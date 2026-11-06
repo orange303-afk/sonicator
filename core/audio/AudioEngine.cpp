@@ -58,7 +58,6 @@ bool AudioEngine::loadFile(const juce::File& file)
 void AudioEngine::play()
 {
     if (! reader) return;
-    if (isMidiPreview()) return;
     if (source.hasStreamFinished() || startAtNextPlay)
     {
         if (skipSilence && audibleStart < 0)

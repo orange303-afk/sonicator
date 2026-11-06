@@ -11,6 +11,7 @@ public:
     void setSearchText(const juce::String&);
     void selectRow(int row) { table.selectRow(row); }
     int getSelectedRow() const { return table.getSelectedRow(); }
+    void focusForNavigation() { table.grabKeyboardFocus(); }
     int getNumRows() override { return (int) visible.size(); }
     void paintRowBackground(juce::Graphics&,int,int,int,bool) override;
     void paintCell(juce::Graphics&,int,int,int,int,bool) override;

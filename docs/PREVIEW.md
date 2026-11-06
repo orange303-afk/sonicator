@@ -8,13 +8,15 @@ Folder queries use the existing path index with separator-aware prefix bounds (D
 
 ## Ordinary preview
 
-Selecting a new file plays it. Programmatic selection restoration does not call the selection action. Reloading an unchanged selected path preserves its transport position. **Play** restarts after EOF; with **Loop** off, EOF stops permanently until another explicit Play. A changed file (size/mtime) is reloaded rather than treating its old preview as current.
+**Auto Preview** is on by default: selecting a new file plays it, including when MIDI Preview is enabled. Turning it off makes selection silent; explicit **Play** remains available in both modes. Programmatic selection restoration does not call the selection action. Reloading an unchanged selected path preserves its transport position. **Play** restarts after EOF; with **Loop** off, EOF stops permanently until another explicit Play. A changed file (size/mtime) is reloaded rather than treating its old preview as current.
+
+Buttons and checkboxes do not take keyboard focus on click; nonmodal toolbar and preview actions restore focus to the file list so Up/Down continue navigating. Search and the folder tree retain their own keyboard behaviour when explicitly focused; modal dialogs/choosers must retain focus while open. The header uses a larger tightly cropped wordmark without a separate decorative icon; the OS app icon is unchanged.
 
 **Skip Silence** is off by default. When enabled, the next start from Stop/EOF begins one frame before the first finite nonzero decoded sample in any channel. It does not trim files, apply a noise threshold or alter playback already in progress. Pause/resume retains its position. Entirely silent audio starts at zero. Detection is performed on the control thread using bounded decode blocks, not on the audio callback; scanning a long entirely silent file can take time.
 
 ## MIDI Preview
 
-Enable **MIDI Preview** to play the selected sample from a hardware MIDI input instead of automatically playing it on selection. On first activation all currently available inputs are enabled. **Audio settings** includes input selection; use it to enable devices connected later. Disabling MIDI Preview stops voices and returns to ordinary preview (press Play or select a different file).
+Enable **MIDI Preview** to play the selected sample from a hardware MIDI input. **Auto Preview** independently controls automatic audition on selection; ordinary preview and MIDI voices are mixed when both are active. On first activation all currently available inputs are enabled. **Audio settings** includes input selection; use it to enable devices connected later. Changing MIDI Preview stops current playback/voices; press Play or select a different file to audition again.
 
 - 16 voices, mono/stereo audio, note 60 at original pitch; 12 semitones per octave, velocity-sensitive.
 - Attack 2 ms, release 20 ms; NoteOff and sustain pedal supported. At the voice limit new notes are ignored rather than abruptly stealing an audible voice.
