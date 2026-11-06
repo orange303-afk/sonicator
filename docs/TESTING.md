@@ -11,7 +11,7 @@ Environment: macOS, native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5. T
 - Incremental import, failed-file retry, force reanalysis, cancel, missing-file restoration and analyzer-version invalidation.
 - UI filtering/sorting/selection, keyboard transport, persisted startup, minimum/large layout snapshots, Unicode filesystem→index→reopen→preview, settings-dialog teardown.
 
-Final default suite for Phase 1: **23 cases / 205 assertions passed**. CTest: **1/1 passed**, 5.09 s. Current suite after the stability stage: **28 cases / 250 assertions** (see below).
+Final default suite for Phase 1: **23 cases / 205 assertions passed**. CTest: **1/1 passed**, 5.09 s. Current suite after the stability stage: **29 cases / 265 assertions** (see below).
 
 ## Scale and large files
 
@@ -60,7 +60,7 @@ Windows / Intel macOS execution, ASan, concurrent UI-writer stress, hardware lat
 
 Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.
 
-- Default suite: **28 cases / 250 assertions passed** (Debug and Release).
+- Default suite: **29 cases / 265 assertions passed** (Debug and Release).
 - New coverage: schema v1→v2 migration with an online backup created exactly once and rows preserved; keyset path stream and batch missing updates; missing detection from the discovery set without touching unscanned roots; version-1 results skipped instead of reanalyzed; catalog rows added after startup appearing in the list.
 - Synthetic scale test `[.scale]`, 300,000 inserted rows and one real WAV: full scan including reconciliation **4.58 s**, unchanged second scan **0.71 s**, and the 300,000 ghost rows carry `missing = 1`; reconciliation query plan is a primary-key search with no temporary B-tree; the full 20-column page query is ordered by `samples_name_id` with no temporary B-tree.
 - Read-only check on a copy of the owner's real catalog (299,057 rows): creating the index **0.179 s**; first 10,000-row page **0.024 s** (previously 0.505 s with a temp sort); a full keyset walk over all 299,057 rows **0.126 s**. Counts and every row were preserved; `user_version` stayed 1 on the original because it was never opened by the new build.
