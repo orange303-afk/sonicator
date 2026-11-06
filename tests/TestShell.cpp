@@ -2,6 +2,7 @@
 #include "ui/MainComponent.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/library/TagStrip.h"
+#include "ui/settings/RelocateFoldersPanel.h"
 #include "core/database/SampleRepository.h"
 #include "core/dsp/BasicAnalyzer.h"
 #include "TestHelpers.h"
@@ -447,13 +448,14 @@ TEST_CASE("Filter bar has Hide empty and no Hide duplicates button", "[ui][filte
 TEST_CASE("A catalog with missing roots shows a relocation hint at startup", "[ui][relocation]")
 {
     TestDirectory t;
+    const auto gone = t.dir.getChildFile("gone/Drums").getFullPathName();
     auto dbPath = t.dir.getChildFile("missing-roots.sqlite");
     {
         Database db(dbPath); SampleRepository repo(db); repo.createTables();
-        SampleRecord r; r.filePath = "/gone/Drums/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
-        repo.addRoot("/gone/Drums");
+        SampleRecord r; r.filePath = gone + "/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
+        repo.addRoot(gone);
     }
-    MainComponent app(dbPath, false);
+    MainComponent app(dbPath, false, {}, t.dir.getChildFile("settings.json"));
     auto* status = dynamic_cast<juce::Label*>(app.findChildWithID("importStatus"));
     REQUIRE(status != nullptr);
     REQUIRE(status->getText().contains("not found"));
@@ -463,13 +465,14 @@ TEST_CASE("A catalog with missing roots shows a relocation hint at startup", "[u
 TEST_CASE("Relocation dialog lists every missing root", "[ui][relocation]")
 {
     TestDirectory t;
+    const auto gone = t.dir.getChildFile("gone/Drums").getFullPathName();
     auto dbPath = t.dir.getChildFile("dialog.sqlite");
     {
         Database db(dbPath); SampleRepository repo(db); repo.createTables();
-        SampleRecord r; r.filePath = "/gone/Drums/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
-        repo.addRoot("/gone/Drums");
+        SampleRecord r; r.filePath = gone + "/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
+        repo.addRoot(gone);
     }
-    MainComponent app(dbPath, false);
+    MainComponent app(dbPath, false, {}, t.dir.getChildFile("settings.json"));
     app.showRelocateDialog();
     juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
     auto* modal = juce::Component::getCurrentlyModalComponent();
@@ -490,6 +493,8 @@ TEST_CASE("Relocation dialog lists every missing root", "[ui][relocation]")
 TEST_CASE("Opening a catalog with missing roots offers relocation", "[ui][relocation]")
 {
     TestDirectory t;
+    const auto gone = t.dir.getChildFile("gone/Drums").getFullPathName();
+    auto settingsFile = t.dir.getChildFile("settings.json");
     auto dbA = t.dir.getChildFile("a.sqlite");
     {
         Database db(dbA); SampleRepository repo(db); repo.createTables();
@@ -498,16 +503,65 @@ TEST_CASE("Opening a catalog with missing roots offers relocation", "[ui][reloca
     auto dbB = t.dir.getChildFile("b.sqlite");
     {
         Database db(dbB); SampleRepository repo(db); repo.createTables();
-        SampleRecord r; r.filePath = "/gone/Drums/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
-        repo.addRoot("/gone/Drums");
+        SampleRecord r; r.filePath = gone + "/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
+        repo.addRoot(gone);
     }
-    MainComponent app(dbA, false);
+    MainComponent app(dbA, false, {}, settingsFile);
     juce::String error;
     REQUIRE(app.switchCatalog(dbB, false, error));
+    REQUIRE(SettingsStore(settingsFile).load().databasePath == dbB.getFullPathName());
     juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
     auto* modal = juce::Component::getCurrentlyModalComponent();
     REQUIRE(modal != nullptr);
     REQUIRE(modal->getName() == "Relocate folders");
     modal->exitModalState(0);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+}
+
+TEST_CASE("Relocating through the dialog writes a backup and rewrites the catalog", "[ui][relocation]")
+{
+    TestDirectory t;
+    const auto gone = t.dir.getChildFile("gone/Drums");
+    const auto newRoot = t.dir.getChildFile("new-root"); newRoot.createDirectory();
+    const auto dbPath = t.dir.getChildFile("apply.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        SampleRecord r; r.filePath = gone.getChildFile("Kick/01.wav").getFullPathName();
+        r.fileName = "01.wav"; r.fileHash = "h"; repo.upsert(r);
+        repo.addRoot(gone.getFullPathName());
+    }
+    // The probe checks existence only; the fixture needs the remapped relative path.
+    auto targetFile = newRoot.getChildFile("Kick/01.wav");
+    REQUIRE(targetFile.getParentDirectory().createDirectory());
+    REQUIRE(targetFile.replaceWithText("audio"));
+    MainComponent app(dbPath, false, {}, t.dir.getChildFile("settings.json"));
+    app.showRelocateDialog();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    auto* modal = dynamic_cast<juce::DialogWindow*>(juce::Component::getCurrentlyModalComponent());
+    REQUIRE(modal != nullptr);
+    auto* panel = dynamic_cast<RelocateFoldersPanel*>(modal->getContentComponent());
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->setTarget(0, newRoot));
+    REQUIRE_FALSE(panel->needsConfirmation());
+    auto* applyButton = dynamic_cast<juce::Button*>(panel->findChildWithID("relocateApply"));
+    REQUIRE(applyButton != nullptr);
+    applyButton->onClick();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    REQUIRE(juce::Component::getCurrentlyModalComponent() == nullptr);
+
+    auto backups = t.dir.findChildFiles(juce::File::findFiles, false, "apply.sqlite.relocate-*.sqlite");
+    REQUIRE(backups.size() == 1);
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        REQUIRE_FALSE(repo.findByPath(gone.getChildFile("Kick/01.wav").getFullPathName()).has_value());
+        auto moved = repo.findByPath(newRoot.getChildFile("Kick/01.wav").getFullPathName());
+        REQUIRE(moved.has_value());
+        REQUIRE(moved->fileHash == "h");
+        REQUIRE(repo.roots().contains(newRoot.getFullPathName()));
+        REQUIRE_FALSE(repo.roots().contains(gone.getFullPathName()));
+    }
+    auto* status = dynamic_cast<juce::Label*>(app.findChildWithID("importStatus"));
+    REQUIRE(status != nullptr);
+    REQUIRE(status->getText().contains("Relocated 1 file(s)"));
+    REQUIRE(status->getText().contains("Backup"));
 }

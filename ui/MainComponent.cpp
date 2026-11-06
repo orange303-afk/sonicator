@@ -218,17 +218,20 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         status.setText(catalogCount > 0
             ? juce::String(catalogCount) + " samples loaded"
             : "Ready. Add a folder to begin.",juce::dontSendNotification);
-        const auto missing = missingRoots();
-        if (catalogCount > 0 && ! missing.isEmpty())
-        {
-            status.setText(juce::String(missing.size())
-                + " catalog folder(s) not found on this computer. Settings > Relocate folders...",
-                juce::dontSendNotification);
-            status.setTooltip(missing.joinIntoString("\n"));
-        }
     }
     catch (const std::exception& e) { status.setText("Database error: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
-    if (engine.error().isNotEmpty()) status.setText("Audio device: " + engine.error(),juce::dontSendNotification);
+    const auto missing = missingRoots();
+    if (! missing.isEmpty())
+    {
+        status.setText(juce::String(missing.size())
+            + " catalog folder(s) not found on this computer. Settings > Relocate folders...",
+            juce::dontSendNotification);
+        status.setTooltip(missing.joinIntoString("\n"));
+    }
+    else if (engine.error().isNotEmpty())
+    {
+        status.setText("Audio device: " + engine.error(),juce::dontSendNotification);
+    }
     pause.setEnabled(false); cancel.setEnabled(false);
     addFolder.setEnabled(indexer != nullptr); rescan.setEnabled(indexer != nullptr);
     reanalyze.setEnabled(indexer != nullptr); newFiles.setEnabled(indexer != nullptr);
@@ -413,21 +416,37 @@ void MainComponent::showRelocateDialog()
         if (indexer && indexer->progress().running)
             return "Stop indexing before relocating folders.";
         if (! writeRepo || ! readRepo) return "The catalog is not open.";
+        RelocationResult result;
         try
         {
             const auto stamp = juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S");
             auto backup = dbPath.getSiblingFile(dbPath.getFileName() + ".relocate-" + stamp + ".sqlite")
                               .getNonexistentSibling();
             writeRepo->backupTo(backup);
-            const auto result = writeRepo->relocateRoots(relocations);
-            writeRepo->refreshDuplicates();
-            selectedFolder.clear(); pageOffset = 0;
-            folders.refresh(*readRepo);
+            result = writeRepo->relocateRoots(relocations);
+
+            // The transaction has committed. A failure from here on must not be reported as a
+            // failed relocation, because every stored path is already relocated.
+            juce::String refreshWarning;
+            try { writeRepo->refreshDuplicates(); }
+            catch (const std::exception& e) { refreshWarning = juce::String::fromUTF8(e.what()); }
+            selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
+            try { folders.refresh(*readRepo); }
+            catch (const std::exception& e)
+            {
+                if (refreshWarning.isNotEmpty()) refreshWarning += "  |  ";
+                refreshWarning += juce::String::fromUTF8(e.what());
+            }
             reloadLibrary();
-            status.setText("Relocated " + juce::String(result.movedFiles) + " file(s) in "
-                               + juce::String((int) relocations.size()) + " folder(s). Backup: "
-                               + backup.getFullPathName(),
-                           juce::dontSendNotification);
+
+            juce::String message = "Relocated " + juce::String(result.movedFiles) + " file(s) in "
+                + juce::String((int) relocations.size()) + " folder(s).";
+            if (result.conflicts > 0)
+                message += "  |  " + juce::String(result.conflicts) + " existing path collision(s) merged.";
+            message += "  |  Backup: " + backup.getFullPathName();
+            if (refreshWarning.isNotEmpty())
+                message += "  |  Catalog refresh warning: " + refreshWarning;
+            status.setText(message,juce::dontSendNotification);
             status.setTooltip(backup.getFullPathName());
             return {};
         }

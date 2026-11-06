@@ -498,3 +498,22 @@ TEST_CASE("A relocation with a missing target changes nothing", "[database][relo
     REQUIRE(repo.roots().contains(oldRoot.getFullPathName()));
     REQUIRE_FALSE(repo.roots().contains(absent.getFullPathName()));
 }
+
+TEST_CASE("A Windows-style root relocates on a POSIX host", "[database][relocation]")
+{
+    TestDirectory t;
+    auto newRoot = t.dir.getChildFile("foreign-target"); newRoot.createDirectory();
+    Database db(t.dir.getChildFile("foreign.sqlite")); SampleRepository repo(db); repo.createTables();
+    SampleRecord row; row.filePath = "C:\\Samples\\Drums\\Kick\\01.wav"; row.fileName = "01.wav"; row.fileHash = "h";
+    const auto id = repo.upsert(row);
+    repo.addRoot("C:\\Samples\\Drums");
+    REQUIRE(repo.countUnderRoot("C:\\Samples\\Drums") == 1);
+
+    const auto result = repo.relocateRoots({{ "C:\\Samples\\Drums", newRoot.getFullPathName() }});
+    REQUIRE(result.movedFiles == 1);
+    const auto moved = repo.findByPath(newRoot.getChildFile("Kick/01.wav").getFullPathName());
+    REQUIRE(moved.has_value());
+    REQUIRE(moved->id == id);
+    REQUIRE(repo.roots().contains(newRoot.getFullPathName()));
+    REQUIRE_FALSE(repo.roots().contains("C:\\Samples\\Drums"));
+}

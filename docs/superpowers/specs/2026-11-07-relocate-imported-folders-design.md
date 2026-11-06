@@ -67,7 +67,8 @@ the filesystem, so rewriting paths preserves them and avoids reanalysis.
   descendants of each other (prevents two old roots collapsing onto overlapping trees).
 - After a folder is chosen, the dialog counts catalog rows under that root and probes up to 200
   remapped paths with `File::existsAsFile()`. It shows `N files · M of 200 sampled found`; below 90%
-  it shows a warning but still allows the user to continue. This catches "picked the wrong folder".
+  it shows a warning and asks for confirmation before applying (the user can still continue). This
+  catches "picked the wrong folder".
 
 ### Repository operation
 
@@ -101,7 +102,9 @@ RelocationResult relocateRoots(const std::vector<RootRelocation>&);
 - Before applying, `MainComponent` writes an online SQLite backup beside the catalog:
   `<name>.relocate-<YYYYMMDD-HHMMSS>.sqlite` (same `backupTo` API as migrations). If the backup
   fails, nothing is changed.
-- The status line after success reports moved files, relocated roots and the backup path.
+- The status line after success reports moved files, relocated roots, merged collisions when any
+  occurred, and the backup path. Post-commit refresh errors are reported as a warning, never as a
+  failed relocation, because every path is already committed.
 - If relocation throws, the dialog stays open and shows the error; the transaction has rolled back.
 
 ### Cross-platform path helper

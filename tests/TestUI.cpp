@@ -260,13 +260,18 @@ TEST_CASE("Relocation panel enables applying only after every folder is chosen",
     TestDirectory t;
     auto target = t.dir.getChildFile("target"); target.createDirectory();
     RelocateFoldersPanel panel({{ "/missing/Drums", 12 }, { "/missing/Bass", 7 }});
+    panel.onProbe = [](const juce::String&, const juce::String&) { return RelocationProbe{ 10, 0 }; };
     REQUIRE_FALSE(panel.canApply());
     REQUIRE_FALSE(panel.setTarget(0, t.dir.getChildFile("absent")));
     REQUIRE(panel.setTarget(0, target));
+    REQUIRE(panel.needsConfirmation());
     REQUIRE_FALSE(panel.canApply());
     auto other = t.dir.getChildFile("other"); other.createDirectory();
+    panel.onProbe = [](const juce::String&, const juce::String&) { return RelocationProbe{ 10, 10 }; };
+    REQUIRE(panel.setTarget(0, target));
     REQUIRE(panel.setTarget(1, other));
     REQUIRE(panel.canApply());
+    REQUIRE_FALSE(panel.needsConfirmation());
     auto rows = panel.relocations();
     REQUIRE(rows.size() == 2);
     REQUIRE(rows[0].oldRoot == "/missing/Drums");

@@ -107,6 +107,7 @@ struct RelocateFoldersPanel::Row final : juce::Component
 RelocateFoldersPanel::RelocateFoldersPanel(std::vector<RelocateRootInfo> roots)
 {
     setSize(680, 470);
+    setComponentID("relocatePanel");
     for (auto* c : std::array<juce::Component*, 7>{ &title, &explanation, &errorLabel, &viewport,
                                                     &apply, &cancel, &content })
         addAndMakeVisible(c);
@@ -133,16 +134,9 @@ RelocateFoldersPanel::RelocateFoldersPanel(std::vector<RelocateRootInfo> roots)
         button->setWantsKeyboardFocus(false);
         button->setMouseClickGrabsKeyboardFocus(false);
     }
+    apply.setComponentID("relocateApply");
 
-    apply.onClick = [this]
-    {
-        if (! canApply() || ! onApply) return;
-        setError({});
-        const auto error = onApply(relocations());
-        if (error.isNotEmpty()) { setError(error); return; }
-        if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>())
-            dialog->exitModalState(0);
-    };
+    apply.onClick = [this] { requestApply(); };
     cancel.onClick = [this]
     {
         if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>())
@@ -264,6 +258,49 @@ std::vector<RootRelocation> RelocateFoldersPanel::relocations() const
 void RelocateFoldersPanel::updateApplyState()
 {
     apply.setEnabled(canApply());
+}
+
+bool RelocateFoldersPanel::needsConfirmation() const
+{
+    for (const auto& row : rows)
+        if (row->lastProbe.sampled > 0 && row->lastProbe.found * 10 < row->lastProbe.sampled * 9)
+            return true;
+    return false;
+}
+
+void RelocateFoldersPanel::requestApply()
+{
+    if (! canApply() || ! onApply) return;
+    if (! needsConfirmation()) { performApply(); return; }
+    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::WarningIcon)
+        .withTitle("Relocate folders")
+        .withMessage("Some chosen folders contain fewer than 90% of the sampled catalog files. "
+                     "This usually means the wrong folder was chosen. Continue anyway?\n\n"
+                     "A database backup is written before any path is changed.")
+        .withButton("Relocate", 1).withButton("Cancel", 0),
+        [safe = juce::Component::SafePointer<RelocateFoldersPanel>(this)](int choice)
+        {
+            if (safe != nullptr && choice == 1) safe->performApply();
+        });
+}
+
+void RelocateFoldersPanel::performApply()
+{
+    if (! canApply() || ! onApply) return;
+    setError({});
+    apply.setEnabled(false);
+    cancel.setEnabled(false);
+    const auto error = onApply(relocations());
+    if (error.isNotEmpty())
+    {
+        setError(error);
+        cancel.setEnabled(true);
+        updateApplyState();
+        return;
+    }
+    if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>())
+        dialog->exitModalState(0);
 }
 
 void RelocateFoldersPanel::chooseTarget(size_t index)

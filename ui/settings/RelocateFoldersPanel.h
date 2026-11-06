@@ -28,6 +28,7 @@ public:
     void setError(const juce::String&);
     bool setTarget(size_t index, const juce::File& folder);
     bool canApply() const;
+    bool needsConfirmation() const;
     std::vector<RootRelocation> relocations() const;
     std::function<RelocationProbe(const juce::String& oldRoot, const juce::String& newRoot)> onProbe;
     std::function<juce::String(const std::vector<RootRelocation>&)> onApply;
@@ -41,6 +42,8 @@ private:
     juce::TextButton apply { "Relocate" }, cancel { "Not now" };
     std::unique_ptr<juce::FileChooser> chooser;
     void chooseTarget(size_t index);
+    void requestApply();
+    void performApply();
     void updateApplyState();
 };
 } // namespace sonicator
