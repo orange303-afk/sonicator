@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "BinaryData.h"
 namespace sonicator {
 juce::File MainComponent::defaultDatabaseFile()
 {
@@ -9,6 +10,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     : dbPath(databaseFile), engine(openDevice), preview(engine,dbPath.getParentDirectory().getChildFile("cache"))
 {
     setLookAndFeel(&look); setWantsKeyboardFocus(true);
+    headerIcon = juce::ImageFileFormat::loadFrom(BinaryData::iconheader_png, BinaryData::iconheader_pngSize);
+    logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
     for (auto* c : std::array<juce::Component*,20>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,
          &pause,&cancel,&settings,&previousPage,&nextPage,&heading,&subtitle,&libraryHeading,&rootsLabel,
          &status,&countLabel,&analysisHeading,&analysisViewport,&stageLabel})
@@ -17,6 +20,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     heading.setFont(juce::FontOptions(24,juce::Font::bold));
     subtitle.setText("INTELLIGENT SAMPLE EXPLORER",juce::dontSendNotification);
     subtitle.setFont(juce::FontOptions(11)); subtitle.setColour(juce::Label::textColourId,theme::muted);
+    const bool branded = logoWordmark.isValid();
+    heading.setVisible(! branded); subtitle.setVisible(! branded);
     libraryHeading.setText("LIBRARY",juce::dontSendNotification);
     libraryHeading.setColour(juce::Label::textColourId,theme::muted);
     rootsLabel.setText("Add your sample folders.\nOriginal files stay untouched.",juce::dontSendNotification);
@@ -173,7 +178,13 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(theme::line); g.drawHorizontalLine(85,0,(float) getWidth());
     g.drawVerticalLine(sidebarBounds.getRight(),86,(float) sidebarBounds.getBottom());
     g.drawVerticalLine(analysisBounds.getX(),86,(float) analysisBounds.getBottom());
-    g.setColour(theme::accent); g.drawEllipse(20,23,28,28,1.5f); g.drawEllipse(14,31,40,12,1.0f);
+    g.setColour(theme::accent);
+    if (! headerIcon.isValid()) { g.drawEllipse(20,23,28,28,1.5f); g.drawEllipse(14,31,40,12,1.0f); }
+    if (headerIcon.isValid())
+        g.drawImage(headerIcon, juce::Rectangle<float>(16,26,32,32), juce::RectanglePlacement::centred);
+    if (logoWordmark.isValid())
+        g.drawImage(logoWordmark, juce::Rectangle<float>(58,10,230,66),
+                    juce::RectanglePlacement::onlyReduceInSize | juce::RectanglePlacement::centred);
 }
 void MainComponent::resized()
 {

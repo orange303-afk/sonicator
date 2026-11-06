@@ -21,10 +21,14 @@ target_compile_definitions(SonicatorCore PUBLIC
     JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
 target_link_libraries(SonicatorCore PUBLIC
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography)
+juce_add_binary_data(SonicatorAssets SOURCES
+    resources/branding/icon-header.png
+    resources/branding/logo-silver.png)
 add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp)
-target_link_libraries(SonicatorUI PUBLIC SonicatorCore)
+target_link_libraries(SonicatorUI PUBLIC SonicatorCore PRIVATE SonicatorAssets)
 juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
-    BUNDLE_ID "com.sonicator.browser" MICROPHONE_PERMISSION_ENABLED FALSE)
+    BUNDLE_ID "com.sonicator.browser" MICROPHONE_PERMISSION_ENABLED FALSE
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/icon-tile-1024.png")
 target_sources(Sonicator PRIVATE app/Main.cpp)
 target_link_libraries(Sonicator PRIVATE SonicatorUI)
 if(APPLE)
