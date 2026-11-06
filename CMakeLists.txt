@@ -13,17 +13,20 @@ FetchContent_Declare(JUCE
 FetchContent_MakeAvailable(JUCE)
 add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/database/Database.cpp core/database/SampleRepository.cpp
-    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp)
+    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/audio/AudioEngine.cpp
+    core/indexing/IndexingService.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
 target_link_libraries(SonicatorCore PUBLIC
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography)
+add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp)
+target_link_libraries(SonicatorUI PUBLIC SonicatorCore)
 juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
     BUNDLE_ID "com.sonicator.browser" MICROPHONE_PERMISSION_ENABLED FALSE)
-target_sources(Sonicator PRIVATE app/Main.cpp ui/MainComponent.cpp)
-target_link_libraries(Sonicator PRIVATE SonicatorCore)
+target_sources(Sonicator PRIVATE app/Main.cpp)
+target_link_libraries(Sonicator PRIVATE SonicatorUI)
 include(CTest)
 if(BUILD_TESTING)
     FetchContent_Declare(Catch2

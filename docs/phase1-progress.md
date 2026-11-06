@@ -5,11 +5,11 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 - [x] 1. CMake/JUCE scaffold and dependencies
 - [x] 2. SQLite repository and migrations
 - [x] 3. Recursive scanner
-- [ ] 4. Audio playback engine
+- [x] 4. Audio playback engine
 - [x] 5. Streaming DSP analyzer
-- [ ] 6. Sortable library UI
-- [ ] 7. Preview and waveform
-- [ ] 8. Background indexing, persistence, verification
+- [x] 6. Sortable library UI
+- [x] 7. Preview and waveform
+- [x] 8. Background indexing, persistence, verification
 
 ## Pre-flight decisions
 
@@ -35,3 +35,12 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 - Tasks 3/5: tests first failed on missing scanner/analyzer symbols. After implementation and fixing fixture overwrite semantics: `build/tests/SonicatorTests` → 8 cases / 62 assertions passed; `ctest --test-dir build --output-on-failure` → 1/1 passed.
 - Ruling: Task 5 executed before Task 4 because its test contract and dependencies were already ready; both are independent core services. No feature scope change.
 - Ruling: repository uses exceptions for database errors and upsert-by-path instead of silent bool failures; UI/indexer must report these exceptions. Queries are capped at 50,000 records per page.
+- Tasks 4/8: missing-symbol RED runs for AudioEngine and IndexingService, then complete suite GREEN (11 cases / 109 assertions).
+- Tasks 6/7: missing-symbol RED for UI, then missing-constructor RED for integrated shell; complete suite GREEN (14 cases / 125 assertions).
+- Format verification: generated synthetic fixtures; WAV/AIFF/FLAC/MP3 decode and render actual samples. MP3 test initially inspected only encoder priming silence, corrected to inspect 0.18 s of rendered output.
+- Final baseline: 15 cases / 157 assertions passed; CTest 1/1 passed. UI snapshots render at 880x580 and 1440x900. Optional 10,000-file test: 10,011 assertions passed, initial index 12.3733 s, unchanged rescan 0.999065 s (Debug, native arm64, short identical WAVs; not a real-library quality/performance claim).
+- Application launched natively via `open`; process confirmed with `pgrep` (PID 38510). System Events UI inspection timed out, so no claim of automated native chooser interaction or physical audible-output verification.
+- Ruling: current-page name search/sort and 10k-row pagination are explicit Phase 1 limits; global indexed search belongs to later work. Cost: users with >10k samples navigate pages.
+- Ruling: JUCE's internal transport locks are retained for practical browser preview; no claim of a formally lock-free audio engine. Cost: strict worst-case realtime bounds remain unproven.
+- `graphify update .` completed (4916 nodes, 25400 edges), generated output ignored by git.
+- Final independent review pending.

@@ -14,6 +14,6 @@ class FileScanner
 public:
     static bool isSupportedFormat(const juce::File&);
     static std::vector<AudioFileInfo> scanDirectory(const juce::File&, CancelCheck = {});
-    static juce::String computeFileHash(const juce::File&);
+    static juce::String computeFileHash(const juce::File&, CancelCheck = {});
 };
 }
