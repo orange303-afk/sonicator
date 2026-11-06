@@ -36,6 +36,10 @@ FolderTree::FolderTree()
 }
 FolderTree::~FolderTree() { tree.setRootItem(nullptr); }
 void FolderTree::resized() { tree.setBounds(getLocalBounds()); }
+void FolderTree::clearSelection()
+{
+    if (auto* selected = tree.getSelectedItem(0)) selected->setSelected(false, true);
+}
 void FolderTree::lookAndFeelChanged()
 {
     tree.setColour(juce::TreeView::backgroundColourId,theme::panel);

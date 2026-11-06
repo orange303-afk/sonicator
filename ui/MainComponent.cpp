@@ -55,8 +55,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     theme::apply(appSettings.theme);
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,29>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
-         &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&clearFilters,&editTags,&previousPage,&nextPage,&heading,&subtitle,
+    for (auto* c : std::array<juce::Component*,30>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
+         &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&hideDuplicates,&clearFilters,&editTags,&previousPage,&nextPage,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel})
         if (c != nullptr) addAndMakeVisible(c);
@@ -140,19 +140,24 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     {
         filter.starredOnly = ! filter.starredOnly; pageOffset = 0; reloadLibrary();
     };
+    hideDuplicates.onClick = [this]
+    {
+        filter.hideDuplicates = ! filter.hideDuplicates; pageOffset = 0; reloadLibrary();
+    };
     clearFilters.onClick = [this]
     {
         search.clear(); pendingSearch.clear();
         filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
         filter.matchAnyTag = false; filter.starredOnly = false;
+        filter.hideDuplicates = false; filter.duplicateHash.clear();
         pageOffset = 0; reloadLibrary();
     };
     editTags.onClick = [this] { showEditTagsMenu(); };
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
     preview.onAction = [this] { library.focusForNavigation(); };
-    for (auto* button : std::array<juce::Button*,14>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
-          &tagFilter,&starredButton,&clearFilters,&editTags,&previousPage,&nextPage})
+    for (auto* button : std::array<juce::Button*,15>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
+          &tagFilter,&starredButton,&hideDuplicates,&clearFilters,&editTags,&previousPage,&nextPage})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         if (button == &addFolder || button == &settings) continue; // Modal dialogs must retain their own focus.
@@ -168,6 +173,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     {
         writeDb = std::make_unique<Database>(dbPath); writeRepo = std::make_unique<SampleRepository>(*writeDb);
         writeRepo->createTables();
+        writeRepo->refreshDuplicates();
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         indexer = std::make_unique<IndexingService>(*writeRepo);
         folders.refresh(*readRepo);
@@ -314,6 +320,7 @@ void MainComponent::reloadLibrary()
         const int shown = (int) page.samples.size();
         library.setSamples(std::move(page.samples));
         library.setRowTags(readRepo->tagsForSamples(ids));
+        library.setDuplicateCounts(readRepo->duplicateCounts(ids));
         allTags = readRepo->tags();
         updateTagControls();
         juce::String text = juce::String(catalogCount) + (filter.hasTextOrTagFilter() ? " matching" : " samples")
@@ -333,6 +340,7 @@ void MainComponent::updateTagControls()
     tagFilter.setButtonText(active > 0 ? "Tags (" + juce::String(active) + ")" : "Tags");
     tagFilter.setToggleState(active > 0 || filter.matchAnyTag, juce::dontSendNotification);
     starredButton.setToggleState(filter.starredOnly,juce::dontSendNotification);
+    hideDuplicates.setToggleState(filter.hideDuplicates || filter.duplicateHash.isNotEmpty(),juce::dontSendNotification);
     clearFilters.setEnabled(filter.hasTextOrTagFilter());
 }
 void MainComponent::updateSelectedTags()
@@ -361,6 +369,17 @@ void MainComponent::selectSample(const SampleRecord& r)
         + "Flatness   " + juce::String(r.spectralFlatness,4);
     if (r.missing) details += "\n\nFile is missing";
     if (r.error.isNotEmpty()) details += "\n\n" + r.error;
+    if (readRepo != nullptr)
+    {
+        if (const auto duplicate = readRepo->duplicateInfo(r.id))
+        {
+            details += "\n\nDuplicates   " + juce::String(duplicate->groupSize) + " copies";
+            if (duplicate->representativeId != r.id)
+                details += "\nShown copy is not the catalog representative.\nRepresentative: " + duplicate->representativePath;
+            for (const auto& copy : readRepo->duplicateMembers(r.id))
+                if (copy.id != r.id) details += "\n\n" + copy.filePath + (copy.missing ? "  (missing)" : "");
+        }
+    }
     analysisDetails.setText(details,juce::dontSendNotification);
     analysisDetails.setTooltip(r.filePath);
     updateSelectedTags();
@@ -577,9 +596,12 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
 #endif
     const juce::File leadFile(lead.filePath);
     menu.addItem(9002, openLabel, leadFile.existsAsFile() || leadFile.getParentDirectory().isDirectory());
+    const auto duplicate = readRepo->duplicateInfo(lead.id);
+    if (duplicate.has_value() && duplicate->groupSize > 1)
+        menu.addItem(9004, "Show all " + juce::String(duplicate->groupSize) + " copies");
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ screenPosition.x, screenPosition.y, 1, 1 }),
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave,
-         files = selection, leadPath = lead.filePath](int result)
+         files = selection, leadPath = lead.filePath, leadHash = lead.fileHash](int result)
         {
             if (safe == nullptr || result == 0) return;
             try
@@ -597,6 +619,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                 else if (result == 9001)
                 {
                     safe->writeRepo->setStarred(ids, ! allStarred);
+                    safe->writeRepo->refreshDuplicates();
                     safe->reloadLibrary();
                 }
                 else if (result == 9002)
@@ -605,6 +628,19 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     if (file.existsAsFile()) file.revealToUser();
                     else if (file.getParentDirectory().isDirectory()) file.getParentDirectory().revealToUser();
                     else safe->status.setText("Folder is not available.",juce::dontSendNotification);
+                }
+                else if (result == 9004)
+                {
+                    if (leadHash.isEmpty()) return;
+                    safe->filter.duplicateHash = leadHash;
+                    safe->filter.hideDuplicates = false;
+                    safe->filter.text.clear(); safe->filter.includeTags.clear();
+                    safe->filter.excludeTags.clear(); safe->filter.matchAnyTag = false;
+                    safe->filter.starredOnly = false; safe->selectedFolder.clear();
+                    safe->search.clear(); safe->pendingSearch.clear();
+                    safe->folders.clearSelection();
+                    safe->pageOffset = 0;
+                    safe->reloadLibrary();
                 }
                 else if (result == 9003)
                 {
@@ -671,7 +707,16 @@ void MainComponent::timerCallback()
         const auto now = juce::Time::getMillisecondCounter();
         if (now - lastRefreshMs >= 1500) { lastRefreshMs = now; refreshIfCatalogChanged(); }
     }
-    if (wasRunning && ! p.running) { reloadLibrary(); folders.refresh(*readRepo); }
+    if (wasRunning && ! p.running)
+    {
+        // A cancelled scan can still have written complete rows; keep derived groups truthful.
+        if (p.cancelled)
+        {
+            try { writeRepo->refreshDuplicates(); }
+            catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+        }
+        reloadLibrary(); folders.refresh(*readRepo);
+    }
     wasRunning = p.running;
     const auto now = juce::Time::getMillisecondCounter();
     if (pendingSearch.trim() != filter.text && now - lastSearchChange >= 250)
@@ -826,9 +871,11 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
     filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
     filter.matchAnyTag = false; filter.starredOnly = false;
+    filter.hideDuplicates = false; filter.duplicateHash.clear();
     search.clear(); pendingSearch.clear();
     analysisDetails.setText("Select a sample to inspect its measured audio features.",juce::dontSendNotification);
     selectedTags.setTags({});
+    writeRepo->refreshDuplicates();
     folders.refresh(*readRepo);
     reloadLibrary();
     juce::String message = "Catalog: " + dbPath.getFullPathName();
@@ -902,8 +949,9 @@ void MainComponent::resized()
     previousPage.setBounds(bar.removeFromRight(30)); countLabel.setBounds(bar);
     list.removeFromTop(4);
     auto filterBar = list.removeFromTop(30);
-    tagFilter.setBounds(filterBar.removeFromLeft(90)); filterBar.removeFromLeft(6);
-    starredButton.setBounds(filterBar.removeFromLeft(104)); filterBar.removeFromLeft(6);
+    tagFilter.setBounds(filterBar.removeFromLeft(84)); filterBar.removeFromLeft(6);
+    starredButton.setBounds(filterBar.removeFromLeft(96)); filterBar.removeFromLeft(6);
+    hideDuplicates.setBounds(filterBar.removeFromLeft(120)); filterBar.removeFromLeft(6);
     clearFilters.setBounds(filterBar.removeFromLeft(110));
     list.removeFromTop(8); library.setBounds(list);
 }

@@ -125,3 +125,14 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 - Ruling: window geometry lives in `settings.json` and is written debounced after move/resize and at shutdown. Settings writers use load-modify-save updates so theme/catalog changes never erase geometry (and vice versa). Saved bounds are validated against connected displays, clamped to 880x580 and the work area, and off-screen bounds are recentred. Cost: OS maximised state is not restored separately; the saved bounds are.
 - Verification: **67 cases / 637 assertions** in Debug and Release; CTest 1/1; Release ad-hoc signature verified. New coverage: v4 migration and star defaults, batched stars and filter, star survival through upsert, batch tags, multi-selection across a refresh, starred filter in the shell, window-bound resolver and independent settings updates.
 - Not verified: the macOS clipboard contents in an automated test (manual check), context-menu screenshots, Windows file copy, or live move/resize persistence across a real relaunch.
+
+## Hide duplicates stage (2026-11-06)
+
+- Scope: byte-identical duplicate groups, a `Hide duplicates` filter, `COPIES ×N`, `Show all copies` and representative selection. No PCM comparison, no deletion.
+- Ruling: equality is the full SHA-256 already stored plus a nonzero size. This is definitive for byte-identical files without rebuilding hashes or decoding audio. Cost: identical audio in different containers/metadata is not detected.
+- Ruling: derived `duplicates` table (schema v5) instead of rewriting `samples`. `refreshDuplicates` clears and rebuilds it in one transaction; the filter uses an indexed `NOT EXISTS`. Cost: derived data must be refreshed after indexing/stars and is not user-editable.
+- Ruling: representative order is starred → present → analyzed without error → shortest path → lowest ID. Missing copies never win. A star can change the representative, so starring triggers a rebuild. Cost: the rule is catalog-wide, so a folder view can display a copy from another folder; `Show all copies` reveals the group.
+- Ruling: the table is refreshed at startup, after every non-cancelled index run, after a catalog switch and after starring. No long background pass is needed.
+- UI: `Hide duplicates` toggle, `COPIES` column, inspector copy count and paths, context-menu `Show all copies`.
+- Verification: **69 cases / 664 assertions** in Debug and Release; CTest 1/1; Release ad-hoc signature verified. New coverage: v5 migration, grouping by hash/size, unique hashes excluded, counts/members, starred and missing representative rules, hide and group-hash filters, idempotent rebuild, automatic groups after indexing, and the shell toggle. `[.scale]` passes with 300k same-hash rows; reconciliation 4.79 s, unchanged rescan 0.81 s.
+- Not verified: decoded-PCM equality, a user-selected representative, Windows/Intel execution, or duplicate behavior across two concurrently running app instances.

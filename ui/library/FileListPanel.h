@@ -12,6 +12,7 @@ public:
     ~FileListPanel() override { table.setModel(nullptr); }
     void setSamples(std::vector<SampleRecord>);
     void setRowTags(std::map<int64_t, std::vector<Tag>>);
+    void setDuplicateCounts(std::map<int64_t, int>);
     void setSearchText(const juce::String&);
     void selectRow(int row) { table.selectRow(row); }
     void selectRows(const std::vector<int>& rows);
@@ -36,6 +37,7 @@ private:
     juce::TableListBox table { "Sample library", this };
     std::vector<SampleRecord> all, visible;
     std::map<int64_t, std::vector<Tag>> rowTags;
+    std::map<int64_t, int> duplicateCounts;
     juce::String search;
     int sortColumn = 1;
     bool ascending = true;

@@ -74,6 +74,21 @@ Windows / Intel macOS execution, ASan, concurrent UI-writer stress, hardware lat
 - Debug/Release `codesign --verify --verbose`: valid on disk and designated requirement satisfied (ad-hoc).
 - `git diff --check`: clean.
 
+## Hide duplicates (2026-11-06)
+
+Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.
+
+- Default suite: **69 cases / 664 assertions passed** in Debug and Release; Debug and Release CTest 1/1; Release ad-hoc bundle signature verified.
+- New coverage: schema upgrades reach version 5 and create the `duplicates` table while preserving rows, tags and stars; byte-identical grouping uses hash + size and ignores unique hashes; duplicate counts, members and representative path; representative preference for starred, missing and shortest-path cases; `Hide duplicates` and group-hash filters; idempotent rebuild; indexing populates groups automatically; the shell hides one of two identical copies and `Clear filters` restores both.
+- `[.scale]` still passes with 300,000 same-hash rows: reconciliation 4.79 s, unchanged rescan 0.81 s, whole-catalog search 106.3 ms, v2→v5 backfill 6.96 s.
+- The representative is catalog-wide; folder-filtered views can therefore show the copy from another folder. `Show all copies` is the escape hatch.
+
+### Known limits after this stage
+
+- Only byte-identical files are grouped; identical decoded audio in different containers is not detected.
+- Duplicate data is derived and rebuilt; there is no user override for the representative yet.
+- Nothing is deleted, moved or renamed.
+
 ## Context menu, stars and window geometry (2026-11-06)
 
 Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.

@@ -45,6 +45,12 @@ public:
     void setSampleTag(int64_t sampleId, int64_t tagId, bool assigned);
     void setSampleTag(const std::vector<int64_t>& sampleIds, int64_t tagId, bool assigned);
     void setStarred(const std::vector<int64_t>& sampleIds, bool starred);
+    // Rebuilds the byte-identical duplicate groups (same full SHA-256 and size).
+    void refreshDuplicates();
+    std::map<int64_t,int> duplicateCounts(const std::vector<int64_t>& sampleIds) const;
+    struct DuplicateInfo { int groupSize = 0; int64_t representativeId = 0; juce::String representativePath; };
+    std::optional<DuplicateInfo> duplicateInfo(int64_t sampleId) const;
+    std::vector<SampleRecord> duplicateMembers(int64_t sampleId) const;
     // Lower-cased name + newline + lower-cased path, used by whole-catalog text search.
     static juce::String searchKey(const juce::String& name, const juce::String& path);
 private:

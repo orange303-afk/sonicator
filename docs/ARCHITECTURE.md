@@ -18,7 +18,7 @@ Shutdown stops the UI timer, cancels/joins indexing without force-killing a thre
 
 ## Storage
 
-Schema `user_version=4`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, feature-set version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten. Version 2 adds `samples_name_id`, an index on `(name COLLATE NOCASE, id)` that matches the UI sort, so paged reads no longer build a temporary B-tree. Version 3 adds `samples.search_key` (Unicode-folded name + path for whole-catalog text search), `tags` and `sample_tags`. Version 4 adds `samples.starred`, a user favourite flag; analysis upserts deliberately do not update it, so a rescan can never clear a star. Standard tags are seeded only when the tag table is created, so a rename is not undone; sample IDs are stable across upserts, so assignments survive rescan and reanalysis. Upgrading first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages. A user-triggered backup uses the same API into `Sonicator/backups/sonicator-<timestamp>.sqlite` and refuses to overwrite an existing file or the live database. Settings updates load-modify-save only the fields they own, so window geometry and theme/catalog writers do not overwrite each other. Saved window bounds are validated against connected displays and clamped to a minimum size and the current work area.
+Schema `user_version=5`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, feature-set version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten. Version 2 adds `samples_name_id`, an index on `(name COLLATE NOCASE, id)` that matches the UI sort, so paged reads no longer build a temporary B-tree. Version 3 adds `samples.search_key` (Unicode-folded name + path for whole-catalog text search), `tags` and `sample_tags`. Version 4 adds `samples.starred`, a user favourite flag; analysis upserts deliberately do not update it, so a rescan can never clear a star. Version 5 adds the `duplicates` table: `(sample_id, representative_id, group_hash, group_size, is_representative)` with indexes on the group hash and representative. It is derived data, rebuilt from the catalog; the audio rows themselves are not rewritten. Standard tags are seeded only when the tag table is created, so a rename is not undone; sample IDs are stable across upserts, so assignments survive rescan and reanalysis. Upgrading first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages. A user-triggered backup uses the same API into `Sonicator/backups/sonicator-<timestamp>.sqlite` and refuses to overwrite an existing file or the live database. Settings updates load-modify-save only the fields they own, so window geometry and theme/catalog writers do not overwrite each other. Saved window bounds are validated against connected displays and clamped to a minimum size and the current work area.
 
 Upsert by path preserves sample ID. Two files with the same content keep independent paths. Skip only when size/time and the feature-set version match. Files changed during analysis are marked for retry, not recorded as successful. Startup reads the database; it does not initiate reanalysis.
 
@@ -44,6 +44,17 @@ repository to it, or open an existing catalog. The old file is kept. Switching i
 indexing and for files that fail `SampleRepository::isCatalog` (a `samples` and `roots` schema with
 a nonzero `user_version`), so a foreign SQLite database is never altered. A saved catalog path that
 is missing, invalid or unreadable falls back to the default location at startup.
+
+## Duplicate groups
+
+Byte-identical duplicates are grouped by the full SHA-256 already stored at analysis time plus a
+nonzero size. `refreshDuplicates` rebuilds the derived table in one transaction: one representative
+per group, chosen by starred, present on disk, analyzed without error, shortest path, then lowest
+ID. Missing copies never beat present ones. The `Hide duplicates` filter excludes rows with
+`is_representative=0`; `Show all copies` filters by the group hash instead. The table is refreshed
+after every non-cancelled index run, at startup, after a catalog switch and after starring (which
+can change the representative). This is byte equality only; decoded-PCM equality across containers
+is not implemented.
 
 ## Selection, context menu and clipboard
 

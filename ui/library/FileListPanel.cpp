@@ -29,12 +29,13 @@ FileListPanel::FileListPanel()
     table.setMultipleSelectionEnabled(true);
     auto& h = table.getHeader();
     h.addColumn("",8,30,24,40);
-    h.addColumn("SAMPLE",1,265,120,1200);
+    h.addColumn("SAMPLE",1,250,120,1200);
     h.addColumn("FORMAT",2,70,55,120);
     h.addColumn("LENGTH",3,85,60,140);
     h.addColumn("RATE",4,85,60,140);
     h.addColumn("CH",5,45,35,70);
     h.addColumn("TAGS",7,145,80,350);
+    h.addColumn("COPIES",9,62,50,90);
     h.addColumn("STATUS",6,120,80,350);
     h.setSortColumnId(1,true);
 }
@@ -92,6 +93,11 @@ void FileListPanel::setRowTags(std::map<int64_t, std::vector<Tag>> tags)
     rowTags = std::move(tags);
     table.repaint();
 }
+void FileListPanel::setDuplicateCounts(std::map<int64_t, int> counts)
+{
+    duplicateCounts = std::move(counts);
+    table.repaint();
+}
 void FileListPanel::setSearchText(const juce::String& text) { search = text.trim(); rebuild(); }
 void FileListPanel::rebuild()
 {
@@ -102,7 +108,7 @@ void FileListPanel::rebuild()
 }
 void FileListPanel::sortOrderChanged(int column, bool forwards)
 {
-    if (column == 7 || column == 8)
+    if (column == 7 || column == 8 || column == 9)
     {
         // Tags are shown for context but are not a sort key; keep the header arrow on the real one.
         const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
@@ -145,6 +151,22 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
         const auto area = juce::Rectangle<float>(0, 0, (float) w, (float) h).withSizeKeepingCentre(14.0f, 14.0f);
         g.setColour(r.starred ? juce::Colour(0xffe0b84a) : theme::muted.withAlpha(0.55f));
         drawStar(g, area, r.starred);
+        return;
+    }
+    if (col == 9)
+    {
+        const auto found = duplicateCounts.find(r.id);
+        if (found == duplicateCounts.end() || found->second < 2)
+        {
+            g.setColour(theme::muted.withAlpha(0.4f)); g.setFont(juce::FontOptions(12));
+            g.drawText("--",8,0,w-12,h,juce::Justification::centredLeft,true);
+        }
+        else
+        {
+            g.setColour(theme::accent); g.setFont(juce::FontOptions(12));
+            g.drawText(juce::String(juce::CharPointer_UTF8("\xc3\x97")) + juce::String(found->second),
+                       8,0,w-12,h,juce::Justification::centredLeft,true);
+        }
         return;
     }
     if (col == 7)

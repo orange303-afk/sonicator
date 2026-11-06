@@ -5,7 +5,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred";
-constexpr int schemaVersion = 4;
+constexpr int schemaVersion = 5;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -179,7 +179,12 @@ void SampleRepository::createTables()
             "colour INTEGER NOT NULL, builtin INTEGER NOT NULL DEFAULT 0);"
             "CREATE TABLE IF NOT EXISTS sample_tags (sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
             "tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY(sample_id, tag_id)) WITHOUT ROWID;"
-            "CREATE INDEX IF NOT EXISTS sample_tags_tag ON sample_tags(tag_id, sample_id);");
+            "CREATE INDEX IF NOT EXISTS sample_tags_tag ON sample_tags(tag_id, sample_id);"
+            "CREATE TABLE IF NOT EXISTS duplicates (sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE,"
+            "representative_id INTEGER NOT NULL, group_hash TEXT NOT NULL, group_size INTEGER NOT NULL,"
+            "is_representative INTEGER NOT NULL DEFAULT 0);"
+            "CREATE INDEX IF NOT EXISTS duplicates_hash ON duplicates(group_hash);"
+            "CREATE INDEX IF NOT EXISTS duplicates_rep ON duplicates(representative_id);");
         // Databases created before schema 3 predate the folded search column.
         bool hasSearchKey = false, hasStarred = false;
         {
@@ -224,7 +229,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=4;");
+        detail::exec(db.handle, "PRAGMA user_version=5;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -372,6 +377,10 @@ LibraryPage SampleRepository::query(const LibraryFilter& filter, int limit, int 
     for (auto id : filter.excludeTags)
         addInt(" AND NOT EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
     if (filter.starredOnly) where += " AND samples.starred=1";
+    if (filter.hideDuplicates)
+        where += " AND NOT EXISTS(SELECT 1 FROM duplicates d WHERE d.sample_id=samples.id AND d.is_representative=0)";
+    if (filter.duplicateHash.isNotEmpty())
+        addText(" AND samples.hash=?", filter.duplicateHash);
 
     auto bind = [&params](detail::Statement& s)
     {
@@ -579,5 +588,97 @@ void SampleRepository::setStarred(const std::vector<int64_t>& sampleIds, bool st
         try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
         throw;
     }
+}
+void SampleRepository::refreshDuplicates()
+{
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::exec(db.handle, "DELETE FROM duplicates;");
+        detail::Statement groups(db.handle,
+            "SELECT hash FROM samples WHERE hash<>'' AND size>0 GROUP BY hash HAVING COUNT(*)>1");
+        std::vector<juce::String> hashes;
+        while (groups.step()) hashes.push_back(groups.text(0));
+        struct Member { int64_t id = 0; bool starred = false, missing = false; bool failed = false; int pathLength = 0; };
+        detail::Statement select(db.handle,
+            "SELECT id,path,starred,missing,error FROM samples WHERE hash=?");
+        detail::Statement insert(db.handle,
+            "INSERT OR REPLACE INTO duplicates(sample_id,representative_id,group_hash,group_size,is_representative)"
+            " VALUES(?,?,?,?,?)");
+        for (const auto& hash : hashes)
+        {
+            select.reset(); select.text(1, hash);
+            std::vector<Member> members;
+            while (select.step())
+                members.push_back({ select.integer(0), select.integer(2) != 0, select.integer(3) != 0,
+                                    ! select.text(4).isEmpty(), select.text(1).length() });
+            if (members.size() < 2) continue;
+            const auto better = [](const Member& a, const Member& b)
+            {
+                if (a.starred != b.starred) return a.starred;
+                if (a.missing != b.missing) return ! a.missing;
+                if (a.failed != b.failed) return ! a.failed;
+                if (a.pathLength != b.pathLength) return a.pathLength < b.pathLength;
+                return a.id < b.id;
+            };
+            const auto representative = std::min_element(members.begin(), members.end(), better);
+            const auto groupSize = (int) members.size();
+            for (const auto& member : members)
+            {
+                insert.reset(); insert.integer(1, member.id); insert.integer(2, representative->id);
+                insert.text(3, hash); insert.integer(4, groupSize);
+                insert.integer(5, member.id == representative->id ? 1 : 0); insert.step();
+            }
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+std::map<int64_t,int> SampleRepository::duplicateCounts(const std::vector<int64_t>& sampleIds) const
+{
+    std::lock_guard lock(db.mutex);
+    std::map<int64_t,int> out;
+    constexpr size_t chunkSize = 400;
+    for (size_t start = 0; start < sampleIds.size(); start += chunkSize)
+    {
+        const size_t end = std::min(sampleIds.size(), start + chunkSize);
+        juce::String placeholders;
+        for (size_t i = start; i < end; ++i) placeholders += (i == start ? "?" : ",?");
+        auto sql = "SELECT sample_id,group_size FROM duplicates WHERE sample_id IN (" + placeholders + ")";
+        detail::Statement s(db.handle, sql.toRawUTF8());
+        int index = 1;
+        for (size_t i = start; i < end; ++i) s.integer(index++, sampleIds[i]);
+        while (s.step()) out[s.integer(0)] = (int) s.integer(1);
+    }
+    return out;
+}
+std::optional<SampleRepository::DuplicateInfo> SampleRepository::duplicateInfo(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT d.group_size,d.representative_id,s.path FROM duplicates d"
+        " JOIN samples s ON s.id=d.representative_id WHERE d.sample_id=?");
+    s.integer(1, sampleId);
+    if (! s.step()) return std::nullopt;
+    return DuplicateInfo { (int) s.integer(0), s.integer(1), s.text(2) };
+}
+std::vector<SampleRecord> SampleRepository::duplicateMembers(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement group(db.handle, "SELECT group_hash FROM duplicates WHERE sample_id=?");
+    group.integer(1, sampleId);
+    if (! group.step()) return {};
+    const auto hash = group.text(0);
+    auto sql = "SELECT " + juce::String(columns) + " FROM samples WHERE hash=?"
+        " ORDER BY missing ASC,starred DESC,length(path) ASC,id ASC";
+    detail::Statement s(db.handle, sql.toRawUTF8()); s.text(1, hash);
+    std::vector<SampleRecord> out;
+    while (s.step()) out.push_back(read(s));
+    return out;
 }
 } // namespace sonicator

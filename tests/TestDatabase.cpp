@@ -100,7 +100,7 @@ TEST_CASE("Schema v1 migrates in place, keeps rows, and backs up once", "[databa
     REQUIRE(backups.size() == 1);
     REQUIRE(rawScalar(backups[0], "SELECT COUNT(*) FROM samples") == 3);
     REQUIRE(rawScalar(backups[0], "PRAGMA user_version") == 1);
-    REQUIRE(rawScalar(file, "PRAGMA user_version") == 4);
+    REQUIRE(rawScalar(file, "PRAGMA user_version") == 5);
     REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='samples_name_id'") == 1);
     { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.count() == 3); }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
@@ -263,7 +263,7 @@ TEST_CASE("Schema v2 migrates to tags and a backfilled Unicode search key", "[da
         REQUIRE(repo.query(f).total == 1);
         f.text = "kick"; REQUIRE(repo.query(f).total == 1);
         REQUIRE(repo.tags().size() == 15);
-        REQUIRE(rawScalar(file, "PRAGMA user_version") == 4);
+        REQUIRE(rawScalar(file, "PRAGMA user_version") == 5);
         REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM samples WHERE version=1") == 2);
     }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "v2.sqlite.backup-*").size() == 1);
@@ -286,7 +286,7 @@ TEST_CASE("User backup is a consistent copy and refuses unsafe destinations", "[
         REQUIRE(copyRepo.count() == 1);
         REQUIRE(copyRepo.findByPath("/backup/sample.wav")->fileHash == "h");
         REQUIRE(copyRepo.tagsForSample(id).size() == 1);
-        REQUIRE(rawScalar(backup, "PRAGMA user_version") == 4);
+        REQUIRE(rawScalar(backup, "PRAGMA user_version") == 5);
     }
     REQUIRE_THROWS(repo.backupTo(file));
     REQUIRE_THROWS(repo.backupTo(backup));
@@ -328,4 +328,44 @@ TEST_CASE("Stars are batched, preserved by reanalysis and filter the catalog", "
     repo.setStarred({ a }, false);
     REQUIRE(repo.query(filter).total == 1);
     REQUIRE_FALSE(repo.findByPath("/a.wav")->starred);
+}
+
+TEST_CASE("Byte-identical duplicates group, hide and prefer the right representative", "[database][duplicates]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("dups.sqlite")); SampleRepository repo(db); repo.createTables();
+    auto make = [](const juce::String& path, const juce::String& name, const juce::String& hash, int64_t size)
+    {
+        SampleRecord r; r.filePath = path; r.fileName = name; r.fileHash = hash; r.fileSize = size;
+        r.format = "WAV"; r.version = basicFeaturesVersion; return r;
+    };
+    const auto a = repo.upsert(make("/lib/a.wav", "a.wav", "same", 1000));
+    const auto b = repo.upsert(make("/lib/longer/b.wav", "b.wav", "same", 1000));
+    const auto c = repo.upsert(make("/lib/c.wav", "c.wav", "different", 1000));
+    const auto d = repo.upsert(make("/lib/d.wav", "d.wav", "same", 1000));
+    repo.refreshDuplicates();
+    auto counts = repo.duplicateCounts({ a, b, c, d });
+    REQUIRE(counts[a] == 3); REQUIRE(counts[b] == 3); REQUIRE(counts[d] == 3);
+    REQUIRE(counts.find(c) == counts.end());
+    auto info = repo.duplicateInfo(a);
+    REQUIRE(info.has_value()); REQUIRE(info->groupSize == 3); REQUIRE(info->representativeId == a);
+    REQUIRE(repo.duplicateMembers(a).size() == 3);
+
+    LibraryFilter filter; filter.hideDuplicates = true;
+    REQUIRE(repo.query(filter).total == 2); // representative of the group + unique c
+    filter.duplicateHash = "same";
+    REQUIRE(repo.query(filter).total == 1);
+    filter.hideDuplicates = false;
+    REQUIRE(repo.query(filter).total == 3);
+
+    repo.setStarred({ b }, true);
+    repo.refreshDuplicates();
+    REQUIRE(repo.duplicateInfo(a)->representativeId == b);
+    repo.setStarred({ b }, false);
+    repo.setMissing({ a });
+    repo.refreshDuplicates();
+    // a is missing and b/d are present; d wins on the shortest path.
+    REQUIRE(repo.duplicateInfo(a)->representativeId == d);
+
+    repo.refreshDuplicates();
+    REQUIRE(repo.duplicateCounts({ a, b, d })[a] == 3);
 }

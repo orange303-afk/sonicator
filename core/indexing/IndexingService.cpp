@@ -119,6 +119,11 @@ void IndexingService::run()
             }
             { std::lock_guard lock(stateMutex); state.finalizing = false; }
         }
+        if (! cancelled)
+        {
+            { std::lock_guard lock(stateMutex); state.message = "Updating duplicate groups"; }
+            repo.refreshDuplicates();
+        }
         std::lock_guard lock(stateMutex);
         state.message = cancelled ? "Cancelled; completed results were saved"
             : (scanMode == ScanMode::NewOnly ? "New-file scan complete" : "Scan complete");

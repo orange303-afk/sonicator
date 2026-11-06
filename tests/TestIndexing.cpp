@@ -18,6 +18,8 @@ TEST_CASE("Indexer persists, skips unchanged files, detects duplicates and retri
     REQUIRE(p.processed == 3); REQUIRE(p.analyzed == 2); REQUIRE(p.failed == 1);
     REQUIRE(p.duplicates == 1); REQUIRE(repo.count() == 3);
     REQUIRE(repo.roots().size() == 1);
+    LibraryFilter duplicateFilter; duplicateFilter.hideDuplicates = true;
+    REQUIRE(repo.query(duplicateFilter).total == 2); // copy.wav hidden, tone + corrupt remain
     auto old = repo.findByPath(audio.getChildFile("tone.wav").getFullPathName()); REQUIRE(old);
     REQUIRE(index.start(roots)); REQUIRE(index.waitUntilFinished(10000));
     p = index.progress(); REQUIRE(p.skipped == 2); REQUIRE(p.failed == 1); // bad files can be retried

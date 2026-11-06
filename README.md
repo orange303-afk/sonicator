@@ -42,10 +42,11 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 5. Search covers the entire catalog by filename and path. Typing is debounced by 250 ms; Enter applies immediately and Escape clears it. Header clicks sort the whole result, not the current page. Pages contain at most 10,000 records; use **< / >** to navigate.
 6. **Tags** and **Starred** filter the catalog. Select a sample and **Edit tags...** to assign tags; create, rename, recolour and delete tags from the tag menu.
 7. Select several rows with **Cmd-click** (toggle) or **Shift-click** (range). Right-click any row for **Copy** (files on macOS, paths on other platforms), **Tag** (coloured submenu, applies to the whole selection), **Star/Unstar** and **Open in Finder** (**Explorer** on Windows).
-8. **Rescan** asks for confirmation, then analyzes new, changed and previously failed files; unchanged analyzed files are skipped. **New files** is the additive scan: it walks the folders but analyzes only paths that are not in the catalog yet, without reconciling missing records. **Reanalyze all** asks for a stronger confirmation and recomputes every file. Cancel keeps completed results and never stores a partial row.
-9. **Backup** writes a consistent SQLite copy to `Sonicator/backups/` beside the database. The live database and its WAL are never copied as raw files.
-10. **Settings** opens the theme (system/dark/light), interface scale, catalog location, audio output and the About/support links. Theme, scale, language, catalog path and the last window position/size persist between launches.
-11. **Audio output** inside Settings selects the output device. No microphone input is opened.
+8. **Hide duplicates** hides byte-identical copies (same full SHA-256 and size) and keeps one catalog-wide representative. The `COPIES` column shows `×N`; right-click **Show all copies** reveals the whole group. Nothing is deleted.
+9. **Rescan** asks for confirmation, then analyzes new, changed and previously failed files; unchanged analyzed files are skipped. **New files** is the additive scan: it walks the folders but analyzes only paths that are not in the catalog yet, without reconciling missing records. **Reanalyze all** asks for a stronger confirmation and recomputes every file. Cancel keeps completed results and never stores a partial row.
+10. **Backup** writes a consistent SQLite copy to `Sonicator/backups/` beside the database. The live database and its WAL are never copied as raw files.
+11. **Settings** opens the theme (system/dark/light), interface scale, catalog location, audio output and the About/support links. Theme, scale, language, catalog path and the last window position/size persist between launches.
+12. **Audio output** inside Settings selects the output device. No microphone input is opened.
 
 ## Data
 
@@ -117,6 +118,7 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - The manual **Backup** copy runs through SQLite's backup API on the UI thread, so a very large catalog can pause the window briefly while it copies. No automatic rotation or deletion of user backups is performed.
 - Interface scale is limited to 100%, 110%, 125% and 150%. Only English is available; the language setting is stored for future translations. **Move catalog** leaves the previous database file in place instead of deleting it.
 - `Copy` writes real file references only on macOS; other platforms fall back to newline-separated paths until a native file clipboard is added. Multi-selection covers the current 10,000-row page. **Open in Finder/Explorer** reveals the clicked row's file, not every selected file.
+- **Hide duplicates** compares full file bytes only (SHA-256 + size); different containers or metadata with identical decoded audio are not grouped. The representative is chosen across the whole catalog, so inside a folder view the visible copy may be the one from another folder; **Show all copies** reveals it. No file is deleted or moved.
 - A saved catalog that is missing or is not a SONICATOR catalog falls back to the default location at startup; the fallback is written to the log.
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.
