@@ -25,6 +25,9 @@ public:
     void beginImport(const juce::File&);
     bool refreshIfCatalogChanged();
     juce::File backupCatalog();
+    // Registered roots that do not exist on this computer.
+    juce::StringArray missingRoots() const;
+    void showRelocateDialog();
     // Copies (moveCurrent) or opens an existing catalog and switches every repository to it.
     bool switchCatalog(const juce::File& target, bool moveCurrent, juce::String& error);
     // Applies a whole-catalog search immediately (typing uses a 250 ms debounce instead).
@@ -62,7 +65,7 @@ private:
     std::unique_ptr<SampleRepository> readRepo, writeRepo;
     std::unique_ptr<IndexingService> indexer;
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog;
+    juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog;
     int pageOffset = 0, catalogCount = 0, pageSize = 10000;
     bool wasRunning = false;
     uint32_t lastRefreshMs = 0, lastSearchChange = 0;

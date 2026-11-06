@@ -1,5 +1,7 @@
 #include "MainComponent.h"
 #include "BinaryData.h"
+#include "core/database/PathRelocation.h"
+#include "ui/settings/RelocateFoldersPanel.h"
 #include "ui/settings/SettingsPanel.h"
 #include "ui/platform/FileClipboard.h"
 #include <algorithm>
@@ -45,6 +47,13 @@ class SettingsDialogWindow final : public juce::DialogWindow
 {
 public:
     SettingsDialogWindow() : juce::DialogWindow("Settings", theme::panel, true) {}
+    void closeButtonPressed() override { exitModalState(0); }
+    void inputAttemptWhenModal() override { exitModalState(0); }
+};
+class RelocateDialogWindow final : public juce::DialogWindow
+{
+public:
+    RelocateDialogWindow() : juce::DialogWindow("Relocate folders", theme::panel, true) {}
     void closeButtonPressed() override { exitModalState(0); }
     void inputAttemptWhenModal() override { exitModalState(0); }
 };
@@ -209,6 +218,14 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         status.setText(catalogCount > 0
             ? juce::String(catalogCount) + " samples loaded"
             : "Ready. Add a folder to begin.",juce::dontSendNotification);
+        const auto missing = missingRoots();
+        if (catalogCount > 0 && ! missing.isEmpty())
+        {
+            status.setText(juce::String(missing.size())
+                + " catalog folder(s) not found on this computer. Settings > Relocate folders...",
+                juce::dontSendNotification);
+            status.setTooltip(missing.joinIntoString("\n"));
+        }
     }
     catch (const std::exception& e) { status.setText("Database error: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
     if (engine.error().isNotEmpty()) status.setText("Audio device: " + engine.error(),juce::dontSendNotification);
@@ -223,7 +240,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
 MainComponent::~MainComponent()
 {
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
-    stopTimer(); chooser.reset(); settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
+    stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
+    settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
     indexer.reset(); setLookAndFeel(nullptr);
 }
 bool MainComponent::contains(const std::vector<int64_t>& values, int64_t id)
@@ -319,6 +337,113 @@ juce::File MainComponent::backupCatalog()
     status.setText("Backup saved: " + target.getFullPathName(),juce::dontSendNotification);
     status.setTooltip(target.getFullPathName());
     return target;
+}
+juce::StringArray MainComponent::missingRoots() const
+{
+    juce::StringArray out;
+    if (! readRepo) return out;
+    try
+    {
+        for (const auto& root : readRepo->roots())
+            if (! juce::File(root).isDirectory()) out.add(root);
+    }
+    catch (const std::exception&) {}
+    return out;
+}
+void MainComponent::showRelocateDialog()
+{
+    if (indexer && indexer->progress().running)
+    {
+        status.setText("Stop indexing before relocating folders.",juce::dontSendNotification);
+        return;
+    }
+    if (! readRepo || ! writeRepo) return;
+    if (relocateDialog != nullptr) { relocateDialog->toFront(true); return; }
+
+    const auto missing = missingRoots();
+    if (missing.isEmpty())
+    {
+        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+            .withIconType(juce::MessageBoxIconType::InfoIcon)
+            .withTitle("Relocate folders")
+            .withMessage("All catalog folders are available on this computer.")
+            .withButton("OK", 1), [](int) {});
+        return;
+    }
+
+    std::vector<RelocateRootInfo> roots;
+    roots.reserve((size_t) missing.size());
+    for (const auto& root : missing)
+    {
+        int files = 0;
+        try { files = readRepo->countUnderRoot(root); } catch (const std::exception&) {}
+        roots.push_back({ root, files });
+    }
+
+    auto* panel = new RelocateFoldersPanel(std::move(roots));
+    panel->setLookAndFeel(&look);
+    panel->onProbe = [read = readRepo.get()](const juce::String& oldRoot, const juce::String& newRoot)
+    {
+        RelocationProbe probe;
+        constexpr int limit = 200;
+        int64_t lastId = 0;
+        try
+        {
+            for (;;)
+            {
+                auto rows = read->pathsAfterId(lastId, 5000);
+                if (rows.empty()) break;
+                lastId = rows.back().id;
+                for (const auto& row : rows)
+                {
+                    if (! pathrelocation::isUnder(row.path, oldRoot)) continue;
+                    ++probe.sampled;
+                    if (juce::File(pathrelocation::remap(row.path, oldRoot, newRoot)).existsAsFile())
+                        ++probe.found;
+                    if (probe.sampled >= limit) break;
+                }
+                if (probe.sampled >= limit) break;
+            }
+        }
+        catch (const std::exception&) {}
+        return probe;
+    };
+    panel->onApply = [this](const std::vector<RootRelocation>& relocations) -> juce::String
+    {
+        if (indexer && indexer->progress().running)
+            return "Stop indexing before relocating folders.";
+        if (! writeRepo || ! readRepo) return "The catalog is not open.";
+        try
+        {
+            const auto stamp = juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S");
+            auto backup = dbPath.getSiblingFile(dbPath.getFileName() + ".relocate-" + stamp + ".sqlite")
+                              .getNonexistentSibling();
+            writeRepo->backupTo(backup);
+            const auto result = writeRepo->relocateRoots(relocations);
+            writeRepo->refreshDuplicates();
+            selectedFolder.clear(); pageOffset = 0;
+            folders.refresh(*readRepo);
+            reloadLibrary();
+            status.setText("Relocated " + juce::String(result.movedFiles) + " file(s) in "
+                               + juce::String((int) relocations.size()) + " folder(s). Backup: "
+                               + backup.getFullPathName(),
+                           juce::dontSendNotification);
+            status.setTooltip(backup.getFullPathName());
+            return {};
+        }
+        catch (const std::exception& e)
+        {
+            return "Relocation failed: " + juce::String::fromUTF8(e.what());
+        }
+    };
+
+    auto* window = new RelocateDialogWindow();
+    window->setContentOwned(panel, true);
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(false, false);
+    window->centreAroundComponent(this, window->getWidth(), window->getHeight());
+    relocateDialog = window;
+    window->enterModalState(true, nullptr, true);
 }
 bool MainComponent::refreshIfCatalogChanged()
 {
@@ -836,6 +961,14 @@ void MainComponent::showSettings()
     auto* panel = new SettingsPanel(appSettings,dbPath,indexing);
     panel->onSettingsChanged = [this](AppSettings next) { applySettings(next); };
     panel->onShowAudio = [this] { showAudioSettings(); };
+    panel->onRelocateRequested = [this]
+    {
+        if (settingsDialog != nullptr) settingsDialog->exitModalState(0);
+        juce::MessageManager::callAsync([safe = juce::Component::SafePointer<MainComponent>(this)]
+        {
+            if (safe != nullptr) safe->showRelocateDialog();
+        });
+    };
     panel->onDatabaseChosen = [this, safePanel = juce::Component::SafePointer<SettingsPanel>(panel)]
         (const juce::File& file, bool moveCurrent)
         {
@@ -849,6 +982,8 @@ void MainComponent::showSettings()
                         ? "Catalog copied and switched. The previous file was kept."
                         : "Catalog opened.",false);
                 }
+                if (! moveCurrent && ! missingRoots().isEmpty() && settingsDialog != nullptr)
+                    settingsDialog->exitModalState(0);
             }
             else if (safePanel != nullptr) safePanel->setDatabaseStatus(error,true);
         };
@@ -944,6 +1079,13 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
         message += "  |  settings were not saved: " + juce::String::fromUTF8(e.what());
     }
     status.setText(message,juce::dontSendNotification);
+    if (! moveCurrent && ! missingRoots().isEmpty())
+    {
+        juce::MessageManager::callAsync([safe = juce::Component::SafePointer<MainComponent>(this)]
+        {
+            if (safe != nullptr) safe->showRelocateDialog();
+        });
+    }
     return true;
 }
 void MainComponent::showAudioSettings()

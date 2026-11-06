@@ -18,9 +18,9 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
       naukograd("naukograd.bandcamp.com", juce::URL("https://naukograd.bandcamp.com")),
       kofi("ko-fi.com/ilyaorange", juce::URL("https://ko-fi.com/ilyaorange"))
 {
-    for (auto* c : std::array<juce::Component*,21>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
+    for (auto* c : std::array<juce::Component*,22>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
          &languageLabel,&languageNote,&libraryHeading,&databaseKey,&databaseLabel,&libraryNote,&databaseStatus,
-         &audioHeading,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase})
+         &audioHeading,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
         addAndMakeVisible(c);
     for (auto* c : std::array<juce::Component*,7>{&openDatabase,&audio,&close,&gumroad,&bandcamp,&naukograd,&kofi})
         addAndMakeVisible(c);
@@ -65,14 +65,16 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         link->setFont(juce::FontOptions(12),false);
         link->setJustificationType(juce::Justification::centredLeft);
     }
-    for (auto* button : std::array<juce::Button*,4>{&moveDatabase,&openDatabase,&audio,&close})
+    for (auto* button : std::array<juce::Button*,5>{&moveDatabase,&openDatabase,&relocateDatabase,&audio,&close})
     {
         button->setWantsKeyboardFocus(false);
         button->setMouseClickGrabsKeyboardFocus(false);
     }
     moveDatabase.setEnabled(! indexing); openDatabase.setEnabled(! indexing);
+    relocateDatabase.setEnabled(! indexing);
     moveDatabase.setTooltip("Copy the current catalog through SQLite and switch to the copy");
     openDatabase.setTooltip("Open an existing SONICATOR catalog without moving the current one");
+    relocateDatabase.setTooltip("Rewrite catalog paths for folders that moved to this computer");
     setDatabaseFile(database);
     setDatabaseStatus(indexing ? "Unavailable while indexing." : "Original audio files are not included in the database.",false);
 
@@ -86,6 +88,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     languageBox.onChange = [this] { current.language = "English"; notifySettings(); };
     moveDatabase.onClick = [this] { chooseDatabase(true); };
     openDatabase.onClick = [this] { chooseDatabase(false); };
+    relocateDatabase.onClick = [this] { if (onRelocateRequested) onRelocateRequested(); };
     audio.onClick = [this] { if (onShowAudio) onShowAudio(); };
     close.onClick = [this]
     {
@@ -224,9 +227,12 @@ void SettingsPanel::resized()
     add(30, 6, false, [this](juce::Rectangle<int> area)
     {
         auto right = area.withTrimmedLeft(140);
-        moveDatabase.setBounds(right.removeFromLeft((right.getWidth() - 8) / 2));
+        const auto width = (right.getWidth() - 16) / 3;
+        moveDatabase.setBounds(right.removeFromLeft(width));
         right.removeFromLeft(8);
-        openDatabase.setBounds(right);
+        openDatabase.setBounds(right.removeFromLeft(width));
+        right.removeFromLeft(8);
+        relocateDatabase.setBounds(right);
     });
     add(32, 6, false, [this](juce::Rectangle<int> area) { libraryNote.setBounds(area.withTrimmedLeft(140)); });
     add(24, 4, false, [this](juce::Rectangle<int> area) { databaseStatus.setBounds(area.withTrimmedLeft(140)); });

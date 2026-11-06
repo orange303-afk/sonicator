@@ -444,3 +444,62 @@ TEST_CASE("Filter bar has Hide empty and no Hide duplicates button", "[ui][filte
     REQUIRE_FALSE(hideEmpty->getMouseClickGrabsKeyboardFocus());
     REQUIRE(app.findChildWithID("hideDuplicates") == nullptr);
 }
+TEST_CASE("A catalog with missing roots shows a relocation hint at startup", "[ui][relocation]")
+{
+    TestDirectory t;
+    auto dbPath = t.dir.getChildFile("missing-roots.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        SampleRecord r; r.filePath = "/gone/Drums/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
+        repo.addRoot("/gone/Drums");
+    }
+    MainComponent app(dbPath, false);
+    auto* status = dynamic_cast<juce::Label*>(app.findChildWithID("importStatus"));
+    REQUIRE(status != nullptr);
+    REQUIRE(status->getText().contains("not found"));
+    REQUIRE(status->getText().contains("Relocate"));
+}
+
+TEST_CASE("Relocation dialog lists every missing root", "[ui][relocation]")
+{
+    TestDirectory t;
+    auto dbPath = t.dir.getChildFile("dialog.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        SampleRecord r; r.filePath = "/gone/Drums/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
+        repo.addRoot("/gone/Drums");
+    }
+    MainComponent app(dbPath, false);
+    app.showRelocateDialog();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    auto* modal = juce::Component::getCurrentlyModalComponent();
+    REQUIRE(modal != nullptr);
+    REQUIRE(modal->getName() == "Relocate folders");
+    modal->exitModalState(0);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+}
+
+TEST_CASE("Opening a catalog with missing roots offers relocation", "[ui][relocation]")
+{
+    TestDirectory t;
+    auto dbA = t.dir.getChildFile("a.sqlite");
+    {
+        Database db(dbA); SampleRepository repo(db); repo.createTables();
+        repo.addRoot(t.dir.getFullPathName());
+    }
+    auto dbB = t.dir.getChildFile("b.sqlite");
+    {
+        Database db(dbB); SampleRepository repo(db); repo.createTables();
+        SampleRecord r; r.filePath = "/gone/Drums/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
+        repo.addRoot("/gone/Drums");
+    }
+    MainComponent app(dbA, false);
+    juce::String error;
+    REQUIRE(app.switchCatalog(dbB, false, error));
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    auto* modal = juce::Component::getCurrentlyModalComponent();
+    REQUIRE(modal != nullptr);
+    REQUIRE(modal->getName() == "Relocate folders");
+    modal->exitModalState(0);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+}

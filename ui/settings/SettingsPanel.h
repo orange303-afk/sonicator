@@ -14,6 +14,7 @@ public:
     void setDatabaseStatus(const juce::String&, bool error);
     std::function<void(const AppSettings&)> onSettingsChanged;
     std::function<void(const juce::File&, bool moveCurrent)> onDatabaseChosen;
+    std::function<void()> onRelocateRequested;
     std::function<void()> onShowAudio;
 private:
     AppSettings current;
@@ -24,6 +25,7 @@ private:
                  audioHeading, aboutHeading, productLabel, authorLabel, supportLabel;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::TextButton moveDatabase { "Move catalog..." }, openDatabase { "Open catalog..." },
+                     relocateDatabase { "Relocate folders..." },
                      audio { "Audio/MIDI Settings" }, close { "Close" };
     juce::HyperlinkButton gumroad, bandcamp, naukograd, kofi;
     std::unique_ptr<juce::FileChooser> chooser;
