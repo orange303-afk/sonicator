@@ -36,6 +36,11 @@ FolderTree::FolderTree()
 }
 FolderTree::~FolderTree() { tree.setRootItem(nullptr); }
 void FolderTree::resized() { tree.setBounds(getLocalBounds()); }
+void FolderTree::lookAndFeelChanged()
+{
+    tree.setColour(juce::TreeView::backgroundColourId,theme::panel);
+    tree.repaint();
+}
 void FolderTree::refresh(SampleRepository& repo)
 {
     const juce::ScopedValueSetter<bool> restoreGuard(restoring,true);

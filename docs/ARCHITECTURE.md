@@ -30,6 +30,21 @@ After analysis, missing files are reconciled in one pass ordered by primary key.
 
 Future machine predictions and user overrides must be stored independently of these measured file records. Model upgrades must not overwrite user annotations.
 
+## Settings, theme and catalogue switching
+
+Settings are stored as JSON at `Sonicator/settings.json` (atomic temp-file replace). The theme is a
+runtime palette: `theme::apply` selects dark, light or the current system appearance, and
+`Desktop::addDarkModeSettingListener` follows a live system change. Custom-painted components read
+the palette at paint time; components with constructor-set colours re-apply them in
+`lookAndFeelChanged`. In the light theme the silver wordmark is replaced by typeset product text.
+Interface scale uses `Desktop::setGlobalScaleFactor` at startup and immediately after a change.
+
+The Settings dialog can copy the current catalog to a new path through `backupTo` and switch every
+repository to it, or open an existing catalog. The old file is kept. Switching is refused while
+indexing and for files that fail `SampleRepository::isCatalog` (a `samples` and `roots` schema with
+a nonzero `user_version`), so a foreign SQLite database is never altered. A saved catalog path that
+is missing, invalid or unreadable falls back to the default location at startup.
+
 ## DSP conventions
 
 Decode in 2048-frame blocks, bounded by 64 channels. Peak = maximum absolute channel value. RMS = square root of total channel/sample power divided by the number of channel samples (not average of chunk RMS values). Values in SQLite are linear; UI displays dBFS. Silence displays -inf dBFS.

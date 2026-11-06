@@ -3,6 +3,8 @@
 #include "ui/preview/PreviewPanel.h"
 #include "ui/library/FolderTree.h"
 #include "ui/library/TagStrip.h"
+#include "ui/settings/SettingsPanel.h"
+#include <set>
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
 using namespace sonicator;
@@ -149,4 +151,34 @@ TEST_CASE("Tag strip lays out coloured chips and reports its height", "[ui][tags
     REQUIRE(strip.createComponentSnapshot(strip.getLocalBounds()).isValid());
     strip.setTags({});
     REQUIRE(strip.getPreferredHeight(200) == 24);
+}
+TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][settings]")
+{
+    SettingsPanel panel(AppSettings{}, juce::File("/tmp/catalog.sqlite"), false);
+    auto* themeBox = dynamic_cast<juce::ComboBox*>(panel.findChildWithID("settingsTheme"));
+    auto* scaleBox = dynamic_cast<juce::ComboBox*>(panel.findChildWithID("settingsScale"));
+    REQUIRE(themeBox != nullptr); REQUIRE(scaleBox != nullptr);
+    AppSettings changed; int calls = 0;
+    panel.onSettingsChanged = [&](const AppSettings& value) { changed = value; ++calls; };
+    themeBox->setSelectedId(3, juce::sendNotificationSync);
+    REQUIRE(calls == 1); REQUIRE(changed.theme == ThemeMode::Light);
+    scaleBox->setSelectedId(125, juce::sendNotificationSync);
+    REQUIRE(calls == 2); REQUIRE(changed.scalePercent == 125);
+
+    std::set<juce::String> urls;
+    for (auto* child : panel.getChildren())
+        if (auto* link = dynamic_cast<juce::HyperlinkButton*>(child)) urls.insert(link->getURL().toString(true));
+    REQUIRE(urls.count("https://ilyaorange.gumroad.com") == 1);
+    REQUIRE(urls.count("https://ilyaorange.bandcamp.com") == 1);
+    REQUIRE(urls.count("https://naukograd.bandcamp.com") == 1);
+    REQUIRE(urls.count("https://ko-fi.com/ilyaorange") == 1);
+    panel.setBounds(0,0,560,700);
+    const auto image = panel.createComponentSnapshot(panel.getLocalBounds());
+    REQUIRE(image.isValid());
+    const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_SETTINGS_SCREENSHOT",{});
+    if (shot.isNotEmpty())
+    {
+        auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
+        juce::PNGImageFormat png; REQUIRE(png.writeImageToStream(image,*stream));
+    }
 }

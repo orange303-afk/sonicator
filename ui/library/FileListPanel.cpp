@@ -4,8 +4,7 @@ namespace sonicator {
 FileListPanel::FileListPanel()
 {
     addAndMakeVisible(table); table.setRowHeight(34);
-    table.setColour(juce::ListBox::backgroundColourId,theme::background);
-    table.setColour(juce::ListBox::outlineColourId,theme::line);
+    refreshTheme();
     auto& h = table.getHeader();
     h.addColumn("SAMPLE",1,265,120,1200);
     h.addColumn("FORMAT",2,70,55,120);
@@ -15,6 +14,14 @@ FileListPanel::FileListPanel()
     h.addColumn("TAGS",7,145,80,350);
     h.addColumn("STATUS",6,120,80,350);
     h.setSortColumnId(1,true);
+}
+void FileListPanel::lookAndFeelChanged() { refreshTheme(); }
+void FileListPanel::refreshTheme()
+{
+    table.setColour(juce::ListBox::backgroundColourId,theme::background);
+    table.setColour(juce::ListBox::outlineColourId,theme::line);
+    table.setColour(juce::ListBox::textColourId,theme::text);
+    table.repaint();
 }
 void FileListPanel::setSamples(std::vector<SampleRecord> records)
 {
@@ -71,7 +78,7 @@ void FileListPanel::sortVisible(int column, bool forwards)
 }
 void FileListPanel::paintRowBackground(juce::Graphics& g,int row,int width,int height,bool selected)
 {
-    g.fillAll(selected ? juce::Colour(0xff342844) : (row % 2 ? theme::panel : theme::background));
+    g.fillAll(selected ? theme::selection : (row % 2 ? theme::panel : theme::background));
     if (selected) { g.setColour(theme::accent); g.fillRect(0,0,3,height); }
     g.setColour(theme::line.withAlpha(0.25f)); g.drawHorizontalLine(height-1,0,(float) width);
 }
@@ -97,7 +104,7 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
             g.setColour(colour); g.fillEllipse((float) x, h / 2.0f - 3.0f, 6.0f, 6.0f);
             x += 10;
             const int textWidth = juce::GlyphArrangement::getStringWidthInt(juce::FontOptions(11), tag.name);
-            g.setColour(colour.brighter(0.55f));
+            g.setColour(theme::tagText(colour));
             g.drawText(tag.name, x, 0, juce::jmax(0, w - x - 6), h, juce::Justification::centredLeft, true);
             x += juce::jmin(textWidth + 10, juce::jmax(0, w - x));
         }

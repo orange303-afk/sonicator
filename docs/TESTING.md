@@ -74,6 +74,22 @@ Windows / Intel macOS execution, ASan, concurrent UI-writer stress, hardware lat
 - Debug/Release `codesign --verify --verbose`: valid on disk and designated requirement satisfied (ad-hoc).
 - `git diff --check`: clean.
 
+## Settings and About stage (2026-11-06)
+
+Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.
+
+- Default suite: **62 cases / 593 assertions passed** in Debug and Release; Debug and Release CTest 1/1; Release ad-hoc bundle signature verified.
+- New coverage: settings JSON round-trip, defaults and invalid theme/scale; theme/scale callbacks from the dialog; the four support URLs (Gumroad, both Bandcamp pages, Ko-fi); Settings-dialog destruction before the application; live switch to an existing catalog, copy-and-switch, settings persistence, foreign-file rejection without modification; light and dark theme snapshots and main-window rendering at 1200x800.
+- Rendered Settings panel checked at 560x700: theme, scale, language note, catalog controls, audio entry and the complete About block with links and Close button.
+- Light theme checked at 1200x800: white panels, readable text, tags and table, typeset branding instead of the silver wordmark.
+
+### Known limits after this stage
+
+- Only English exists; the language value is stored for future translations.
+- Scale is a fixed set of four values and applies to the whole application.
+- **Move catalog** keeps the previous database file; it is not deleted automatically.
+- The system dark-mode listener is wired but a live OS appearance change was not automated in tests.
+
 ## Library maintenance stage (2026-11-06)
 
 Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5.

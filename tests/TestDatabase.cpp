@@ -291,3 +291,18 @@ TEST_CASE("User backup is a consistent copy and refuses unsafe destinations", "[
     REQUIRE_THROWS(repo.backupTo(file));
     REQUIRE_THROWS(repo.backupTo(backup));
 }
+TEST_CASE("Catalog detection rejects unrelated SQLite files", "[database][backup]")
+{
+    TestDirectory t;
+    const auto live = t.dir.getChildFile("live.sqlite");
+    { Database db(live); SampleRepository repo(db); repo.createTables(); REQUIRE(SampleRepository::isCatalog(live)); }
+    const auto foreign = t.dir.getChildFile("foreign.sqlite");
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(foreign.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        execRaw(raw, "CREATE TABLE notes(text TEXT); PRAGMA user_version=5;");
+        sqlite3_close(raw);
+    }
+    REQUIRE_FALSE(SampleRepository::isCatalog(foreign));
+    REQUIRE_FALSE(SampleRepository::isCatalog(t.dir.getChildFile("absent.sqlite")));
+}

@@ -22,6 +22,8 @@ public:
     void selectedRowsChanged(int) override;
     void sortOrderChanged(int,bool) override;
     void resized() override { table.setBounds(getLocalBounds()); }
+    void lookAndFeelChanged() override;
+    void refreshTheme();
     std::function<void(const SampleRecord&)> onSelected;
     // Header clicks also change the whole-catalog order; the owner re-runs the SQL query.
     std::function<void(int,bool)> onSortChanged;

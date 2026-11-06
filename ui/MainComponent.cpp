@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "BinaryData.h"
+#include "ui/settings/SettingsPanel.h"
 #include <algorithm>
 #include <iterator>
 namespace sonicator {
@@ -18,10 +19,13 @@ juce::File MainComponent::defaultDatabaseFile()
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
         .getChildFile("Sonicator/sonicator.sqlite");
 }
-MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
-    : dbPath(databaseFile), engine(openDevice), preview(engine,dbPath.getParentDirectory().getChildFile("cache"))
+MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppSettings initialSettings,juce::File settingsFile)
+    : dbPath(databaseFile), appSettings(std::move(initialSettings)),
+      settingsStore(settingsFile != juce::File() ? std::move(settingsFile) : AppSettings::defaultSettingsFile()),
+      engine(openDevice), preview(engine,dbPath.getParentDirectory().getChildFile("cache"))
 {
-    setLookAndFeel(&look); setWantsKeyboardFocus(true);
+    theme::apply(appSettings.theme);
+    setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
     for (auto* c : std::array<juce::Component*,28>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
          &pause,&cancel,&settings,&backup,&tagFilter,&clearFilters,&editTags,&previousPage,&nextPage,&heading,&subtitle,
@@ -32,8 +36,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     heading.setFont(juce::FontOptions(24,juce::Font::bold));
     subtitle.setText("INTELLIGENT SAMPLE EXPLORER",juce::dontSendNotification);
     subtitle.setFont(juce::FontOptions(11)); subtitle.setColour(juce::Label::textColourId,theme::muted);
-    const bool branded = logoWordmark.isValid();
-    heading.setVisible(! branded); subtitle.setVisible(! branded);
+    brandedLogo = logoWordmark.isValid();
+    heading.setVisible(! brandedLogo); subtitle.setVisible(! brandedLogo);
     libraryHeading.setText("LIBRARY",juce::dontSendNotification);
     libraryHeading.setColour(juce::Label::textColourId,theme::muted);
     rootsLabel.setText("Add your sample folders.\nOriginal files stay untouched.",juce::dontSendNotification);
@@ -98,7 +102,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     backup.setTooltip("Save a consistent copy of the catalog database");
     pause.onClick = [this] { if (indexer) indexer->setPaused(! indexer->progress().paused); };
     cancel.onClick = [this] { if (indexer) indexer->cancel(); };
-    settings.onClick = [this] { showAudioSettings(); };
+    settings.onClick = [this] { showSettings(); };
     tagFilter.onClick = [this] { showTagFilterMenu(); };
     clearFilters.onClick = [this]
     {
@@ -141,11 +145,15 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
     addFolder.setEnabled(indexer != nullptr); rescan.setEnabled(indexer != nullptr);
     reanalyze.setEnabled(indexer != nullptr); newFiles.setEnabled(indexer != nullptr);
     backup.setEnabled(indexer != nullptr);
+    sendLookAndFeelChange();
     startTimerHz(10);
+    juce::Desktop::getInstance().addDarkModeSettingListener(this);
 }
 MainComponent::~MainComponent()
 {
-    stopTimer(); chooser.reset(); audioDialog.deleteAndZero(); indexer.reset(); setLookAndFeel(nullptr);
+    juce::Desktop::getInstance().removeDarkModeSettingListener(this);
+    stopTimer(); chooser.reset(); settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
+    indexer.reset(); setLookAndFeel(nullptr);
 }
 bool MainComponent::contains(const std::vector<int64_t>& values, int64_t id)
 {
@@ -527,10 +535,162 @@ void MainComponent::timerCallback()
         reloadLibrary();
     }
 }
+void MainComponent::lookAndFeelChanged()
+{
+    const bool showBrand = brandedLogo && theme::isDark;
+    heading.setVisible(! showBrand); subtitle.setVisible(! showBrand);
+    subtitle.setColour(juce::Label::textColourId,theme::muted);
+    libraryHeading.setColour(juce::Label::textColourId,theme::muted);
+    rootsLabel.setColour(juce::Label::textColourId,theme::muted);
+    status.setColour(juce::Label::textColourId,theme::muted);
+    tagsLabel.setColour(juce::Label::textColourId,theme::muted);
+    stageLabel.setColour(juce::Label::textColourId,theme::muted);
+    search.setTextToShowWhenEmpty("Search entire library...",theme::muted);
+    repaint();
+}
+void MainComponent::darkModeSettingChanged()
+{
+    if (appSettings.theme == ThemeMode::System) refreshTheme();
+}
+void MainComponent::refreshTheme()
+{
+    theme::apply(appSettings.theme);
+    look.refreshColours();
+    sendLookAndFeelChange();
+    repaint();
+}
+void MainComponent::applySettings(const AppSettings& next)
+{
+    const auto database = appSettings.databasePath;
+    appSettings = next;
+    appSettings.databasePath = database;
+    appSettings.scalePercent = AppSettings::clampScale(appSettings.scalePercent);
+    refreshTheme();
+    juce::Desktop::getInstance().setGlobalScaleFactor(
+        juce::jlimit(0.75f, 2.0f, appSettings.scalePercent / 100.0f));
+    try { settingsStore.save(appSettings); }
+    catch (const std::exception& e)
+    {
+        status.setText("Settings applied but not saved: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification);
+    }
+}
+void MainComponent::showSettings()
+{
+    if (settingsDialog != nullptr) { settingsDialog->toFront(true); return; }
+    const bool indexing = indexer && indexer->progress().running;
+    auto* panel = new SettingsPanel(appSettings,dbPath,indexing);
+    panel->onSettingsChanged = [this](AppSettings next) { applySettings(next); };
+    panel->onShowAudio = [this] { showAudioSettings(); };
+    panel->onDatabaseChosen = [this, safePanel = juce::Component::SafePointer<SettingsPanel>(panel)]
+        (const juce::File& file, bool moveCurrent)
+        {
+            juce::String error;
+            if (switchCatalog(file,moveCurrent,error))
+            {
+                if (safePanel != nullptr)
+                {
+                    safePanel->setDatabaseFile(dbPath);
+                    safePanel->setDatabaseStatus(moveCurrent
+                        ? "Catalog copied and switched. The previous file was kept."
+                        : "Catalog opened.",false);
+                }
+            }
+            else if (safePanel != nullptr) safePanel->setDatabaseStatus(error,true);
+        };
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned(panel);
+    panel->setLookAndFeel(&look);
+    options.dialogTitle = "Settings";
+    options.dialogBackgroundColour = theme::panel;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    settingsDialog = options.launchAsync();
+}
+bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, juce::String& error)
+{
+    error.clear();
+    if (indexer && indexer->progress().running)
+    {
+        error = "Stop indexing before switching catalogs.";
+        return false;
+    }
+    if (target.getFullPathName().isEmpty())
+    {
+        error = "Choose a database file.";
+        return false;
+    }
+    if (target.getFullPathName() == dbPath.getFullPathName())
+    {
+        error = "This catalog is already open.";
+        return false;
+    }
+    if (moveCurrent && target.existsAsFile())
+    {
+        error = "Choose a new file for the catalog copy.";
+        return false;
+    }
+    if (! moveCurrent && ! SampleRepository::isCatalog(target))
+    {
+        error = target.existsAsFile() ? "That file is not a SONICATOR catalog." : "That catalog does not exist.";
+        return false;
+    }
+    if (moveCurrent)
+    {
+        try { writeRepo->backupTo(target); }
+        catch (const std::exception& e)
+        {
+            error = "Cannot copy the catalog: " + juce::String::fromUTF8(e.what());
+            return false;
+        }
+    }
+    std::unique_ptr<Database> newWriteDb, newReadDb;
+    std::unique_ptr<SampleRepository> newWriteRepo, newReadRepo;
+    try
+    {
+        newWriteDb = std::make_unique<Database>(target);
+        newWriteRepo = std::make_unique<SampleRepository>(*newWriteDb);
+        newWriteRepo->createTables();
+        newReadDb = std::make_unique<Database>(target);
+        newReadRepo = std::make_unique<SampleRepository>(*newReadDb);
+    }
+    catch (const std::exception& e)
+    {
+        error = "Cannot open the catalog: " + juce::String::fromUTF8(e.what());
+        if (moveCurrent) error += " The copy was kept at " + target.getFullPathName();
+        return false;
+    }
+    if (indexer) { indexer->cancel(); indexer->waitUntilFinished(-1); indexer.reset(); }
+    writeRepo.reset(); writeDb.reset(); readRepo.reset(); readDb.reset();
+    writeDb = std::move(newWriteDb); writeRepo = std::move(newWriteRepo);
+    readDb = std::move(newReadDb); readRepo = std::move(newReadRepo);
+    indexer = std::make_unique<IndexingService>(*writeRepo);
+    const auto previous = dbPath;
+    dbPath = target;
+    const auto isDefault = dbPath.getFullPathName() == defaultDatabaseFile().getFullPathName();
+    appSettings.databasePath = isDefault ? juce::String() : dbPath.getFullPathName();
+    selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
+    filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear(); filter.matchAnyTag = false;
+    search.clear(); pendingSearch.clear();
+    analysisDetails.setText("Select a sample to inspect its measured audio features.",juce::dontSendNotification);
+    selectedTags.setTags({});
+    folders.refresh(*readRepo);
+    reloadLibrary();
+    juce::String message = "Catalog: " + dbPath.getFullPathName();
+    if (moveCurrent) message += "  |  previous catalog kept at " + previous.getFullPathName();
+    try { settingsStore.save(appSettings); }
+    catch (const std::exception& e)
+    {
+        message += "  |  settings were not saved: " + juce::String::fromUTF8(e.what());
+    }
+    status.setText(message,juce::dontSendNotification);
+    return true;
+}
 void MainComponent::showAudioSettings()
 {
     if (audioDialog != nullptr) { audioDialog->toFront(true); return; }
     auto* selector = new juce::AudioDeviceSelectorComponent(engine.deviceManager(),0,0,0,2,true,false,true,false);
+    selector->setLookAndFeel(&look);
     selector->setSize(460,500);
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned(selector); options.dialogTitle = "Audio output";
@@ -544,7 +704,7 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(theme::line); g.drawHorizontalLine(85,0,(float) getWidth());
     g.drawVerticalLine(sidebarBounds.getRight(),86,(float) sidebarBounds.getBottom());
     g.drawVerticalLine(analysisBounds.getX(),86,(float) analysisBounds.getBottom());
-    if (logoWordmark.isValid())
+    if (logoWordmark.isValid() && theme::isDark)
         g.drawImage(logoWordmark, juce::Rectangle<float>(16,8,310,70),
                     juce::RectanglePlacement::onlyReduceInSize | juce::RectanglePlacement::centred);
 }

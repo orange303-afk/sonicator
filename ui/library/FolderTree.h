@@ -12,6 +12,7 @@ public:
     ~FolderTree() override;
     void refresh(SampleRepository&);
     void resized() override;
+    void lookAndFeelChanged() override;
     std::function<void(juce::String)> onFolder;
 private:
     class Item;

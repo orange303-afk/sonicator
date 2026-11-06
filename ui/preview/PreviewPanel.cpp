@@ -69,6 +69,7 @@ void PreviewPanel::paint(juce::Graphics& g)
 {
     g.fillAll(theme::panel); g.setColour(theme::line); g.drawHorizontalLine(0,0,(float) getWidth());
 }
+void PreviewPanel::lookAndFeelChanged() { time.setColour(juce::Label::textColourId,theme::muted); repaint(); }
 void PreviewPanel::resized()
 {
     auto r = getLocalBounds().reduced(16,12);

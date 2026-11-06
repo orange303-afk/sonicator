@@ -64,7 +64,7 @@ void TagStrip::paint(juce::Graphics& g)
         g.setColour(colour.withAlpha(0.55f)); g.drawRoundedRectangle(bounds.reduced(0.5f), 5.0f, 1.0f);
         g.setColour(colour);
         g.fillEllipse(bounds.getX() + padding, bounds.getCentreY() - dotSize / 2.0f, dotSize, dotSize);
-        g.setColour(colour.brighter(0.55f));
+        g.setColour(theme::tagText(colour));
         g.drawText(tag.name, chipBounds[i].withTrimmedLeft(padding + dotSize + 6),
                    juce::Justification::centredLeft, true);
     }

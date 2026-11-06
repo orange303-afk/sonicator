@@ -5,19 +5,28 @@
 #include "ui/library/TagStrip.h"
 #include "ui/preview/PreviewPanel.h"
 #include "core/indexing/IndexingService.h"
+#include "core/settings/AppSettings.h"
 namespace sonicator {
-class MainComponent final : public juce::Component, private juce::Timer
+class MainComponent final : public juce::Component,
+                            private juce::Timer,
+                            private juce::DarkModeSettingListener
 {
 public:
     static juce::File defaultDatabaseFile();
-    explicit MainComponent(const juce::File& databaseFile = defaultDatabaseFile(), bool openDevice = true);
+    explicit MainComponent(const juce::File& databaseFile = defaultDatabaseFile(),
+                           bool openDevice = true,
+                           AppSettings initialSettings = {},
+                           juce::File settingsFile = {});
     ~MainComponent() override;
     void paint(juce::Graphics& g) override;
     void resized() override;
+    void lookAndFeelChanged() override;
     bool keyPressed(const juce::KeyPress& k) override { return preview.keyPressed(k); }
     void beginImport(const juce::File&);
     bool refreshIfCatalogChanged();
     juce::File backupCatalog();
+    // Copies (moveCurrent) or opens an existing catalog and switches every repository to it.
+    bool switchCatalog(const juce::File& target, bool moveCurrent, juce::String& error);
     // Applies a whole-catalog search immediately (typing uses a 250 ms debounce instead).
     void searchLibrary(const juce::String&);
     void setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny = false);
@@ -25,6 +34,9 @@ private:
     SonicatorLookAndFeel look;
     juce::Image logoWordmark;
     juce::File dbPath;
+    AppSettings appSettings;
+    SettingsStore settingsStore;
+    bool brandedLogo = false;
     AudioEngine engine;
     PreviewPanel preview;
     FileListPanel library;
@@ -36,7 +48,7 @@ private:
     int64_t selectedSampleId = 0;
     juce::TextEditor search;
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" };
-    juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Audio settings" }, backup { "Backup" };
+    juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" }, backup { "Backup" };
     juce::TextButton tagFilter { "Tags" }, clearFilters { "Clear filters" }, editTags { "Edit tags..." };
     juce::TextButton previousPage { "<" }, nextPage { ">" };
     juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel;
@@ -47,13 +59,14 @@ private:
     std::unique_ptr<SampleRepository> readRepo, writeRepo;
     std::unique_ptr<IndexingService> indexer;
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::Component::SafePointer<juce::DialogWindow> audioDialog;
+    juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog;
     int pageOffset = 0, catalogCount = 0;
     bool wasRunning = false;
     uint32_t lastRefreshMs = 0, lastSearchChange = 0;
     juce::String pendingSearch;
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
     void timerCallback() override;
+    void darkModeSettingChanged() override;
     void chooseFolder();
     void requestScan(bool reanalyze);
     void scanRoots(bool force, bool newOnly = false);
@@ -62,6 +75,9 @@ private:
     void selectSample(const SampleRecord&);
     void updateSelectedTags();
     void showAudioSettings();
+    void showSettings();
+    void applySettings(const AppSettings&);
+    void refreshTheme();
     void showTagFilterMenu();
     void showTagColourMenu(int64_t tagId);
     void showEditTagsMenu();

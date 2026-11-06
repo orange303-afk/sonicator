@@ -33,6 +33,8 @@ public:
     juce::StringArray roots() const;
     // Consistent SQLite backup through the backup API (WAL-safe). The destination must be new.
     void backupTo(const juce::File& destination);
+    // True only for an existing SONICATOR catalog (samples and roots tables with a schema version).
+    static bool isCatalog(const juce::File& file);
     std::vector<Tag> tags() const;
     std::vector<Tag> tagsForSample(int64_t sampleId) const;
     std::map<int64_t, std::vector<Tag>> tagsForSamples(const std::vector<int64_t>& sampleIds) const;

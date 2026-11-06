@@ -10,6 +10,7 @@ public:
     bool loadFile(const juce::File&);
     std::function<void()> onAction;
     void resized() override;
+    void lookAndFeelChanged() override;
     void paint(juce::Graphics&) override;
     bool keyPressed(const juce::KeyPress&) override;
 private:

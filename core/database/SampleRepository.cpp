@@ -413,6 +413,25 @@ juce::StringArray SampleRepository::roots() const
     while (s.step()) out.add(s.text(0));
     return out;
 }
+bool SampleRepository::isCatalog(const juce::File& file)
+{
+    if (! file.existsAsFile()) return false;
+    sqlite3* handle = nullptr;
+    if (sqlite3_open_v2(file.getFullPathName().toRawUTF8(), &handle, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK)
+    {
+        if (handle != nullptr) sqlite3_close(handle);
+        return false;
+    }
+    bool catalog = false;
+    sqlite3_stmt* statement = nullptr;
+    constexpr auto sql = "SELECT (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('samples','roots'))"
+                         ", (SELECT user_version FROM pragma_user_version)";
+    if (sqlite3_prepare_v2(handle, sql, -1, &statement, nullptr) == SQLITE_OK && sqlite3_step(statement) == SQLITE_ROW)
+        catalog = sqlite3_column_int(statement, 0) == 2 && sqlite3_column_int(statement, 1) >= 1;
+    if (statement != nullptr) sqlite3_finalize(statement);
+    sqlite3_close(handle);
+    return catalog;
+}
 void SampleRepository::backupTo(const juce::File& destination)
 {
     std::lock_guard lock(db.mutex);

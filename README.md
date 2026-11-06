@@ -43,7 +43,8 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 6. **Tags** filters the catalog by standard or custom tags: include, exclude, and match all/any. Select a sample and **Edit tags...** to assign tags; create, rename, recolour and delete tags from the tag menu.
 7. **Rescan** asks for confirmation, then analyzes new, changed and previously failed files; unchanged analyzed files are skipped. **New files** is the additive scan: it walks the folders but analyzes only paths that are not in the catalog yet, without reconciling missing records. **Reanalyze all** asks for a stronger confirmation and recomputes every file. Cancel keeps completed results and never stores a partial row.
 8. **Backup** writes a consistent SQLite copy to `Sonicator/backups/` beside the database. The live database and its WAL are never copied as raw files.
-9. **Audio settings** selects the output device. No microphone input is opened.
+9. **Settings** opens the theme (system/dark/light), interface scale, catalog location, audio output and the About/support links. Theme, scale, language and catalog path persist between launches.
+10. **Audio output** inside Settings selects the output device. No microphone input is opened.
 
 ## Data
 
@@ -51,6 +52,7 @@ Database and bounded waveform cache live in JUCE's user application-data locatio
 
 - macOS: `~/Library/Sonicator/sonicator.sqlite` (JUCE `userApplicationDataDirectory`).
 - Windows: `%APPDATA%\Sonicator\sonicator.sqlite`.
+- Settings: `Sonicator/settings.json` in the same application-data location. It stores theme, scale, language and an optional catalog path.
 
 No original audio is changed, renamed or deleted. Duplicate copies remain distinct file-path records, identified by full SHA-256.
 Do not delete a live SQLite database or its `-wal`/`-shm` sidecars. Close the application before making filesystem backups.
@@ -64,10 +66,12 @@ core/scanner/                recursive discovery and cancellable full-file SHA-2
 core/dsp/                    chunked audio decoding and measured descriptors
 core/audio/                  preview transport, sample-rate conversion, read-ahead
 core/indexing/               background import, pause/cancel, incremental updates
+core/settings/               persisted application settings
 ui/shell/                    shared dark theme
 ui/library/                  global search, tags and paged library
 ui/waveform/                 asynchronous thumbnail and bounded disk cache
 ui/preview/                  transport and keyboard controls
+ui/settings/                 Settings dialog, catalogue switching and About links
 ui/MainComponent.*           orchestration, inspector, device settings
 resources/sqlite/            official SQLite amalgamation
 tests/                       core, audio-render, UI and integration tests
@@ -109,6 +113,8 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - Waveform cache holds at most 64 thumbnails. Search, sorting and tag filters run over the whole catalog; a page still contains at most 10,000 rows. Text search folds ASCII, Latin, Greek and Cyrillic case; scripts without case (CJK) match literally. No 500,000-file or GPU/60 FPS claim is made.
 - Files with decode errors are retried on rescan. Missing roots abort that scan with a visible message; records are not deleted. The additive **New files** scan deliberately does not mark missing records.
 - The manual **Backup** copy runs through SQLite's backup API on the UI thread, so a very large catalog can pause the window briefly while it copies. No automatic rotation or deletion of user backups is performed.
+- Interface scale is limited to 100%, 110%, 125% and 150%. Only English is available; the language setting is stored for future translations. **Move catalog** leaves the previous database file in place instead of deleting it.
+- A saved catalog that is missing or is not a SONICATOR catalog falls back to the default location at startup; the fallback is written to the log.
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.
 - Windows, Intel macOS, DAW integrations, physical listening/latency and release packaging still need platform/user verification.

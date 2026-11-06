@@ -84,14 +84,14 @@ TEST_CASE("Samples added to the catalog after startup appear in the list", "[ui]
     REQUIRE(library->getNumRows() == 2);
     REQUIRE(library->getSelectedRow() == 0);
 }
-TEST_CASE("Audio settings dialog is destroyed before the application's audio engine", "[ui][dialog]")
+TEST_CASE("Settings dialog is destroyed before the application", "[ui][dialog][settings]")
 {
     TestDirectory t;
     auto app = std::make_unique<MainComponent>(t.dir.getChildFile("library.sqlite"),false);
     juce::TextButton* settings = nullptr;
     for (auto* child : app->getChildren())
         if (auto* button = dynamic_cast<juce::TextButton*>(child))
-            if (button->getButtonText() == "Audio settings") settings = button;
+            if (button->getButtonText() == "Settings") settings = button;
     REQUIRE(settings != nullptr);
     settings->onClick();
     juce::Component::SafePointer<juce::Component> dialog(juce::Component::getCurrentlyModalComponent());
@@ -227,4 +227,73 @@ TEST_CASE("Backup button writes a consistent copy beside the database", "[ui][ma
     Database copy(copies[0]); SampleRepository copyRepo(copy); copyRepo.createTables();
     REQUIRE(copyRepo.count() == 1);
     REQUIRE_FALSE(copies[0].isDirectory());
+}
+TEST_CASE("Settings switch to an existing catalog or copy the current one", "[ui][settings][database]")
+{
+    TestDirectory t;
+    auto a = t.wave("a.wav");
+    auto dbA = t.dir.getChildFile("a.sqlite");
+    {
+        Database db(dbA); SampleRepository repo(db); repo.createTables();
+        auto r = BasicAnalyzer().analyze(a); repo.upsert(r); repo.addRoot(t.dir.getFullPathName());
+    }
+    auto b1 = t.wave("b1.wav", 550); auto b2 = t.wave("b2.wav", 660);
+    auto dbB = t.dir.getChildFile("b.sqlite");
+    {
+        Database db(dbB); SampleRepository repo(db); repo.createTables();
+        for (const auto& file : { b1, b2 }) { auto r = BasicAnalyzer().analyze(file); repo.upsert(r); }
+        repo.addRoot(t.dir.getFullPathName());
+    }
+    auto settingsFile = t.dir.getChildFile("settings.json");
+    MainComponent app(dbA,false,{},settingsFile);
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 1);
+    juce::String error;
+    REQUIRE(app.switchCatalog(dbB,false,error));
+    REQUIRE(error.isEmpty());
+    REQUIRE(library->getNumRows() == 2);
+    REQUIRE(SettingsStore(settingsFile).load().databasePath == dbB.getFullPathName());
+
+    auto moved = t.dir.getChildFile("moved.sqlite");
+    REQUIRE(app.switchCatalog(moved,true,error));
+    REQUIRE(error.isEmpty());
+    REQUIRE(moved.existsAsFile());
+    REQUIRE(library->getNumRows() == 2);
+    {
+        Database db(moved); SampleRepository repo(db); REQUIRE(repo.count() == 2);
+    }
+    REQUIRE(SettingsStore(settingsFile).load().databasePath == moved.getFullPathName());
+    REQUIRE_FALSE(app.switchCatalog(moved,true,error));
+    REQUIRE(error.isNotEmpty());
+    REQUIRE_FALSE(app.switchCatalog(t.dir.getChildFile("absent.sqlite"),false,error));
+    auto foreign = t.dir.getChildFile("foreign.sqlite");
+    REQUIRE(foreign.replaceWithText("this is not a catalog"));
+    REQUIRE_FALSE(app.switchCatalog(foreign,false,error));
+    REQUIRE(error.isNotEmpty());
+    REQUIRE(foreign.loadFileAsString() == "this is not a catalog");
+}
+TEST_CASE("Light and dark themes apply without invalid rendering", "[ui][theme]")
+{
+    TestDirectory t;
+    {
+        MainComponent light(t.dir.getChildFile("light.sqlite"),false,AppSettings{ThemeMode::Light,100,"English"});
+        REQUIRE_FALSE(theme::isDark);
+        light.setBounds(0,0,1200,800);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        const auto image = light.createComponentSnapshot(light.getLocalBounds());
+        REQUIRE(image.isValid());
+        const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_LIGHT_SCREENSHOT",{});
+        if (shot.isNotEmpty())
+        {
+            auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
+            juce::PNGImageFormat png; REQUIRE(png.writeImageToStream(image,*stream));
+        }
+    }
+    {
+        MainComponent dark(t.dir.getChildFile("dark.sqlite"),false,AppSettings{ThemeMode::Dark,100,"English"});
+        REQUIRE(theme::isDark);
+        dark.setBounds(0,0,1200,800);
+        REQUIRE(dark.createComponentSnapshot(dark.getLocalBounds()).isValid());
+    }
+    theme::apply(ThemeMode::Dark);
 }
