@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <unordered_set>
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
 using namespace sonicator;
@@ -78,6 +79,19 @@ TEST_CASE("Rows written with the current feature version are skipped, not reanal
     REQUIRE(index.start({file.getParentDirectory().getFullPathName()})); REQUIRE(index.waitUntilFinished(10000));
     REQUIRE(index.progress().skipped == 1);
     REQUIRE(index.progress().analyzed == 0);
+}
+TEST_CASE("A record absent from discovery is only marked missing when the file is gone", "[indexing]")
+{
+    TestDirectory t; auto present = t.wave("audio/present.wav", 440);
+    juce::StringArray roots { present.getParentDirectory().getFullPathName() };
+    std::unordered_set<std::string> discovered;
+    std::vector<PathEntry> rows {
+        { 1, present.getFullPathName(), false },
+        { 2, present.getParentDirectory().getChildFile("gone.wav").getFullPathName(), false },
+        { 3, present.getFullPathName(), true },
+        { 4, "/elsewhere/outside.wav", false }
+    };
+    REQUIRE(findMissingIds(rows, discovered, roots) == std::vector<int64_t>{ 2 });
 }
 TEST_CASE("Indexer cancellation and unavailable folders are explicit", "[indexing]")
 {

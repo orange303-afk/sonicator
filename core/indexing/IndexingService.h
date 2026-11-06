@@ -4,6 +4,8 @@
 #include <juce_events/juce_events.h>
 #include <atomic>
 #include <condition_variable>
+#include <unordered_set>
+#include <vector>
 namespace sonicator {
 struct IndexingProgress
 {
@@ -11,6 +13,11 @@ struct IndexingProgress
     int total = 0, processed = 0, analyzed = 0, skipped = 0, failed = 0, duplicates = 0;
     juce::String current, message;
 };
+// Rows under the scanned roots that are not in the discovery set and not on disk. The filesystem
+// probe runs only for candidates, so an unchanged scan stays allocation-and-index only.
+std::vector<int64_t> findMissingIds(const std::vector<PathEntry>& rows,
+                                    const std::unordered_set<std::string>& discoveredPaths,
+                                    const juce::StringArray& roots);
 class IndexingService final : private juce::Thread
 {
 public:

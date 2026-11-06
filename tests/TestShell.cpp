@@ -41,6 +41,8 @@ TEST_CASE("Samples added to the catalog after startup appear in the list", "[ui]
     MainComponent app(dbPath, false);
     auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
     REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 1);
+    library->selectRow(0);
+    REQUIRE(library->getSelectedRow() == 0);
     REQUIRE_FALSE(app.refreshIfCatalogChanged());
     {
         Database db(dbPath); SampleRepository repo(db); repo.createTables();
@@ -48,6 +50,7 @@ TEST_CASE("Samples added to the catalog after startup appear in the list", "[ui]
     }
     REQUIRE(app.refreshIfCatalogChanged());
     REQUIRE(library->getNumRows() == 2);
+    REQUIRE(library->getSelectedRow() == 0);
 }
 TEST_CASE("Audio settings dialog is destroyed before the application's audio engine", "[ui][dialog]")
 {

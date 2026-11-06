@@ -27,6 +27,25 @@ void IndexingService::setPaused(bool value)
     pauseCondition.notify_all();
 }
 IndexingProgress IndexingService::progress() const { std::lock_guard lock(stateMutex); return state; }
+std::vector<int64_t> findMissingIds(const std::vector<PathEntry>& rows,
+                                    const std::unordered_set<std::string>& discoveredPaths,
+                                    const juce::StringArray& roots)
+{
+    std::vector<int64_t> missing;
+    for (const auto& row : rows)
+    {
+        if (row.missing) continue;
+        const juce::File file(row.path);
+        bool inRoot = false;
+        for (const auto& root : roots)
+            if (file.isAChildOf(juce::File(root))) { inRoot = true; break; }
+        if (! inRoot || discoveredPaths.find(row.path.toStdString()) != discoveredPaths.end()) continue;
+        // Discovery can fail silently (offline volume, File Provider, I/O error), so an absent path is
+        // only proof of deletion when the filesystem agrees. Candidates alone pay for the probe.
+        if (! file.existsAsFile()) missing.push_back(row.id);
+    }
+    return missing;
+}
 bool IndexingService::checkpoint()
 {
     std::unique_lock lock(pauseMutex);
@@ -71,8 +90,8 @@ void IndexingService::run()
         }
         if (! cancelled)
         {
-            // Paths that are under a scanned root but were not discovered are gone. Discovery already
-            // enumerated every path, so this pass needs no count, no sort and no filesystem probe.
+            // Paths under a scanned root that discovery did not return are checked against the disk
+            // before they are marked missing. No sort, no offset paging.
             { std::lock_guard lock(stateMutex); state.finalizing = true; state.message = "Checking for missing files"; }
             int64_t lastId = 0;
             for (;;)
@@ -80,18 +99,8 @@ void IndexingService::run()
                 if (checkpoint()) break;
                 auto rows = repo.pathsAfterId(lastId, 5000);
                 if (rows.empty()) break;
-                std::vector<int64_t> missingIds;
-                for (const auto& row : rows)
-                {
-                    lastId = row.id;
-                    if (row.missing) continue;
-                    const juce::File file(row.path);
-                    bool inRoot = false;
-                    for (const auto& root : folders)
-                        if (file.isAChildOf(juce::File(root))) { inRoot = true; break; }
-                    if (inRoot && foundPaths.find(row.path.toStdString()) == foundPaths.end())
-                        missingIds.push_back(row.id);
-                }
+                lastId = rows.back().id;
+                const auto missingIds = findMissingIds(rows, foundPaths, folders);
                 if (! missingIds.empty()) repo.setMissing(missingIds);
             }
             { std::lock_guard lock(stateMutex); state.finalizing = false; }
@@ -101,7 +110,7 @@ void IndexingService::run()
     }
     catch (const std::exception& e)
     {
-        std::lock_guard lock(stateMutex); state.message = juce::String::fromUTF8(e.what());
+        std::lock_guard lock(stateMutex); state.message = juce::String::fromUTF8(e.what()); state.finalizing = false;
     }
     std::lock_guard lock(stateMutex);
     state.running = false; state.paused = false; state.cancelled = cancelled;

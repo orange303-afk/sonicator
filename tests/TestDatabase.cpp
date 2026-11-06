@@ -75,18 +75,22 @@ TEST_CASE("Schema v1 migrates in place, keeps rows, and backs up once", "[databa
                      "size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
                      "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER);");
         execRaw(raw, "INSERT INTO samples(path,name,hash,format,error,version) VALUES('/a.wav','a.wav','h1','WAV','',1),"
-                     "('/b.wav','b.wav','h2','WAV','',1);");
+                     "('/b.wav','b.wav','h2','WAV','',1),('/c.wav','c.wav','h3','WAV','',2);");
         execRaw(raw, "PRAGMA user_version=1;");
         sqlite3_close(raw);
     }
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(repo.count() == 2);
+        REQUIRE(repo.count() == 3);
+        REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM samples WHERE version=1") == 3);
     }
-    REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
+    const auto backups = t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*");
+    REQUIRE(backups.size() == 1);
+    REQUIRE(rawScalar(backups[0], "SELECT COUNT(*) FROM samples") == 3);
+    REQUIRE(rawScalar(backups[0], "PRAGMA user_version") == 1);
     REQUIRE(rawScalar(file, "PRAGMA user_version") == 2);
     REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='samples_name_id'") == 1);
-    { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.count() == 2); }
+    { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.count() == 3); }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
 }
 TEST_CASE("Path stream walks by primary key and marks missing in batches", "[database]")

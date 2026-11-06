@@ -22,20 +22,36 @@ void backupDatabase(sqlite3* source, const juce::File& destination)
     if (sqlite3_open_v2(destination.getFullPathName().toRawUTF8(), &out,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr) != SQLITE_OK)
     {
+        const juce::String error = out != nullptr ? juce::String(sqlite3_errmsg(out)) : juce::String("cannot open destination");
         if (out != nullptr) sqlite3_close(out);
-        throw std::runtime_error("Cannot create database backup");
+        throw std::runtime_error("Cannot create database backup: " + error.toStdString());
     }
+    sqlite3_busy_timeout(out, 5000);
     auto* backup = sqlite3_backup_init(out, "main", source, "main");
     if (backup == nullptr)
     {
         const juce::String error(sqlite3_errmsg(out));
         sqlite3_close(out);
-        throw std::runtime_error(error.toStdString());
+        destination.deleteFile();
+        throw std::runtime_error("Cannot start database backup: " + error.toStdString());
     }
-    sqlite3_backup_step(backup, -1);
-    const int rc = sqlite3_backup_finish(backup);
+    int rc = SQLITE_OK;
+    for (;;)
+    {
+        rc = sqlite3_backup_step(backup, 256);
+        if (rc == SQLITE_BUSY || rc == SQLITE_LOCKED) { sqlite3_sleep(50); continue; }
+        if (rc == SQLITE_OK) continue;
+        break;
+    }
+    const int finishResult = sqlite3_backup_finish(backup);
+    const juce::String error(sqlite3_errmsg(out));
     sqlite3_close(out);
-    if (rc != SQLITE_OK) throw std::runtime_error("Database backup failed");
+    if (rc != SQLITE_DONE || finishResult != SQLITE_OK)
+    {
+        // Never leave a zero-byte file that looks like a usable backup.
+        destination.deleteFile();
+        throw std::runtime_error("Database backup failed: " + error.toStdString());
+    }
 }
 }
 void SampleRepository::createTables()
@@ -44,11 +60,15 @@ void SampleRepository::createTables()
     detail::Statement version(db.handle, "PRAGMA user_version");
     const int current = version.step() ? (int) version.integer(0) : 0;
     if (current > schemaVersion) throw std::runtime_error("Database schema is newer than this application");
-    if (current >= 1 && current < schemaVersion)
+    detail::Statement tables(db.handle, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('samples','roots')");
+    const int existingTables = tables.step() ? (int) tables.integer(0) : 0;
+    const bool upgrading = current < schemaVersion && (current >= 1 || existingTables > 0);
+    if (upgrading)
     {
         // WAL may still hold committed pages, so copy through SQLite rather than the file system.
         const auto target = db.file().getSiblingFile(db.file().getFileName() + ".backup-"
-            + juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S"));
+            + juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S")
+            + "-" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt())).getNonexistentSibling();
         backupDatabase(db.handle, target);
     }
     try
@@ -62,8 +82,11 @@ void SampleRepository::createTables()
             "CREATE INDEX IF NOT EXISTS samples_hash ON samples(hash);"
             "CREATE INDEX IF NOT EXISTS samples_name_id ON samples(name COLLATE NOCASE, id);"
             "CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY);"
-            "PRAGMA user_version=2;"
-            "COMMIT;");
+            "PRAGMA user_version=2;");
+        // Rows written by the build that bumped the version to 2 measured the same feature set, so
+        // they are relabelled rather than reanalyzed. Only during this one-time upgrade.
+        if (current >= 1 && current < 2) detail::exec(db.handle, "UPDATE samples SET version=1 WHERE version=2;");
+        detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
     {

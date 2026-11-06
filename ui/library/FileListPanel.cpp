@@ -15,7 +15,15 @@ FileListPanel::FileListPanel()
     h.addColumn("STATUS",6,130,80,350);
     h.setSortColumnId(1,true);
 }
-void FileListPanel::setSamples(std::vector<SampleRecord> records) { all = std::move(records); rebuild(); }
+void FileListPanel::setSamples(std::vector<SampleRecord> records)
+{
+    const auto selectedRow = table.getSelectedRow();
+    const int64_t selectedId = (selectedRow >= 0 && selectedRow < getNumRows()) ? visible[(size_t) selectedRow].id : 0;
+    all = std::move(records); rebuild();
+    if (selectedId == 0) return;
+    for (int row = 0; row < getNumRows(); ++row)
+        if (visible[(size_t) row].id == selectedId) { table.selectRow(row, true); break; }
+}
 void FileListPanel::setSearchText(const juce::String& text) { search = text.trim(); rebuild(); }
 void FileListPanel::rebuild()
 {

@@ -62,12 +62,13 @@ Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE
 
 - Default suite: **28 cases / 250 assertions passed** (Debug and Release).
 - New coverage: schema v1→v2 migration with an online backup created exactly once and rows preserved; keyset path stream and batch missing updates; missing detection from the discovery set without touching unscanned roots; version-1 results skipped instead of reanalyzed; catalog rows added after startup appearing in the list.
-- Synthetic scale test `[.scale]`, 300,000 inserted rows and one real WAV: full scan including reconciliation **3.91 s**; reconciliation query plan is a primary-key search with no temporary B-tree; the UI page query uses the `samples_name_id` covering index.
+- Synthetic scale test `[.scale]`, 300,000 inserted rows and one real WAV: full scan including reconciliation **4.58 s**, unchanged second scan **0.71 s**, and the 300,000 ghost rows carry `missing = 1`; reconciliation query plan is a primary-key search with no temporary B-tree; the full 20-column page query is ordered by `samples_name_id` with no temporary B-tree.
 - Read-only check on a copy of the owner's real catalog (299,057 rows): creating the index **0.179 s**; first 10,000-row page **0.024 s** (previously 0.505 s with a temp sort); a full keyset walk over all 299,057 rows **0.126 s**. Counts and every row were preserved; `user_version` stayed 1 on the original because it was never opened by the new build.
 - The original `~/Library/Sonicator/sonicator.sqlite` was not opened for writing, rescanned or reanalyzed in this stage.
 
 ### Known limits after this stage
 
 - Search and column sorting still apply to the loaded 10,000-row page, not the whole catalog.
-- The first launch of the new build writes a ~150 MB backup beside the database before migrating.
-- A file created between discovery and reconciliation is reported missing until the next scan.
+- The first launch of the new build writes a ~150 MB backup beside the database before migrating. To restore it: quit the app, delete the database's `-wal` and `-shm` files, then copy the backup over the database file.
+- A file created between discovery and reconciliation is reported missing until the next scan, then restored automatically.
+- A record that disappears between discovery and reconciliation is confirmed with a single filesystem probe before it is marked missing.
