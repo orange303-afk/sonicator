@@ -4,6 +4,7 @@
 #include "ui/library/FolderTree.h"
 #include "ui/library/TagStrip.h"
 #include "ui/settings/SettingsPanel.h"
+#include "ui/settings/RelocateFoldersPanel.h"
 #include "ui/shell/WindowBounds.h"
 #include <set>
 #include "core/indexing/IndexingService.h"
@@ -253,4 +254,25 @@ TEST_CASE("Virtual sample rows load in blocks and keep multi-selection", "[ui][v
     REQUIRE(list.getSelectedSamples()[0].id == 30);
     REQUIRE(list.getSelectedSamples()[1].id == 20);
     REQUIRE(list.getSelectedSamples()[0].fileName == "s30.wav");
+}
+TEST_CASE("Relocation panel enables applying only after every folder is chosen", "[ui][relocation]")
+{
+    TestDirectory t;
+    auto target = t.dir.getChildFile("target"); target.createDirectory();
+    RelocateFoldersPanel panel({{ "/missing/Drums", 12 }, { "/missing/Bass", 7 }});
+    REQUIRE_FALSE(panel.canApply());
+    REQUIRE_FALSE(panel.setTarget(0, t.dir.getChildFile("absent")));
+    REQUIRE(panel.setTarget(0, target));
+    REQUIRE_FALSE(panel.canApply());
+    auto other = t.dir.getChildFile("other"); other.createDirectory();
+    REQUIRE(panel.setTarget(1, other));
+    REQUIRE(panel.canApply());
+    auto rows = panel.relocations();
+    REQUIRE(rows.size() == 2);
+    REQUIRE(rows[0].oldRoot == "/missing/Drums");
+    REQUIRE(rows[0].newRoot == target.getFullPathName());
+
+    REQUIRE_FALSE(panel.setTarget(1, target)); // duplicate target
+    REQUIRE(panel.canApply()); // the previous valid target is kept
+    REQUIRE(panel.relocations()[1].newRoot == other.getFullPathName());
 }

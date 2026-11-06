@@ -24,7 +24,7 @@ target_link_libraries(SonicatorCore PUBLIC
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography)
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png)
-add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/settings/SettingsPanel.cpp ui/shell/WindowBounds.cpp)
+add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/settings/SettingsPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp)
 if(APPLE)
     target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.mm)
 else()
