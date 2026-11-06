@@ -36,7 +36,7 @@ TEST_CASE("Missing-file restoration and analyzer-version invalidation keep stabl
     IndexingService index(repo); juce::StringArray roots { file.getParentDirectory().getFullPathName() };
     REQUIRE(index.start(roots)); REQUIRE(index.waitUntilFinished(10000));
     auto original = repo.findByPath(file.getFullPathName()); REQUIRE(original);
-    auto obsolete = *original; obsolete.version = analysisVersion-1; repo.upsert(obsolete);
+    auto obsolete = *original; obsolete.version = basicFeaturesVersion-1; repo.upsert(obsolete);
     REQUIRE(index.start(roots)); REQUIRE(index.waitUntilFinished(10000));
     REQUIRE(index.progress().analyzed == 1); REQUIRE(index.progress().skipped == 0);
     REQUIRE(file.deleteFile());
@@ -57,13 +57,27 @@ TEST_CASE("Missing files are detected from the discovery set without touching ot
     REQUIRE(index.start({audio.getFullPathName()})); REQUIRE(index.waitUntilFinished(10000));
     REQUIRE(repo.count() == 2);
     SampleRecord outside; outside.filePath = "/elsewhere/not-scanned.wav"; outside.fileName = "not-scanned.wav";
-    outside.fileHash = "h"; outside.version = analysisVersion; repo.upsert(outside);
+    outside.fileHash = "h"; outside.version = basicFeaturesVersion; repo.upsert(outside);
     REQUIRE(audio.getChildFile("gone.wav").deleteFile());
     REQUIRE(index.start({audio.getFullPathName()})); REQUIRE(index.waitUntilFinished(10000));
     REQUIRE(repo.findByPath(audio.getChildFile("gone.wav").getFullPathName())->missing);
     REQUIRE_FALSE(repo.findByPath(audio.getChildFile("keep.wav").getFullPathName())->missing);
     REQUIRE_FALSE(repo.findByPath("/elsewhere/not-scanned.wav")->missing);
     REQUIRE_FALSE(index.progress().finalizing);
+}
+TEST_CASE("Rows written with the current feature version are skipped, not reanalyzed", "[indexing][version]")
+{
+    TestDirectory t; auto file = t.wave("audio/tone.wav");
+    auto dbPath = t.dir.getChildFile("catalog.sqlite");
+    Database db(dbPath); SampleRepository repo(db); repo.createTables();
+    auto analyzed = BasicAnalyzer().analyzeAndHash(file);
+    analyzed.fileSize = file.getSize(); analyzed.dateModified = file.getLastModificationTime().toMilliseconds();
+    analyzed.version = 1; repo.upsert(analyzed);
+    REQUIRE(basicFeaturesVersion == 1);
+    IndexingService index(repo);
+    REQUIRE(index.start({file.getParentDirectory().getFullPathName()})); REQUIRE(index.waitUntilFinished(10000));
+    REQUIRE(index.progress().skipped == 1);
+    REQUIRE(index.progress().analyzed == 0);
 }
 TEST_CASE("Indexer cancellation and unavailable folders are explicit", "[indexing]")
 {

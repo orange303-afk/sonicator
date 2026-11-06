@@ -1,7 +1,10 @@
 #pragma once
 #include <juce_core/juce_core.h>
 namespace sonicator {
-inline constexpr int analysisVersion = 2;
+// Version of the measured DSP feature set stored in SampleRecord: duration, rate, bits,
+// channels, peak, rms, centroid, rolloff, flatness and the file hash. Bump it only when
+// that output changes, and record the change in docs/ARCHITECTURE.md.
+inline constexpr int basicFeaturesVersion = 1;
 struct SampleRecord
 {
     int64_t id = 0;

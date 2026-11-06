@@ -17,7 +17,7 @@ TEST_CASE("Repository persists Unicode paths, metrics, and upserts without losin
         r.filePath = juce::String::fromUTF8("/тест/音/🎵.wav"); r.fileName = juce::String::fromUTF8("🎵.wav");
         r.fileHash = "same-content"; r.duration = 1.25;
         r.spectralRolloff = 1234.0; r.spectralFlatness = 0.17;
-        r.version = analysisVersion;
+        r.version = basicFeaturesVersion;
         id = repo.upsert(r);
         REQUIRE(id > 0);
         REQUIRE(repo.count() == 1);
@@ -39,7 +39,7 @@ TEST_CASE("Repository persists Unicode paths, metrics, and upserts without losin
         REQUIRE(r->duration == Catch::Approx(2.5));
         REQUIRE(r->spectralRolloff == Catch::Approx(1234));
         REQUIRE(r->spectralFlatness == Catch::Approx(0.17));
-        REQUIRE(r->version == analysisVersion);
+        REQUIRE(r->version == basicFeaturesVersion);
         REQUIRE(repo.page(1, 0).size() == 1);
         REQUIRE(repo.page(1, 2).empty());
         REQUIRE_FALSE(repo.findByPath("absent"));

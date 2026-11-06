@@ -56,7 +56,7 @@ void IndexingService::run()
             auto previous = repo.findByPath(file.getFullPathName());
             if (! forceAnalysis && previous && previous->error.isEmpty() && ! previous->missing
                 && previous->fileSize == entry.fileSize && previous->dateModified == entry.dateModified
-                && previous->version == analysisVersion)
+                && previous->version == basicFeaturesVersion)
             {
                 std::lock_guard lock(stateMutex); ++state.processed; ++state.skipped; continue;
             }

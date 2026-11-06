@@ -70,7 +70,7 @@ SampleRecord BasicAnalyzer::analyze(const juce::File& file, CancelCheck cancel) 
         }
         r.spectralFlatness = juce::jlimit(0.0, 1.0, std::exp(logSum / bins) / (total / bins));
     }
-    r.dateAnalyzed = juce::Time::currentTimeMillis(); r.version = analysisVersion;
+    r.dateAnalyzed = juce::Time::currentTimeMillis(); r.version = basicFeaturesVersion;
     return r;
 }
 SampleRecord BasicAnalyzer::analyzeAndHash(const juce::File& file, CancelCheck cancel) const

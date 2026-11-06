@@ -10,7 +10,7 @@ TEST_CASE("Streaming analyzer measures a sine, including inverted stereo", "[ana
     {
         auto r = BasicAnalyzer().analyze(t.wave("sine.wav", 440, channels, 44100, true));
         REQUIRE(r.error.isEmpty());
-        REQUIRE(r.version == analysisVersion);
+        REQUIRE(r.version == basicFeaturesVersion);
         REQUIRE(r.duration == Catch::Approx(1));
         REQUIRE(r.sampleRate == 44100);
         REQUIRE(r.numChannels == channels);
