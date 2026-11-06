@@ -85,6 +85,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     tagsLabel.setText("TAGS",juce::dontSendNotification);
     tagsLabel.setFont(juce::FontOptions(11)); tagsLabel.setColour(juce::Label::textColourId,theme::muted);
     search.setTextToShowWhenEmpty("Search entire library...",theme::muted);
+    search.setJustification(juce::Justification::centredLeft);
+    search.setIndents(10, 0);
     search.onTextChange = [this]
     {
         pendingSearch = search.getText();
@@ -737,6 +739,8 @@ void MainComponent::lookAndFeelChanged()
     tagsLabel.setColour(juce::Label::textColourId,theme::muted);
     stageLabel.setColour(juce::Label::textColourId,theme::muted);
     search.setTextToShowWhenEmpty("Search entire library...",theme::muted);
+    search.setJustification(juce::Justification::centredLeft);
+    search.setIndents(10, 0);
     repaint();
 }
 void MainComponent::darkModeSettingChanged()

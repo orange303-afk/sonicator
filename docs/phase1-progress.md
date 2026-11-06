@@ -136,3 +136,10 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 - UI: `Hide duplicates` toggle, `COPIES` column, inspector copy count and paths, context-menu `Show all copies`.
 - Verification: **69 cases / 664 assertions** in Debug and Release; CTest 1/1; Release ad-hoc signature verified. New coverage: v5 migration, grouping by hash/size, unique hashes excluded, counts/members, starred and missing representative rules, hide and group-hash filters, idempotent rebuild, automatic groups after indexing, and the shell toggle. `[.scale]` passes with 300k same-hash rows; reconciliation 4.79 s, unchanged rescan 0.81 s.
 - Not verified: decoded-PCM equality, a user-selected representative, Windows/Intel execution, or duplicate behavior across two concurrently running app instances.
+
+## UI polish stage (2026-11-06)
+
+- Bug: the window grew but its content kept the initial 1280x800 layout. Cause: `Window::resized()` overrode `DocumentWindow::resized()` without calling the base, so the content component was never laid out in the new area. Ruling: always call the base resize before scheduling the debounced geometry save. Cost: none; the same path now also lays out a restored, non-default window size.
+- Theme: replaced the blue-violet dark palette with warm charcoal/graphite and an orange accent; the light theme uses warm off-white with a burnt-orange accent. Tag colours remain semantic. Selection uses a warm brown, not purple.
+- Search: `Justification::centredLeft` plus a 10 px left indent centres the placeholder and typed text vertically in the 34 px field.
+- Verification: **69 cases / 664 assertions** in Debug and Release; CTest 1/1; Release signature verified; rendered dark and light snapshots inspected. Manual resize/restore is the remaining visual check.

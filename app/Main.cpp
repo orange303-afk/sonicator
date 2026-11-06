@@ -75,7 +75,12 @@ private:
         }
     private:
         void moved() override { if (geometryReady) startTimer(500); }
-        void resized() override { if (geometryReady) startTimer(500); }
+        void resized() override
+        {
+            // The base class lays the content component out inside the new window area.
+            juce::DocumentWindow::resized();
+            if (geometryReady) startTimer(500);
+        }
         void timerCallback() override { stopTimer(); persistGeometry(); }
         sonicator::SettingsStore store;
         sonicator::AppSettings appSettings;

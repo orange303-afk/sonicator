@@ -293,7 +293,15 @@ TEST_CASE("Light and dark themes apply without invalid rendering", "[ui][theme]"
         MainComponent dark(t.dir.getChildFile("dark.sqlite"),false,AppSettings{ThemeMode::Dark,100,"English"});
         REQUIRE(theme::isDark);
         dark.setBounds(0,0,1200,800);
-        REQUIRE(dark.createComponentSnapshot(dark.getLocalBounds()).isValid());
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        const auto image = dark.createComponentSnapshot(dark.getLocalBounds());
+        REQUIRE(image.isValid());
+        const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_DARK_SCREENSHOT",{});
+        if (shot.isNotEmpty())
+        {
+            auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
+            juce::PNGImageFormat png; REQUIRE(png.writeImageToStream(image,*stream));
+        }
     }
     theme::apply(ThemeMode::Dark);
 }
