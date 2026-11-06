@@ -12,6 +12,7 @@ struct TestDirectory
     {
         auto f = dir.getChildFile(name);
         f.getParentDirectory().createDirectory();
+        f.deleteFile(); // FileOutputStream appends to existing files; fixtures are replaced, never appended.
         auto out = f.createOutputStream();
         const int bytes = samples * channels * 2;
         out->write("RIFF", 4); out->writeInt(bytes + 36); out->write("WAVEfmt ", 8);

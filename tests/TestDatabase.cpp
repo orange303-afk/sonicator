@@ -12,7 +12,7 @@ TEST_CASE("Repository persists Unicode paths, metrics, and upserts without losin
         SampleRepository repo(db);
         repo.createTables();
         SampleRecord r;
-        r.filePath = "/тест/音/🎵.wav"; r.fileName = "🎵.wav";
+        r.filePath = juce::String::fromUTF8("/тест/音/🎵.wav"); r.fileName = juce::String::fromUTF8("🎵.wav");
         r.fileHash = "same-content"; r.duration = 1.25;
         r.spectralRolloff = 1234.0; r.spectralFlatness = 0.17;
         r.version = analysisVersion;
@@ -25,13 +25,14 @@ TEST_CASE("Repository persists Unicode paths, metrics, and upserts without losin
         r.filePath = "/another/copy.wav";
         repo.upsert(r);
         REQUIRE(repo.countHash("same-content") == 2);
-        repo.addRoot("/тест"); repo.addRoot("/тест");
+        repo.addRoot(juce::String::fromUTF8("/тест")); repo.addRoot(juce::String::fromUTF8("/тест"));
         REQUIRE(repo.roots().size() == 1);
     }
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        auto r = repo.findByPath("/тест/音/🎵.wav");
+        auto r = repo.findByPath(juce::String::fromUTF8("/тест/音/🎵.wav"));
         REQUIRE(r.has_value());
+        REQUIRE(r->filePath.toStdString() == "/тест/音/🎵.wav");
         REQUIRE(r->id == id);
         REQUIRE(r->duration == Catch::Approx(2.5));
         REQUIRE(r->spectralRolloff == Catch::Approx(1234));

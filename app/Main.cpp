@@ -12,7 +12,7 @@ private:
     class Window final : public juce::DocumentWindow
     {
     public:
-        Window() : DocumentWindow("SONICATOR — Intelligent Sample Explorer",
+        Window() : DocumentWindow("SONICATOR - Intelligent Sample Explorer",
                                   juce::Colour(0xff10131b), allButtons)
         {
             setUsingNativeTitleBar(true);

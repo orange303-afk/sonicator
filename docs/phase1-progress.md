@@ -2,11 +2,11 @@
 
 Spec: SONICATOR technical specification in the conversation. Scope: Core Browser only.
 
-- [ ] 1. CMake/JUCE scaffold and dependencies
-- [ ] 2. SQLite repository and migrations
-- [ ] 3. Recursive scanner
+- [x] 1. CMake/JUCE scaffold and dependencies
+- [x] 2. SQLite repository and migrations
+- [x] 3. Recursive scanner
 - [ ] 4. Audio playback engine
-- [ ] 5. Streaming DSP analyzer
+- [x] 5. Streaming DSP analyzer
 - [ ] 6. Sortable library UI
 - [ ] 7. Preview and waveform
 - [ ] 8. Background indexing, persistence, verification
@@ -31,4 +31,7 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 
 ## Verification record
 
-Pending.
+- Tasks 1/2: macOS arm64 application linked. Repository tests first failed on missing implementations, then passed. Unicode fixtures corrected to use explicit UTF-8 (JUCE narrow strings are ASCII).
+- Tasks 3/5: tests first failed on missing scanner/analyzer symbols. After implementation and fixing fixture overwrite semantics: `build/tests/SonicatorTests` → 8 cases / 62 assertions passed; `ctest --test-dir build --output-on-failure` → 1/1 passed.
+- Ruling: Task 5 executed before Task 4 because its test contract and dependencies were already ready; both are independent core services. No feature scope change.
+- Ruling: repository uses exceptions for database errors and upsert-by-path instead of silent bool failures; UI/indexer must report these exceptions. Queries are capped at 50,000 records per page.

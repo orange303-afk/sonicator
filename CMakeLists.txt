@@ -11,7 +11,9 @@ FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
     GIT_TAG 9.0.5 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
-add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c)
+add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
+    core/database/Database.cpp core/database/SampleRepository.cpp
+    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1

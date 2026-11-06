@@ -6,7 +6,7 @@ TEST_CASE("Scanner recurses, filters case-insensitively and handles empty folder
 {
     TestDirectory t;
     REQUIRE(FileScanner::scanDirectory(t.dir).empty());
-    t.wave("tone.WAV"); t.wave("sub/тон.wav");
+    t.wave("tone.WAV"); t.wave(juce::String::fromUTF8("sub/тон.wav"));
     t.dir.getChildFile("readme.txt").replaceWithText("not audio");
     REQUIRE(FileScanner::scanDirectory(t.dir).size() == 2);
     REQUIRE(FileScanner::isSupportedFormat(t.dir.getChildFile("x.FLAC")));
