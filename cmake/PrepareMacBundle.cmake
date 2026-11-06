@@ -1,5 +1,5 @@
-# Finder/FileProvider can attach FinderInfo to generated .app directories in Documents.
-# Remove only that signing-incompatible attribute, and only on our build product.
-# Missing attributes are expected; codesign itself reports any remaining failure.
-execute_process(COMMAND /usr/bin/xattr -d com.apple.FinderInfo "${APP_BUNDLE}"
+# Finder/FileProvider can attach FinderInfo and fileprovider attributes to generated .app
+# directories in Documents. Clear them recursively on our build product only; codesign itself
+# reports any remaining signing failure.
+execute_process(COMMAND /usr/bin/xattr -cr "${APP_BUNDLE}"
     OUTPUT_QUIET ERROR_QUIET)
