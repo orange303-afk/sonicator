@@ -37,11 +37,11 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 
 1. **+ Add folder** imports one directory recursively. Repeat for multiple roots.
 2. Indexing runs in the background; **Pause / Resume / Cancel** control it. Completed file results remain saved on cancellation.
-3. Select a row to immediately preview its original file. Use **Play / Pause / Stop / Loop**, volume and click/drag in the waveform to seek.
-4. Keyboard: **Space** play/pause, **Left / Right** seek one second, **Escape** stop (when not consumed by an editing control).
+3. Select a row to immediately preview its original file. Use **Play / Pause / Stop / Loop**, volume, and drag on the waveform to select a time range. A plain click on the waveform seeks and clears the selection.
+4. Keyboard: **Space** play/pause, **Left / Right** seek one second, **Escape** stop and clear the waveform selection (when not consumed by an editing control).
 5. Search covers the entire catalog by filename and path. Typing is debounced by 250 ms; Enter applies immediately and Escape clears it. Header clicks sort the whole result, not the current page. Choose **100 / 1 000 / 10 000 / All** from the menu next to the **< / >** arrows. **All** is virtualized: only matching IDs are prepared, and records are fetched in small blocks as you scroll, so a 300k catalog stays responsive.
 6. **Tags** and **Starred** filter the catalog. Select a sample and **Edit tags...** to assign tags; create, rename, recolour and delete tags from the tag menu.
-7. Select several rows with **Cmd-click** (toggle) or **Shift-click** (range). Right-click any row for **Copy** (files on macOS, paths on other platforms), **Tag** (coloured submenu, applies to the whole selection), **Star/Unstar** and **Open in Finder** (**Explorer** on Windows).
+7. Select several rows with **Cmd-click** (toggle) or **Shift-click** (range). Right-click any row for **Copy** (files on macOS, paths on other platforms), **Tag** (coloured submenu, applies to the whole selection), **Star/Unstar** and **Open in Finder** (**Explorer** on Windows). Drag one or more selected rows out of the library, or drag from inside a waveform selection: Finder/desktop copies, messengers attach, and DAWs import. Library originals are never moved or deleted; a selection drag sends a prepared WAV of exactly that range.
 8. **Hide duplicates** hides byte-identical copies (same full SHA-256 and size) and keeps one catalog-wide representative. The `COPIES` column shows `×N`; right-click **Show all copies** reveals the whole group. Nothing is deleted.
 9. **Rescan** asks for confirmation, then analyzes new, changed and previously failed files; unchanged analyzed files are skipped. **New files** is the additive scan: it walks the folders but analyzes only paths that are not in the catalog yet, without reconciling missing records. **Reanalyze all** asks for a stronger confirmation and recomputes every file. Cancel keeps completed results and never stores a partial row.
 10. **Backup** writes a consistent SQLite copy to `Sonicator/backups/` beside the database. The live database and its WAL are never copied as raw files.
@@ -59,6 +59,13 @@ Database and bounded waveform cache live in JUCE's user application-data locatio
 No original audio is changed, renamed or deleted. Duplicate copies remain distinct file-path records, identified by full SHA-256.
 Do not delete a live SQLite database or its `-wal`/`-shm` sidecars. Close the application before making filesystem backups.
 
+Waveform selection exports are new WAV files under `Sonicator/exports/` in the same application-data location:
+
+- macOS: `~/Library/Sonicator/exports`.
+- Windows: `%APPDATA%\Sonicator\exports`.
+
+The source sample rate and channel count are preserved; 16-bit sources stay 16-bit PCM, 24/32-bit integer sources become 24-bit PCM, float sources become 32-bit float, and compressed sources become 24-bit PCM. Exported files are not deleted automatically because a DAW project or a message may reference them, so the folder grows until you remove files manually. Source originals are opened read-only and are never moved by a drag.
+
 ## Modules
 
 ```text
@@ -66,12 +73,13 @@ app/Main.cpp                 application lifecycle and window
 core/database/               RAII SQLite connection, prepared queries, schema version
 core/scanner/                recursive discovery and cancellable full-file SHA-256
 core/dsp/                    chunked audio decoding and measured descriptors
-core/audio/                  preview transport, sample-rate conversion, read-ahead
+core/audio/                  preview transport, sample-rate conversion, read-ahead, selection boundaries
+core/export/                 selection WAV export, background preparation, external file drag
 core/indexing/               background import, pause/cancel, incremental updates
 core/settings/               persisted application settings
 ui/shell/                    shared dark theme
-ui/library/                  global search, tags and paged/virtualized library
-ui/waveform/                 asynchronous thumbnail and bounded disk cache
+ui/library/                  global search, tags, paged/virtualized library and original-file row drag
+ui/waveform/                 asynchronous thumbnail, bounded disk cache and range selection
 ui/preview/                  transport and keyboard controls
 ui/settings/                 Settings dialog, catalogue switching and About links
 ui/platform/                 native file clipboard (macOS) with a text-path fallback
@@ -108,7 +116,7 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 
 ## Limits / next stage
 
-- No instrument/structure classification, BPM, pitch/key, confidence, embeddings, semantic search, map, collections or DAW drag-and-drop in Phase 1. These are not shown as fake functioning controls.
+- No instrument/structure classification, BPM, pitch/key, confidence, embeddings, semantic search, map or collections in Phase 1. These are not shown as fake functioning controls.
 - DSP currently measures duration, sample rate, applicable bit depth, channels, linear peak/RMS, power spectral centroid, 85% power rolloff and power spectral flatness. Not LUFS, spectral density/bands, attack/decay or transient/rhythm analysis yet.
 - FFT size 2048, Hann window, non-overlapping frames. These are engineering descriptors, not calibrated semantic labels or a perceptual similarity model.
 - Analysis supports up to 64 channels; preview uses the first two channels, not a surround downmix. Compressed bit depth can be unavailable.
@@ -123,6 +131,6 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - A saved catalog that is missing or is not a SONICATOR catalog falls back to the default location at startup; the fallback is written to the log.
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.
-- Windows, Intel macOS, DAW integrations, physical listening/latency and release packaging still need platform/user verification.
+- Windows, Intel macOS, physical listening/latency and release packaging still need platform/user verification. External file drag (library rows and selection WAVs) is verified on macOS only; Windows uses the same JUCE file-URL path and must be checked separately.
 
 Phase 2: independently versioned classification/BPM/pitch/key modules, ONNX/model licence review, manually labelled evaluation data, confidence calibration and separate user overrides. Do not begin until the Phase 1 baseline is accepted.

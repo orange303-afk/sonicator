@@ -14,6 +14,29 @@ Buttons and checkboxes do not take keyboard focus on click; nonmodal toolbar and
 
 **Skip Silence** is off by default. When enabled, the next start from Stop/EOF begins one frame before the first finite nonzero decoded sample in any channel. It does not trim files, apply a noise threshold or alter playback already in progress. Pause/resume retains its position. Entirely silent audio starts at zero. Detection is performed on the control thread using bounded decode blocks, not on the audio callback; scanning a long entirely silent file can take time.
 
+## Dragging original files
+
+Select one or more library rows and drag them out of the window. The OS receives standard file URLs with `canMoveFiles = false`: Finder and the desktop copy, messengers attach, and DAWs import onto a track. The library original is never moved, renamed or deleted, and the app never needs per-target integration.
+
+- A multi-row drag carries every selected existing original in current table order; missing files are skipped. If none remain, no drag starts and the status explains why.
+- The row under the mouse is selected before the drag when it was not already selected. A normal click still seeks/previews.
+- A drag starts after 5 px, so a click does not accidentally start an OS drag. Dragging does not alter the selection.
+- Only external file drag is supported in this stage: no internal drag between app panes, no MIDI drag, and no multi-range drag.
+
+## Waveform selection and export
+
+Drag across the waveform by more than about 3 px to select a time range. Endpoints are clamped to the file and finalized in either direction. A plain click seeks and clears the selection; dragging from inside an existing selection starts the external file drag instead of editing it. A new file, `setFile`, or **Escape** clears the selection when the preview has keyboard focus. A **Clear** button appears while a selection exists and follows the same no-keyboard-focus policy as the transport buttons.
+
+The overlay draws a translucent accent range, start/end lines and a compact `0.250–1.100 s` label. While a selection exists, a background worker exports it. The status reads **Preparing selection…**, then **Ready — drag the selection into a DAW**, or shows the explicit export error. Dragging before the file is ready is refused with that status; no export runs inside the mouse event, so the OS drag starts immediately once ready.
+
+**Play** with a selection seeks to its start. The 30 Hz preview stops at the end, or seeks back to the start when **Loop** is on. This is preview accuracy (one timer tick), not sample-accurate editing. **Auto Preview** on row change still plays the whole file; loading a new file clears the selection first.
+
+Selection export is WAV only and never modifies the source. It preserves the source sample rate and channel count; 16-bit sources stay 16-bit PCM, 24/32-bit integer sources become 24-bit PCM, float sources become 32-bit float, and compressed sources become 24-bit PCM. There is no gain change, normalization, fade or time-stretch. Export writes `destination + ".part"` in bounded chunks and renames only after success, so a failed or cancelled export leaves no partial file.
+
+Exported selections live under `Sonicator/exports/` and are **not** deleted automatically: a DAW project or a message may still reference them. The folder grows until you remove files manually; a cleanup action is a later Settings feature. More than 64 channels is refused explicitly rather than downmixed.
+
+External drag into DAWs/messengers is verified on macOS in this stage. Windows uses the same JUCE file-URL path but still needs separate verification.
+
 ## MIDI Preview
 
 Enable **MIDI Preview** to play the selected sample from a hardware MIDI input. **Auto Preview** independently controls automatic audition on selection; ordinary preview and MIDI voices are mixed when both are active. On first activation all currently available inputs are enabled. **Audio settings** includes input selection; use it to enable devices connected later. Changing MIDI Preview stops current playback/voices; press Play or select a different file to audition again.
