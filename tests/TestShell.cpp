@@ -339,16 +339,15 @@ TEST_CASE("Starred filter shows only favourites", "[ui][starred]")
     starred->onClick();
     REQUIRE(library->getNumRows() == 2);
 }
-TEST_CASE("Hide duplicates shows one byte-identical copy", "[ui][duplicates]")
+TEST_CASE("Hide empty filters fully silent files", "[ui][empty]")
 {
     TestDirectory t;
-    auto a = t.wave("a.wav");
-    REQUIRE(a.copyFileTo(t.dir.getChildFile("b.wav")));
-    auto c = t.wave("c.wav", 660);
-    auto dbPath = t.dir.getChildFile("library.sqlite");
+    auto loud = t.wave("loud.wav");
+    auto silent = t.wave("silent.wav", 0);
+    auto dbPath = t.dir.getChildFile("empty-library.sqlite");
     {
         Database db(dbPath); SampleRepository repo(db); repo.createTables();
-        for (const auto& file : { a, t.dir.getChildFile("b.wav"), c })
+        for (const auto& file : { loud, silent })
         {
             auto r = BasicAnalyzer().analyzeAndHash(file); REQUIRE(r.error.isEmpty()); repo.upsert(r);
         }
@@ -356,24 +355,16 @@ TEST_CASE("Hide duplicates shows one byte-identical copy", "[ui][duplicates]")
     }
     MainComponent app(dbPath,false);
     auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
-    REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 3);
-    auto* hide = shellButton(app,"Hide duplicates");
+    REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 2);
+    auto* hide = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty"));
     REQUIRE(hide != nullptr);
-    hide->onClick();
-    REQUIRE(library->getNumRows() == 2);
-    const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_DUPLICATES_SCREENSHOT",{});
-    if (shot.isNotEmpty())
-    {
-        app.setBounds(0,0,1440,900);
-        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
-        auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
-        juce::PNGImageFormat png;
-        REQUIRE(png.writeImageToStream(app.createComponentSnapshot(app.getLocalBounds()),*stream));
-    }
+    hide->setToggleState(true, juce::sendNotificationSync);
+    REQUIRE(library->getNumRows() == 1);
     auto* clear = shellButton(app,"Clear filters");
     REQUIRE(clear != nullptr);
     clear->onClick();
-    REQUIRE(library->getNumRows() == 3);
+    REQUIRE(library->getNumRows() == 2);
+    REQUIRE_FALSE(hide->getToggleState());
 }
 TEST_CASE("Page size options page or virtualize the library", "[ui][paging]")
 {
@@ -418,4 +409,14 @@ TEST_CASE("Page size options page or virtualize the library", "[ui][paging]")
     REQUIRE(next != nullptr);
     next->onClick();
     REQUIRE(library->getNumRows() == 20);
+}
+TEST_CASE("Filter bar has Hide empty and no Hide duplicates button", "[ui][filters]")
+{
+    TestDirectory t;
+    MainComponent app(t.dir.getChildFile("filters.sqlite"),false);
+    auto* hideEmpty = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty"));
+    REQUIRE(hideEmpty != nullptr);
+    REQUIRE_FALSE(hideEmpty->getWantsKeyboardFocus());
+    REQUIRE_FALSE(hideEmpty->getMouseClickGrabsKeyboardFocus());
+    REQUIRE(app.findChildWithID("hideDuplicates") == nullptr);
 }

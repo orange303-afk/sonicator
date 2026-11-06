@@ -330,6 +330,22 @@ TEST_CASE("Stars are batched, preserved by reanalysis and filter the catalog", "
     REQUIRE_FALSE(repo.findByPath("/a.wav")->starred);
 }
 
+TEST_CASE("Hide empty filters files with a zero peak", "[database][empty]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("empty.sqlite")); SampleRepository repo(db); repo.createTables();
+    auto loud = sample("/lib/loud.wav", "loud.wav"); loud.peakLevel = 0.5; repo.upsert(loud);
+    auto silent = sample("/lib/silent.wav", "silent.wav"); silent.peakLevel = 0.0; repo.upsert(silent);
+    LibraryFilter filter; filter.hideEmpty = true;
+    REQUIRE(filter.hasTextOrTagFilter());
+    const auto page = repo.query(filter);
+    REQUIRE(page.total == 1);
+    REQUIRE(page.samples.size() == 1);
+    REQUIRE(page.samples[0].fileName == "loud.wav");
+    REQUIRE(repo.queryIds(filter).size() == 1);
+    filter.hideEmpty = false;
+    REQUIRE(repo.query(filter).total == 2);
+    REQUIRE_FALSE(filter.hasTextOrTagFilter());
+}
 TEST_CASE("Byte-identical duplicates group, hide and prefer the right representative", "[database][duplicates]")
 {
     TestDirectory t; Database db(t.dir.getChildFile("dups.sqlite")); SampleRepository repo(db); repo.createTables();

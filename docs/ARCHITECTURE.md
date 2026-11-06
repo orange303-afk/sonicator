@@ -61,8 +61,10 @@ remains virtualized by `TableListBox`; scrolling does not build widgets for off-
 Byte-identical duplicates are grouped by the full SHA-256 already stored at analysis time plus a
 nonzero size. `refreshDuplicates` rebuilds the derived table in one transaction: one representative
 per group, chosen by starred, present on disk, analyzed without error, shortest path, then lowest
-ID. Missing copies never beat present ones. The `Hide duplicates` filter excludes rows with
-`is_representative=0`; `Show all copies` filters by the group hash instead. The table is refreshed
+ID. Missing copies never beat present ones. The `DUPLICATES` column shows the group size and
+`Show all copies` filters by the group hash. The internal `hideDuplicates` filter still exists but
+has no toolbar control in this stage. `LibraryFilter::hideEmpty` adds `peak > 0`, hiding only files
+whose measured maximum absolute sample is exactly zero. The table is refreshed
 after every non-cancelled index run, at startup, after a catalog switch and after starring (which
 can change the representative). This is byte equality only; decoded-PCM equality across containers
 is not implemented.

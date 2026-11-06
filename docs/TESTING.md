@@ -1,5 +1,12 @@
 # Phase 1 verification
 
+## Filter bar: Hide empty and DUPLICATES (2026-11-07)
+
+- Debug and Release: **107 cases / 935 assertions**, all passed.
+- The **Hide duplicates** toolbar button was removed. Byte-identical grouping, the `DUPLICATES` column (renamed from `COPIES`) and **Show all copies** remain; **Clear filters** still resets the duplicate-hash view. The internal `hideDuplicates` filter remains covered by database tests but has no UI control.
+- **Hide empty** is a SQL filter (`peak > 0`), so it applies to the whole catalog, pagination and virtual `All`, not only the loaded page. Only files whose measured maximum absolute sample is exactly zero are hidden; near-silent files with any nonzero sample remain. Clear filters resets it; the setting is session-only like the other filters.
+- New coverage: zero-peak vs nonzero-peak filtering through `query` and `queryIds`; filter-bar presence and no-focus policy; clearing restores the full list.
+
 ## Waveform selection and drag-and-drop (2026-11-06)
 
 - Debug and Release: **105 cases / 925 assertions**, all passed. CTest 1/1 in both; Debug 22.98 s, Release 21.37 s. Release bundle ad-hoc signature verified (`valid on disk`, `satisfies its Designated Requirement`).

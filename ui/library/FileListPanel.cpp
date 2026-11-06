@@ -39,7 +39,7 @@ FileListPanel::FileListPanel()
     h.addColumn("RATE",4,85,60,140);
     h.addColumn("CH",5,45,35,70);
     h.addColumn("TAGS",7,145,80,350);
-    h.addColumn("COPIES",9,62,50,90);
+    h.addColumn("DUPLICATES",9,88,70,130);
     h.addColumn("STATUS",6,120,80,350);
     h.setSortColumnId(1,true);
 }

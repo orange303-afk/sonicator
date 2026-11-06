@@ -18,14 +18,14 @@ struct LibraryFilter
     juce::String folder;
     std::vector<int64_t> includeTags;
     std::vector<int64_t> excludeTags;
-    bool matchAnyTag = false, starredOnly = false, hideDuplicates = false;
+    bool matchAnyTag = false, starredOnly = false, hideDuplicates = false, hideEmpty = false;
     juce::String duplicateHash; // show every member of this byte-identical group
     LibrarySort sort = LibrarySort::Name;
     bool ascending = true;
     bool hasTextOrTagFilter() const
     {
         return text.isNotEmpty() || ! includeTags.empty() || ! excludeTags.empty()
-            || starredOnly || hideDuplicates || duplicateHash.isNotEmpty();
+            || starredOnly || hideDuplicates || hideEmpty || duplicateHash.isNotEmpty();
     }
 };
 struct LibraryPage

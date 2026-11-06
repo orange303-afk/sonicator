@@ -151,6 +151,7 @@ FilterSql buildFilterSql(const LibraryFilter& filter)
     for (auto id : filter.excludeTags)
         addInt(" AND NOT EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
     if (filter.starredOnly) sql.where += " AND samples.starred=1";
+    if (filter.hideEmpty) sql.where += " AND samples.peak>0";
     if (filter.hideDuplicates)
         sql.where += " AND NOT EXISTS(SELECT 1 FROM duplicates d WHERE d.sample_id=samples.id AND d.is_representative=0)";
     if (filter.duplicateHash.isNotEmpty())

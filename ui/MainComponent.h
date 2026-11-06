@@ -49,8 +49,9 @@ private:
     juce::TextEditor search;
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" };
     juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" }, backup { "Backup" };
-    juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" }, hideDuplicates { "Hide duplicates" },
+    juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" },
                      clearFilters { "Clear filters" }, editTags { "Edit tags..." };
+    juce::ToggleButton hideEmpty { "Hide empty" };
     juce::TextButton previousPage { "<" }, nextPage { ">" };
     juce::ComboBox pageSizeBox;
     juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel;

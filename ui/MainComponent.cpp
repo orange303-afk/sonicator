@@ -56,7 +56,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
     for (auto* c : std::array<juce::Component*,31>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
-         &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&hideDuplicates,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
+         &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel})
         if (c != nullptr) addAndMakeVisible(c);
@@ -143,16 +143,19 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     {
         filter.starredOnly = ! filter.starredOnly; pageOffset = 0; reloadLibrary();
     };
-    hideDuplicates.onClick = [this]
+    hideEmpty.setComponentID("hideEmpty");
+    hideEmpty.setToggleState(false,juce::dontSendNotification);
+    hideEmpty.setTooltip("Hide files whose measured peak is zero (fully silent)");
+    hideEmpty.onClick = [this]
     {
-        filter.hideDuplicates = ! filter.hideDuplicates; pageOffset = 0; reloadLibrary();
+        filter.hideEmpty = hideEmpty.getToggleState(); pageOffset = 0; reloadLibrary();
     };
     clearFilters.onClick = [this]
     {
         search.clear(); pendingSearch.clear();
         filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
         filter.matchAnyTag = false; filter.starredOnly = false;
-        filter.hideDuplicates = false; filter.duplicateHash.clear();
+        filter.hideDuplicates = false; filter.hideEmpty = false; filter.duplicateHash.clear();
         pageOffset = 0; reloadLibrary();
     };
     editTags.onClick = [this] { showEditTagsMenu(); };
@@ -175,7 +178,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
     preview.onAction = [this] { library.focusForNavigation(); };
     for (auto* button : std::array<juce::Button*,15>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
-          &tagFilter,&starredButton,&hideDuplicates,&clearFilters,&editTags,&previousPage,&nextPage})
+          &tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         if (button == &addFolder || button == &settings) continue; // Modal dialogs must retain their own focus.
@@ -384,7 +387,7 @@ void MainComponent::updateTagControls()
     tagFilter.setButtonText(active > 0 ? "Tags (" + juce::String(active) + ")" : "Tags");
     tagFilter.setToggleState(active > 0 || filter.matchAnyTag, juce::dontSendNotification);
     starredButton.setToggleState(filter.starredOnly,juce::dontSendNotification);
-    hideDuplicates.setToggleState(filter.hideDuplicates || filter.duplicateHash.isNotEmpty(),juce::dontSendNotification);
+    hideEmpty.setToggleState(filter.hideEmpty,juce::dontSendNotification);
     clearFilters.setEnabled(filter.hasTextOrTagFilter());
 }
 void MainComponent::updateSelectedTags()
@@ -917,7 +920,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
     filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
     filter.matchAnyTag = false; filter.starredOnly = false;
-    filter.hideDuplicates = false; filter.duplicateHash.clear();
+    filter.hideDuplicates = false; filter.hideEmpty = false; filter.duplicateHash.clear();
     search.clear(); pendingSearch.clear();
     analysisDetails.setText("Select a sample to inspect its measured audio features.",juce::dontSendNotification);
     selectedTags.setTags({});
@@ -998,7 +1001,7 @@ void MainComponent::resized()
     auto filterBar = list.removeFromTop(30);
     tagFilter.setBounds(filterBar.removeFromLeft(84)); filterBar.removeFromLeft(6);
     starredButton.setBounds(filterBar.removeFromLeft(96)); filterBar.removeFromLeft(6);
-    hideDuplicates.setBounds(filterBar.removeFromLeft(120)); filterBar.removeFromLeft(6);
+    hideEmpty.setBounds(filterBar.removeFromLeft(96)); filterBar.removeFromLeft(6);
     clearFilters.setBounds(filterBar.removeFromLeft(110));
     list.removeFromTop(8); library.setBounds(list);
 }
