@@ -47,6 +47,24 @@ TEST_CASE("Missing-file restoration and analyzer-version invalidation keep stabl
     auto restored = repo.findByPath(file.getFullPathName()); REQUIRE(restored);
     REQUIRE_FALSE(restored->missing); REQUIRE(restored->id == original->id);
 }
+TEST_CASE("Missing files are detected from the discovery set without touching other roots", "[indexing]")
+{
+    TestDirectory t;
+    auto audio = t.dir.getChildFile("audio"); audio.createDirectory();
+    t.wave("audio/keep.wav", 440); t.wave("audio/gone.wav", 550);
+    Database db(t.dir.getChildFile("catalog.sqlite")); SampleRepository repo(db); repo.createTables();
+    IndexingService index(repo);
+    REQUIRE(index.start({audio.getFullPathName()})); REQUIRE(index.waitUntilFinished(10000));
+    REQUIRE(repo.count() == 2);
+    SampleRecord outside; outside.filePath = "/elsewhere/not-scanned.wav"; outside.fileName = "not-scanned.wav";
+    outside.fileHash = "h"; outside.version = analysisVersion; repo.upsert(outside);
+    REQUIRE(audio.getChildFile("gone.wav").deleteFile());
+    REQUIRE(index.start({audio.getFullPathName()})); REQUIRE(index.waitUntilFinished(10000));
+    REQUIRE(repo.findByPath(audio.getChildFile("gone.wav").getFullPathName())->missing);
+    REQUIRE_FALSE(repo.findByPath(audio.getChildFile("keep.wav").getFullPathName())->missing);
+    REQUIRE_FALSE(repo.findByPath("/elsewhere/not-scanned.wav")->missing);
+    REQUIRE_FALSE(index.progress().finalizing);
+}
 TEST_CASE("Indexer cancellation and unavailable folders are explicit", "[indexing]")
 {
     TestDirectory t; Database db(t.dir.getChildFile("catalog.sqlite"));

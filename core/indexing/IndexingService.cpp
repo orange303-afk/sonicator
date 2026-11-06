@@ -38,14 +38,14 @@ void IndexingService::run()
     try
     {
         std::vector<AudioFileInfo> files;
-        std::unordered_set<std::string> seen;
+        std::unordered_set<std::string> foundPaths;
         for (const auto& folder : folders)
         {
             if (checkpoint()) break;
             auto found = FileScanner::scanDirectory(juce::File(folder), [this] { return checkpoint(); });
             repo.addRoot(folder);
             for (auto& f : found)
-                if (seen.insert(f.file.getFullPathName().toStdString()).second) files.push_back(std::move(f));
+                if (foundPaths.insert(f.file.getFullPathName().toStdString()).second) files.push_back(std::move(f));
         }
         { std::lock_guard lock(stateMutex); state.total = (int) files.size(); state.message = "Analyzing"; }
         for (const auto& entry : files)
@@ -71,21 +71,30 @@ void IndexingService::run()
         }
         if (! cancelled)
         {
-            // Missing paths remain in the catalog. Only reconcile roots that were successfully traversed.
-            for (int offset = 0;; offset += 1000)
+            // Paths that are under a scanned root but were not discovered are gone. Discovery already
+            // enumerated every path, so this pass needs no count, no sort and no filesystem probe.
+            { std::lock_guard lock(stateMutex); state.finalizing = true; state.message = "Checking for missing files"; }
+            int64_t lastId = 0;
+            for (;;)
             {
-                auto records = repo.page(1000,offset);
-                if (records.empty()) break;
-                for (auto& r : records)
+                if (checkpoint()) break;
+                auto rows = repo.pathsAfterId(lastId, 5000);
+                if (rows.empty()) break;
+                std::vector<int64_t> missingIds;
+                for (const auto& row : rows)
                 {
-                    if (checkpoint()) break;
-                    juce::File file(r.filePath);
+                    lastId = row.id;
+                    if (row.missing) continue;
+                    const juce::File file(row.path);
                     bool inRoot = false;
-                    for (auto& root : folders) if (file.isAChildOf(juce::File(root))) { inRoot = true; break; }
-                    if (inRoot && ! file.existsAsFile() && ! r.missing) { r.missing = true; repo.upsert(r); }
+                    for (const auto& root : folders)
+                        if (file.isAChildOf(juce::File(root))) { inRoot = true; break; }
+                    if (inRoot && foundPaths.find(row.path.toStdString()) == foundPaths.end())
+                        missingIds.push_back(row.id);
                 }
-                if (cancelled) break;
+                if (! missingIds.empty()) repo.setMissing(missingIds);
             }
+            { std::lock_guard lock(stateMutex); state.finalizing = false; }
         }
         std::lock_guard lock(stateMutex);
         state.message = cancelled ? "Cancelled; completed results were saved" : "Scan complete";

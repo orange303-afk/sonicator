@@ -7,7 +7,7 @@
 namespace sonicator {
 struct IndexingProgress
 {
-    bool running = false, paused = false, cancelled = false;
+    bool running = false, paused = false, cancelled = false, finalizing = false;
     int total = 0, processed = 0, analyzed = 0, skipped = 0, failed = 0, duplicates = 0;
     juce::String current, message;
 };
