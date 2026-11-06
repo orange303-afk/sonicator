@@ -59,3 +59,18 @@ Spec: SONICATOR technical specification in the conversation. Scope: Core Browser
 - Final: 23 cases / 205 assertions GREEN; CTest 1/1 GREEN. Optional 10k benchmark: 10,011 assertions GREEN, 12.6964 s initial / 0.98047 s repeat. External subset: 60 audio files analyzed successfully, 5 metadata forks excluded, all original hash/size/mtime checks GREEN. Production external enumeration: 299,057 candidates in 46.523 s.
 - Final: Ruling: this repository was created here and has no base branch or remote; there is nothing to merge into or publish to. Preserve committed work on feature/core-browser; no merge/push performed. Cost: remote/integration setup remains the owner's choice.
 - Deferred minors: none from independent review. Unverified platform/stress/release checks remain documented limitations, not claimed completed work.
+
+## Library stability stage (2026-11-06)
+
+- Symptom: after `299057/299057` the window still showed `0 samples`. Read-only diagnosis of the owner's database found every row persisted (298,899 analyzed, 158 errors); the list only reloaded after the job ended, and finalization re-sorted the whole table once per 1,000-row page while probing every path on disk.
+- Schema v2: `samples_name_id` on `(name COLLATE NOCASE, id)` matches the UI sort; an online SQLite backup is written beside the database before a v1→v2 migration. The owner's database was never opened for writing in this stage.
+- Reconciliation now compares the catalog against the path set produced by the same discovery pass, walking rows by primary key. No sort, no offset paging, no per-record filesystem call. Cancelled scans skip it, and records under unscanned roots are untouched.
+- `basicFeaturesVersion = 1` replaces the unjustified bump to 2. Verified read-only that all 298,899 version-1 rows contain the full measured feature set, so they skip instead of triggering a global reanalysis.
+- UI: the saved catalog is shown at startup with an explicit count, and the list refreshes at most every 1.5 s while a job runs when the row count changes.
+- Branding: the three owner-supplied PNGs are stored unmodified in `resources/branding/originals/`; derived header mark and wordmark are embedded through JUCE BinaryData, and the app bundle icon is generated from the rounded tile.
+- Verification: 28 cases / 250 assertions in Debug and Release; `[.scale]` 300,000 rows reconciled in 3.91 s; on a copy of the real catalog the index build took 0.179 s, the first 10,000-row page 0.024 s, and a full keyset walk 0.126 s.
+- Ruling: keep the measured feature set at version 1 rather than inventing a second valid version — the stored rows already describe exactly what version 1 means. Cost: any hidden difference in old rows would stay undetected; mitigated by inspecting the real catalog before the decision and by documenting that a real output change must bump the constant.
+- Ruling: detect missing files from the discovery set instead of probing the filesystem per record. Cost: a file created between discovery and reconciliation is reported missing until the next scan, then restored automatically.
+- Ruling: one backup per schema migration, written beside the database and never deleted automatically. Cost: the first launch of the new build needs roughly 150 MB of free space.
+- Ruling: the app icon uses the rounded blue-violet tile, while the flat mark is preserved as variant A. Cost: if the owner prefers variant A, it is a one-line change in `CMakeLists.txt` and `icon-header.png`.
+- Deferred minors: none from this stage. Whole-catalog search, tags, Hide Duplicates, Settings, VST3/AU and ML remain backlog, not claimed work.

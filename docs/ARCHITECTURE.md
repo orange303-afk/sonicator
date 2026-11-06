@@ -18,11 +18,13 @@ Shutdown stops the UI timer, cancels/joins indexing without force-killing a thre
 
 ## Storage
 
-Schema `user_version=1`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, analyzer version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten.
+Schema `user_version=2`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, feature-set version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten. Version 2 adds `samples_name_id`, an index on `(name COLLATE NOCASE, id)` that matches the UI sort, so paged reads no longer build a temporary B-tree. Upgrading from version 1 first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages.
 
-Upsert by path preserves sample ID. Two files with the same content keep independent paths. Skip only when size/time and successful analyzer version match. Files changed during analysis are marked for retry, not recorded as successful. Startup reads the database; it does not initiate reanalysis.
+Upsert by path preserves sample ID. Two files with the same content keep independent paths. Skip only when size/time and the feature-set version match. Files changed during analysis are marked for retry, not recorded as successful. Startup reads the database; it does not initiate reanalysis.
 
-Analyzer version 2 adds WAV/AIFF physical audio-payload validation, invalidating earlier cached successes on explicit rescan. It deliberately tolerates incorrect outer container sizes seen in real commercial sample packs. AppleDouble forks are excluded by a filename-prefix fast path plus a magic-byte check. Per-file hashing I/O failures become error records and do not abort the rest of an import.
+`basicFeaturesVersion = 1` describes the measured feature set stored in `SampleRecord`: duration, rate, bits, channels, peak, RMS, centroid, rolloff, flatness and hash. The earlier bump to 2 was reverted: every stored version-1 row already contains that full set, so keeping 2 would have invalidated 298,899 valid results without adding data. Future analyzers get their own versioned storage instead of forcing a global bump.
+
+After analysis, missing files are reconciled in one pass ordered by primary key. The discovered path set from the same scan is the reference, so no filesystem probe per record is needed, and records under roots that were not scanned are untouched. WAV/AIFF physical audio-payload validation deliberately tolerates incorrect outer container sizes seen in real commercial sample packs. AppleDouble forks are excluded by a filename-prefix fast path plus a magic-byte check. Per-file hashing I/O failures become error records and do not abort the rest of an import.
 
 Future machine predictions and user overrides must be stored independently of these measured file records. Model upgrades must not overwrite user annotations.
 
