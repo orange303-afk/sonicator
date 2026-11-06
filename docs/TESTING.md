@@ -1,5 +1,12 @@
 # Phase 1 verification
 
+## Catalog folder relocation (2026-11-07)
+
+- Debug suite: **116 cases / 1002 assertions**, all passed; CTest 1/1. Release and Windows were not rerun in this stage.
+- New coverage: pure path mapping in both directions (`C:\...` → `/...` and `/...` → `D:\...`), mixed separators, drive and `/` roots, sibling-prefix rejection (`/Samples2` is not `/Samples`); transactional root relocation preserving IDs, tags, stars, hashes, analysis and `search_key`; other roots and `missing` flags untouched; target collision merges tags/star and deletes only the duplicate; a nonexistent target leaves every path and root unchanged; `countUnderRoot` matches both separator styles; the relocation panel enables **Relocate** only when every row has a distinct, non-overlapping target; the startup status hint and the automatic offer after opening a catalog with missing roots.
+- UI inspected: Settings with Move/Open/Relocate at 560×700 and the relocation dialog at 680×470, both rendered from the real components.
+- Known limits: relocation is prefix-based and requires the folder structure inside each root to be preserved; no automatic folder discovery; `missing` is not reset by the relocation (Rescan remains authoritative); the pre-change backup is a full database copy; Windows → macOS and macOS → Windows still need the manual round-trip described in the plan.
+
 ## Filter bar: Hide empty and DUPLICATES (2026-11-07)
 
 - Debug and Release: **107 cases / 935 assertions**, all passed.

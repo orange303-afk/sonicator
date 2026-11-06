@@ -475,6 +475,14 @@ TEST_CASE("Relocation dialog lists every missing root", "[ui][relocation]")
     auto* modal = juce::Component::getCurrentlyModalComponent();
     REQUIRE(modal != nullptr);
     REQUIRE(modal->getName() == "Relocate folders");
+    const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_RELOCATE_SCREENSHOT",{});
+    if (shot.isNotEmpty())
+    {
+        auto stream = juce::File(shot).createOutputStream();
+        REQUIRE(stream != nullptr);
+        juce::PNGImageFormat png;
+        REQUIRE(png.writeImageToStream(modal->createComponentSnapshot(modal->getLocalBounds(),true,2.0f),*stream));
+    }
     modal->exitModalState(0);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
 }
