@@ -40,9 +40,8 @@ if(APPLE)
     # The linker's signature covers only the Mach-O; seal the complete local app bundle.
     # This is an ad-hoc development signature, not Developer ID signing/notarization.
     add_custom_command(TARGET Sonicator POST_BUILD
-        COMMAND ${CMAKE_COMMAND} "-DAPP_BUNDLE=$<TARGET_BUNDLE_DIR:Sonicator>"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/PrepareMacBundle.cmake"
-        COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Sonicator>"
+        COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignMacBundle.sh"
+            "$<TARGET_BUNDLE_DIR:Sonicator>"
         VERBATIM)
 endif()
 include(CTest)
