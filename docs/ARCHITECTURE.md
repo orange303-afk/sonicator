@@ -63,8 +63,8 @@ nonzero size. `refreshDuplicates` rebuilds the derived table in one transaction:
 per group, chosen by starred, present on disk, analyzed without error, shortest path, then lowest
 ID. Missing copies never beat present ones. The `DUPLICATES` column shows the group size and
 `Show all copies` filters by the group hash. The internal `hideDuplicates` filter still exists but
-has no toolbar control in this stage. `LibraryFilter::hideEmpty` adds `peak > 0`, hiding only files
-whose measured maximum absolute sample is exactly zero. The table is refreshed
+has no toolbar control in this stage. `LibraryFilter::hideEmpty` adds `peak >= 0.001`, hiding files
+quieter than -60 dBFS (digital silence and noise floor). The table is refreshed
 after every non-cancelled index run, at startup, after a catalog switch and after starring (which
 can change the representative). This is byte equality only; decoded-PCM equality across containers
 is not implemented.

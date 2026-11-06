@@ -335,6 +335,7 @@ TEST_CASE("Hide empty filters files with a zero peak", "[database][empty]")
     TestDirectory t; Database db(t.dir.getChildFile("empty.sqlite")); SampleRepository repo(db); repo.createTables();
     auto loud = sample("/lib/loud.wav", "loud.wav"); loud.peakLevel = 0.5; repo.upsert(loud);
     auto silent = sample("/lib/silent.wav", "silent.wav"); silent.peakLevel = 0.0; repo.upsert(silent);
+    auto noiseFloor = sample("/lib/noise.wav", "noise.wav"); noiseFloor.peakLevel = 0.000427; repo.upsert(noiseFloor);
     LibraryFilter filter; filter.hideEmpty = true;
     REQUIRE(filter.hasTextOrTagFilter());
     const auto page = repo.query(filter);
@@ -343,7 +344,7 @@ TEST_CASE("Hide empty filters files with a zero peak", "[database][empty]")
     REQUIRE(page.samples[0].fileName == "loud.wav");
     REQUIRE(repo.queryIds(filter).size() == 1);
     filter.hideEmpty = false;
-    REQUIRE(repo.query(filter).total == 2);
+    REQUIRE(repo.query(filter).total == 3);
     REQUIRE_FALSE(filter.hasTextOrTagFilter());
 }
 TEST_CASE("Byte-identical duplicates group, hide and prefer the right representative", "[database][duplicates]")

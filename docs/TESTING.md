@@ -4,8 +4,8 @@
 
 - Debug and Release: **107 cases / 935 assertions**, all passed.
 - The **Hide duplicates** toolbar button was removed. Byte-identical grouping, the `DUPLICATES` column (renamed from `COPIES`) and **Show all copies** remain; **Clear filters** still resets the duplicate-hash view. The internal `hideDuplicates` filter remains covered by database tests but has no UI control.
-- **Hide empty** is a SQL filter (`peak > 0`), so it applies to the whole catalog, pagination and virtual `All`, not only the loaded page. Only files whose measured maximum absolute sample is exactly zero are hidden; near-silent files with any nonzero sample remain. Clear filters resets it; the setting is session-only like the other filters.
-- New coverage: zero-peak vs nonzero-peak filtering through `query` and `queryIds`; filter-bar presence and no-focus policy; clearing restores the full list.
+- **Hide empty** is a SQL filter (`peak >= 0.001`), so it applies to the whole catalog, pagination and virtual `All`, not only the loaded page. Files quieter than -60 dBFS are hidden; this covers digital silence and noise-floor files such as a 0.1 s placeholder with peak 0.000427. Clear filters resets it; the setting is session-only like the other filters.
+- New coverage: silence, noise-floor and normal-level filtering through `query` and `queryIds`; filter-bar presence and no-focus policy; clearing restores the full list.
 
 ## Waveform selection and drag-and-drop (2026-11-06)
 

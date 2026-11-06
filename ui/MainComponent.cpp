@@ -145,7 +145,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     hideEmpty.setComponentID("hideEmpty");
     hideEmpty.setToggleState(false,juce::dontSendNotification);
-    hideEmpty.setTooltip("Hide files whose measured peak is zero (fully silent)");
+    hideEmpty.setTooltip("Hide files quieter than -60 dBFS (peak below 0.001)");
     hideEmpty.onClick = [this]
     {
         filter.hideEmpty = hideEmpty.getToggleState(); pageOffset = 0; reloadLibrary();
