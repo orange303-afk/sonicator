@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "core/database/SampleRepository.h"
+#include "TestHelpers.h"
+#include <sqlite3.h>
 using namespace sonicator;
 TEST_CASE("Repository persists Unicode paths, metrics, and upserts without losing identity", "[database]")
 {
@@ -43,6 +45,49 @@ TEST_CASE("Repository persists Unicode paths, metrics, and upserts without losin
         REQUIRE_FALSE(repo.findByPath("absent"));
     }
     REQUIRE(file.deleteFile());
+}
+namespace {
+void execRaw(sqlite3* db, const char* sql)
+{
+    REQUIRE(sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
+}
+int rawScalar(const juce::File& file, const char* sql)
+{
+    sqlite3* raw = nullptr;
+    REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+    sqlite3_stmt* s = nullptr;
+    REQUIRE(sqlite3_prepare_v2(raw, sql, -1, &s, nullptr) == SQLITE_OK);
+    REQUIRE(sqlite3_step(s) == SQLITE_ROW);
+    const int value = sqlite3_column_int(s, 0);
+    sqlite3_finalize(s); sqlite3_close(raw);
+    return value;
+}
+}
+TEST_CASE("Schema v1 migrates in place, keeps rows, and backs up once", "[database][migration]")
+{
+    TestDirectory t;
+    auto file = t.dir.getChildFile("legacy.sqlite");
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        execRaw(raw, "CREATE TABLE samples (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
+                     "name TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, error TEXT NOT NULL,"
+                     "size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
+                     "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER);");
+        execRaw(raw, "INSERT INTO samples(path,name,hash,format,error,version) VALUES('/a.wav','a.wav','h1','WAV','',1),"
+                     "('/b.wav','b.wav','h2','WAV','',1);");
+        execRaw(raw, "PRAGMA user_version=1;");
+        sqlite3_close(raw);
+    }
+    {
+        Database db(file); SampleRepository repo(db); repo.createTables();
+        REQUIRE(repo.count() == 2);
+    }
+    REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
+    REQUIRE(rawScalar(file, "PRAGMA user_version") == 2);
+    REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='samples_name_id'") == 1);
+    { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.count() == 2); }
+    REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
 }
 TEST_CASE("Database open failure is reported", "[database]")
 {

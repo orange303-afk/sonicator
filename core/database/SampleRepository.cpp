@@ -3,6 +3,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing";
+constexpr int schemaVersion = 2;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -15,19 +16,60 @@ SampleRecord read(const detail::Statement& s)
     r.spectralRolloff = s.real(17); r.spectralFlatness = s.real(18); r.missing = s.integer(19) != 0;
     return r;
 }
+void backupDatabase(sqlite3* source, const juce::File& destination)
+{
+    sqlite3* out = nullptr;
+    if (sqlite3_open_v2(destination.getFullPathName().toRawUTF8(), &out,
+                        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr) != SQLITE_OK)
+    {
+        if (out != nullptr) sqlite3_close(out);
+        throw std::runtime_error("Cannot create database backup");
+    }
+    auto* backup = sqlite3_backup_init(out, "main", source, "main");
+    if (backup == nullptr)
+    {
+        const juce::String error(sqlite3_errmsg(out));
+        sqlite3_close(out);
+        throw std::runtime_error(error.toStdString());
+    }
+    sqlite3_backup_step(backup, -1);
+    const int rc = sqlite3_backup_finish(backup);
+    sqlite3_close(out);
+    if (rc != SQLITE_OK) throw std::runtime_error("Database backup failed");
+}
 }
 void SampleRepository::createTables()
 {
     std::lock_guard lock(db.mutex);
     detail::Statement version(db.handle, "PRAGMA user_version");
-    if (version.step() && version.integer(0) > 1) throw std::runtime_error("Database schema is newer than this application");
-    detail::exec(db.handle,
-        "CREATE TABLE IF NOT EXISTS samples (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
-        "name TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, error TEXT NOT NULL,"
-        "size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
-        "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER);"
-        "CREATE INDEX IF NOT EXISTS samples_hash ON samples(hash);"
-        "CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY); PRAGMA user_version=1;");
+    const int current = version.step() ? (int) version.integer(0) : 0;
+    if (current > schemaVersion) throw std::runtime_error("Database schema is newer than this application");
+    if (current >= 1 && current < schemaVersion)
+    {
+        // WAL may still hold committed pages, so copy through SQLite rather than the file system.
+        const auto target = db.file().getSiblingFile(db.file().getFileName() + ".backup-"
+            + juce::Time::getCurrentTime().formatted("%Y%m%d-%H%M%S"));
+        backupDatabase(db.handle, target);
+    }
+    try
+    {
+        detail::exec(db.handle,
+            "BEGIN IMMEDIATE;"
+            "CREATE TABLE IF NOT EXISTS samples (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
+            "name TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, error TEXT NOT NULL,"
+            "size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
+            "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER);"
+            "CREATE INDEX IF NOT EXISTS samples_hash ON samples(hash);"
+            "CREATE INDEX IF NOT EXISTS samples_name_id ON samples(name COLLATE NOCASE, id);"
+            "CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY);"
+            "PRAGMA user_version=2;"
+            "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
 }
 int64_t SampleRepository::upsert(const SampleRecord& r)
 {

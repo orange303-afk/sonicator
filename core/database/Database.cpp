@@ -1,7 +1,7 @@
 #include "Database.h"
 #include "SqliteHelpers.h"
 namespace sonicator {
-Database::Database(const juce::File& f)
+Database::Database(const juce::File& f) : path(f)
 {
     if (! f.getParentDirectory().createDirectory())
         throw std::runtime_error("Cannot create database directory");
