@@ -31,6 +31,24 @@ TEST_CASE("Application shell restores the catalog and paints at minimum size", "
         REQUIRE(png.writeImageToStream(image,*output));
     }
 }
+TEST_CASE("Samples added to the catalog after startup appear in the list", "[ui][integration]")
+{
+    TestDirectory t; auto a = t.wave("a.wav"); auto dbPath = t.dir.getChildFile("library.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        auto r = BasicAnalyzer().analyze(a); repo.upsert(r); repo.addRoot(t.dir.getFullPathName());
+    }
+    MainComponent app(dbPath, false);
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 1);
+    REQUIRE_FALSE(app.refreshIfCatalogChanged());
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        auto r = BasicAnalyzer().analyze(t.wave("b.wav", 660)); repo.upsert(r);
+    }
+    REQUIRE(app.refreshIfCatalogChanged());
+    REQUIRE(library->getNumRows() == 2);
+}
 TEST_CASE("Audio settings dialog is destroyed before the application's audio engine", "[ui][dialog]")
 {
     TestDirectory t;

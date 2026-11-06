@@ -51,7 +51,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice)
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         indexer = std::make_unique<IndexingService>(*writeRepo);
         reloadLibrary();
-        status.setText("Ready. Add a folder to begin.",juce::dontSendNotification);
+        status.setText(catalogCount > 0
+            ? juce::String(catalogCount) + " samples loaded"
+            : "Ready. Add a folder to begin.",juce::dontSendNotification);
     }
     catch (const std::exception& e) { status.setText("Database error: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
     if (engine.error().isNotEmpty()) status.setText("Audio device: " + engine.error(),juce::dontSendNotification);
@@ -76,7 +78,7 @@ void MainComponent::chooseFolder()
 void MainComponent::beginImport(const juce::File& folder)
 {
     if (! indexer || indexer->progress().running) return;
-    if (indexer->start({folder.getFullPathName()})) wasRunning = true;
+    if (indexer->start({folder.getFullPathName()})) { wasRunning = true; reloadLibrary(); }
 }
 void MainComponent::scanRoots(bool force)
 {
@@ -85,9 +87,17 @@ void MainComponent::scanRoots(bool force)
     {
         auto roots = readRepo->roots();
         if (roots.isEmpty()) { status.setText("Add a folder first.",juce::dontSendNotification); return; }
-        if (indexer->start(roots,force)) wasRunning = true;
+        if (indexer->start(roots,force)) { wasRunning = true; reloadLibrary(); }
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+}
+bool MainComponent::refreshIfCatalogChanged()
+{
+    if (! readRepo) return false;
+    try { if (readRepo->count() == catalogCount) return false; }
+    catch (const std::exception&) { return false; }
+    reloadLibrary();
+    return true;
 }
 void MainComponent::reloadLibrary()
 {
@@ -137,6 +147,11 @@ void MainComponent::timerCallback()
             + "  skipped " + juce::String(p.skipped) + "  errors " + juce::String(p.failed)
             + "  duplicates " + juce::String(p.duplicates) + (p.running ? "  |  " + p.current : ""),juce::dontSendNotification);
         status.setTooltip(status.getText());
+    }
+    if (p.running)
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+        if (now - lastRefreshMs >= 1500) { lastRefreshMs = now; refreshIfCatalogChanged(); }
     }
     if (wasRunning && ! p.running) reloadLibrary();
     wasRunning = p.running;

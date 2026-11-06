@@ -14,6 +14,7 @@ public:
     void resized() override;
     bool keyPressed(const juce::KeyPress& k) override { return preview.keyPressed(k); }
     void beginImport(const juce::File&);
+    bool refreshIfCatalogChanged();
 private:
     SonicatorLookAndFeel look;
     juce::File dbPath;
@@ -34,6 +35,7 @@ private:
     juce::Component::SafePointer<juce::DialogWindow> audioDialog;
     int pageOffset = 0, catalogCount = 0;
     bool wasRunning = false;
+    uint32_t lastRefreshMs = 0;
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
     void timerCallback() override;
     void chooseFolder();
