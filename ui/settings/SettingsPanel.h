@@ -1,6 +1,7 @@
 #pragma once
 #include "core/settings/AppSettings.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <vector>
 namespace sonicator {
 class SettingsPanel final : public juce::Component
 {
@@ -19,13 +20,15 @@ private:
     juce::File database;
     bool indexing = false, statusError = false;
     juce::Label title, appearance, themeLabel, scaleLabel, languageHeading, languageLabel,
-                 languageNote, libraryHeading, databaseLabel, libraryNote, databaseStatus,
+                 languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
                  audioHeading, aboutHeading, productLabel, authorLabel, supportLabel;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::TextButton moveDatabase { "Move catalog..." }, openDatabase { "Open catalog..." },
-                     audio { "Audio output..." }, close { "Close" };
+                     audio { "Audio/MIDI Settings" }, close { "Close" };
     juce::HyperlinkButton gumroad, bandcamp, naukograd, kofi;
     std::unique_ptr<juce::FileChooser> chooser;
+    std::vector<juce::Rectangle<float>> sectionRules;
+    juce::Rectangle<int> databaseFieldBounds;
     void notifySettings();
     void chooseDatabase(bool moveCurrent);
 };

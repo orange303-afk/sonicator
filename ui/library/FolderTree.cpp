@@ -10,7 +10,7 @@ public:
     int getItemHeight() const override { return 26; }
     void paintItem(juce::Graphics& g,int w,int h) override
     {
-        if (isSelected()) { g.setColour(theme::accent.withAlpha(0.25f)); g.fillAll(); }
+        if (isSelected()) { g.setColour(theme::selection); g.fillAll(); }
         g.setColour(theme::text); g.setFont(13.0f);
         g.drawText(all ? "All samples" : juce::File(path).getFileName(), 3,0,w-6,h,juce::Justification::centredLeft,true);
     }
@@ -31,7 +31,7 @@ private:
 FolderTree::FolderTree()
 {
     addAndMakeVisible(tree); tree.setRootItemVisible(true); tree.setMultiSelectEnabled(false);
-    tree.setColour(juce::TreeView::backgroundColourId,theme::panel); tree.setDefaultOpenness(false);
+    tree.setColour(juce::TreeView::backgroundColourId,juce::Colours::transparentBlack); tree.setDefaultOpenness(false);
     tree.setIndentSize(14); tree.setWantsKeyboardFocus(true);
 }
 FolderTree::~FolderTree() { tree.setRootItem(nullptr); }
@@ -42,7 +42,7 @@ void FolderTree::clearSelection()
 }
 void FolderTree::lookAndFeelChanged()
 {
-    tree.setColour(juce::TreeView::backgroundColourId,theme::panel);
+    tree.setColour(juce::TreeView::backgroundColourId,juce::Colours::transparentBlack);
     tree.repaint();
 }
 void FolderTree::refresh(SampleRepository& repo)

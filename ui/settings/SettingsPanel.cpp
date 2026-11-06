@@ -1,6 +1,16 @@
 #include "SettingsPanel.h"
 #include "ui/shell/Theme.h"
 namespace sonicator {
+namespace {
+juce::Font sectionFont()
+{
+    return juce::Font(juce::FontOptions(10.5f, juce::Font::bold)).withExtraKerningFactor(0.12f);
+}
+juce::Font noteFont()
+{
+    return juce::Font(juce::FontOptions(12.0f));
+}
+}
 SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool busy)
     : current(initial), database(std::move(file)), indexing(busy),
       gumroad("ilyaorange.gumroad.com", juce::URL("https://ilyaorange.gumroad.com")),
@@ -8,16 +18,16 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
       naukograd("naukograd.bandcamp.com", juce::URL("https://naukograd.bandcamp.com")),
       kofi("ko-fi.com/ilyaorange", juce::URL("https://ko-fi.com/ilyaorange"))
 {
-    for (auto* c : std::array<juce::Component*,20>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
-         &languageLabel,&languageNote,&libraryHeading,&databaseLabel,&libraryNote,&databaseStatus,&audioHeading,
-         &aboutHeading,&productLabel,&authorLabel,&supportLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase})
+    for (auto* c : std::array<juce::Component*,21>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
+         &languageLabel,&languageNote,&libraryHeading,&databaseKey,&databaseLabel,&libraryNote,&databaseStatus,
+         &audioHeading,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase})
         addAndMakeVisible(c);
     for (auto* c : std::array<juce::Component*,7>{&openDatabase,&audio,&close,&gumroad,&bandcamp,&naukograd,&kofi})
         addAndMakeVisible(c);
 
     title.setText("Settings",juce::dontSendNotification);
     title.setFont(juce::FontOptions(20,juce::Font::bold));
-    appearance.setText("APPEARANCE",juce::dontSendNotification); appearance.setFont(juce::FontOptions(10));
+    appearance.setText("APPEARANCE",juce::dontSendNotification); appearance.setFont(sectionFont());
     themeLabel.setText("Theme",juce::dontSendNotification); themeLabel.setFont(juce::FontOptions(13));
     scaleLabel.setText("Interface scale",juce::dontSendNotification); scaleLabel.setFont(juce::FontOptions(13));
     themeBox.setComponentID("settingsTheme");
@@ -27,26 +37,29 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     themeBox.setSelectedId(initial.theme == ThemeMode::Dark ? 2 : (initial.theme == ThemeMode::Light ? 3 : 1),juce::dontSendNotification);
     scaleBox.addItem("100%",100); scaleBox.addItem("110%",110); scaleBox.addItem("125%",125); scaleBox.addItem("150%",150);
     scaleBox.setSelectedId(AppSettings::clampScale(initial.scalePercent),juce::dontSendNotification);
-    languageHeading.setText("LANGUAGE",juce::dontSendNotification); languageHeading.setFont(juce::FontOptions(10));
+    languageHeading.setText("LANGUAGE",juce::dontSendNotification); languageHeading.setFont(sectionFont());
     languageLabel.setText("Interface language",juce::dontSendNotification); languageLabel.setFont(juce::FontOptions(13));
     languageNote.setText("English is the only language in this stage. The choice is stored so later translations can use it.",juce::dontSendNotification);
-    languageNote.setFont(juce::FontOptions(10)); languageNote.setJustificationType(juce::Justification::topLeft);
+    languageNote.setFont(noteFont()); languageNote.setJustificationType(juce::Justification::centredLeft);
     languageBox.addItem("English",1); languageBox.setSelectedId(1,juce::dontSendNotification);
     languageBox.setEnabled(false);
-    libraryHeading.setText("LIBRARY",juce::dontSendNotification); libraryHeading.setFont(juce::FontOptions(10));
-    databaseLabel.setFont(juce::FontOptions(12)); databaseLabel.setJustificationType(juce::Justification::topLeft);
+    libraryHeading.setText("LIBRARY",juce::dontSendNotification); libraryHeading.setFont(sectionFont());
+    databaseKey.setText("Database",juce::dontSendNotification); databaseKey.setFont(juce::FontOptions(13));
+    databaseLabel.setFont(juce::FontOptions(12)); databaseLabel.setJustificationType(juce::Justification::centredLeft);
+    databaseLabel.setBorderSize(juce::BorderSize<int>(0,10,0,10));
+    databaseLabel.setMinimumHorizontalScale(0.8f);
     libraryNote.setText(indexing
         ? "Indexing is running. Stop it before moving or opening another catalog."
         : "Move copies a consistent snapshot to a new location and switches to it; the old file is kept. Open uses an existing catalog.",juce::dontSendNotification);
-    libraryNote.setFont(juce::FontOptions(10)); libraryNote.setJustificationType(juce::Justification::topLeft);
-    databaseStatus.setFont(juce::FontOptions(11)); databaseStatus.setJustificationType(juce::Justification::topLeft);
-    audioHeading.setText("AUDIO",juce::dontSendNotification); audioHeading.setFont(juce::FontOptions(10));
-    aboutHeading.setText("ABOUT",juce::dontSendNotification); aboutHeading.setFont(juce::FontOptions(10));
+    libraryNote.setFont(noteFont()); libraryNote.setJustificationType(juce::Justification::centredLeft);
+    databaseStatus.setFont(noteFont()); databaseStatus.setJustificationType(juce::Justification::centredLeft);
+    audioHeading.setText("AUDIO",juce::dontSendNotification); audioHeading.setFont(sectionFont());
+    aboutHeading.setText("ABOUT",juce::dontSendNotification); aboutHeading.setFont(sectionFont());
     productLabel.setText("Sonicator",juce::dontSendNotification);
     productLabel.setFont(juce::FontOptions(18,juce::Font::bold));
     authorLabel.setText("by Ilya Orange",juce::dontSendNotification); authorLabel.setFont(juce::FontOptions(13));
     supportLabel.setText("Sonicator is free, but you can support further development:",juce::dontSendNotification);
-    supportLabel.setFont(juce::FontOptions(11)); supportLabel.setJustificationType(juce::Justification::topLeft);
+    supportLabel.setFont(noteFont()); supportLabel.setJustificationType(juce::Justification::centredLeft);
     for (auto* link : std::array<juce::HyperlinkButton*,4>{&gumroad,&bandcamp,&naukograd,&kofi})
     {
         link->setFont(juce::FontOptions(12),false);
@@ -106,7 +119,7 @@ void SettingsPanel::chooseDatabase(bool moveCurrent)
 void SettingsPanel::setDatabaseFile(juce::File file)
 {
     database = std::move(file);
-    databaseLabel.setText("Database\n" + database.getFullPathName(),juce::dontSendNotification);
+    databaseLabel.setText(database.getFullPathName(),juce::dontSendNotification);
     databaseLabel.setTooltip(database.getFullPathName());
 }
 void SettingsPanel::setDatabaseStatus(const juce::String& text, bool error)
@@ -126,6 +139,7 @@ void SettingsPanel::lookAndFeelChanged()
     themeLabel.setColour(juce::Label::textColourId,theme::text);
     scaleLabel.setColour(juce::Label::textColourId,theme::text);
     languageLabel.setColour(juce::Label::textColourId,theme::text);
+    databaseKey.setColour(juce::Label::textColourId,theme::text);
     languageNote.setColour(juce::Label::textColourId,theme::muted);
     libraryNote.setColour(juce::Label::textColourId,theme::muted);
     databaseStatus.setColour(juce::Label::textColourId,statusError
@@ -136,53 +150,118 @@ void SettingsPanel::lookAndFeelChanged()
         link->setColour(juce::HyperlinkButton::textColourId,theme::accent);
     repaint();
 }
-void SettingsPanel::paint(juce::Graphics& g) { g.fillAll(theme::panel); }
+void SettingsPanel::paint(juce::Graphics& g)
+{
+    g.fillAll(theme::panel);
+    if (! databaseFieldBounds.isEmpty())
+    {
+        const auto field = databaseFieldBounds.toFloat().reduced(0.5f);
+        g.setColour(theme::background);
+        g.fillRoundedRectangle(field, 7.0f);
+        g.setColour(theme::line);
+        g.drawRoundedRectangle(field, 7.0f, 1.0f);
+    }
+    g.setColour(theme::line);
+    for (const auto& rule : sectionRules)
+        g.fillRect(rule);
+}
 void SettingsPanel::resized()
 {
-    auto bounds = getLocalBounds().reduced(20,16);
+    sectionRules.clear();
+    auto bounds = getLocalBounds().reduced(24,16);
     auto footer = bounds.removeFromBottom(34);
-    auto r = bounds;
-    title.setBounds(r.removeFromTop(26)); r.removeFromTop(6);
-    auto section = [&](juce::Label& label)
+    bounds.removeFromBottom(10); // keep the last row clear of the footer
+
+    struct LayoutRow
     {
-        label.setBounds(r.removeFromTop(16)); r.removeFromTop(4);
+        int height = 0, gap = 0;
+        bool stretch = false;
+        std::function<void(juce::Rectangle<int>)> place;
     };
-    auto row = [&](juce::Label& label, juce::Component& control)
+    std::vector<LayoutRow> rows;
+    constexpr int labelColumn = 140;
+
+    auto add = [&rows](int height, int gap, bool stretch, std::function<void(juce::Rectangle<int>)> place)
     {
-        auto line = r.removeFromTop(28);
-        label.setBounds(line.removeFromLeft(130));
-        control.setBounds(line);
-        r.removeFromTop(4);
+        rows.push_back({ height, gap, stretch, std::move(place) });
     };
-    section(appearance);
-    row(themeLabel,themeBox);
-    row(scaleLabel,scaleBox);
-    r.removeFromTop(8);
-    section(languageHeading);
-    row(languageLabel,languageBox);
-    languageNote.setBounds(r.removeFromTop(28));
-    r.removeFromTop(8);
-    section(libraryHeading);
-    databaseLabel.setBounds(r.removeFromTop(38));
-    auto buttons = r.removeFromTop(28);
-    moveDatabase.setBounds(buttons.removeFromLeft(160)); buttons.removeFromLeft(8);
-    openDatabase.setBounds(buttons.removeFromLeft(160));
-    r.removeFromTop(6);
-    libraryNote.setBounds(r.removeFromTop(30));
-    databaseStatus.setBounds(r.removeFromTop(24));
-    r.removeFromTop(6);
-    section(audioHeading);
-    audio.setBounds(r.removeFromTop(28));
-    r.removeFromTop(8);
-    section(aboutHeading);
-    productLabel.setBounds(r.removeFromTop(24));
-    authorLabel.setBounds(r.removeFromTop(18));
-    gumroad.setBounds(r.removeFromTop(20));
-    bandcamp.setBounds(r.removeFromTop(20));
-    naukograd.setBounds(r.removeFromTop(20));
-    r.removeFromTop(6);
-    supportLabel.setBounds(r.removeFromTop(24));
-    kofi.setBounds(r.removeFromTop(20));
+    auto section = [this, &add](juce::Label& label, int gapBefore)
+    {
+        add(14, gapBefore, true, [this, &label](juce::Rectangle<int> area)
+        {
+            label.setBounds(area);
+            const auto textWidth = juce::GlyphArrangement::getStringWidthInt(label.getFont(), label.getText());
+            const auto lineX = area.getX() + textWidth + 12;
+            if (lineX < area.getRight())
+                sectionRules.emplace_back((float) lineX, (float) area.getCentreY(),
+                                          (float) (area.getRight() - lineX), 1.0f);
+        });
+    };
+    auto row = [&add, labelColumn](juce::Label& label, juce::Component& control, int gapBefore)
+    {
+        add(28, gapBefore, false, [&label, &control, labelColumn](juce::Rectangle<int> area)
+        {
+            label.setBounds(area.removeFromLeft(labelColumn));
+            control.setBounds(area);
+        });
+    };
+
+    add(24, 0, false, [this](juce::Rectangle<int> area) { title.setBounds(area); });
+    section(appearance, 12);
+    row(themeLabel, themeBox, 4);
+    row(scaleLabel, scaleBox, 4);
+    section(languageHeading, 14);
+    row(languageLabel, languageBox, 4);
+    add(30, 6, false, [this](juce::Rectangle<int> area) { languageNote.setBounds(area); });
+
+    section(libraryHeading, 14);
+    add(30, 4, false, [this](juce::Rectangle<int> area)
+    {
+        databaseKey.setBounds(area.removeFromLeft(140));
+        databaseFieldBounds = area;
+        databaseLabel.setBounds(area.reduced(0, 4));
+    });
+    add(30, 6, false, [this](juce::Rectangle<int> area)
+    {
+        auto right = area.withTrimmedLeft(140);
+        moveDatabase.setBounds(right.removeFromLeft((right.getWidth() - 8) / 2));
+        right.removeFromLeft(8);
+        openDatabase.setBounds(right);
+    });
+    add(32, 6, false, [this](juce::Rectangle<int> area) { libraryNote.setBounds(area.withTrimmedLeft(140)); });
+    add(24, 4, false, [this](juce::Rectangle<int> area) { databaseStatus.setBounds(area.withTrimmedLeft(140)); });
+
+    section(audioHeading, 14);
+    add(30, 4, false, [this](juce::Rectangle<int> area) { audio.setBounds(area.withTrimmedLeft(140)); });
+
+    section(aboutHeading, 14);
+    add(24, 2, false, [this](juce::Rectangle<int> area) { productLabel.setBounds(area); });
+    add(18, 0, false, [this](juce::Rectangle<int> area) { authorLabel.setBounds(area); });
+    add(60, 2, false, [this](juce::Rectangle<int> area)
+    {
+        auto r = area;
+        for (auto* link : { &gumroad, &bandcamp, &naukograd })
+            link->setBounds(r.removeFromTop(20));
+    });
+    add(24, 6, false, [this](juce::Rectangle<int> area) { supportLabel.setBounds(area); });
+    add(20, 2, false, [this](juce::Rectangle<int> area) { kofi.setBounds(area); });
+
+    int fixedHeight = 0, stretchCount = 0;
+    for (const auto& r : rows)
+    {
+        fixedHeight += r.height + r.gap;
+        if (r.stretch) ++stretchCount;
+    }
+    const int extra = stretchCount > 0 ? juce::jmax(0, (bounds.getHeight() - fixedHeight) / stretchCount) : 0;
+
+    int y = bounds.getY();
+    for (const auto& r : rows)
+    {
+        y += r.gap + (r.stretch ? extra : 0);
+        r.place({ bounds.getX(), y, bounds.getWidth(), r.height });
+        y += r.height;
+    }
+
     close.setBounds(footer.removeFromRight(92).withSizeKeepingCentre(92,28));
 }
 } // namespace sonicator

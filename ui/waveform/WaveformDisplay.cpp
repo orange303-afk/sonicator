@@ -78,7 +78,7 @@ void WaveformDisplay::updateSelectionDuringDrag(double time)
 }
 void WaveformDisplay::paint(juce::Graphics& g)
 {
-    g.setColour(theme::background); g.fillRoundedRectangle(getLocalBounds().toFloat(),7);
+    g.setColour(theme::table); g.fillRect(getLocalBounds());
     if (thumbnail.getTotalLength() <= 0)
     {
         g.setColour(theme::muted); g.drawText("Select a sample to preview",getLocalBounds(),juce::Justification::centred); return;
@@ -90,7 +90,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
     {
         const auto x1 = selection::xAtTime(currentSelection.start, getWidth(), total);
         const auto x2 = selection::xAtTime(currentSelection.end, getWidth(), total);
-        g.setColour(theme::accent.brighter(0.6f).withAlpha(0.28f));
+        g.setColour(theme::accent.withAlpha(0.20f));
         g.fillRect(juce::Rectangle<float>(x1, 6.0f, juce::jmax(1.0f, x2 - x1), (float) getHeight() - 12.0f));
         g.setColour(theme::accent.withAlpha(0.85f));
         g.drawVerticalLine((int) x1, 5.0f, (float) getHeight() - 5.0f);
@@ -100,13 +100,13 @@ void WaveformDisplay::paint(juce::Graphics& g)
         const auto labelWidth = 104;
         const auto labelX = juce::jlimit(6.0f, juce::jmax(6.0f, (float) getWidth() - labelWidth - 6.0f), x1 + 4.0f);
         const juce::Rectangle<float> labelBounds(labelX, 6.0f, (float) labelWidth, 18.0f);
-        g.setColour(theme::panel.withAlpha(0.88f));
+        g.setColour(theme::panel);
         g.fillRoundedRectangle(labelBounds, 4.0f);
         g.setColour(theme::text);
         g.drawText(label, labelBounds, juce::Justification::centred);
     }
-    float x = 6 + (float) juce::jlimit(0.0,1.0,position/thumbnail.getTotalLength()) * (getWidth()-12);
-    g.setColour(theme::text); g.drawVerticalLine((int) x,5,(float) getHeight()-5);
+    float progress = 6 + (float) juce::jlimit(0.0,1.0,position/thumbnail.getTotalLength()) * (getWidth()-12);
+    g.setColour(theme::accent); g.drawVerticalLine((int) progress,5,(float) getHeight()-5);
 }
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {

@@ -182,7 +182,12 @@ void PreviewPanel::lookAndFeelChanged()
 }
 void PreviewPanel::paint(juce::Graphics& g)
 {
-    g.fillAll(theme::panel); g.setColour(theme::line); g.drawHorizontalLine(0,0,(float) getWidth());
+    juce::Path background;
+    auto bounds = getLocalBounds().toFloat();
+    background.addRoundedRectangle(bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight(),
+                                   12.0f, 12.0f, true, true, false, false);
+    g.setColour(theme::panel);
+    g.fillPath(background);
 }
 void PreviewPanel::resized()
 {

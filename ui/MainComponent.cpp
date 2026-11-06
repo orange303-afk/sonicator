@@ -21,7 +21,6 @@ juce::Image tagDotImage(uint32_t colour)
     juce::Image image(juce::Image::ARGB, 14, 14, true);
     juce::Graphics g(image);
     g.setColour(juce::Colour(colour)); g.fillEllipse(2.0f, 2.0f, 10.0f, 10.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.3f)); g.drawEllipse(2.5f, 2.5f, 9.0f, 9.0f, 1.0f);
     return image;
 }
 juce::Image starMenuImage()
@@ -38,9 +37,17 @@ juce::Image starMenuImage()
         if (i == 0) path.startNewSubPath(point); else path.lineTo(point);
     }
     path.closeSubPath();
-    g.setColour(juce::Colour(0xffe0b84a)); g.fillPath(path);
+    g.setColour(theme::text); g.fillPath(path);
     return image;
 }
+// A modal Settings window that dismisses itself when the user clicks anywhere outside it.
+class SettingsDialogWindow final : public juce::DialogWindow
+{
+public:
+    SettingsDialogWindow() : juce::DialogWindow("Settings", theme::panel, true) {}
+    void closeButtonPressed() override { exitModalState(0); }
+    void inputAttemptWhenModal() override { exitModalState(0); }
+};
 }
 juce::File MainComponent::defaultDatabaseFile()
 {
@@ -845,15 +852,14 @@ void MainComponent::showSettings()
             }
             else if (safePanel != nullptr) safePanel->setDatabaseStatus(error,true);
         };
-    juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned(panel);
     panel->setLookAndFeel(&look);
-    options.dialogTitle = "Settings";
-    options.dialogBackgroundColour = theme::panel;
-    options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true;
-    options.resizable = false;
-    settingsDialog = options.launchAsync();
+    auto* window = new SettingsDialogWindow();
+    window->setContentOwned(panel, true);
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(false, false);
+    window->centreAroundComponent(this, window->getWidth(), window->getHeight());
+    settingsDialog = window;
+    window->enterModalState(true, nullptr, true);
 }
 bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, juce::String& error)
 {
@@ -947,17 +953,17 @@ void MainComponent::showAudioSettings()
     selector->setLookAndFeel(&look);
     selector->setSize(460,500);
     juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned(selector); options.dialogTitle = "Audio output";
+    options.content.setOwned(selector); options.dialogTitle = "Audio/MIDI Settings";
     options.dialogBackgroundColour = theme::panel; options.escapeKeyTriggersCloseButton = true;
     options.useNativeTitleBar = true; options.resizable = false; audioDialog = options.launchAsync();
 }
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(theme::background);
-    g.setColour(theme::panel); g.fillRect(sidebarBounds); g.fillRect(analysisBounds);
+    g.setColour(theme::panel);
+    g.fillRoundedRectangle(sidebarBounds.toFloat(), 10.0f);
+    g.fillRoundedRectangle(analysisBounds.toFloat(), 10.0f);
     g.setColour(theme::line); g.drawHorizontalLine(85,0,(float) getWidth());
-    g.drawVerticalLine(sidebarBounds.getRight(),86,(float) sidebarBounds.getBottom());
-    g.drawVerticalLine(analysisBounds.getX(),86,(float) analysisBounds.getBottom());
     if (logoWordmark.isValid() && theme::isDark)
         g.drawImage(logoWordmark, juce::Rectangle<float>(16,8,310,70),
                     juce::RectanglePlacement::onlyReduceInSize | juce::RectanglePlacement::centred);
@@ -966,7 +972,7 @@ void MainComponent::resized()
 {
     auto r = getLocalBounds(); headerBounds = r.removeFromTop(86);
     auto header = headerBounds.reduced(16,14);
-    auto branding = header.removeFromLeft(310); header.removeFromLeft(16);
+    auto branding = header.removeFromLeft(310); header.removeFromLeft(32);
     heading.setBounds(branding.removeFromTop(30)); subtitle.setBounds(branding);
     settings.setBounds(header.removeFromRight(115).withSizeKeepingCentre(115,32));
     header.removeFromRight(16); search.setBounds(header.withSizeKeepingCentre(header.getWidth(),34));

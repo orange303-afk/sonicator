@@ -60,11 +60,11 @@ void TagStrip::paint(juce::Graphics& g)
         const auto colour = juce::Colour(tag.colour);
         auto bounds = chipBounds[i].toFloat();
         if (bounds.getY() >= (float) getHeight()) break;
-        g.setColour(colour.withAlpha(0.16f)); g.fillRoundedRectangle(bounds, 5.0f);
-        g.setColour(colour.withAlpha(0.55f)); g.drawRoundedRectangle(bounds.reduced(0.5f), 5.0f, 1.0f);
+        g.setColour(theme::raised); g.fillRoundedRectangle(bounds, 5.0f);
+        g.setColour(theme::line); g.drawRoundedRectangle(bounds.reduced(0.5f), 5.0f, 1.0f);
         g.setColour(colour);
         g.fillEllipse(bounds.getX() + padding, bounds.getCentreY() - dotSize / 2.0f, dotSize, dotSize);
-        g.setColour(theme::tagText(colour));
+        g.setColour(theme::text);
         g.drawText(tag.name, chipBounds[i].withTrimmedLeft(padding + dotSize + 6),
                    juce::Justification::centredLeft, true);
     }

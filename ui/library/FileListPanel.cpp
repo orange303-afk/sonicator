@@ -46,8 +46,8 @@ FileListPanel::FileListPanel()
 void FileListPanel::lookAndFeelChanged() { refreshTheme(); }
 void FileListPanel::refreshTheme()
 {
-    table.setColour(juce::ListBox::backgroundColourId,theme::background);
-    table.setColour(juce::ListBox::outlineColourId,theme::line);
+    table.setColour(juce::ListBox::backgroundColourId,theme::table);
+    table.setColour(juce::ListBox::outlineColourId,juce::Colours::transparentBlack);
     table.setColour(juce::ListBox::textColourId,theme::text);
     table.repaint();
 }
@@ -268,8 +268,7 @@ void FileListPanel::sortVisible(int column, bool forwards)
 }
 void FileListPanel::paintRowBackground(juce::Graphics& g,int row,int width,int height,bool selected)
 {
-    g.fillAll(selected ? theme::selection : (row % 2 ? theme::panel : theme::background));
-    if (selected) { g.setColour(theme::accent); g.fillRect(0,0,3,height); }
+    g.fillAll(selected ? theme::selection : (row % 2 ? theme::rowAlternate : theme::table));
     g.setColour(theme::line.withAlpha(0.25f)); g.drawHorizontalLine(height-1,0,(float) width);
 }
 void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool)
@@ -280,7 +279,7 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
     if (col == 8)
     {
         const auto area = juce::Rectangle<float>(0, 0, (float) w, (float) h).withSizeKeepingCentre(14.0f, 14.0f);
-        g.setColour(r.starred ? juce::Colour(0xffe0b84a) : theme::muted.withAlpha(0.55f));
+        g.setColour(r.starred ? theme::text : theme::muted.withAlpha(0.55f));
         drawStar(g, area, r.starred);
         return;
     }
@@ -294,7 +293,7 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
         }
         else
         {
-            g.setColour(theme::accent); g.setFont(juce::FontOptions(12));
+            g.setColour(theme::muted); g.setFont(juce::FontOptions(12));
             g.drawText(juce::String(juce::CharPointer_UTF8("\xc3\x97")) + juce::String(found->second),
                        8,0,w-12,h,juce::Justification::centredLeft,true);
         }

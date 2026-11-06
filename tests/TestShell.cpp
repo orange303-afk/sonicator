@@ -99,6 +99,30 @@ TEST_CASE("Settings dialog is destroyed before the application", "[ui][dialog][s
     app.reset();
     REQUIRE(dialog == nullptr);
 }
+TEST_CASE("Settings dialog closes when clicking outside", "[ui][dialog][settings]")
+{
+    TestDirectory t;
+    MainComponent app(t.dir.getChildFile("library.sqlite"),false);
+    juce::TextButton* settings = nullptr;
+    for (auto* child : app.getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*>(child))
+            if (button->getButtonText() == "Settings") settings = button;
+    REQUIRE(settings != nullptr);
+    settings->onClick();
+    auto* modal = juce::Component::getCurrentlyModalComponent();
+    REQUIRE(modal != nullptr);
+    const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_SETTINGS_SCREENSHOT",{});
+    if (shot.isNotEmpty())
+    {
+        auto stream = juce::File(shot).createOutputStream();
+        REQUIRE(stream != nullptr);
+        juce::PNGImageFormat png;
+        REQUIRE(png.writeImageToStream(modal->createComponentSnapshot(modal->getLocalBounds(),true,2.0f),*stream));
+    }
+    modal->inputAttemptWhenModal();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+    REQUIRE(juce::Component::getCurrentlyModalComponent() == nullptr);
+}
 TEST_CASE("Whole-catalog search and tag filters drive the shell library", "[ui][integration][search][tags]")
 {
     TestDirectory t; auto kick = t.wave("Kick.wav"); t.wave("Snare.wav"); t.wave("Bass.wav");

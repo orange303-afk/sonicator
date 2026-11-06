@@ -45,8 +45,8 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 8. **Hide empty** hides files quieter than -60 dBFS (peak below 0.001), which covers digital silence and noise-floor files. The `DUPLICATES` column shows `×N` for byte-identical copies (same full SHA-256 and size); right-click **Show all copies** reveals a whole group. Nothing is deleted.
 9. **Rescan** asks for confirmation, then analyzes new, changed and previously failed files; unchanged analyzed files are skipped. **New files** is the additive scan: it walks the folders but analyzes only paths that are not in the catalog yet, without reconciling missing records. **Reanalyze all** asks for a stronger confirmation and recomputes every file. Cancel keeps completed results and never stores a partial row.
 10. **Backup** writes a consistent SQLite copy to `Sonicator/backups/` beside the database. The live database and its WAL are never copied as raw files.
-11. **Settings** opens the theme (system/dark/light), interface scale, catalog location, audio output and the About/support links. Theme, scale, language, catalog path and the last window position/size persist between launches.
-12. **Audio output** inside Settings selects the output device. No microphone input is opened.
+11. **Settings** opens the theme (system/dark/light), interface scale, catalog location, Audio/MIDI Settings and the About/support links. Theme, scale, language, catalog path and the last window position/size persist between launches.
+12. **Audio/MIDI Settings** inside Settings selects the output device. No microphone input is opened.
 
 ## Data
 
