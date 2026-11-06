@@ -2,7 +2,60 @@
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
 #include <iostream>
+#include <sqlite3.h>
 using namespace sonicator;
+TEST_CASE("Three hundred thousand rows finalize quickly with correct missing flags", "[.scale]")
+{
+    TestDirectory t;
+    auto audio = t.dir.getChildFile("audio"); audio.createDirectory();
+    t.wave("audio/keep.wav", 440);
+    auto dbPath = t.dir.getChildFile("catalog.sqlite");
+    Database db(dbPath); SampleRepository repo(db); repo.createTables();
+    {
+        sqlite3* raw = nullptr; REQUIRE(sqlite3_open(dbPath.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        REQUIRE(sqlite3_exec(raw, "BEGIN", nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_stmt* s = nullptr;
+        REQUIRE(sqlite3_prepare_v2(raw, "INSERT INTO samples(path,name,hash,format,error,size,modified,version,missing)"
+            " VALUES(?,?,'h','WAV','',0,0,1,0)", -1, &s, nullptr) == SQLITE_OK);
+        for (int i = 0; i < 300000; ++i)
+        {
+            const auto name = "ghost_" + juce::String(i) + ".wav";
+            const auto path = audio.getChildFile(name).getFullPathName();
+            sqlite3_bind_text(s, 1, path.toRawUTF8(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(s, 2, name.toRawUTF8(), -1, SQLITE_TRANSIENT);
+            REQUIRE(sqlite3_step(s) == SQLITE_DONE);
+            sqlite3_reset(s);
+        }
+        sqlite3_finalize(s);
+        REQUIRE(sqlite3_exec(raw, "COMMIT", nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(raw);
+    }
+    {
+        sqlite3* raw = nullptr; REQUIRE(sqlite3_open(dbPath.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        sqlite3_stmt* s = nullptr;
+        REQUIRE(sqlite3_prepare_v2(raw, "EXPLAIN QUERY PLAN SELECT id,path,missing FROM samples WHERE id>0 ORDER BY id LIMIT 5000", -1, &s, nullptr) == SQLITE_OK);
+        bool tempSort = false;
+        while (sqlite3_step(s) == SQLITE_ROW)
+            if (juce::String((const char*) sqlite3_column_text(s, 3)).containsIgnoreCase("TEMP B-TREE")) tempSort = true;
+        sqlite3_finalize(s);
+        REQUIRE(sqlite3_prepare_v2(raw, "EXPLAIN QUERY PLAN SELECT id FROM samples ORDER BY name COLLATE NOCASE,id LIMIT 10000", -1, &s, nullptr) == SQLITE_OK);
+        bool usesSortIndex = false;
+        while (sqlite3_step(s) == SQLITE_ROW)
+            if (juce::String((const char*) sqlite3_column_text(s, 3)).containsIgnoreCase("samples_name_id")) usesSortIndex = true;
+        sqlite3_finalize(s); sqlite3_close(raw);
+        REQUIRE_FALSE(tempSort);
+        REQUIRE(usesSortIndex);
+    }
+    IndexingService index(repo);
+    const auto started = juce::Time::getMillisecondCounterHiRes();
+    REQUIRE(index.start({audio.getFullPathName()})); REQUIRE(index.waitUntilFinished(120000));
+    const auto seconds = (juce::Time::getMillisecondCounterHiRes() - started) / 1000.0;
+    REQUIRE(repo.count() == 300001);
+    REQUIRE_FALSE(repo.findByPath(audio.getChildFile("keep.wav").getFullPathName())->missing);
+    REQUIRE(index.progress().analyzed >= 1);
+    REQUIRE(seconds < 60.0);
+    std::cout << "300k reconciliation: " << seconds << " s\n";
+}
 TEST_CASE("Index and reopen ten thousand real WAV files", "[.benchmark]")
 {
     TestDirectory t;
