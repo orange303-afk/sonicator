@@ -132,22 +132,30 @@ public:
         void paintButton(juce::Graphics& g, bool highlighted, bool down) override
         {
             const auto area = getLocalBounds().toFloat().reduced(6.0f);
-            const auto fill = buttonType == juce::DocumentWindow::closeButton
-                ? theme::accent.withAlpha(down ? 0.65f : (highlighted ? 0.9f : 0.75f))
-                : (highlighted || down ? theme::hover : theme::raised);
-            g.setColour(fill);
-            g.fillEllipse(area);
-            g.setColour(buttonType == juce::DocumentWindow::closeButton ? theme::background : theme::muted);
-            const auto glyph = area.reduced(4.5f);
             if (buttonType == juce::DocumentWindow::closeButton)
             {
-                g.drawLine(glyph.getX(), glyph.getY(), glyph.getRight(), glyph.getBottom(), 1.2f);
-                g.drawLine(glyph.getRight(), glyph.getY(), glyph.getX(), glyph.getBottom(), 1.2f);
+                // A plain cross, with only a subtle hover surface; no coloured traffic-light disc.
+                if (highlighted || down)
+                {
+                    g.setColour(theme::hover.withAlpha(down ? 0.9f : 0.65f));
+                    g.fillRoundedRectangle(area, 4.0f);
+                }
+                const auto glyph = area.reduced(3.0f);
+                g.setColour(down ? theme::text : theme::muted);
+                g.drawLine(glyph.getX(), glyph.getY(), glyph.getRight(), glyph.getBottom(), 1.35f);
+                g.drawLine(glyph.getRight(), glyph.getY(), glyph.getX(), glyph.getBottom(), 1.35f);
             }
-            else if (buttonType == juce::DocumentWindow::minimiseButton)
-                g.drawLine(glyph.getX(), glyph.getCentreY(), glyph.getRight(), glyph.getCentreY(), 1.2f);
             else
-                g.drawRect(glyph, 1.2f);
+            {
+                g.setColour(highlighted || down ? theme::hover : theme::raised);
+                g.fillEllipse(area);
+                g.setColour(theme::muted);
+                const auto glyph = area.reduced(4.5f);
+                if (buttonType == juce::DocumentWindow::minimiseButton)
+                    g.drawLine(glyph.getX(), glyph.getCentreY(), glyph.getRight(), glyph.getCentreY(), 1.2f);
+                else
+                    g.drawRect(glyph, 1.2f);
+            }
         }
     private:
         int buttonType;

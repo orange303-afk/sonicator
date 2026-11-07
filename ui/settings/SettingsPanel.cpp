@@ -76,6 +76,8 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     openDatabase.setTooltip("Open an existing SONICATOR catalog without moving the current one");
     relocateDatabase.setTooltip("Rewrite catalog paths for folders that moved to this computer");
     backupDatabase.setTooltip("Save a consistent copy of the catalog database; original audio files are not included");
+    close.setButtonText(juce::String::charToString((juce::juce_wchar) 0x00d7));
+    close.setTooltip("Close");
     setDatabaseFile(database);
     setDatabaseStatus(indexing ? "Unavailable while indexing." : "Original audio files are not included in the database.",false);
 
@@ -281,6 +283,6 @@ void SettingsPanel::resized()
         y += r.height;
     }
 
-    close.setBounds(footer.removeFromRight(92).withSizeKeepingCentre(92,28));
+    close.setBounds(footer.removeFromRight(32).withSizeKeepingCentre(32,28));
 }
 } // namespace sonicator

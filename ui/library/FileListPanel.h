@@ -33,6 +33,8 @@ public:
     void setSearchText(const juce::String&);
     void selectRow(int row) { table.selectRow(row); }
     void selectRows(const std::vector<int>& rows);
+    // Selects an id without invoking the row-selection action, used when restoring the session.
+    bool selectSampleById(int64_t sampleId);
     std::vector<SampleRecord> getSelectedSamples();
     juce::StringArray dragPaths();
     int prepareRowDrag(int row, bool addToSelection = false);

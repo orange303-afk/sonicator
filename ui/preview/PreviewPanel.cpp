@@ -85,7 +85,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     volume.setWantsKeyboardFocus(false); volume.setMouseClickGrabsKeyboardFocus(false);
     setWantsKeyboardFocus(true); startTimerHz(30);
 }
-bool PreviewPanel::loadFile(const juce::File& file)
+bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
 {
     if (file == loadedFile && file != juce::File() && file.getSize() == loadedSize
         && file.getLastModificationTime().toMilliseconds() == loadedModified) return true;
@@ -135,7 +135,7 @@ bool PreviewPanel::loadFile(const juce::File& file)
     else
         waveform.setFile(success && ! soundFont ? file : juce::File());
     midi.setToggleState(engine.isMidiPreview(),juce::dontSendNotification);
-    if (success && ! soundFont && autoPreview.getToggleState()) engine.play();
+    if (allowAutoPlay && success && ! soundFont && autoPreview.getToggleState()) engine.play();
     return success;
 }
 void PreviewPanel::applyPersistedSettings(const AppSettings& settings)

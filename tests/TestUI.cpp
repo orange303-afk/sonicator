@@ -436,3 +436,36 @@ TEST_CASE("Favorite tree keeps a folder and its catalogued descendants expandabl
     REQUIRE(root->getNumSubItems() == 1);
     REQUIRE(root->getSubItem(0)->getUniqueName() == rootPath + "/NotThere");
 }
+TEST_CASE("Selecting a sample by id does not fire the row action", "[ui][session]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("select-id.sqlite")); SampleRepository repo(db); repo.createTables();
+    SampleRecord a; a.filePath = "/lib/a.wav"; a.fileName = "a.wav"; a.fileHash = "a";
+    SampleRecord b = a; b.filePath = "/lib/b.wav"; b.fileName = "b.wav"; b.fileHash = "b";
+    a.id = repo.upsert(a); b.id = repo.upsert(b);
+    FileListPanel list; int actions = 0; list.onSelected = [&](const SampleRecord&) { ++actions; };
+    list.setSamples({ a, b });
+    REQUIRE(list.selectSampleById(b.id));
+    REQUIRE(list.getSelectedRow() == 1);
+    REQUIRE(actions == 0);
+    REQUIRE_FALSE(list.selectSampleById(9999));
+}
+TEST_CASE("Folder tree selects a nested restored path", "[ui][session][folders]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("select-folder.sqlite")); SampleRepository repo(db); repo.createTables();
+    const auto rootPath = t.dir.getChildFile("lib").getFullPathName(); repo.addRoot(rootPath);
+    SampleRecord r; r.filePath = rootPath + "/Drums/deep/snare.wav"; r.fileName = "snare.wav"; repo.upsert(r);
+    FolderTree folders; folders.refresh(repo);
+    const auto path = rootPath + "/Drums/deep";
+    REQUIRE(folders.selectPath(path));
+    auto* tree = dynamic_cast<juce::TreeView*>(folders.getChildComponent(0)); REQUIRE(tree != nullptr);
+    auto* selected = tree->getSelectedItem(0); REQUIRE(selected != nullptr);
+    REQUIRE(selected->getUniqueName() == path);
+    REQUIRE_FALSE(folders.selectPath(rootPath + "/NotThere"));
+}
+TEST_CASE("Preview can load the restored file without starting playback", "[ui][session][preview]")
+{
+    TestDirectory t; AudioEngine engine(false); PreviewPanel preview(engine, t.dir.getChildFile("cache"));
+    const auto file = t.wave("restored.wav");
+    REQUIRE(preview.loadFile(file, false));
+    REQUIRE_FALSE(engine.isPlaying());
+}

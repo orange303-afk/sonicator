@@ -27,8 +27,9 @@
 - REX MIDI positions use fractional frames: verified at 44.1/48/96 kHz after
   fixing integer truncation. Marker-only first slices are promoted to ranges
   instead of being dropped from MIDI mapping.
-- Hide empty persists in settings; switching catalogs preserves it and Clear
-  filters saves off. Search history opens on clicking the search field, without
+- Hide empty persists in settings and defaults on; switching catalogs preserves it and Clear
+  filters saves off. The last opened folder and selected file are restored on launch without
+  autoplaying the preview. Search history opens on clicking the search field, without
   a separate button. History stays limited to 10 entries.
 - **Tags and AutoTag (2026-11-08, schema 8):** five recent assigned tags at the top
   of the file context menu, stored per catalog and updated only by explicit human
@@ -48,6 +49,7 @@
 - **Settings backup and themed dialogs (2026-11-08):** `Backup database` moved from the footer
   into Settings. Confirmation and prompt windows use the Sonicator LookAndFeel, and Settings,
   Relocate, Audio/MIDI and AutoTag windows use a non-native title bar drawn in the app theme.
+  Settings window close controls are plain crosses.
 - **Schema 9 instrument tags (2026-11-08):** Crash, Ride, Tom, Rim, Fill, Riser, Downfilter,
   Upfilter, Snap, Shaker and Tamb are built-in tags and AutoTag classes. Crash no longer maps to
   Percussion; existing catalogs receive the new tags through the normal backup migration.

@@ -2,21 +2,39 @@
 #include "core/settings/AppSettings.h"
 #include "TestHelpers.h"
 using namespace sonicator;
-TEST_CASE("Hide empty defaults off and survives unrelated settings updates", "[settings][hide-empty]")
+TEST_CASE("Hide empty defaults on and survives unrelated settings updates", "[settings][hide-empty]")
 {
     TestDirectory t;
     const auto file = t.dir.getChildFile("preferences.json");
     SettingsStore store(file);
-    REQUIRE_FALSE(store.load().hideEmpty);
-    REQUIRE(file.replaceWithText("{\"hideEmpty\":\"false\"}"));
-    REQUIRE_FALSE(store.load().hideEmpty); // malformed strings are not interpreted as true
-    store.update([](AppSettings& saved) { saved.hideEmpty = true; });
-    store.update([](AppSettings& saved) { saved.windowWidth = 1200; saved.theme = ThemeMode::Light; });
     REQUIRE(store.load().hideEmpty);
+    REQUIRE(file.replaceWithText("{\"hideEmpty\":\"false\"}"));
+    REQUIRE(store.load().hideEmpty); // malformed strings keep the enabled default
     store.update([](AppSettings& saved) { saved.hideEmpty = false; });
+    store.update([](AppSettings& saved) { saved.windowWidth = 1200; saved.theme = ThemeMode::Light; });
     REQUIRE_FALSE(store.load().hideEmpty);
+    store.update([](AppSettings& saved) { saved.hideEmpty = true; });
+    REQUIRE(store.load().hideEmpty);
     REQUIRE(store.load().windowWidth == 1200);
     REQUIRE(store.load().theme == ThemeMode::Light);
+}
+TEST_CASE("Last folder and selected file round-trip through settings", "[settings][session]")
+{
+    TestDirectory t;
+    SettingsStore store(t.dir.getChildFile("session.json"));
+    REQUIRE(store.load().lastFolder.isEmpty());
+    REQUIRE(store.load().lastSamplePath.isEmpty());
+    store.update([](AppSettings& saved)
+    {
+        saved.lastFolder = "/lib/Drums";
+        saved.lastSamplePath = "/lib/Drums/kick.wav";
+    });
+    const auto loaded = store.load();
+    REQUIRE(loaded.lastFolder == "/lib/Drums");
+    REQUIRE(loaded.lastSamplePath == "/lib/Drums/kick.wav");
+    store.update([](AppSettings& saved) { saved.lastFolder.clear(); saved.lastSamplePath.clear(); });
+    REQUIRE(store.load().lastFolder.isEmpty());
+    REQUIRE(store.load().lastSamplePath.isEmpty());
 }
 TEST_CASE("Settings persist theme, scale, language and catalog path", "[settings]")
 {

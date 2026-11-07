@@ -10,7 +10,9 @@ public:
     PreviewPanel(AudioEngine&, const juce::File& cacheFolder,
                  const juce::File& exportFolder = AudioExporter::defaultExportFolder());
     ~PreviewPanel() override { stopTimer(); }
-    bool loadFile(const juce::File&);
+    // allowAutoPlay=false loads the file and waveform without starting playback. Used when the
+    // last session is restored, so reopening the app does not unexpectedly audition audio.
+    bool loadFile(const juce::File&, bool allowAutoPlay = true);
     // Restores preview toggles and their engine state. Does not notify onSettingsChanged.
     void applyPersistedSettings(const AppSettings&);
     bool midiPreviewEnabled() const { return engine.isMidiPreview(); }

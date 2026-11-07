@@ -43,7 +43,9 @@ AppSettings SettingsStore::load() const
         ? pageSize : 10000;
     settings.databasePath = object->getProperty("database").toString();
     const auto hide = object->getProperty("hideEmpty");
-    settings.hideEmpty = hide.isBool() && (bool) hide;
+    settings.hideEmpty = hide.isBool() ? (bool) hide : true;
+    settings.lastFolder = object->getProperty("lastFolder").toString();
+    settings.lastSamplePath = object->getProperty("lastSamplePath").toString();
     auto readBool = [object](const char* key, bool fallback)
     {
         const auto value = object->getProperty(key);
@@ -101,6 +103,8 @@ void SettingsStore::save(const AppSettings& settings) const
         if (folder.trim().isNotEmpty()) favorites.add(folder);
     object->setProperty("favoriteFolders", favorites);
     object->setProperty("favoritesPanelHeight", settings.favoritesPanelHeight);
+    object->setProperty("lastFolder", settings.lastFolder);
+    object->setProperty("lastSamplePath", settings.lastSamplePath);
     object->setProperty("windowX", settings.windowX);
     object->setProperty("windowY", settings.windowY);
     object->setProperty("windowWidth", settings.windowWidth);

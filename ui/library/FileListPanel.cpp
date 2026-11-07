@@ -118,6 +118,19 @@ void FileListPanel::selectRows(const std::vector<int>& rows)
     table.deselectAllRows();
     for (auto row : rows) if (row >= 0 && row < getNumRows()) table.selectRow(row, true, false);
 }
+bool FileListPanel::selectSampleById(int64_t sampleId)
+{
+    for (int row = 0; row < getNumRows(); ++row)
+    {
+        if (idAt(row) != sampleId) continue;
+        const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
+        table.deselectAllRows();
+        table.selectRow(row, true, false);
+        table.scrollToEnsureRowIsOnscreen(row);
+        return true;
+    }
+    return false;
+}
 int64_t FileListPanel::idAt(int row) const
 {
     const int total = virtualMode ? (int) virtualIds.size() : (int) visible.size();

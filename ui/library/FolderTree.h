@@ -16,6 +16,8 @@ public:
     void refresh(SampleRepository&, const juce::StringArray& rootPaths, bool showAllSamples);
     void resized() override;
     void clearSelection();
+    // Opens the ancestors and selects a folder path. Returns false when it is not in the tree.
+    bool selectPath(const juce::String& path);
     void lookAndFeelChanged() override;
     std::function<void(juce::String)> onFolder;
     // Right-click on a folder. An empty path with allSamples means the virtual All samples node.
@@ -27,5 +29,6 @@ private:
     std::map<juce::String,std::set<juce::String>> children;
     juce::StringArray roots;
     bool restoring = false;
+    bool selectPath(juce::TreeViewItem& parent, const juce::String& path);
 };
 }

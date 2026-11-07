@@ -20,8 +20,9 @@ dialog windows use the SONICATOR theme instead of JUCE's default alert and title
 - A small `ui/shell/ThemedDialogs` helper creates modal `AlertWindow`s with the owner's
   `SonicatorLookAndFeel`: theme colours, fonts, button height and themed buttons.
 - Settings, Relocate, Audio/MIDI and AutoTag windows use a non-native title bar. The
-  LookAndFeel draws the title bar in the theme surface colour, the app accent close button and
-  the current theme's title text.
+  LookAndFeel draws the title bar in the theme surface colour and the current theme's title text.
+  Close controls are plain cross icons with a subtle hover surface, not coloured traffic-light
+  discs. The Settings footer close button uses the same cross language.
 - The OS file chooser remains native; it is a system dialog, not an in-app window.
 - Confirmation, prompt, warning and info alerts use the helper; the prompt variant keeps the tag
   name editor and the same OK/Cancel keys.

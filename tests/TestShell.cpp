@@ -429,9 +429,12 @@ TEST_CASE("Hide empty filters fully silent files", "[ui][empty]")
     }
     MainComponent app(dbPath,false);
     auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
-    REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 2);
+    REQUIRE(library != nullptr); REQUIRE(library->getNumRows() == 1);
     auto* hide = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty"));
     REQUIRE(hide != nullptr);
+    REQUIRE(hide->getToggleState());
+    hide->setToggleState(false, juce::sendNotificationSync);
+    REQUIRE(library->getNumRows() == 2);
     hide->setToggleState(true, juce::sendNotificationSync);
     REQUIRE(library->getNumRows() == 1);
     auto* clear = shellButton(app,"Clear filters");
@@ -451,6 +454,7 @@ TEST_CASE("Page size options page or virtualize the library", "[ui][paging]")
             r.fileName = "sample_" + juce::String(i).paddedLeft('0', 3) + ".wav";
             r.filePath = "/virtual/" + r.fileName;
             r.fileHash = "hash" + juce::String(i); r.format = "WAV"; r.version = basicFeaturesVersion;
+            r.peakLevel = 0.5;
             repo.upsert(r);
         }
     }
@@ -490,6 +494,7 @@ TEST_CASE("Filter bar has Hide empty and no Hide duplicates button", "[ui][filte
     MainComponent app(t.dir.getChildFile("filters.sqlite"),false);
     auto* hideEmpty = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty"));
     REQUIRE(hideEmpty != nullptr);
+    REQUIRE(hideEmpty->getToggleState());
     REQUIRE_FALSE(hideEmpty->getWantsKeyboardFocus());
     REQUIRE_FALSE(hideEmpty->getMouseClickGrabsKeyboardFocus());
     REQUIRE(app.findChildWithID("hideDuplicates") == nullptr);
@@ -625,6 +630,7 @@ TEST_CASE("The bottom status bar shows the selected file path and smart values",
         r.filePath = audio.getFullPathName(); r.fileName = audio.getFileName();
         r.fileHash = "h"; r.version = basicFeaturesVersion;
         r.format = "WAV"; r.duration = 1; r.sampleRate = 44100; r.numChannels = 1;
+        r.peakLevel = 0.5;
         const auto id = repo.upsert(r);
         SmartPublication publication;
         publication.sampleId = id;
@@ -724,4 +730,57 @@ TEST_CASE("Shell shows the favorites section only when favorite folders exist", 
     REQUIRE(emptyTree != nullptr);
     REQUIRE_FALSE(emptyLabel->isVisible());
     REQUIRE_FALSE(emptyTree->isVisible());
+}
+TEST_CASE("Last folder and selected file are restored on restart", "[ui][session]")
+{
+    TestDirectory t;
+    const auto kick = t.wave("lib/Drums/kick.wav");
+    const auto snare = t.wave("lib/Drums/snare.wav");
+    const auto bass = t.wave("lib/Bass/bass.wav");
+    const auto dbPath = t.dir.getChildFile("session.sqlite");
+    const auto lib = t.dir.getChildFile("lib");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        for (const auto& file : { kick, snare, bass })
+        {
+            auto record = BasicAnalyzer().analyzeAndHash(file);
+            REQUIRE(record.error.isEmpty());
+            repo.upsert(record);
+        }
+        repo.addRoot(lib.getFullPathName());
+    }
+    const auto settingsFile = t.dir.getChildFile("session.json");
+    AppSettings initial;
+    initial.autoPreview = false;
+    initial.lastFolder = lib.getChildFile("Drums").getFullPathName();
+    initial.lastSamplePath = snare.getFullPathName();
+    { SettingsStore store(settingsFile); store.save(initial); }
+    {
+        MainComponent app(dbPath, false, SettingsStore(settingsFile).load(), settingsFile);
+        auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+        REQUIRE(library != nullptr);
+        REQUIRE(library->getNumRows() == 2);
+        REQUIRE(library->getSelectedRow() == 1); // snare
+        auto* status = dynamic_cast<juce::Label*>(app.findChildWithID("selectionStatus"));
+        REQUIRE(status != nullptr);
+        REQUIRE(status->getText().contains(snare.getFullPathName()));
+        auto* folders = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree"));
+        REQUIRE(folders != nullptr);
+        auto* tree = dynamic_cast<juce::TreeView*>(folders->getChildComponent(0));
+        REQUIRE(tree != nullptr);
+        REQUIRE(tree->getSelectedItem(0) != nullptr);
+        REQUIRE(tree->getSelectedItem(0)->getUniqueName() == lib.getChildFile("Drums").getFullPathName());
+        library->selectRow(0); // kick becomes the last selection
+        app.flushSessionState();
+    }
+    const auto saved = SettingsStore(settingsFile).load();
+    REQUIRE(saved.lastFolder == lib.getChildFile("Drums").getFullPathName());
+    REQUIRE(saved.lastSamplePath == kick.getFullPathName());
+    MainComponent reopened(dbPath, false, saved, settingsFile);
+    auto* library = dynamic_cast<FileListPanel*>(reopened.findChildWithID("library"));
+    REQUIRE(library != nullptr);
+    REQUIRE(library->getSelectedRow() == 0);
+    auto* status = dynamic_cast<juce::Label*>(reopened.findChildWithID("selectionStatus"));
+    REQUIRE(status != nullptr);
+    REQUIRE(status->getText().contains(kick.getFullPathName()));
 }

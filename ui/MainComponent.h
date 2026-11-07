@@ -56,6 +56,8 @@ public:
     void showSearchHistory();
     void persistHideEmpty();
     void persistPreviewSettings();
+    // Writes the pending last folder/file immediately. Used by shutdown and session tests.
+    void flushSessionState();
     void setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny = false);
 private:
     SonicatorLookAndFeel look;
@@ -100,7 +102,9 @@ private:
     int pageOffset = 0, catalogCount = 0, pageSize = 10000;
     bool wasRunning = false, smartWasRunning = false, taggingWasRunning = false;
     bool autoTagPreparing = false, autoTagWasRunning = false;
-    uint32_t lastRefreshMs = 0, lastSearchChange = 0;
+    uint32_t lastRefreshMs = 0, lastSearchChange = 0, lastSessionSaveMs = 0;
+    juce::String sessionSamplePath;
+    bool sessionDirty = false, restoringSession = false, persistSessionState = false;
     juce::String pendingSearch;
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
     void timerCallback() override;
@@ -129,6 +133,8 @@ private:
     bool isUnderFavoriteFolder(const juce::String& path) const;
     void resetTagsSelected(const std::vector<int64_t>& sampleIds);
     void resetTagsFolder(const juce::String& path, int catalogued);
+    void markSessionStateDirty();
+    void saveSessionState();
     // Explicit human assignment path: writes only missing links and updates the recent-tag
     // history only when at least one link was actually created.
     int assignTagAndRemember(const std::vector<int64_t>& sampleIds, int64_t tagId);

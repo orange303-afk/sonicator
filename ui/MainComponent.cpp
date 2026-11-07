@@ -107,6 +107,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
       engine(openDevice), preview(engine,dbPath.getParentDirectory().getChildFile("cache"))
 {
     theme::apply(appSettings.theme);
+    persistSessionState = juce::JUCEApplicationBase::getInstance() != nullptr;
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
     for (auto* c : std::array<juce::Component*,32>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
@@ -217,7 +218,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     folders.onFolder = [this](juce::String path)
     {
         favorites.clearSelection();
-        selectedFolder = std::move(path); pageOffset = 0; reloadLibrary();
+        selectedFolder = std::move(path); pageOffset = 0;
+        sessionSamplePath.clear(); markSessionStateDirty();
+        reloadLibrary();
     };
     folders.onContextMenu = [this](const juce::String& path, bool allSamples, juce::Point<int> position)
     {
@@ -227,7 +230,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     {
         if (path.isEmpty()) return;
         folders.clearSelection();
-        selectedFolder = std::move(path); pageOffset = 0; reloadLibrary();
+        selectedFolder = std::move(path); pageOffset = 0;
+        sessionSamplePath.clear(); markSessionStateDirty();
+        reloadLibrary();
     };
     favorites.onContextMenu = [this](const juce::String& path, bool, juce::Point<int> position)
     {
@@ -333,9 +338,33 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         smart = std::make_unique<SmartAnalysisService>(*writeRepo);
         tagging = std::make_unique<TaggingService>(*writeRepo);
         autoTag = std::make_unique<AutoTagService>(*writeRepo);
+        restoringSession = true;
+        if (! appSettings.lastFolder.isEmpty()
+            && juce::File(appSettings.lastFolder).isDirectory()
+            && readRepo->countInFolder(appSettings.lastFolder) > 0)
+            selectedFolder = appSettings.lastFolder;
         folders.refresh(*readRepo);
         refreshFavorites();
         reloadLibrary();
+        if (! selectedFolder.isEmpty()) folders.selectPath(selectedFolder);
+        if (! appSettings.lastSamplePath.isEmpty())
+        {
+            if (const auto record = readRepo->findByPath(appSettings.lastSamplePath))
+            {
+                const bool inScope = selectedFolder.isEmpty()
+                    || juce::File(record->filePath).isAChildOf(juce::File(selectedFolder));
+                if (inScope && library.selectSampleById(record->id))
+                {
+                    selectedSampleId = record->id;
+                    sessionSamplePath = record->filePath;
+                    updateSelectionStatus(*record);
+                    updateSelectedTags();
+                    preview.loadFile(juce::File(record->filePath), false);
+                }
+            }
+        }
+        restoringSession = false;
+        sessionDirty = false;
         status.setText(catalogCount > 0
             ? juce::String(catalogCount) + " samples loaded"
             : "Ready. Add a folder to begin.",juce::dontSendNotification);
@@ -363,6 +392,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
 }
 MainComponent::~MainComponent()
 {
+    if (persistSessionState) saveSessionState();
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
     stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
     settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
@@ -813,6 +843,8 @@ void MainComponent::updateSelectedTags()
 void MainComponent::selectSample(const SampleRecord& r)
 {
     selectedSampleId = r.id;
+    sessionSamplePath = r.filePath;
+    markSessionStateDirty();
     auto dbfs = [](double v) { return v > 0 ? juce::String(juce::Decibels::gainToDecibels(v),1) + " dBFS" : "-inf dBFS"; };
     juce::String details = r.fileName + "\n\n" + r.format + "  /  " + juce::String(r.numChannels) + " channels\n\n"
         + "Length      " + juce::String(r.duration,3) + " s\n\n"
@@ -1007,6 +1039,33 @@ void MainComponent::showEditTagsMenu()
             else safe->assignTagAndRemember({ sampleId }, tag.id);
             safe->reloadLibrary();
         });
+}
+void MainComponent::markSessionStateDirty()
+{
+    if (! restoringSession) sessionDirty = true;
+}
+void MainComponent::flushSessionState()
+{
+    saveSessionState();
+}
+void MainComponent::saveSessionState()
+{
+    if (! sessionDirty) return;
+    try
+    {
+        settingsStore.update([this](AppSettings& saved)
+        {
+            saved.lastFolder = selectedFolder;
+            saved.lastSamplePath = sessionSamplePath;
+        });
+        sessionDirty = false;
+        lastSessionSaveMs = juce::Time::getMillisecondCounter();
+    }
+    catch (const std::exception& e)
+    {
+        status.setText("Session state was not saved: " + juce::String::fromUTF8(e.what()),
+            juce::dontSendNotification);
+    }
 }
 void MainComponent::refreshFavorites()
 {
@@ -1695,6 +1754,7 @@ void MainComponent::timerCallback()
     }
     autoTagWasRunning = autoTagRunning;
     const auto now = juce::Time::getMillisecondCounter();
+    if (persistSessionState && sessionDirty && now - lastSessionSaveMs >= 500) saveSessionState();
     if (pendingSearch.trim() != filter.text && now - lastSearchChange >= 250)
     {
         filter.text = pendingSearch.trim();
@@ -1880,6 +1940,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     const auto isDefault = dbPath.getFullPathName() == defaultDatabaseFile().getFullPathName();
     appSettings.databasePath = isDefault ? juce::String() : dbPath.getFullPathName();
     selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
+    sessionSamplePath.clear(); markSessionStateDirty();
     favorites.clearSelection();
     filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
     filter.matchAnyTag = false; filter.starredOnly = false;

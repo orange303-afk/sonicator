@@ -60,6 +60,37 @@ void FolderTree::clearSelection()
 {
     if (auto* selected = tree.getSelectedItem(0)) selected->setSelected(false, true);
 }
+bool FolderTree::selectPath(const juce::String& path)
+{
+    if (path.isEmpty()) return false;
+    auto* item = tree.getRootItem();
+    if (item == nullptr) return false;
+    if (item->getUniqueName() == path) { item->setSelected(true, true); return true; }
+    item->setOpen(true);
+    return selectPath(*item, path);
+}
+bool FolderTree::selectPath(juce::TreeViewItem& parent, const juce::String& path)
+{
+    for (int i = 0; i < parent.getNumSubItems(); ++i)
+    {
+        auto* child = parent.getSubItem(i);
+        if (child == nullptr) continue;
+        const auto name = child->getUniqueName();
+        if (name == path)
+        {
+            child->setSelected(true, true);
+            tree.scrollToKeepItemVisible(child);
+            return true;
+        }
+        if (name == "All samples" || name == "Favorites") continue;
+        if (juce::File(path).isAChildOf(juce::File(name)))
+        {
+            child->setOpen(true);
+            if (selectPath(*child, path)) return true;
+        }
+    }
+    return false;
+}
 void FolderTree::lookAndFeelChanged()
 {
     tree.setColour(juce::TreeView::backgroundColourId,juce::Colours::transparentBlack);

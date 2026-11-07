@@ -13,7 +13,9 @@ struct AppSettings
     juce::StringArray searchHistory; // most recent first, at most 10 entries
     juce::StringArray favoriteFolders; // global across catalogs, in display order
     int favoritesPanelHeight = 200;    // user-dragged divider position
-    bool hideEmpty = false;
+    juce::String lastFolder;           // restored on the next launch when still in the catalog
+    juce::String lastSamplePath;       // restored selection without starting preview playback
+    bool hideEmpty = true;
     // Preview panel toggles. Persisted so a restart keeps the same audition behaviour.
     bool midiPreview = false;
     bool skipSilence = false;
