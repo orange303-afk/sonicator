@@ -37,6 +37,9 @@ public:
     bool start();
     // Bounded queue of explicit samples, e.g. after an override or from the inspector.
     bool startSelected(const std::vector<int64_t>& sampleIds);
+    // Re-analyzes every catalogued sample in a folder and its descendants. Measured features and
+    // content hashes are never recomputed; only the metadata pipeline runs.
+    bool startFolder(const juce::String& folder);
     // Queues one sample without blocking the message thread. Starts a selected job when idle.
     bool requestSample(int64_t sampleId);
     void cancel();
@@ -51,8 +54,9 @@ public:
     static std::vector<SmartInput> currentInputs(const SampleRecord&);
     static bool inputsDiffer(const std::vector<SmartInput>& stored, const std::vector<SmartInput>& current);
 private:
-    enum class Mode { Incremental, Selected };
+    enum class Mode { Incremental, Selected, Folder };
     SampleRepository& repo;
+    juce::String folderScope;
     mutable std::mutex stateMutex;
     SmartProgress state;
     std::atomic<bool> cancelled { false };

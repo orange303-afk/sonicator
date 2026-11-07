@@ -15,6 +15,8 @@ public:
     void clearSelection();
     void lookAndFeelChanged() override;
     std::function<void(juce::String)> onFolder;
+    // Right-click on a folder. An empty path with allSamples means the virtual All samples node.
+    std::function<void(const juce::String& path, bool allSamples, juce::Point<int> screenPosition)> onContextMenu;
 private:
     class Item;
     juce::TreeView tree;

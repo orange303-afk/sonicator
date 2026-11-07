@@ -30,14 +30,23 @@
 - Hide empty persists in settings; switching catalogs preserves it and Clear
   filters saves off. Search history opens on clicking the search field, without
   a separate button. History stays limited to 10 entries.
+- **Tags and AutoTag (2026-11-08, schema 8):** five recent assigned tags at the top
+  of the file context menu, stored per catalog and updated only by explicit human
+  assignments. Folder context menu with Open, recursive Scan, Analyze, Tag and
+  AutoTag. AutoTag is a pure instrument-only rule engine over filename tokens and
+  current stored metadata; it proposes only existing instrument tags, skips
+  ambiguity/conflicts/folder-only/stale evidence, excludes manual Type override
+  contradictions, and writes only included proposals after review. Folder Tag and
+  AutoTag application run in bounded background batches with cancellation and
+  actual applied counts. See `docs/TAGGING.md`.
 
 ## Next development slice
 
-The foundation and columns are complete for this slice; the next plan continues with
-the inspector (provenance, alternatives, conflicts), global metadata filters and the
-user override editing UI. Then implement and evaluate DSP BPM
-and pitch/key fallback on appropriate material. Do not equate sampler root with key.
-Do not rehash/recompute basic features to add smart results.
+The tagging stage is complete for this slice. The next plan continues with the
+inspector (provenance, alternatives, conflicts), global metadata filters and the
+user override editing UI. Then implement and evaluate DSP BPM and pitch/key
+fallback on appropriate material. Do not equate sampler root with key. Do not
+rehash/recompute basic features to add smart results.
 
 ## Verification and constraints
 
@@ -45,7 +54,8 @@ Do not rehash/recompute basic features to add smart results.
 - Real-library tests should use a bounded manifest or a narrow folder, with a
   timeout and unfiltered diagnostics. The sampling helper still has to traverse
   the root when a requested extension is absent; do not mistake that for a build.
-- macOS Debug is the verified platform. Windows, physical audio acceptance and
-  full SoundFont/REX format conformance are separate checks.
+- macOS Debug is the verified platform. Windows, physical audio acceptance,
+  Explorer integration and full SoundFont/REX format conformance are separate
+  checks.
 - Release readiness/packaging remains deferred. Phase 2 is not complete yet.
 - No original library files are modified. No training on commercial samples.

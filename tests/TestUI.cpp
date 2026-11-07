@@ -5,6 +5,7 @@
 #include "ui/library/FolderTree.h"
 #include "ui/library/TagStrip.h"
 #include "ui/settings/SettingsPanel.h"
+#include "ui/tagging/AutoTagDialog.h"
 #include "ui/settings/RelocateFoldersPanel.h"
 #include "ui/shell/WindowBounds.h"
 #include <set>
@@ -332,4 +333,72 @@ TEST_CASE("Type, BPM and Key columns render every display state", "[ui][columns]
     list.sortOrderChanged(11, false);
     REQUIRE(column == 11);
     REQUIRE_FALSE(forwards);
+}
+TEST_CASE("Folder tree reports a right-click with its path and All samples state", "[ui][folders]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("tree-menu.sqlite")); SampleRepository repo(db); repo.createTables();
+    const auto rootPath = t.dir.getChildFile("audio").getFullPathName(); repo.addRoot(rootPath);
+    SampleRecord r; r.filePath = rootPath + "/Drums/kick.wav"; r.fileName = "kick.wav"; repo.upsert(r);
+    FolderTree folders; folders.refresh(repo);
+    juce::String requestedPath; bool requestedAll = true; int requests = 0;
+    folders.onContextMenu = [&](const juce::String& path, bool all, juce::Point<int>)
+    {
+        requestedPath = path; requestedAll = all; ++requests;
+    };
+    auto* tree = dynamic_cast<juce::TreeView*>(folders.getChildComponent(0)); REQUIRE(tree != nullptr);
+    auto* root = tree->getRootItem(); REQUIRE(root != nullptr); root->setOpen(true);
+    auto* audio = root->getSubItem(0); REQUIRE(audio != nullptr); audio->setOpen(true);
+    auto* drums = audio->getSubItem(0); REQUIRE(drums != nullptr);
+    const auto now = juce::Time::getCurrentTime();
+    juce::MouseEvent click(juce::Desktop::getInstance().getMainMouseSource(), { 2.0f, 2.0f },
+        juce::ModifierKeys(juce::ModifierKeys::rightButtonModifier), 1.0f, 0, 0, 0, 0,
+        tree, tree, now, { 2.0f, 2.0f }, now, 1, false);
+    drums->itemClicked(click);
+    REQUIRE(requests == 1);
+    REQUIRE_FALSE(requestedAll);
+    REQUIRE(requestedPath == rootPath + "/Drums");
+    REQUIRE(drums->isSelected());
+    root->itemClicked(click);
+    REQUIRE(requests == 2);
+    REQUIRE(requestedAll);
+    REQUIRE(requestedPath.isEmpty());
+}
+TEST_CASE("AutoTag dialog virtualizes proposals and honours include toggles", "[ui][autotag]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("dialog.sqlite")); SampleRepository repo(db); repo.createTables();
+    AutoTagService service(repo);
+    AutoTagResult result;
+    result.checked = 2; result.newAssignments = 1; result.alreadyAssigned = 1;
+    result.scope = "selected files";
+    AutoTagProposal first;
+    first.sampleId = 1; first.filePath = "/lib/kick.wav"; first.fileName = "kick.wav";
+    first.canonicalType = "Kick"; first.tagId = 1; first.alreadyAssigned = true; first.included = false;
+    AutoTagProposal second;
+    second.sampleId = 2; second.filePath = "/lib/snare.wav"; second.fileName = "snare.wav";
+    second.canonicalType = "Snare"; second.tagId = 2; second.included = true;
+    result.proposals = { first, second };
+    AutoTagDialog dialog(std::move(result), service, [] {});
+    std::function<juce::Component*(juce::Component&)> find = [&](juce::Component& parent) -> juce::Component*
+    {
+        if (parent.getComponentID() == "autoTagProposals") return &parent;
+        for (auto* child : parent.getChildren())
+            if (auto* found = find(*child)) return found;
+        return nullptr;
+    };
+    auto* table = dynamic_cast<juce::TableListBox*>(find(dialog));
+    REQUIRE(table != nullptr);
+    REQUIRE(table->getNumRows() == 2);
+    auto* apply = dynamic_cast<juce::Button*>(dialog.findChildWithID("autoTagApply"));
+    REQUIRE(apply != nullptr);
+    REQUIRE(apply->isEnabled());
+    const auto now = juce::Time::getCurrentTime();
+    juce::MouseEvent click(juce::Desktop::getInstance().getMainMouseSource(), { 2.0f, 2.0f },
+        juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier), 1.0f, 0, 0, 0, 0,
+        &dialog, &dialog, now, { 2.0f, 2.0f }, now, 1, false);
+    table->getModel()->cellClicked(1, 1, click);
+    REQUIRE_FALSE(apply->isEnabled());
+    table->getModel()->cellClicked(1, 1, click);
+    REQUIRE(apply->isEnabled());
+    table->getModel()->cellClicked(0, 1, click);
+    REQUIRE(apply->isEnabled()); // already-assigned rows cannot be re-enabled
 }

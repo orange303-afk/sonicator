@@ -142,3 +142,50 @@ TEST_CASE("Reanalysed audio invalidates the stored smart result but keeps overri
     REQUIRE(stale->bpm == Catch::Approx(90.0)); // the manual override is still effective
     REQUIRE(repo.smartOverrides(id).count(SmartField::Bpm) == 1);
 }
+TEST_CASE("Folder smart analysis covers the subtree only and keeps measured features", "[smart][folders]")
+{
+    TestDirectory t;
+    const auto folder = t.dir.getChildFile("lib/Drums");
+    const auto fileA = t.wave("lib/Drums/kick 120bpm.wav");
+    const auto fileB = t.wave("lib/Drums/deep/snare.wav");
+    const auto outside = t.wave("lib/Other/pad.wav");
+    Database db(t.dir.getChildFile("smart-folder.sqlite")); SampleRepository repo(db); repo.createTables();
+    auto add = [&](const juce::File& f)
+    {
+        SampleRecord r; r.filePath = f.getFullPathName(); r.fileName = f.getFileName();
+        r.fileHash = "measured-" + f.getFileName(); r.duration = 1.25;
+        r.version = basicFeaturesVersion;
+        return repo.upsert(r);
+    };
+    const auto idA = add(fileA), idB = add(fileB), idOutside = add(outside);
+    const auto keep = repo.createTag("Keep", 0xff445566);
+    REQUIRE(repo.assignTag({ idA }, keep) == 1);
+    repo.setStarred({ idA }, true);
+    SmartAnalysisService smart(repo);
+    REQUIRE(smart.startFolder(folder.getFullPathName()));
+    REQUIRE(smart.waitUntilFinished(15000));
+    const auto p = smart.progress();
+    REQUIRE(p.processed == 2);
+    REQUIRE(p.total == 2);
+    REQUIRE(repo.smartResult(idA).has_value());
+    REQUIRE(repo.smartResult(idB).has_value());
+    REQUIRE_FALSE(repo.smartResult(idOutside).has_value());
+    REQUIRE(repo.smartResult(idA)->bpm == Catch::Approx(120.0));
+    // Smart analysis never rewrites measured features or the content hash.
+    const auto stored = repo.findById(idA);
+    REQUIRE(stored->duration == Catch::Approx(1.25));
+    REQUIRE(stored->fileHash == "measured-kick 120bpm.wav");
+    REQUIRE(stored->version == basicFeaturesVersion);
+    REQUIRE(stored->starred);
+    REQUIRE(repo.tagsForSample(idA).size() == 1);
+}
+TEST_CASE("Folder analysis of an empty subtree completes with no work", "[smart][folders][empty]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("smart-empty.sqlite")); SampleRepository repo(db); repo.createTables();
+    SmartAnalysisService smart(repo);
+    REQUIRE(smart.startFolder(t.dir.getChildFile("lib/none").getFullPathName()));
+    REQUIRE(smart.waitUntilFinished(10000));
+    REQUIRE(smart.progress().processed == 0);
+    REQUIRE(smart.progress().stage == SmartStage::Complete);
+}

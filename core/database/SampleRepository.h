@@ -3,6 +3,7 @@
 #include "LibraryQuery.h"
 #include "SampleRecord.h"
 #include "core/smart/SmartTypes.h"
+#include <functional>
 #include <map>
 #include <optional>
 #include <vector>
@@ -81,6 +82,27 @@ public:
     void deleteTag(int64_t tagId);
     void setSampleTag(int64_t sampleId, int64_t tagId, bool assigned);
     void setSampleTag(const std::vector<int64_t>& sampleIds, int64_t tagId, bool assigned);
+    // Assigns only missing links and returns how many were actually created. Existing links are
+    // never removed, so a repeated bulk assignment is idempotent.
+    int assignTag(const std::vector<int64_t>& sampleIds, int64_t tagId);
+    struct TagAssignmentOutcome { int added = 0; bool cancelled = false; };
+    // One transaction. Cancellation before the commit rolls the whole batch back, so a cancelled
+    // batch leaves no partial links. Ids that are not in the catalog are skipped, never errors.
+    TagAssignmentOutcome assignTagBatch(const std::vector<int64_t>& sampleIds, int64_t tagId,
+                                        const std::function<bool()>& isCancelled);
+    struct TagPair { int64_t sampleId = 0, tagId = 0; };
+    // AutoTag applies one class per file, so a batch may carry different tag ids. Missing samples
+    // or tags are skipped; previous batches stay committed when a later batch fails.
+    TagAssignmentOutcome assignTagPairs(const std::vector<TagPair>& pairs,
+                                        const std::function<bool()>& isCancelled);
+    // Last explicitly assigned tags, newest first. Stored per catalog; deleted tags fall out of
+    // the join and renamed tags keep their current name.
+    void recordRecentTag(int64_t tagId);
+    std::vector<Tag> recentTags(int limit = 5) const;
+    // Every catalogued sample inside a folder and its descendants. Separator-aware, independent
+    // of search, tags, stars, duplicate filters and pagination. Empty folder means no scope.
+    std::vector<int64_t> idsInFolder(const juce::String& folder) const;
+    int countWithTagInFolder(const juce::String& folder, int64_t tagId) const;
     void setStarred(const std::vector<int64_t>& sampleIds, bool starred);
     // Rebuilds the byte-identical duplicate groups (same full SHA-256 and size).
     void refreshDuplicates();

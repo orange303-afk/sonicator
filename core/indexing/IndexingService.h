@@ -28,6 +28,10 @@ public:
     // Discovers the registered folders but analyzes only paths that are not in the catalog yet.
     // Known files are left untouched, including changed, failed and older-version records.
     bool startNewOnly(const juce::StringArray& roots);
+    // Scans one folder and its descendants without registering it as a new imported root. Missing
+    // reconciliation is restricted to that subtree, so an unavailable folder elsewhere is not
+    // mistaken for deleted files.
+    bool startSubtree(const juce::String& folder, bool force = false);
     void cancel();
     void setPaused(bool);
     IndexingProgress progress() const;
@@ -36,6 +40,7 @@ private:
     SampleRepository& repo;
     juce::StringArray folders;
     bool forceAnalysis = false;
+    bool registerRoots = true;
     ScanMode scanMode = ScanMode::Full;
     mutable std::mutex stateMutex;
     IndexingProgress state;
@@ -43,7 +48,7 @@ private:
     std::mutex pauseMutex;
     std::condition_variable pauseCondition;
     bool paused = false;
-    bool beginScan(const juce::StringArray& roots, bool force, ScanMode mode);
+    bool beginScan(const juce::StringArray& roots, bool force, ScanMode mode, bool registerRoots);
     bool checkpoint();
     void run() override;
 };

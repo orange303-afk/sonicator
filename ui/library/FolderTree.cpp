@@ -15,6 +15,12 @@ public:
         g.drawText(all ? "All samples" : juce::File(path).getFileName(), 3,0,w-6,h,juce::Justification::centredLeft,true);
     }
     void itemSelectionChanged(bool selected) override { if (selected && ! owner.restoring && owner.onFolder) owner.onFolder(all ? juce::String() : path); }
+    void itemClicked(const juce::MouseEvent& e) override
+    {
+        if (! e.mods.isPopupMenu() || owner.onContextMenu == nullptr) return;
+        if (! isSelected()) setSelected(true, true);
+        owner.onContextMenu(all ? juce::String() : path, all, e.getScreenPosition());
+    }
     void itemOpennessChanged(bool open) override
     {
         if (! open || getNumSubItems() != 0) return;

@@ -5,17 +5,26 @@ namespace sonicator {
 IndexingService::~IndexingService() { cancel(); waitForThreadToExit(-1); }
 bool IndexingService::start(const juce::StringArray& roots, bool force)
 {
-    return beginScan(roots, force, ScanMode::Full);
+    return beginScan(roots, force, ScanMode::Full, true);
 }
 bool IndexingService::startNewOnly(const juce::StringArray& roots)
 {
-    return beginScan(roots, false, ScanMode::NewOnly);
+    return beginScan(roots, false, ScanMode::NewOnly, true);
 }
-bool IndexingService::beginScan(const juce::StringArray& roots, bool force, ScanMode mode)
+bool IndexingService::startSubtree(const juce::String& folder, bool force)
+{
+    if (folder.isEmpty()) return false;
+    juce::StringArray roots;
+    roots.add(folder);
+    return beginScan(roots, force, ScanMode::Full, false);
+}
+bool IndexingService::beginScan(const juce::StringArray& roots, bool force, ScanMode mode,
+                                bool registerNewRoots)
 {
     if (isThreadRunning()) return false;
     waitForThreadToExit(-1);
-    folders = roots; forceAnalysis = force; scanMode = mode; cancelled = false;
+    folders = roots; forceAnalysis = force; scanMode = mode; registerRoots = registerNewRoots;
+    cancelled = false;
     { std::lock_guard lock(pauseMutex); paused = false; }
     { std::lock_guard lock(stateMutex); state = {}; state.running = true; state.message = "Discovering audio files..."; }
     if (! startThread())
@@ -71,7 +80,7 @@ void IndexingService::run()
         {
             if (checkpoint()) break;
             auto found = FileScanner::scanDirectory(juce::File(folder), [this] { return checkpoint(); });
-            repo.addRoot(folder);
+            if (registerRoots) repo.addRoot(folder);
             for (auto& f : found)
                 if (foundPaths.insert(f.file.getFullPathName().toStdString()).second) files.push_back(std::move(f));
         }

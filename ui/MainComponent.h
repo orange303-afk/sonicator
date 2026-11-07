@@ -7,6 +7,8 @@
 #include "ui/preview/PreviewPanel.h"
 #include "core/indexing/IndexingService.h"
 #include "core/smart/SmartAnalysisService.h"
+#include "core/tagging/TaggingService.h"
+#include "core/tagging/AutoTagService.h"
 #include "core/settings/AppSettings.h"
 namespace sonicator {
 class MainComponent final : public juce::Component,
@@ -71,10 +73,13 @@ private:
     std::unique_ptr<SampleRepository> readRepo, writeRepo;
     std::unique_ptr<IndexingService> indexer;
     std::unique_ptr<SmartAnalysisService> smart;
+    std::unique_ptr<TaggingService> tagging;
+    std::unique_ptr<AutoTagService> autoTag;
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog;
+    juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog, autoTagDialog;
     int pageOffset = 0, catalogCount = 0, pageSize = 10000;
-    bool wasRunning = false, smartWasRunning = false;
+    bool wasRunning = false, smartWasRunning = false, taggingWasRunning = false;
+    bool autoTagPreparing = false, autoTagWasRunning = false;
     uint32_t lastRefreshMs = 0, lastSearchChange = 0;
     juce::String pendingSearch;
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
@@ -96,6 +101,13 @@ private:
     void showTagColourMenu(int64_t tagId);
     void showEditTagsMenu();
     void showSampleContextMenu(const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> screenPosition);
+    void showFolderContextMenu(const juce::String& path, bool allSamples, juce::Point<int> screenPosition);
+    // Explicit human assignment path: writes only missing links and updates the recent-tag
+    // history only when at least one link was actually created.
+    int assignTagAndRemember(const std::vector<int64_t>& sampleIds, int64_t tagId);
+    void startAutoTagSelected(const std::vector<int64_t>& sampleIds);
+    void startAutoTagFolder(const juce::String& folder);
+    void showAutoTagDialog(AutoTagResult result);
     void promptTagName(const juce::String& title, const juce::String& initial, std::function<void(juce::String)> onAccept);
     static bool contains(const std::vector<int64_t>& values, int64_t id);
     static void toggle(std::vector<int64_t>& values, int64_t id);

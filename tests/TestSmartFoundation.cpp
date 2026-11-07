@@ -110,7 +110,7 @@ TEST_CASE("Schema 6 upgrades to 7 keeping smart results, overrides, tags and sta
     rawExec(file, "PRAGMA user_version=6;");
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 7);
+        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 8);
         auto result = repo.smartResult(id);
         REQUIRE(result.has_value());
         REQUIRE(result->hasBpm);
@@ -274,7 +274,7 @@ TEST_CASE("A queued sample is analyzed without blocking the caller", "[smart][fo
     REQUIRE(result->pipelineState == SmartPipelineState::Complete);
     REQUIRE(result->bpm == Catch::Approx(110.0));
 }
-TEST_CASE("A real schema 6 database gains schema 7 columns in place", "[smart][foundation]")
+TEST_CASE("A real schema 6 database gains current schema columns in place", "[smart][foundation]")
 {
     auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
         .getNonexistentChildFile("sonicator-foundation-v6", ".sqlite");
@@ -317,7 +317,7 @@ TEST_CASE("A real schema 6 database gains schema 7 columns in place", "[smart][f
         "PRAGMA user_version=6;");
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 7);
+        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 8);
         auto result = repo.smartResult(7);
         REQUIRE(result.has_value());
         REQUIRE(result->bpm == Catch::Approx(128.0));

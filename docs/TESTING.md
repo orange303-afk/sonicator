@@ -1,5 +1,18 @@
 # Phase 1 verification
 
+## Tags, AutoTag and folder actions (2026-11-08)
+
+- macOS Debug: **238 cases / 1869 assertions**, all passed; CTest 1/1, about 24 s. Windows, Explorer integration and physical acceptance were not run.
+- Schema **8** adds `recent_tags`. Migration uses the existing SQLite backup and keeps ids, tags, stars, duplicates, overrides and measured features. Migration/reopen/isolation covered.
+- Recent tags: five unique newest-first entries, repeat assignment moves a tag up, rename and delete are reflected, persistence and per-catalog isolation, batch assignment counts only new links and never removes links, quick items never untoggle. The context menu shows no empty section; AutoTag does not update the history.
+- Folder scope: recursive ids, separator-aware sibling-prefix rejection, independence from filters/pagination, empty and unavailable folders, subtree Scan without a new root, missing reconciliation restricted to the subtree.
+- Analyze: folder pass covers only the subtree and leaves `version`, `fileHash`, `duration` and other measured fields untouched; it does not import files.
+- Tag folder: background batches, idempotent repeat, real applied counts, cancellation rolls back the unfinished batch and keeps completed ones, missing ids do not abort a batch.
+- AutoTag rules: all supported instrument tokens and abbreviations, compound `bass drum`/`sub bass`/`808` rules, whole-token matching, case/separators/plurals, folder-only evidence, metadata and resolved smart evidence, stale/invalid candidates, manual Type override contradictions, unsupported classes, missing tags, deterministic reasons.
+- AutoTag review/application: preparation writes nothing, already-assigned rows are marked, include/exclude control works in the virtualized dialog, empty and cancelled preparation, changed file and deleted tag are rejected before applying, apply is idempotent, cancellation keeps earlier batches and reports the actual count.
+- Known limits: applied AutoTag reasons are not persisted; AutoTag maps onto existing tag names, so renaming a built-in instrument tag yields `tag-missing`; folder names are context only; Windows remains a separate acceptance check. See `docs/TAGGING.md`.
+- A pre-existing `jassert` from a preview callback grabbing keyboard focus while `MainComponent` was not on screen was fixed by guarding the callback with `isShowing()`; the full suite now prints no JUCE assertions.
+
 ## Catalog folder relocation (2026-11-07)
 
 - Debug suite: **118 cases / 1029 assertions**, all passed; CTest 1/1. Release and Windows were not rerun in this stage.

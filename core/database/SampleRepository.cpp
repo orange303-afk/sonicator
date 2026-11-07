@@ -9,7 +9,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred";
-constexpr int schemaVersion = 7;
+constexpr int schemaVersion = 8;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -403,6 +403,9 @@ void SampleRepository::createTables()
             "CREATE TABLE IF NOT EXISTS sample_tags (sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
             "tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY(sample_id, tag_id)) WITHOUT ROWID;"
             "CREATE INDEX IF NOT EXISTS sample_tags_tag ON sample_tags(tag_id, sample_id);"
+            "CREATE TABLE IF NOT EXISTS recent_tags ("
+            "tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,"
+            "used_at INTEGER NOT NULL, seq INTEGER NOT NULL) WITHOUT ROWID;"
             "CREATE TABLE IF NOT EXISTS duplicates (sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE,"
             "representative_id INTEGER NOT NULL, group_hash TEXT NOT NULL, group_size INTEGER NOT NULL,"
             "is_representative INTEGER NOT NULL DEFAULT 0);"
@@ -556,7 +559,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=7;");
+        detail::exec(db.handle, "PRAGMA user_version=8;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -971,6 +974,145 @@ void SampleRepository::setSampleTag(const std::vector<int64_t>& sampleIds, int64
         try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
         throw;
     }
+}
+int SampleRepository::assignTag(const std::vector<int64_t>& sampleIds, int64_t tagId)
+{
+    return assignTagBatch(sampleIds, tagId, {}).added;
+}
+SampleRepository::TagAssignmentOutcome SampleRepository::assignTagBatch(
+    const std::vector<int64_t>& sampleIds, int64_t tagId, const std::function<bool()>& isCancelled)
+{
+    TagAssignmentOutcome outcome;
+    if (sampleIds.empty() || tagId <= 0) return outcome;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement s(db.handle,
+            "INSERT OR IGNORE INTO sample_tags(sample_id,tag_id)"
+            " SELECT ?,? WHERE EXISTS(SELECT 1 FROM samples WHERE id=?)");
+        for (auto id : sampleIds)
+        {
+            if (isCancelled && isCancelled())
+            {
+                detail::exec(db.handle, "ROLLBACK;");
+                outcome.cancelled = true;
+                return outcome;
+            }
+            if (id <= 0) continue;
+            s.integer(1, id); s.integer(2, tagId); s.integer(3, id); s.step();
+            if (sqlite3_changes(db.handle) > 0) ++outcome.added;
+            s.reset();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+    return outcome;
+}
+SampleRepository::TagAssignmentOutcome SampleRepository::assignTagPairs(
+    const std::vector<TagPair>& pairs, const std::function<bool()>& isCancelled)
+{
+    TagAssignmentOutcome outcome;
+    if (pairs.empty()) return outcome;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement s(db.handle,
+            "INSERT OR IGNORE INTO sample_tags(sample_id,tag_id)"
+            " SELECT ?,? WHERE EXISTS(SELECT 1 FROM samples WHERE id=?)"
+            " AND EXISTS(SELECT 1 FROM tags WHERE id=?)");
+        for (const auto& pair : pairs)
+        {
+            if (isCancelled && isCancelled())
+            {
+                detail::exec(db.handle, "ROLLBACK;");
+                outcome.cancelled = true;
+                return outcome;
+            }
+            if (pair.sampleId <= 0 || pair.tagId <= 0) continue;
+            s.integer(1, pair.sampleId); s.integer(2, pair.tagId);
+            s.integer(3, pair.sampleId); s.integer(4, pair.tagId);
+            s.step();
+            if (sqlite3_changes(db.handle) > 0) ++outcome.added;
+            s.reset();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+    return outcome;
+}
+void SampleRepository::recordRecentTag(int64_t tagId)
+{
+    if (tagId <= 0) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement exists(db.handle, "SELECT 1 FROM tags WHERE id=?");
+        exists.integer(1, tagId);
+        if (! exists.step())
+        {
+            detail::exec(db.handle, "COMMIT;");
+            return;
+        }
+        detail::Statement remove(db.handle, "DELETE FROM recent_tags WHERE tag_id=?");
+        remove.integer(1, tagId); remove.step();
+        detail::Statement insert(db.handle,
+            "INSERT INTO recent_tags(tag_id,used_at,seq) VALUES(?,?,"
+            "COALESCE((SELECT MAX(seq) FROM recent_tags),0)+1)");
+        insert.integer(1, tagId); insert.integer(2, juce::Time::currentTimeMillis()); insert.step();
+        detail::exec(db.handle,
+            "DELETE FROM recent_tags WHERE tag_id NOT IN"
+            "(SELECT tag_id FROM recent_tags ORDER BY seq DESC LIMIT 5);");
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+std::vector<Tag> SampleRepository::recentTags(int limit) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT t.id,t.name,t.colour,t.builtin FROM recent_tags r"
+        " JOIN tags t ON t.id=r.tag_id ORDER BY r.seq DESC LIMIT ?");
+    s.integer(1, juce::jlimit(0, 5, limit));
+    std::vector<Tag> out;
+    while (s.step()) out.push_back(readTag(s, 0));
+    return out;
+}
+std::vector<int64_t> SampleRepository::idsInFolder(const juce::String& folder) const
+{
+    std::vector<int64_t> out;
+    if (folder.isEmpty()) return out;
+    std::lock_guard lock(db.mutex);
+    auto [lower, upper] = folderRange(folder);
+    detail::Statement s(db.handle, "SELECT id FROM samples WHERE path>=? AND path<? ORDER BY id");
+    s.text(1, lower); s.text(2, upper);
+    while (s.step()) out.push_back(s.integer(0));
+    return out;
+}
+int SampleRepository::countWithTagInFolder(const juce::String& folder, int64_t tagId) const
+{
+    if (folder.isEmpty() || tagId <= 0) return 0;
+    std::lock_guard lock(db.mutex);
+    auto [lower, upper] = folderRange(folder);
+    detail::Statement s(db.handle,
+        "SELECT COUNT(*) FROM samples s JOIN sample_tags st ON st.sample_id=s.id"
+        " WHERE s.path>=? AND s.path<? AND st.tag_id=?");
+    s.text(1, lower); s.text(2, upper); s.integer(3, tagId);
+    return s.step() ? (int) s.integer(0) : 0;
 }
 void SampleRepository::setStarred(const std::vector<int64_t>& sampleIds, bool starred)
 {

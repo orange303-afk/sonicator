@@ -177,3 +177,47 @@ TEST_CASE("Cancelled reanalysis keeps the previous successful row", "[indexing][
     REQUIRE(after->error.isEmpty());
     for (const auto& row : repo.page()) REQUIRE(row.error != "Cancelled");
 }
+TEST_CASE("Subtree scan stays inside the chosen folder and never registers a new root", "[indexing][folders]")
+{
+    TestDirectory t;
+    const auto lib = t.dir.getChildFile("lib");
+    lib.getChildFile("Other").createDirectory();
+    const auto drums = lib.getChildFile("Drums");
+    const auto a = t.wave("lib/Drums/a.wav");
+    const auto b = t.wave("lib/Other/b.wav");
+    Database db(t.dir.getChildFile("subtree.sqlite")); SampleRepository repo(db); repo.createTables();
+    IndexingService index(repo);
+    REQUIRE(index.start({ lib.getFullPathName() })); REQUIRE(index.waitUntilFinished(10000));
+    REQUIRE(repo.roots().size() == 1);
+    REQUIRE(repo.count() == 2);
+    const auto aId = repo.findByPath(a.getFullPathName())->id;
+    const auto bId = repo.findByPath(b.getFullPathName())->id;
+    const auto keep = repo.createTag("Keep", 0xff445566);
+    REQUIRE(repo.assignTag({ aId }, keep) == 1);
+    repo.setStarred({ aId }, true);
+    REQUIRE(b.deleteFile());
+    const auto c = t.wave("lib/Drums/new/c.wav");
+    REQUIRE(index.startSubtree(drums.getFullPathName())); REQUIRE(index.waitUntilFinished(10000));
+    REQUIRE(repo.roots().size() == 1);
+    REQUIRE(repo.roots()[0] == lib.getFullPathName());
+    REQUIRE(repo.findByPath(c.getFullPathName()).has_value());
+    REQUIRE(repo.count() == 3);
+    // The sibling file outside the scanned subtree is not reconciled as missing.
+    REQUIRE_FALSE(repo.findById(bId)->missing);
+    REQUIRE(repo.findByPath(a.getFullPathName()).has_value());
+    REQUIRE(repo.tagsForSample(aId).size() == 1);
+    REQUIRE(repo.findById(aId)->starred);
+}
+TEST_CASE("Scanning an unavailable folder does not mark catalogued siblings missing", "[indexing][folders][empty]")
+{
+    TestDirectory t;
+    const auto file = t.wave("lib/Other/tone.wav");
+    Database db(t.dir.getChildFile("unavailable.sqlite")); SampleRepository repo(db); repo.createTables();
+    IndexingService index(repo);
+    REQUIRE(index.start({ t.dir.getChildFile("lib").getFullPathName() })); REQUIRE(index.waitUntilFinished(10000));
+    const auto id = repo.findByPath(file.getFullPathName())->id;
+    REQUIRE(index.startSubtree(t.dir.getChildFile("lib/NotThere").getFullPathName()));
+    REQUIRE(index.waitUntilFinished(10000));
+    REQUIRE_FALSE(repo.findById(id)->missing);
+    REQUIRE(repo.roots().size() == 1);
+}

@@ -100,7 +100,7 @@ TEST_CASE("Schema v1 migrates in place, keeps rows, and backs up once", "[databa
     REQUIRE(backups.size() == 1);
     REQUIRE(rawScalar(backups[0], "SELECT COUNT(*) FROM samples") == 3);
     REQUIRE(rawScalar(backups[0], "PRAGMA user_version") == 1);
-    REQUIRE(rawScalar(file, "PRAGMA user_version") == 7);
+    REQUIRE(rawScalar(file, "PRAGMA user_version") == 8);
     REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='samples_name_id'") == 1);
     { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.count() == 3); }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
@@ -263,7 +263,7 @@ TEST_CASE("Schema v2 migrates to tags and a backfilled Unicode search key", "[da
         REQUIRE(repo.query(f).total == 1);
         f.text = "kick"; REQUIRE(repo.query(f).total == 1);
         REQUIRE(repo.tags().size() == 15);
-        REQUIRE(rawScalar(file, "PRAGMA user_version") == 7);
+        REQUIRE(rawScalar(file, "PRAGMA user_version") == 8);
         REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM samples WHERE version=1") == 2);
     }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "v2.sqlite.backup-*").size() == 1);
@@ -286,7 +286,7 @@ TEST_CASE("User backup is a consistent copy and refuses unsafe destinations", "[
         REQUIRE(copyRepo.count() == 1);
         REQUIRE(copyRepo.findByPath("/backup/sample.wav")->fileHash == "h");
         REQUIRE(copyRepo.tagsForSample(id).size() == 1);
-        REQUIRE(rawScalar(backup, "PRAGMA user_version") == 7);
+        REQUIRE(rawScalar(backup, "PRAGMA user_version") == 8);
     }
     REQUIRE_THROWS(repo.backupTo(file));
     REQUIRE_THROWS(repo.backupTo(backup));

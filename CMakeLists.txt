@@ -16,6 +16,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/ContainerValidation.cpp
     core/export/AudioExporter.cpp core/export/SelectionExporter.cpp core/export/ExternalFileDrag.cpp
     core/indexing/IndexingService.cpp
+    core/tagging/TaggingService.cpp core/tagging/AutoTagRules.cpp core/tagging/AutoTagService.cpp
     core/smart/SmartTypes.cpp core/smart/KeyNames.cpp core/smart/SmartResolver.cpp core/smart/NameHeuristics.cpp core/smart/WavMetadata.cpp core/smart/AiffMetadata.cpp core/smart/AbletonAsd.cpp core/smart/Rex2Metadata.cpp core/smart/SmartAnalysisService.cpp core/smart/AssetAnalyzer.cpp
     core/sf2/Sf2Bank.cpp core/sf2/Sf2KitSampler.cpp
     core/rex/Rex2Decoder.cpp core/rex/Rex2SlicePlayer.cpp)
@@ -27,7 +28,7 @@ target_link_libraries(SonicatorCore PUBLIC
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography)
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png)
-add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/settings/SettingsPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp)
+add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/tagging/AutoTagDialog.cpp ui/settings/SettingsPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp)
 if(APPLE)
     target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.mm)
 else()

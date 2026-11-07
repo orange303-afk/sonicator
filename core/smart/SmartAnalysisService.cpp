@@ -137,6 +137,36 @@ bool SmartAnalysisService::startSelected(const std::vector<int64_t>& sampleIds)
     }
     return true;
 }
+bool SmartAnalysisService::startFolder(const juce::String& folder)
+{
+    if (folder.isEmpty() || isThreadRunning()) return false;
+    waitForThreadToExit(-1);
+    cancelled = false;
+    { std::lock_guard lock(pauseMutex); paused = false; }
+    {
+        std::lock_guard lock(queueMutex);
+        queue.clear(); queued.clear();
+        mode = Mode::Folder;
+        folderScope = folder;
+    }
+    {
+        std::lock_guard lock(stateMutex);
+        state = {};
+        state.running = true;
+        state.stage = SmartStage::Extracting;
+        state.total = repo.countInFolder(folder);
+        state.message = "Analyzing folder metadata";
+    }
+    if (! startThread())
+    {
+        std::lock_guard lock(stateMutex);
+        state.running = false;
+        state.stage = SmartStage::Failed;
+        state.message = "Cannot start smart analysis thread";
+        return false;
+    }
+    return true;
+}
 bool SmartAnalysisService::requestSample(int64_t sampleId)
 {
     if (sampleId <= 0) return false;
@@ -437,6 +467,37 @@ void SmartAnalysisService::run()
             }
         };
         processQueued();
+        if (mode == Mode::Folder && ! cancelled)
+        {
+            setStage(SmartStage::Extracting, "Analyzing catalogued files in folder");
+            const auto ids = repo.idsInFolder(folderScope);
+            {
+                std::lock_guard lock(stateMutex);
+                state.total = (int) ids.size();
+            }
+            for (auto id : ids)
+            {
+                if (cancelled || checkpoint()) break;
+                try
+                {
+                    const bool ok = processSample(id, catalogPath);
+                    progressSample();
+                    if (! ok)
+                    {
+                        std::lock_guard lock(stateMutex);
+                        ++state.failed;
+                    }
+                }
+                catch (const std::exception& e)
+                {
+                    repo.markSmartError(id, "exception", juce::String::fromUTF8(e.what()));
+                    progressSample();
+                    std::lock_guard lock(stateMutex);
+                    ++state.failed;
+                    state.lastError = juce::String::fromUTF8(e.what());
+                }
+            }
+        }
         if (mode == Mode::Incremental && ! cancelled)
         {
             int staleBeforeVerify = 0;
@@ -531,7 +592,8 @@ void SmartAnalysisService::run()
     else if (state.stage != SmartStage::Failed)
     {
         state.stage = SmartStage::Complete;
-        state.message = mode == Mode::Selected ? "Selected samples analyzed" : "Smart analysis complete";
+        state.message = mode == Mode::Selected ? "Selected samples analyzed"
+            : (mode == Mode::Folder ? "Folder analysis complete" : "Smart analysis complete");
     }
 }
 } // namespace sonicator

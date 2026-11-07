@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "ui/tagging/AutoTagDialog.h"
 #include "BinaryData.h"
 #include "core/database/PathRelocation.h"
 #include "ui/settings/RelocateFoldersPanel.h"
@@ -154,6 +155,10 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     addAndMakeVisible(folders); rootsLabel.setVisible(false);
     folders.onFolder = [this](juce::String path) { selectedFolder = std::move(path); pageOffset = 0; reloadLibrary(); };
+    folders.onContextMenu = [this](const juce::String& path, bool allSamples, juce::Point<int> position)
+    {
+        showFolderContextMenu(path, allSamples, position);
+    };
     addFolder.onClick = [this] { chooseFolder(); };
     rescan.onClick = [this] { requestScan(false); };
     newFiles.onClick = [this] { scanRoots(false, true); };
@@ -188,7 +193,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     cancel.onClick = [this]
     {
         if (indexer && indexer->progress().running) indexer->cancel();
-        else if (smart) smart->cancel();
+        else if (smart && smart->progress().running) smart->cancel();
+        else if (tagging && tagging->progress().running) tagging->cancel();
+        else if (autoTag) autoTag->cancel();
     };
     settings.onClick = [this] { showSettings(); };
     tagFilter.onClick = [this] { showTagFilterMenu(); };
@@ -232,7 +239,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
-    preview.onAction = [this] { library.focusForNavigation(); };
+    preview.onAction = [this] { if (isShowing()) library.focusForNavigation(); };
     preview.onSettingsChanged = [this] { persistPreviewSettings(); };
     preview.applyPersistedSettings(appSettings);
     for (auto* button : std::array<juce::Button*,16>{&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,&pause,&cancel,&settings,&backup,
@@ -256,6 +263,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         indexer = std::make_unique<IndexingService>(*writeRepo);
         smart = std::make_unique<SmartAnalysisService>(*writeRepo);
+        tagging = std::make_unique<TaggingService>(*writeRepo);
+        autoTag = std::make_unique<AutoTagService>(*writeRepo);
         folders.refresh(*readRepo);
         reloadLibrary();
         status.setText(catalogCount > 0
@@ -289,7 +298,7 @@ MainComponent::~MainComponent()
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
     stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
     settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
-    smart.reset(); indexer.reset(); setLookAndFeel(nullptr);
+    smart.reset(); indexer.reset(); tagging.reset(); autoTag.reset(); setLookAndFeel(nullptr);
 }
 bool MainComponent::contains(const std::vector<int64_t>& values, int64_t id)
 {
@@ -880,6 +889,13 @@ void MainComponent::showTagColourMenu(int64_t tagId)
             safe->reloadLibrary();
         });
 }
+int MainComponent::assignTagAndRemember(const std::vector<int64_t>& sampleIds, int64_t tagId)
+{
+    if (writeRepo == nullptr || sampleIds.empty() || tagId <= 0) return 0;
+    const int added = writeRepo->assignTag(sampleIds, tagId);
+    if (added > 0) writeRepo->recordRecentTag(tagId);
+    return added;
+}
 void MainComponent::showEditTagsMenu()
 {
     if (! readRepo || selectedSampleId <= 0)
@@ -909,7 +925,7 @@ void MainComponent::showEditTagsMenu()
                     {
                         const auto colour = tagPalette[safe->allTags.size() % std::size(tagPalette)].colour;
                         const auto id = safe->writeRepo->createTag(name, colour);
-                        safe->writeRepo->setSampleTag(sampleId, id, true);
+                        safe->assignTagAndRemember({ sampleId }, id);
                         safe->reloadLibrary();
                     }
                     catch (const std::exception& e) { safe->status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
@@ -922,8 +938,230 @@ void MainComponent::showEditTagsMenu()
             bool isAssigned = false;
             for (const auto& current : safe->readRepo->tagsForSample(sampleId))
                 if (current.id == tag.id) isAssigned = true;
-            safe->writeRepo->setSampleTag(sampleId, tag.id, ! isAssigned);
+            if (isAssigned) safe->writeRepo->setSampleTag(sampleId, tag.id, false);
+            else safe->assignTagAndRemember({ sampleId }, tag.id);
             safe->reloadLibrary();
+        });
+}
+void MainComponent::startAutoTagSelected(const std::vector<int64_t>& sampleIds)
+{
+    if (autoTag == nullptr || sampleIds.empty()) return;
+    if (autoTagDialog != nullptr)
+    {
+        autoTagDialog->toFront(true);
+        status.setText("Close the open AutoTag review before preparing another.", juce::dontSendNotification);
+        return;
+    }
+    if (autoTag->progress().running || (tagging && tagging->progress().running))
+    {
+        status.setText("Another bulk tagging operation is already running.", juce::dontSendNotification);
+        return;
+    }
+    if (indexer && indexer->progress().running)
+    {
+        status.setText("Wait for the scan to finish before AutoTag.", juce::dontSendNotification);
+        return;
+    }
+    if (smart && smart->progress().running)
+    {
+        status.setText("Wait for smart analysis to finish before AutoTag.", juce::dontSendNotification);
+        return;
+    }
+    if (autoTag->startSelected(sampleIds))
+    {
+        autoTagPreparing = true;
+        autoTagWasRunning = true;
+        status.setText("Preparing AutoTag proposals for " + juce::String(sampleIds.size())
+            + " selected file(s)", juce::dontSendNotification);
+    }
+    else
+        status.setText("AutoTag could not start.", juce::dontSendNotification);
+}
+void MainComponent::startAutoTagFolder(const juce::String& folder)
+{
+    if (autoTag == nullptr || folder.isEmpty()) return;
+    if (autoTagDialog != nullptr)
+    {
+        autoTagDialog->toFront(true);
+        status.setText("Close the open AutoTag review before preparing another.", juce::dontSendNotification);
+        return;
+    }
+    if (autoTag->progress().running || (tagging && tagging->progress().running))
+    {
+        status.setText("Another bulk tagging operation is already running.", juce::dontSendNotification);
+        return;
+    }
+    if (indexer && indexer->progress().running)
+    {
+        status.setText("Wait for the scan to finish before AutoTag.", juce::dontSendNotification);
+        return;
+    }
+    if (smart && smart->progress().running)
+    {
+        status.setText("Wait for smart analysis to finish before AutoTag.", juce::dontSendNotification);
+        return;
+    }
+    if (autoTag->startFolder(folder))
+    {
+        autoTagPreparing = true;
+        autoTagWasRunning = true;
+        status.setText("Preparing AutoTag proposals for " + folder, juce::dontSendNotification);
+    }
+    else
+        status.setText("AutoTag could not start.", juce::dontSendNotification);
+}
+void MainComponent::showAutoTagDialog(AutoTagResult result)
+{
+    if (autoTagDialog != nullptr || autoTag == nullptr) return;
+    auto* dialog = new AutoTagDialog(std::move(result), *autoTag,
+        [safe = juce::Component::SafePointer<MainComponent>(this)]
+        {
+            if (safe != nullptr) safe->reloadLibrary();
+        });
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned(dialog);
+    options.dialogTitle = "AutoTag proposals";
+    options.dialogBackgroundColour = theme::background;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = true;
+    autoTagDialog = options.launchAsync();
+}
+void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamples,
+                                          juce::Point<int> screenPosition)
+{
+    // All samples is a virtual node: no filesystem open and no implicit whole-catalog bulk work.
+    if (allSamples || path.isEmpty() || readRepo == nullptr) return;
+    const juce::File folder(path);
+    const bool available = folder.isDirectory();
+    int catalogued = 0;
+    try
+    {
+        catalogued = readRepo->countInFolder(path);
+        allTags = readRepo->tags();
+    }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
+#if JUCE_MAC
+    const juce::String openLabel = "Open in Finder";
+#elif JUCE_WINDOWS
+    const juce::String openLabel = "Open in Explorer";
+#else
+    const juce::String openLabel = "Open folder";
+#endif
+    juce::PopupMenu menu, tagMenu;
+    for (int i = 0; i < (int) allTags.size(); ++i)
+        tagMenu.addItem(7100 + i, allTags[(size_t) i].name, true, false,
+                        tagDotImage(allTags[(size_t) i].colour));
+    if (allTags.empty()) tagMenu.addSectionHeader("No tags yet");
+    menu.addItem(7001, openLabel, available);
+    menu.addSeparator();
+    menu.addItem(7002, "Scan folder", indexer != nullptr && ! indexer->progress().running);
+    menu.addItem(7003, "Analyze smart metadata (" + juce::String(catalogued) + ")",
+                 smart != nullptr && ! smart->progress().running
+                     && (indexer == nullptr || ! indexer->progress().running));
+    const bool autoTagIdle = autoTag != nullptr && ! autoTag->progress().running
+        && (indexer == nullptr || ! indexer->progress().running)
+        && (smart == nullptr || ! smart->progress().running)
+        && (tagging == nullptr || ! tagging->progress().running);
+    menu.addItem(7004, "AutoTag folder...", autoTagIdle && catalogued > 0);
+    menu.addSeparator();
+    menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0);
+    const juce::String folderPath = path;
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
+                           { screenPosition.x, screenPosition.y, 1, 1 }),
+        [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued](int result)
+        {
+            if (safe == nullptr || result == 0) return;
+            try
+            {
+                if (result >= 7100)
+                {
+                    const size_t index = (size_t) (result - 7100);
+                    if (index >= safe->allTags.size() || safe->readRepo == nullptr) return;
+                    const auto tag = safe->allTags[index];
+                    const int already = safe->readRepo->countWithTagInFolder(folderPath, tag.id);
+                    const int added = juce::jmax(0, catalogued - already);
+                    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+                        .withIconType(juce::MessageBoxIconType::QuestionIcon)
+                        .withTitle("Tag folder")
+                        .withMessage("Folder:\n" + folderPath
+                            + "\n\nIncludes every subfolder."
+                            + "\nCatalogued files: " + juce::String(catalogued)
+                            + "\nNew assignments: " + juce::String(added)
+                            + "\nAlready tagged: " + juce::String(already)
+                            + "\n\nOriginal files are not changed. Repeating this is safe.")
+                        .withButton("Tag", 1).withButton("Cancel", 0),
+                        [safe, folderPath, tag](int choice)
+                        {
+                            if (safe == nullptr || choice != 1 || safe->tagging == nullptr) return;
+                            if (safe->tagging->progress().running)
+                            {
+                                safe->status.setText("Another tagging operation is already running.", juce::dontSendNotification);
+                                return;
+                            }
+                            if (safe->autoTag != nullptr && safe->autoTag->progress().running)
+                            {
+                                safe->status.setText("Wait for AutoTag to finish before tagging the folder.", juce::dontSendNotification);
+                                return;
+                            }
+                            if (safe->tagging->startTagFolder(folderPath, tag.id))
+                                safe->status.setText("Tagging catalogued files in " + folderPath, juce::dontSendNotification);
+                            else
+                                safe->status.setText("Tagging could not start.", juce::dontSendNotification);
+                        });
+                }
+                else if (result == 7001)
+                {
+                    const juce::File target(folderPath);
+                    if (! target.isDirectory())
+                        safe->status.setText("Folder is not available: " + folderPath, juce::dontSendNotification);
+                    else if (! juce::Process::openDocument(folderPath, {}))
+                        safe->status.setText("Could not open " + folderPath, juce::dontSendNotification);
+                }
+                else if (result == 7002)
+                {
+                    if (safe->indexer == nullptr || safe->indexer->progress().running)
+                    {
+                        safe->status.setText("Another scan is already running.", juce::dontSendNotification);
+                        return;
+                    }
+                    if (safe->smart != nullptr && safe->smart->progress().running)
+                    {
+                        safe->status.setText("Wait for smart analysis to finish before scanning.", juce::dontSendNotification);
+                        return;
+                    }
+                    if (safe->indexer->startSubtree(folderPath))
+                        safe->status.setText("Scanning " + folderPath, juce::dontSendNotification);
+                    else
+                        safe->status.setText("Scan could not start.", juce::dontSendNotification);
+                }
+                else if (result == 7003)
+                {
+                    if (safe->smart == nullptr || safe->smart->progress().running)
+                    {
+                        safe->status.setText("Smart analysis is already running.", juce::dontSendNotification);
+                        return;
+                    }
+                    if (safe->indexer != nullptr && safe->indexer->progress().running)
+                    {
+                        safe->status.setText("Wait for the scan to finish before analyzing metadata.", juce::dontSendNotification);
+                        return;
+                    }
+                    if (safe->smart->startFolder(folderPath))
+                        safe->status.setText("Analyzing metadata for " + juce::String(catalogued)
+                            + " catalogued file(s)", juce::dontSendNotification);
+                    else
+                        safe->status.setText("Smart analysis could not start.", juce::dontSendNotification);
+                }
+                else if (result == 7004)
+                {
+                    safe->startAutoTagFolder(folderPath);
+                }
+            }
+            catch (const std::exception& e)
+            {
+                safe->status.setText(juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+            }
         });
 }
 void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selection,
@@ -958,7 +1196,12 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         allHave[tag.id] = every;
     }
 
+    auto recent = readRepo->recentTags();
     juce::PopupMenu menu, tagsMenu;
+    for (int i = 0; i < (int) recent.size(); ++i)
+        menu.addItem(20000 + i, recent[(size_t) i].name, true, false,
+                     tagDotImage(recent[(size_t) i].colour));
+    if (! recent.empty()) menu.addSeparator();
     menu.addItem(9000, "Copy", anyExisting);
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
@@ -971,6 +1214,11 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     menu.addItem(9005, selection.size() > 1 ? "Analyze selected (" + juce::String(selection.size()) + ")"
                                             : juce::String("Analyze selected"),
                  smartAvailable);
+    const bool autoTagIdle = autoTag != nullptr && ! autoTag->progress().running
+        && ! (indexer && indexer->progress().running)
+        && ! (smart && smart->progress().running)
+        && (tagging == nullptr || ! tagging->progress().running);
+    menu.addItem(9006, "AutoTag selected...", autoTagIdle);
 #if JUCE_MAC
     const juce::String openLabel = "Open in Finder";
 #elif JUCE_WINDOWS
@@ -984,13 +1232,26 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     if (duplicate.has_value() && duplicate->groupSize > 1)
         menu.addItem(9004, "Show all " + juce::String(duplicate->groupSize) + " copies");
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ screenPosition.x, screenPosition.y, 1, 1 }),
-        [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave,
+        [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash](int result)
         {
             if (safe == nullptr || result == 0) return;
             try
             {
-                if (result == 9000)
+                if (result >= 20000)
+                {
+                    const size_t index = (size_t) (result - 20000);
+                    if (index >= recent.size()) return;
+                    const auto tag = recent[index];
+                    const int added = safe->assignTagAndRemember(ids, tag.id);
+                    safe->status.setText(added > 0
+                        ? "Tagged " + juce::String(added) + " of " + juce::String(ids.size())
+                            + " selected file(s) as " + tag.name
+                        : "All selected files already have the tag " + tag.name,
+                        juce::dontSendNotification);
+                    safe->reloadLibrary();
+                }
+                else if (result == 9000)
                 {
                     juce::Array<juce::File> selected;
                     for (const auto& record : files)
@@ -1031,6 +1292,12 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     else
                         safe->status.setText("Smart analysis could not start", juce::dontSendNotification);
                 }
+                else if (result == 9006)
+                {
+                    std::vector<int64_t> selectedIds;
+                    for (const auto& record : files) selectedIds.push_back(record.id);
+                    safe->startAutoTagSelected(selectedIds);
+                }
                 else if (result == 9004)
                 {
                     if (leadHash.isEmpty()) return;
@@ -1053,7 +1320,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                         {
                             const auto colour = tagPalette[safe->allTags.size() % std::size(tagPalette)].colour;
                             const auto id = safe->writeRepo->createTag(name, colour);
-                            safe->writeRepo->setSampleTag(ids, id, true);
+                            safe->assignTagAndRemember(ids, id);
                             safe->reloadLibrary();
                         }
                         catch (const std::exception& e) { safe->status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
@@ -1066,7 +1333,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     const auto tag = safe->allTags[index];
                     const auto state = allHave.find(tag.id);
                     const bool assign = state == allHave.end() || ! state->second;
-                    safe->writeRepo->setSampleTag(ids, tag.id, assign);
+                    if (assign) safe->assignTagAndRemember(ids, tag.id);
+                    else safe->writeRepo->setSampleTag(ids, tag.id, false);
                     safe->reloadLibrary();
                 }
             }
@@ -1093,14 +1361,46 @@ void MainComponent::timerCallback()
     if (! indexer) return;
     auto p = indexer->progress();
     const auto s = smart ? smart->progress() : SmartProgress {};
+    const auto tg = tagging ? tagging->progress() : TaggingProgress {};
+    const auto at = autoTag ? autoTag->progress() : AutoTagProgress {};
     const bool smartRunning = s.running;
-    const bool busy = p.running || smartRunning;
-    pause.setEnabled(busy); cancel.setEnabled(busy);
+    const bool taggingRunning = tg.running;
+    const bool autoTagRunning = at.running;
+    const bool busy = p.running || smartRunning || taggingRunning || autoTagRunning;
+    pause.setEnabled(p.running || smartRunning); cancel.setEnabled(busy);
     addFolder.setEnabled(! busy); rescan.setEnabled(! busy);
     reanalyze.setEnabled(! busy); newFiles.setEnabled(! busy);
     smartButton.setEnabled(! busy);
     pause.setButtonText((p.running ? p.paused : s.paused) ? "Resume" : "Pause");
-    if (p.running || wasRunning)
+    if (taggingRunning || taggingWasRunning)
+    {
+        juce::String stage;
+        switch (tg.stage)
+        {
+            case TaggingStage::Preparing: stage = "Preparing"; break;
+            case TaggingStage::Applying: stage = "Applying"; break;
+            case TaggingStage::Complete: stage = "Complete"; break;
+            case TaggingStage::Cancelled: stage = "Cancelled"; break;
+            case TaggingStage::Failed: stage = "Failed"; break;
+            case TaggingStage::Idle: break;
+        }
+        status.setText(tg.operation + (stage.isNotEmpty() ? "  |  " + stage : juce::String())
+            + (tg.total > 0 ? "  " + juce::String(tg.processed) + "/" + juce::String(tg.total) : juce::String())
+            + "  applied " + juce::String(tg.applied) + "  errors " + juce::String(tg.errors)
+            + (tg.running && tg.current.isNotEmpty() ? "  |  " + tg.current : juce::String())
+            + (tg.running ? juce::String() : "  |  " + tg.message), juce::dontSendNotification);
+        status.setTooltip(status.getText());
+    }
+    else if (autoTagRunning || autoTagWasRunning)
+    {
+        status.setText(at.message
+            + (at.total > 0 ? "  " + juce::String(at.processed) + "/" + juce::String(at.total) : juce::String())
+            + "  proposals " + juce::String(at.proposals) + "  applied " + juce::String(at.applied)
+            + "  skipped " + juce::String(at.skipped) + "  errors " + juce::String(at.errors),
+            juce::dontSendNotification);
+        status.setTooltip(status.getText());
+    }
+    else if (p.running || wasRunning)
     {
         status.setText((p.paused ? "Paused  |  " : juce::String()) + p.message + "  "
             + juce::String(p.processed) + "/" + juce::String(p.total) + "  |  analyzed " + juce::String(p.analyzed)
@@ -1149,6 +1449,24 @@ void MainComponent::timerCallback()
     wasRunning = p.running;
     if (smartWasRunning && ! smartRunning) reloadLibrary();
     smartWasRunning = smartRunning;
+    if (taggingWasRunning && ! taggingRunning) reloadLibrary();
+    taggingWasRunning = taggingRunning;
+    if (autoTagPreparing && autoTagWasRunning && ! autoTagRunning)
+    {
+        autoTagPreparing = false;
+        AutoTagResult result;
+        if (autoTag != nullptr && autoTag->takeResult(result))
+        {
+            if (result.proposals.empty())
+                status.setText(result.message + "  checked " + juce::String(result.checked)
+                    + "  no evidence " + juce::String(result.noEvidence), juce::dontSendNotification);
+            else
+                showAutoTagDialog(std::move(result));
+        }
+        else
+            status.setText(at.message, juce::dontSendNotification);
+    }
+    autoTagWasRunning = autoTagRunning;
     const auto now = juce::Time::getMillisecondCounter();
     if (pendingSearch.trim() != filter.text && now - lastSearchChange >= 250)
     {
@@ -1303,6 +1621,9 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
         if (moveCurrent) error += " The copy was kept at " + target.getFullPathName();
         return false;
     }
+    if (autoTagDialog != nullptr) { autoTagDialog->exitModalState(0); autoTagDialog = nullptr; }
+    if (autoTag) { autoTag->cancel(); autoTag->waitUntilFinished(-1); autoTag.reset(); }
+    if (tagging) { tagging->cancel(); tagging->waitUntilFinished(-1); tagging.reset(); }
     if (smart) { smart->cancel(); smart->waitUntilFinished(-1); smart.reset(); }
     if (indexer) { indexer->cancel(); indexer->waitUntilFinished(-1); indexer.reset(); }
     writeRepo.reset(); writeDb.reset(); readRepo.reset(); readDb.reset();
@@ -1310,6 +1631,11 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     readDb = std::move(newReadDb); readRepo = std::move(newReadRepo);
     indexer = std::make_unique<IndexingService>(*writeRepo);
     smart = std::make_unique<SmartAnalysisService>(*writeRepo);
+    tagging = std::make_unique<TaggingService>(*writeRepo);
+    autoTag = std::make_unique<AutoTagService>(*writeRepo);
+    taggingWasRunning = false;
+    autoTagPreparing = false;
+    autoTagWasRunning = false;
     const auto previous = dbPath;
     dbPath = target;
     const auto isDefault = dbPath.getFullPathName() == defaultDatabaseFile().getFullPathName();

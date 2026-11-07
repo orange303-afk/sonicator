@@ -30,7 +30,7 @@ SmartCandidate candidate(SmartField field, juce::String source, juce::String tex
     return c;
 }
 }
-TEST_CASE("Schema 5 catalogs upgrade to schema 7 with a backup and keep identity", "[smart][database]")
+TEST_CASE("Schema 5 catalogs upgrade to schema 8 with a backup and keep identity", "[smart][database]")
 {
     auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
         .getNonexistentChildFile("sonicator-smart-upgrade", ".sqlite");
@@ -47,7 +47,7 @@ TEST_CASE("Schema 5 catalogs upgrade to schema 7 with a backup and keep identity
     rawExec(file, "PRAGMA user_version=5;");
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 7);
+        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 8);
         auto r = repo.findByPath("/lib/kick.wav");
         REQUIRE(r.has_value());
         REQUIRE(r->id == id);
