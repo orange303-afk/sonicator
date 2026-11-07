@@ -15,7 +15,7 @@ TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation",
     for (auto* child : app.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    REQUIRE(buttons == 16); // history is invoked by the search field, not a toolbar button
+    REQUIRE(buttons == 15); // history is invoked by the search field, not a toolbar button
 }
 TEST_CASE("Hide empty restores on startup and saves toggles without losing other settings", "[ui][settings][hide-empty]")
 {
@@ -230,6 +230,16 @@ juce::Button* shellButton(MainComponent& app, const juce::String& text)
             if (button->getButtonText() == text) return button;
     return nullptr;
 }
+juce::Button* dialogButton(juce::Component& parent, const juce::String& text)
+{
+    for (auto* child : parent.getChildren())
+    {
+        if (auto* button = dynamic_cast<juce::Button*>(child))
+            if (button->getButtonText() == text) return button;
+        if (auto* nested = dialogButton(*child, text)) return nested;
+    }
+    return nullptr;
+}
 }
 TEST_CASE("Rescan and Reanalyze ask before starting", "[ui][maintenance]")
 {
@@ -257,10 +267,11 @@ TEST_CASE("Rescan and Reanalyze ask before starting", "[ui][maintenance]")
     auto* warning = dynamic_cast<juce::AlertWindow*>(juce::Component::getCurrentlyModalComponent());
     REQUIRE(warning != nullptr);
     REQUIRE(warning->getName() == "Reanalyze all");
+    REQUIRE(dynamic_cast<SonicatorLookAndFeel*>(&warning->getLookAndFeel()) != nullptr);
     warning->exitModalState(0);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
 }
-TEST_CASE("Backup button writes a consistent copy beside the database", "[ui][maintenance]")
+TEST_CASE("Backup database lives in Settings and writes a consistent copy", "[ui][maintenance]")
 {
     TestDirectory t; auto audio = t.wave("a.wav"); auto dbPath = t.dir.getChildFile("library.sqlite");
     {
@@ -268,14 +279,28 @@ TEST_CASE("Backup button writes a consistent copy beside the database", "[ui][ma
         auto r = BasicAnalyzer().analyze(audio); repo.upsert(r); repo.addRoot(t.dir.getFullPathName());
     }
     MainComponent app(dbPath,false);
-    auto* backup = shellButton(app,"Backup");
+    auto* settings = shellButton(app,"Settings");
+    REQUIRE(settings != nullptr);
+    settings->onClick();
+    auto* modal = juce::Component::getCurrentlyModalComponent();
+    REQUIRE(modal != nullptr);
+    auto* window = dynamic_cast<juce::DocumentWindow*>(modal);
+    REQUIRE(window != nullptr);
+    REQUIRE_FALSE(window->isUsingNativeTitleBar());
+    REQUIRE(dynamic_cast<SonicatorLookAndFeel*>(&modal->getLookAndFeel()) != nullptr);
+    auto* backup = dialogButton(*modal,"Backup database");
     REQUIRE(backup != nullptr);
+    auto* content = window->getContentComponent();
+    REQUIRE(content != nullptr);
+    REQUIRE(content->getLocalBounds().contains(backup->getBounds()));
     backup->onClick();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
     auto copies = t.dir.getChildFile("backups").findChildFiles(juce::File::findFiles,false,"sonicator-*.sqlite");
     REQUIRE(copies.size() == 1);
     Database copy(copies[0]); SampleRepository copyRepo(copy); copyRepo.createTables();
     REQUIRE(copyRepo.count() == 1);
     REQUIRE_FALSE(copies[0].isDirectory());
+    modal->exitModalState(0);
 }
 TEST_CASE("Settings switch to an existing catalog or copy the current one", "[ui][settings][database]")
 {

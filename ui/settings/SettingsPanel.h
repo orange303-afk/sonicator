@@ -16,6 +16,9 @@ public:
     std::function<void(const juce::File&, bool moveCurrent)> onDatabaseChosen;
     std::function<void()> onRelocateRequested;
     std::function<void()> onShowAudio;
+    // Writes a consistent catalog copy and returns it; on failure returns an invalid file and
+    // fills error.
+    std::function<juce::File(juce::String& error)> onBackupRequested;
 private:
     AppSettings current;
     juce::File database;
@@ -25,7 +28,7 @@ private:
                  audioHeading, aboutHeading, productLabel, authorLabel, supportLabel;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::TextButton moveDatabase { "Move catalog..." }, openDatabase { "Open catalog..." },
-                     relocateDatabase { "Relocate folders..." },
+                     relocateDatabase { "Relocate folders..." }, backupDatabase { "Backup database" },
                      audio { "Audio/MIDI Settings" }, close { "Close" };
     juce::HyperlinkButton gumroad, bandcamp, naukograd, kofi;
     std::unique_ptr<juce::FileChooser> chooser;

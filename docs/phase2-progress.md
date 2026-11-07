@@ -45,6 +45,9 @@
   `settings.json` and shows a second expandable favorite tree below the normal folder tree; nested
   subfolders expand like ordinary folders, clicking filters the library, and a missing path stays
   muted. The divider above favorites is draggable and its height persists in settings.
+- **Settings backup and themed dialogs (2026-11-08):** `Backup database` moved from the footer
+  into Settings. Confirmation and prompt windows use the Sonicator LookAndFeel, and Settings,
+  Relocate, Audio/MIDI and AutoTag windows use a non-native title bar drawn in the app theme.
 - **Schema 9 instrument tags (2026-11-08):** Crash, Ride, Tom, Rim, Fill, Riser, Downfilter,
   Upfilter, Snap, Shaker and Tamb are built-in tags and AutoTag classes. Crash no longer maps to
   Percussion; existing catalogs receive the new tags through the normal backup migration.

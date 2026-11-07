@@ -79,7 +79,7 @@ private:
     int64_t selectedSampleId = 0;
     SearchField search;
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" }, smartButton { "Smart metadata" };
-    juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" }, backup { "Backup" };
+    juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" };
     juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" },
                      clearFilters { "Clear filters" }, editTags { "Edit tags..." };
     juce::ToggleButton hideEmpty { "Hide empty" };

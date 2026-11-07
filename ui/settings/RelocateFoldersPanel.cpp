@@ -1,6 +1,7 @@
 #include "RelocateFoldersPanel.h"
 #include "core/database/PathRelocation.h"
 #include "ui/shell/Theme.h"
+#include "ui/shell/ThemedDialogs.h"
 #include <array>
 
 namespace sonicator {
@@ -272,17 +273,15 @@ void RelocateFoldersPanel::requestApply()
 {
     if (! canApply() || ! onApply) return;
     if (! needsConfirmation()) { performApply(); return; }
-    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-        .withIconType(juce::MessageBoxIconType::WarningIcon)
-        .withTitle("Relocate folders")
-        .withMessage("Some chosen folders contain fewer than 90% of the sampled catalog files. "
-                     "This usually means the wrong folder was chosen. Continue anyway?\n\n"
-                     "A database backup is written before any path is changed.")
-        .withButton("Relocate", 1).withButton("Cancel", 0),
+    dialogs::showAlert(*this, "Relocate folders",
+        "Some chosen folders contain fewer than 90% of the sampled catalog files. "
+        "This usually means the wrong folder was chosen. Continue anyway?\n\n"
+        "A database backup is written before any path is changed.",
+        { { "Relocate", 1 }, { "Cancel", 0 } },
         [safe = juce::Component::SafePointer<RelocateFoldersPanel>(this)](int choice)
         {
             if (safe != nullptr && choice == 1) safe->performApply();
-        });
+        }, juce::MessageBoxIconType::WarningIcon);
 }
 
 void RelocateFoldersPanel::performApply()

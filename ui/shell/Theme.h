@@ -107,6 +107,71 @@ public:
         return juce::Font(juce::FontOptions(13.0f));
     }
 
+    juce::Font getAlertWindowTitleFont() override
+    {
+        return juce::Font(juce::FontOptions(16.0f, juce::Font::bold));
+    }
+    juce::Font getAlertWindowMessageFont() override
+    {
+        return juce::Font(juce::FontOptions(12.5f));
+    }
+    juce::Font getAlertWindowFont() override
+    {
+        return juce::Font(juce::FontOptions(12.0f));
+    }
+    int getAlertWindowButtonHeight() override { return 32; }
+
+    class DocumentButton final : public juce::Button
+    {
+    public:
+        explicit DocumentButton(int type) : juce::Button({}), buttonType(type)
+        {
+            setWantsKeyboardFocus(false);
+            setMouseClickGrabsKeyboardFocus(false);
+        }
+        void paintButton(juce::Graphics& g, bool highlighted, bool down) override
+        {
+            const auto area = getLocalBounds().toFloat().reduced(6.0f);
+            const auto fill = buttonType == juce::DocumentWindow::closeButton
+                ? theme::accent.withAlpha(down ? 0.65f : (highlighted ? 0.9f : 0.75f))
+                : (highlighted || down ? theme::hover : theme::raised);
+            g.setColour(fill);
+            g.fillEllipse(area);
+            g.setColour(buttonType == juce::DocumentWindow::closeButton ? theme::background : theme::muted);
+            const auto glyph = area.reduced(4.5f);
+            if (buttonType == juce::DocumentWindow::closeButton)
+            {
+                g.drawLine(glyph.getX(), glyph.getY(), glyph.getRight(), glyph.getBottom(), 1.2f);
+                g.drawLine(glyph.getRight(), glyph.getY(), glyph.getX(), glyph.getBottom(), 1.2f);
+            }
+            else if (buttonType == juce::DocumentWindow::minimiseButton)
+                g.drawLine(glyph.getX(), glyph.getCentreY(), glyph.getRight(), glyph.getCentreY(), 1.2f);
+            else
+                g.drawRect(glyph, 1.2f);
+        }
+    private:
+        int buttonType;
+    };
+    juce::Button* createDocumentWindowButton(int buttonType) override
+    {
+        return new DocumentButton(buttonType);
+    }
+    void drawDocumentWindowTitleBar(juce::DocumentWindow& window, juce::Graphics& g,
+                                    int width, int height, int titleSpaceX, int titleSpaceW,
+                                    const juce::Image* icon, bool drawTitleTextOnLeft) override
+    {
+        g.fillAll(theme::panel);
+        g.setColour(theme::line);
+        g.drawHorizontalLine(height - 1, 0.0f, (float) width);
+        if (icon != nullptr && icon->isValid())
+            g.drawImageWithin(*icon, 8, 0, height, height, juce::RectanglePlacement::centred);
+        g.setColour(theme::text);
+        g.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
+        g.drawFittedText(window.getName(), titleSpaceX, 0, titleSpaceW, height,
+                         drawTitleTextOnLeft ? juce::Justification::centredLeft
+                                             : juce::Justification::centred, 1);
+    }
+
     void drawButtonBackground(juce::Graphics& g, juce::Button& button, const juce::Colour&,
                               bool highlighted, bool down) override
     {

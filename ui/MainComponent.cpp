@@ -4,6 +4,7 @@
 #include "core/database/PathRelocation.h"
 #include "ui/settings/RelocateFoldersPanel.h"
 #include "ui/settings/SettingsPanel.h"
+#include "ui/shell/ThemedDialogs.h"
 #include "ui/platform/FileClipboard.h"
 #include <algorithm>
 #include <cmath>
@@ -108,8 +109,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     theme::apply(appSettings.theme);
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,33>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
-         &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
+    for (auto* c : std::array<juce::Component*,32>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
+         &pause,&cancel,&settings,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel,&selectionStatus})
         if (c != nullptr) addAndMakeVisible(c);
@@ -236,12 +237,6 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     rescan.onClick = [this] { requestScan(false); };
     newFiles.onClick = [this] { scanRoots(false, true); };
     reanalyze.onClick = [this] { requestScan(true); };
-    backup.onClick = [this]
-    {
-        try { backupCatalog(); }
-        catch (const std::exception& e) { status.setText("Backup failed: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
-    };
-    backup.setTooltip("Save a consistent copy of the catalog database");
     smartButton.onClick = [this]
     {
         if (! smart || ! readRepo) return;
@@ -315,7 +310,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     preview.onAction = [this] { if (isShowing()) library.focusForNavigation(); };
     preview.onSettingsChanged = [this] { persistPreviewSettings(); };
     preview.applyPersistedSettings(appSettings);
-    for (auto* button : std::array<juce::Button*,16>{&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,&pause,&cancel,&settings,&backup,
+    for (auto* button : std::array<juce::Button*,15>{&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,&pause,&cancel,&settings,
           &tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
@@ -362,7 +357,6 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     addFolder.setEnabled(indexer != nullptr); rescan.setEnabled(indexer != nullptr);
     reanalyze.setEnabled(indexer != nullptr); newFiles.setEnabled(indexer != nullptr);
     smartButton.setEnabled(indexer != nullptr);
-    backup.setEnabled(indexer != nullptr);
     sendLookAndFeelChange();
     startTimerHz(10);
     juce::Desktop::getInstance().addDarkModeSettingListener(this);
@@ -496,20 +490,20 @@ void MainComponent::requestScan(bool reanalyzeAll)
     const auto safe = juce::Component::SafePointer<MainComponent>(this);
     if (! reanalyzeAll)
     {
-        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-            .withIconType(juce::MessageBoxIconType::QuestionIcon)
-            .withTitle("Rescan library")
-            .withMessage("Walk every registered folder and analyze files that are new, changed or previously failed. Unchanged analyzed files are skipped.\n\nA large library can take a long time.")
-            .withButton("Rescan", 1).withButton("Cancel", 0),
-            [safe](int choice) { if (safe != nullptr && choice == 1) safe->scanRoots(false); });
+        dialogs::showAlert(*this, "Rescan library",
+            "Walk every registered folder and analyze files that are new, changed or previously failed. "
+            "Unchanged analyzed files are skipped.\n\nA large library can take a long time.",
+            { { "Rescan", 1 }, { "Cancel", 0 } },
+            [safe](int choice) { if (safe != nullptr && choice == 1) safe->scanRoots(false); },
+            juce::MessageBoxIconType::QuestionIcon);
         return;
     }
-    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-        .withIconType(juce::MessageBoxIconType::WarningIcon)
-        .withTitle("Reanalyze all")
-        .withMessage("Recompute the measured features of every file in the catalog, including files that have not changed.\n\nOn a large library this can take a long time. Completed results are saved if you cancel.")
-        .withButton("Reanalyze", 1).withButton("Cancel", 0),
-        [safe](int choice) { if (safe != nullptr && choice == 1) safe->scanRoots(true); });
+    dialogs::showAlert(*this, "Reanalyze all",
+        "Recompute the measured features of every file in the catalog, including files that have not changed. "
+        "\n\nOn a large library this can take a long time. Completed results are saved if you cancel.",
+        { { "Reanalyze", 1 }, { "Cancel", 0 } },
+        [safe](int choice) { if (safe != nullptr && choice == 1) safe->scanRoots(true); },
+        juce::MessageBoxIconType::WarningIcon);
 }
 void MainComponent::scanRoots(bool force, bool newOnly)
 {
@@ -560,11 +554,9 @@ void MainComponent::showRelocateDialog()
     const auto missing = missingRoots();
     if (missing.isEmpty())
     {
-        juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-            .withIconType(juce::MessageBoxIconType::InfoIcon)
-            .withTitle("Relocate folders")
-            .withMessage("All catalog folders are available on this computer.")
-            .withButton("OK", 1), [](int) {});
+        dialogs::showAlert(*this, "Relocate folders",
+            "All catalog folders are available on this computer.",
+            { { "OK", 1 } }, [](int) {}, juce::MessageBoxIconType::InfoIcon);
         return;
     }
 
@@ -652,7 +644,8 @@ void MainComponent::showRelocateDialog()
 
     auto* window = new RelocateDialogWindow();
     window->setContentOwned(panel, true);
-    window->setUsingNativeTitleBar(true);
+    window->setLookAndFeel(&look);
+    window->setUsingNativeTitleBar(false);
     window->setResizable(false, false);
     window->centreAroundComponent(this, window->getWidth(), window->getHeight());
     relocateDialog = window;
@@ -922,17 +915,15 @@ void MainComponent::showTagFilterMenu()
                 if (action == 0) { safe->showTagColourMenu(tag.id); return; }
                 if (action == 2 && ! tag.builtin)
                 {
-                    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-                        .withIconType(juce::MessageBoxIconType::WarningIcon)
-                        .withTitle("Delete tag")
-                        .withMessage("Remove \"" + tag.name + "\" from every sample?")
-                        .withButton("Delete", 1).withButton("Cancel", 0),
+                    dialogs::showAlert(*safe, "Delete tag",
+                        "Remove \"" + tag.name + "\" from every sample?",
+                        { { "Delete", 1 }, { "Cancel", 0 } },
                         [safe, id = tag.id](int choice)
                         {
                             if (safe == nullptr || choice != 1) return;
                             try { safe->writeRepo->deleteTag(id); safe->reloadLibrary(); }
                             catch (const std::exception& e) { safe->status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
-                        });
+                        }, juce::MessageBoxIconType::WarningIcon);
                     return;
                 }
                 if (action == 1)
@@ -1111,13 +1102,11 @@ void MainComponent::resetTagsSelected(const std::vector<int64_t>& sampleIds)
         status.setText("The selected files have no tags to reset.",juce::dontSendNotification);
         return;
     }
-    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-        .withIconType(juce::MessageBoxIconType::WarningIcon)
-        .withTitle("Reset tags")
-        .withMessage("Remove all tag assignments from " + juce::String(sampleIds.size())
+    dialogs::showAlert(*this, "Reset tags",
+        "Remove all tag assignments from " + juce::String(sampleIds.size())
             + " selected file(s)?\n\n" + juce::String(tagged)
-            + " file(s) currently have tags.\n\nTag definitions, stars, smart overrides and original files are kept.")
-        .withButton("Reset", 1).withButton("Cancel", 0),
+            + " file(s) currently have tags.\n\nTag definitions, stars, smart overrides and original files are kept.",
+        { { "Reset", 1 }, { "Cancel", 0 } },
         [safe = juce::Component::SafePointer<MainComponent>(this), sampleIds](int choice)
         {
             if (safe == nullptr || choice != 1 || safe->tagging == nullptr) return;
@@ -1130,7 +1119,7 @@ void MainComponent::resetTagsSelected(const std::vector<int64_t>& sampleIds)
                 safe->status.setText("Removing tags from selected files",juce::dontSendNotification);
             else
                 safe->status.setText("Tag reset could not start.",juce::dontSendNotification);
-        });
+        }, juce::MessageBoxIconType::WarningIcon);
 }
 void MainComponent::resetTagsFolder(const juce::String& path, int catalogued)
 {
@@ -1148,15 +1137,13 @@ void MainComponent::resetTagsFolder(const juce::String& path, int catalogued)
         status.setText("This folder has no tagged files to reset.",juce::dontSendNotification);
         return;
     }
-    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-        .withIconType(juce::MessageBoxIconType::WarningIcon)
-        .withTitle("Reset tags in folder")
-        .withMessage("Folder:\n" + path
+    dialogs::showAlert(*this, "Reset tags in folder",
+        "Folder:\n" + path
             + "\n\nIncludes every subfolder."
             + "\nCatalogued files: " + juce::String(catalogued)
             + "\nTagged files: " + juce::String(tagged)
-            + "\n\nTag definitions, stars, smart overrides and original files are kept.")
-        .withButton("Reset", 1).withButton("Cancel", 0),
+            + "\n\nTag definitions, stars, smart overrides and original files are kept.",
+        { { "Reset", 1 }, { "Cancel", 0 } },
         [safe = juce::Component::SafePointer<MainComponent>(this), path](int choice)
         {
             if (safe == nullptr || choice != 1 || safe->tagging == nullptr) return;
@@ -1169,7 +1156,7 @@ void MainComponent::resetTagsFolder(const juce::String& path, int catalogued)
                 safe->status.setText("Removing tags from " + path,juce::dontSendNotification);
             else
                 safe->status.setText("Tag reset could not start.",juce::dontSendNotification);
-        });
+        }, juce::MessageBoxIconType::WarningIcon);
 }
 void MainComponent::startAutoTagSelected(const std::vector<int64_t>& sampleIds)
 {
@@ -1251,9 +1238,10 @@ void MainComponent::showAutoTagDialog(AutoTagResult result)
     options.dialogTitle = "AutoTag proposals";
     options.dialogBackgroundColour = theme::background;
     options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true;
+    options.useNativeTitleBar = false;
     options.resizable = true;
     autoTagDialog = options.launchAsync();
+    if (autoTagDialog != nullptr) autoTagDialog->setLookAndFeel(&look);
 }
 void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamples,
                                           juce::Point<int> screenPosition)
@@ -1315,16 +1303,14 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                     const auto tag = safe->allTags[index];
                     const int already = safe->readRepo->countWithTagInFolder(folderPath, tag.id);
                     const int added = juce::jmax(0, catalogued - already);
-                    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
-                        .withIconType(juce::MessageBoxIconType::QuestionIcon)
-                        .withTitle("Tag folder")
-                        .withMessage("Folder:\n" + folderPath
+                    dialogs::showAlert(*safe, "Tag folder",
+                        "Folder:\n" + folderPath
                             + "\n\nIncludes every subfolder."
                             + "\nCatalogued files: " + juce::String(catalogued)
                             + "\nNew assignments: " + juce::String(added)
                             + "\nAlready tagged: " + juce::String(already)
-                            + "\n\nOriginal files are not changed. Repeating this is safe.")
-                        .withButton("Tag", 1).withButton("Cancel", 0),
+                            + "\n\nOriginal files are not changed. Repeating this is safe.",
+                        { { "Tag", 1 }, { "Cancel", 0 } },
                         [safe, folderPath, tag](int choice)
                         {
                             if (safe == nullptr || choice != 1 || safe->tagging == nullptr) return;
@@ -1342,7 +1328,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                                 safe->status.setText("Tagging catalogued files in " + folderPath, juce::dontSendNotification);
                             else
                                 safe->status.setText("Tagging could not start.", juce::dontSendNotification);
-                        });
+                        }, juce::MessageBoxIconType::QuestionIcon);
                 }
                 else if (result == 7006)
                 {
@@ -1594,17 +1580,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
 void MainComponent::promptTagName(const juce::String& title, const juce::String& initial,
                                   std::function<void(juce::String)> onAccept)
 {
-    auto* window = new juce::AlertWindow(title, "Tag name:", juce::MessageBoxIconType::NoIcon);
-    window->addTextEditor("name", initial);
-    window->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
-    window->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
-    juce::Component::SafePointer<juce::AlertWindow> safeWindow(window);
-    window->enterModalState(true, juce::ModalCallbackFunction::create(
-        [safeWindow, callback = std::move(onAccept)](int result) mutable
-        {
-            if (safeWindow == nullptr || result == 0 || callback == nullptr) return;
-            callback(safeWindow->getTextEditorContents("name"));
-        }), true);
+    dialogs::showPrompt(*this, title, "Tag name:", initial, std::move(onAccept));
 }
 void MainComponent::timerCallback()
 {
@@ -1786,6 +1762,15 @@ void MainComponent::showSettings()
     auto* panel = new SettingsPanel(appSettings,dbPath,indexing);
     panel->onSettingsChanged = [this](AppSettings next) { applySettings(next); };
     panel->onShowAudio = [this] { showAudioSettings(); };
+    panel->onBackupRequested = [this](juce::String& error) -> juce::File
+    {
+        try { return backupCatalog(); }
+        catch (const std::exception& e)
+        {
+            error = juce::String::fromUTF8(e.what());
+            return {};
+        }
+    };
     panel->onRelocateRequested = [this]
     {
         if (settingsDialog != nullptr) settingsDialog->exitModalState(0);
@@ -1815,7 +1800,8 @@ void MainComponent::showSettings()
     panel->setLookAndFeel(&look);
     auto* window = new SettingsDialogWindow();
     window->setContentOwned(panel, true);
-    window->setUsingNativeTitleBar(true);
+    window->setLookAndFeel(&look);
+    window->setUsingNativeTitleBar(false);
     window->setResizable(false, false);
     window->centreAroundComponent(this, window->getWidth(), window->getHeight());
     settingsDialog = window;
@@ -1934,7 +1920,8 @@ void MainComponent::showAudioSettings()
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned(selector); options.dialogTitle = "Audio/MIDI Settings";
     options.dialogBackgroundColour = theme::panel; options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true; options.resizable = false; audioDialog = options.launchAsync();
+    options.useNativeTitleBar = false; options.resizable = false; audioDialog = options.launchAsync();
+    if (audioDialog != nullptr) audioDialog->setLookAndFeel(&look);
 }
 void MainComponent::paint(juce::Graphics& g)
 {
@@ -1961,7 +1948,7 @@ void MainComponent::resized()
     auto footer = r.removeFromBottom(42).reduced(12,5);
     cancel.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
     pause.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
-    backup.setBounds(footer.removeFromRight(70)); status.setBounds(footer);
+    status.setBounds(footer);
     sidebarBounds = r.removeFromLeft(getWidth() < 1100 ? 190 : 240); analysisBounds = r.removeFromRight(getWidth() < 1100 ? 230 : 270);
     auto sidebar = sidebarBounds.reduced(14,16);
     libraryHeading.setBounds(sidebar.removeFromTop(30)); sidebar.removeFromTop(12);

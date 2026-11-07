@@ -22,7 +22,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
          &languageLabel,&languageNote,&libraryHeading,&databaseKey,&databaseLabel,&libraryNote,&databaseStatus,
          &audioHeading,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
         addAndMakeVisible(c);
-    for (auto* c : std::array<juce::Component*,7>{&openDatabase,&audio,&close,&gumroad,&bandcamp,&naukograd,&kofi})
+    for (auto* c : std::array<juce::Component*,8>{&openDatabase,&backupDatabase,&audio,&close,&gumroad,&bandcamp,&naukograd,&kofi})
         addAndMakeVisible(c);
 
     title.setText("Settings",juce::dontSendNotification);
@@ -65,7 +65,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         link->setFont(juce::FontOptions(12),false);
         link->setJustificationType(juce::Justification::centredLeft);
     }
-    for (auto* button : std::array<juce::Button*,5>{&moveDatabase,&openDatabase,&relocateDatabase,&audio,&close})
+    for (auto* button : std::array<juce::Button*,6>{&moveDatabase,&openDatabase,&relocateDatabase,&backupDatabase,&audio,&close})
     {
         button->setWantsKeyboardFocus(false);
         button->setMouseClickGrabsKeyboardFocus(false);
@@ -75,6 +75,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     moveDatabase.setTooltip("Copy the current catalog through SQLite and switch to the copy");
     openDatabase.setTooltip("Open an existing SONICATOR catalog without moving the current one");
     relocateDatabase.setTooltip("Rewrite catalog paths for folders that moved to this computer");
+    backupDatabase.setTooltip("Save a consistent copy of the catalog database; original audio files are not included");
     setDatabaseFile(database);
     setDatabaseStatus(indexing ? "Unavailable while indexing." : "Original audio files are not included in the database.",false);
 
@@ -89,12 +90,20 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     moveDatabase.onClick = [this] { chooseDatabase(true); };
     openDatabase.onClick = [this] { chooseDatabase(false); };
     relocateDatabase.onClick = [this] { if (onRelocateRequested) onRelocateRequested(); };
+    backupDatabase.onClick = [this]
+    {
+        if (! onBackupRequested) return;
+        juce::String error;
+        const auto file = onBackupRequested(error);
+        if (file.existsAsFile()) setDatabaseStatus("Backup saved: " + file.getFullPathName(), false);
+        else setDatabaseStatus("Backup failed: " + (error.isNotEmpty() ? error : juce::String("unknown error")), true);
+    };
     audio.onClick = [this] { if (onShowAudio) onShowAudio(); };
     close.onClick = [this]
     {
         if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
     };
-    setSize(560,700);
+    setSize(560,760);
 }
 void SettingsPanel::notifySettings()
 {
@@ -233,6 +242,10 @@ void SettingsPanel::resized()
         openDatabase.setBounds(right.removeFromLeft(width));
         right.removeFromLeft(8);
         relocateDatabase.setBounds(right);
+    });
+    add(30, 4, false, [this](juce::Rectangle<int> area)
+    {
+        backupDatabase.setBounds(area.withTrimmedLeft(140).removeFromLeft(180));
     });
     add(32, 6, false, [this](juce::Rectangle<int> area) { libraryNote.setBounds(area.withTrimmedLeft(140)); });
     add(24, 4, false, [this](juce::Rectangle<int> area) { databaseStatus.setBounds(area.withTrimmedLeft(140)); });

@@ -2,7 +2,7 @@
 
 ## Tags, AutoTag and folder actions (2026-11-08)
 
-- macOS Debug: **248 cases / 1997 assertions**, all passed; CTest 1/1, about 24 s. Windows, Explorer integration and physical acceptance were not run.
+- macOS Debug: **248 cases / 2003 assertions**, all passed; CTest 1/1, about 24 s. Windows, Explorer integration and physical acceptance were not run.
 - Reset tags: selection and recursive folder scope, tag links only, tag definitions/stars/overrides/recent history preserved, idempotence and cancellation rollback with the actual removed count.
 - Favorite folders: global `settings.json` round-trip and unrelated-update preservation; second favorite tree shows a root and its catalogued descendants, expands like the normal tree, preserves click callback and keeps a missing root visible without fallback. The divider is draggable, persists its height, and the favorites tree grows when dragged.
 - Schema **8** adds `recent_tags`; schema **9** adds the built-in Crash, Ride, Tom, Rim, Fill, Riser, Downfilter, Upfilter, Snap, Shaker and Tamb tags. Migration uses the existing SQLite backup, preserves user tags and keeps ids, tags, stars, duplicates, overrides and measured features. Migration/reopen/isolation covered.
@@ -15,6 +15,7 @@
 - AutoTag review/application: preparation writes nothing, already-assigned rows are marked, include/exclude control works in the virtualized dialog, empty and cancelled preparation, changed file and deleted tag are rejected before applying, apply is idempotent, cancellation keeps earlier batches and reports the actual count.
 - Known limits: applied AutoTag reasons are not persisted; AutoTag maps onto existing tag names, so renaming a built-in instrument tag yields `tag-missing`; folder names are context only; Windows remains a separate acceptance check. See `docs/TAGGING.md`.
 - A pre-existing `jassert` from a preview callback grabbing keyboard focus while `MainComponent` was not on screen was fixed by guarding the callback with `isShowing()`; the full suite now prints no JUCE assertions.
+- **Settings and dialogs:** `Backup database` is in Settings and writes the same consistent SQLite copy; the toolbar no longer has a Backup button. Confirmation and prompt AlertWindows use the application LookAndFeel (theme colours, fonts, buttons), and Settings, Relocate, Audio/MIDI and AutoTag windows use a non-native title bar drawn by the app theme. Tests verify the themed look, non-native title bar, and the Settings backup button.
 
 ## Catalog folder relocation (2026-11-07)
 
