@@ -52,6 +52,8 @@ private:
     PreviewPanel preview;
     FileListPanel library;
     FolderTree folders;
+    FolderTree favorites;
+    juce::Label favoritesLabel;
     juce::String selectedFolder;
     LibraryFilter filter;
     std::vector<Tag> allTags;
@@ -102,6 +104,13 @@ private:
     void showEditTagsMenu();
     void showSampleContextMenu(const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> screenPosition);
     void showFolderContextMenu(const juce::String& path, bool allSamples, juce::Point<int> screenPosition);
+    void showFavoriteContextMenu(const juce::String& path, juce::Point<int> screenPosition);
+    void refreshFavorites();
+    void toggleFavoriteFolder(const juce::String& path);
+    bool isFavoriteFolder(const juce::String& path) const;
+    bool isUnderFavoriteFolder(const juce::String& path) const;
+    void resetTagsSelected(const std::vector<int64_t>& sampleIds);
+    void resetTagsFolder(const juce::String& path, int catalogued);
     // Explicit human assignment path: writes only missing links and updates the recent-tag
     // history only when at least one link was actually created.
     int assignTagAndRemember(const std::vector<int64_t>& sampleIds, int64_t tagId);

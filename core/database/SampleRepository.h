@@ -95,6 +95,12 @@ public:
     // or tags are skipped; previous batches stay committed when a later batch fails.
     TagAssignmentOutcome assignTagPairs(const std::vector<TagPair>& pairs,
                                         const std::function<bool()>& isCancelled);
+    // Removes every tag link in one transaction. Cancellation rolls the batch back. Tag
+    // definitions, stars, smart data and recent-tag history are untouched.
+    TagAssignmentOutcome clearTagsBatch(const std::vector<int64_t>& sampleIds,
+                                        const std::function<bool()>& isCancelled);
+    int countTaggedInFolder(const juce::String& folder) const;
+    int countTaggedSamples(const std::vector<int64_t>& sampleIds) const;
     // Last explicitly assigned tags, newest first. Stored per catalog; deleted tags fall out of
     // the join and renamed tags keep their current name.
     void recordRecentTag(int64_t tagId);

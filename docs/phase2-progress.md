@@ -39,6 +39,12 @@
   contradictions, and writes only included proposals after review. Folder Tag and
   AutoTag application run in bounded background batches with cancellation and
   actual applied counts. See `docs/TAGGING.md`.
+- **Reset tags and favorite folders (2026-11-08):** confirmed background `Reset tags...` for a
+  selection or a folder subtree removes tag links only; tag definitions, stars, overrides, original
+  files and recent history stay. Global `Add to favorites` / `Remove from favorites` stores paths in
+  `settings.json` and shows a second expandable favorite tree below the normal folder tree; nested
+  subfolders expand like ordinary folders, clicking filters the library, and a missing path stays
+  muted.
 
 ## Next development slice
 

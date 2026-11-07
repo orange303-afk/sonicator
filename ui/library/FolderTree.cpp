@@ -5,26 +5,40 @@ class FolderTree::Item final : public juce::TreeViewItem
 {
 public:
     Item(FolderTree& o,juce::String p,bool top = false) : owner(o),path(std::move(p)),all(top) {}
-    bool mightContainSubItems() override { return all || ! owner.children[path].empty(); }
-    juce::String getUniqueName() const override { return all ? "All samples" : path; }
+    bool mightContainSubItems() override
+    {
+        if (all || path.isEmpty()) return ! owner.roots.isEmpty();
+        return ! owner.children[path].empty();
+    }
+    juce::String getUniqueName() const override
+    {
+        return all ? "All samples" : (path.isEmpty() ? juce::String("Favorites") : path);
+    }
     int getItemHeight() const override { return 26; }
     void paintItem(juce::Graphics& g,int w,int h) override
     {
+        if (! all && path.isEmpty()) return; // hidden container root
         if (isSelected()) { g.setColour(theme::selection); g.fillAll(); }
-        g.setColour(theme::text); g.setFont(13.0f);
+        const bool missing = path.isNotEmpty() && ! juce::File(path).isDirectory();
+        g.setColour(missing ? theme::muted : theme::text); g.setFont(13.0f);
         g.drawText(all ? "All samples" : juce::File(path).getFileName(), 3,0,w-6,h,juce::Justification::centredLeft,true);
     }
-    void itemSelectionChanged(bool selected) override { if (selected && ! owner.restoring && owner.onFolder) owner.onFolder(all ? juce::String() : path); }
+    void itemSelectionChanged(bool selected) override
+    {
+        if (selected && ! owner.restoring && owner.onFolder && (all || path.isNotEmpty()))
+            owner.onFolder(all ? juce::String() : path);
+    }
     void itemClicked(const juce::MouseEvent& e) override
     {
         if (! e.mods.isPopupMenu() || owner.onContextMenu == nullptr) return;
+        if (! all && path.isEmpty()) return;
         if (! isSelected()) setSelected(true, true);
         owner.onContextMenu(all ? juce::String() : path, all, e.getScreenPosition());
     }
     void itemOpennessChanged(bool open) override
     {
         if (! open || getNumSubItems() != 0) return;
-        if (all) { for (const auto& p : owner.roots) addSubItem(new Item(owner,p)); }
+        if (all || path.isEmpty()) { for (const auto& p : owner.roots) addSubItem(new Item(owner,p)); }
         else { for (const auto& p : owner.children[path]) addSubItem(new Item(owner,p)); }
         // JUCE notifies before this callback runs, so the newly added rows need another update.
         treeHasChanged();
@@ -53,9 +67,14 @@ void FolderTree::lookAndFeelChanged()
 }
 void FolderTree::refresh(SampleRepository& repo)
 {
+    refresh(repo, repo.roots(), true);
+}
+void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPaths, bool showAllSamples)
+{
     const juce::ScopedValueSetter<bool> restoreGuard(restoring,true);
     auto openness = tree.getOpennessState(false);
-    tree.setRootItem(nullptr); root.reset(); children.clear(); roots = repo.roots();
+    tree.setRootItem(nullptr); root.reset(); children.clear(); roots = rootPaths;
+    tree.setRootItemVisible(showAllSamples);
     std::set<juce::String> visitedFolders;
     int64_t last = 0;
     for (;;)
@@ -81,7 +100,8 @@ void FolderTree::refresh(SampleRepository& repo)
             }
         }
     }
-    root = std::make_unique<Item>(*this,juce::String(),true); tree.setRootItem(root.get()); root->setOpen(true);
+    root = std::make_unique<Item>(*this,juce::String(),showAllSamples);
+    tree.setRootItem(root.get()); root->setOpen(true);
     if (openness) tree.restoreOpennessState(*openness,true);
 }
 }

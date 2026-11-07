@@ -19,6 +19,10 @@ constexpr PaletteColour tagPalette[] = {
     { "Pink", 0xffd06ab8 }, { "Rose", 0xffd06a7a }, { "Grey", 0xff8a8f9c }
 };
 constexpr int pageSize = 10000;
+juce::String canonicalFolderPath(const juce::String& path)
+{
+    return path.isEmpty() ? juce::String() : juce::File(path).getFullPathName();
+}
 juce::Image tagDotImage(uint32_t colour)
 {
     juce::Image image(juce::Image::ARGB, 14, 14, true);
@@ -154,10 +158,30 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         filter.ascending = ascending; pageOffset = 0; reloadLibrary();
     };
     addAndMakeVisible(folders); rootsLabel.setVisible(false);
-    folders.onFolder = [this](juce::String path) { selectedFolder = std::move(path); pageOffset = 0; reloadLibrary(); };
+    folders.setComponentID("folderTree");
+    addAndMakeVisible(favoritesLabel); addAndMakeVisible(favorites);
+    favoritesLabel.setText("FAVORITES",juce::dontSendNotification);
+    favoritesLabel.setFont(juce::FontOptions(11)); favoritesLabel.setColour(juce::Label::textColourId,theme::muted);
+    favoritesLabel.setComponentID("favoritesLabel"); favorites.setComponentID("favoritesTree");
+    favoritesLabel.setVisible(false); favorites.setVisible(false);
+    folders.onFolder = [this](juce::String path)
+    {
+        favorites.clearSelection();
+        selectedFolder = std::move(path); pageOffset = 0; reloadLibrary();
+    };
     folders.onContextMenu = [this](const juce::String& path, bool allSamples, juce::Point<int> position)
     {
         showFolderContextMenu(path, allSamples, position);
+    };
+    favorites.onFolder = [this](juce::String path)
+    {
+        if (path.isEmpty()) return;
+        folders.clearSelection();
+        selectedFolder = std::move(path); pageOffset = 0; reloadLibrary();
+    };
+    favorites.onContextMenu = [this](const juce::String& path, bool, juce::Point<int> position)
+    {
+        showFavoriteContextMenu(path, position);
     };
     addFolder.onClick = [this] { chooseFolder(); };
     rescan.onClick = [this] { requestScan(false); };
@@ -266,6 +290,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         tagging = std::make_unique<TaggingService>(*writeRepo);
         autoTag = std::make_unique<AutoTagService>(*writeRepo);
         folders.refresh(*readRepo);
+        refreshFavorites();
         reloadLibrary();
         status.setText(catalogCount > 0
             ? juce::String(catalogCount) + " samples loaded"
@@ -407,7 +432,7 @@ void MainComponent::beginImport(const juce::File& folder)
     if (! indexer || indexer->progress().running) return;
     try
     {
-        writeRepo->addRoot(folder.getFullPathName()); folders.refresh(*readRepo);
+        writeRepo->addRoot(folder.getFullPathName()); folders.refresh(*readRepo); refreshFavorites();
         if (indexer->start({folder.getFullPathName()})) { wasRunning = true; reloadLibrary(); }
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
@@ -943,6 +968,159 @@ void MainComponent::showEditTagsMenu()
             safe->reloadLibrary();
         });
 }
+void MainComponent::refreshFavorites()
+{
+    if (readRepo == nullptr) return;
+    try { favorites.refresh(*readRepo, appSettings.favoriteFolders, false); }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+    const bool hasFavorites = ! appSettings.favoriteFolders.isEmpty();
+    favoritesLabel.setVisible(hasFavorites);
+    favorites.setVisible(hasFavorites);
+    if (! hasFavorites) favorites.clearSelection();
+    resized();
+}
+bool MainComponent::isFavoriteFolder(const juce::String& path) const
+{
+    const auto target = canonicalFolderPath(path);
+    if (target.isEmpty()) return false;
+    for (const auto& favorite : appSettings.favoriteFolders)
+        if (canonicalFolderPath(favorite) == target) return true;
+    return false;
+}
+bool MainComponent::isUnderFavoriteFolder(const juce::String& path) const
+{
+    const juce::File target(canonicalFolderPath(path));
+    if (target.getFullPathName().isEmpty()) return false;
+    for (const auto& favorite : appSettings.favoriteFolders)
+    {
+        const juce::File root(canonicalFolderPath(favorite));
+        if (target != root && target.isAChildOf(root)) return true;
+    }
+    return false;
+}
+void MainComponent::toggleFavoriteFolder(const juce::String& path)
+{
+    const auto target = canonicalFolderPath(path);
+    if (target.isEmpty()) return;
+    auto next = appSettings.favoriteFolders;
+    bool removed = false;
+    for (int i = next.size(); --i >= 0;)
+        if (canonicalFolderPath(next[i]) == target) { next.remove(i); removed = true; }
+    if (! removed)
+    {
+        if (isUnderFavoriteFolder(target))
+        {
+            status.setText("This folder is already visible inside a favorite.",juce::dontSendNotification);
+            return;
+        }
+        // A parent favorite contains the whole subtree; drop roots that would duplicate it.
+        for (int i = next.size(); --i >= 0;)
+            if (juce::File(canonicalFolderPath(next[i])).isAChildOf(juce::File(target)))
+                next.remove(i);
+        next.add(target);
+    }
+    try
+    {
+        settingsStore.update([&next](AppSettings& saved) { saved.favoriteFolders = next; });
+        appSettings.favoriteFolders = next;
+        refreshFavorites();
+        status.setText(removed ? "Removed from favorites: " + target
+                               : "Added to favorites: " + target,juce::dontSendNotification);
+    }
+    catch (const std::exception& e)
+    {
+        status.setText("Could not save favorites: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification);
+    }
+}
+void MainComponent::showFavoriteContextMenu(const juce::String& path, juce::Point<int> screenPosition)
+{
+    // Only favorite roots get the menu; children are already covered by their root.
+    if (path.isEmpty() || ! isFavoriteFolder(path)) return;
+    juce::PopupMenu menu;
+    menu.addItem(7201, "Remove from favorites");
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
+                           { screenPosition.x, screenPosition.y, 1, 1 }),
+        [safe = juce::Component::SafePointer<MainComponent>(this), path](int result)
+        {
+            if (safe != nullptr && result == 7201) safe->toggleFavoriteFolder(path);
+        });
+}
+void MainComponent::resetTagsSelected(const std::vector<int64_t>& sampleIds)
+{
+    if (readRepo == nullptr || sampleIds.empty()) return;
+    if (autoTagDialog != nullptr)
+    {
+        status.setText("Close the AutoTag review before resetting tags.",juce::dontSendNotification);
+        return;
+    }
+    int tagged = 0;
+    try { tagged = readRepo->countTaggedSamples(sampleIds); }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
+    if (tagged == 0)
+    {
+        status.setText("The selected files have no tags to reset.",juce::dontSendNotification);
+        return;
+    }
+    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::WarningIcon)
+        .withTitle("Reset tags")
+        .withMessage("Remove all tag assignments from " + juce::String(sampleIds.size())
+            + " selected file(s)?\n\n" + juce::String(tagged)
+            + " file(s) currently have tags.\n\nTag definitions, stars, smart overrides and original files are kept.")
+        .withButton("Reset", 1).withButton("Cancel", 0),
+        [safe = juce::Component::SafePointer<MainComponent>(this), sampleIds](int choice)
+        {
+            if (safe == nullptr || choice != 1 || safe->tagging == nullptr) return;
+            if (safe->autoTag != nullptr && safe->autoTag->progress().running)
+            {
+                safe->status.setText("Wait for AutoTag to finish before resetting tags.",juce::dontSendNotification);
+                return;
+            }
+            if (safe->tagging->startResetSelected(sampleIds))
+                safe->status.setText("Removing tags from selected files",juce::dontSendNotification);
+            else
+                safe->status.setText("Tag reset could not start.",juce::dontSendNotification);
+        });
+}
+void MainComponent::resetTagsFolder(const juce::String& path, int catalogued)
+{
+    if (readRepo == nullptr || path.isEmpty()) return;
+    if (autoTagDialog != nullptr)
+    {
+        status.setText("Close the AutoTag review before resetting tags.",juce::dontSendNotification);
+        return;
+    }
+    int tagged = 0;
+    try { tagged = readRepo->countTaggedInFolder(path); }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
+    if (tagged == 0)
+    {
+        status.setText("This folder has no tagged files to reset.",juce::dontSendNotification);
+        return;
+    }
+    juce::AlertWindow::showAsync(juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::WarningIcon)
+        .withTitle("Reset tags in folder")
+        .withMessage("Folder:\n" + path
+            + "\n\nIncludes every subfolder."
+            + "\nCatalogued files: " + juce::String(catalogued)
+            + "\nTagged files: " + juce::String(tagged)
+            + "\n\nTag definitions, stars, smart overrides and original files are kept.")
+        .withButton("Reset", 1).withButton("Cancel", 0),
+        [safe = juce::Component::SafePointer<MainComponent>(this), path](int choice)
+        {
+            if (safe == nullptr || choice != 1 || safe->tagging == nullptr) return;
+            if (safe->autoTag != nullptr && safe->autoTag->progress().running)
+            {
+                safe->status.setText("Wait for AutoTag to finish before resetting tags.",juce::dontSendNotification);
+                return;
+            }
+            if (safe->tagging->startResetFolder(path))
+                safe->status.setText("Removing tags from " + path,juce::dontSendNotification);
+            else
+                safe->status.setText("Tag reset could not start.",juce::dontSendNotification);
+        });
+}
 void MainComponent::startAutoTagSelected(const std::vector<int64_t>& sampleIds)
 {
     if (autoTag == nullptr || sampleIds.empty()) return;
@@ -1053,7 +1231,12 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
         tagMenu.addItem(7100 + i, allTags[(size_t) i].name, true, false,
                         tagDotImage(allTags[(size_t) i].colour));
     if (allTags.empty()) tagMenu.addSectionHeader("No tags yet");
+    const bool exactFavorite = isFavoriteFolder(path);
+    const bool underFavorite = isUnderFavoriteFolder(path);
+    const juce::String favoriteLabel = exactFavorite ? "Remove from favorites"
+        : (underFavorite ? "Already in favorites" : "Add to favorites");
     menu.addItem(7001, openLabel, available);
+    menu.addItem(7006, favoriteLabel, exactFavorite || ! underFavorite);
     menu.addSeparator();
     menu.addItem(7002, "Scan folder", indexer != nullptr && ! indexer->progress().running);
     menu.addItem(7003, "Analyze smart metadata (" + juce::String(catalogued) + ")",
@@ -1066,6 +1249,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     menu.addItem(7004, "AutoTag folder...", autoTagIdle && catalogued > 0);
     menu.addSeparator();
     menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0);
+    menu.addItem(7005, "Reset tags...", catalogued > 0 && autoTagIdle && autoTagDialog == nullptr);
     const juce::String folderPath = path;
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 }),
@@ -1109,6 +1293,14 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                             else
                                 safe->status.setText("Tagging could not start.", juce::dontSendNotification);
                         });
+                }
+                else if (result == 7006)
+                {
+                    safe->toggleFavoriteFolder(folderPath);
+                }
+                else if (result == 7005)
+                {
+                    safe->resetTagsFolder(folderPath, catalogued);
                 }
                 else if (result == 7001)
                 {
@@ -1219,6 +1411,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         && ! (smart && smart->progress().running)
         && (tagging == nullptr || ! tagging->progress().running);
     menu.addItem(9006, "AutoTag selected...", autoTagIdle);
+    const bool resetIdle = ! ids.empty() && autoTagDialog == nullptr
+        && (tagging == nullptr || ! tagging->progress().running)
+        && (autoTag == nullptr || ! autoTag->progress().running);
+    menu.addItem(9007, "Reset tags...", resetIdle);
 #if JUCE_MAC
     const juce::String openLabel = "Open in Finder";
 #elif JUCE_WINDOWS
@@ -1297,6 +1493,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     std::vector<int64_t> selectedIds;
                     for (const auto& record : files) selectedIds.push_back(record.id);
                     safe->startAutoTagSelected(selectedIds);
+                }
+                else if (result == 9007)
+                {
+                    safe->resetTagsSelected(ids);
                 }
                 else if (result == 9004)
                 {
@@ -1386,7 +1586,8 @@ void MainComponent::timerCallback()
         }
         status.setText(tg.operation + (stage.isNotEmpty() ? "  |  " + stage : juce::String())
             + (tg.total > 0 ? "  " + juce::String(tg.processed) + "/" + juce::String(tg.total) : juce::String())
-            + "  applied " + juce::String(tg.applied) + "  errors " + juce::String(tg.errors)
+            + (tg.clearing ? "  removed " : "  applied ") + juce::String(tg.applied)
+            + "  errors " + juce::String(tg.errors)
             + (tg.running && tg.current.isNotEmpty() ? "  |  " + tg.current : juce::String())
             + (tg.running ? juce::String() : "  |  " + tg.message), juce::dontSendNotification);
         status.setTooltip(status.getText());
@@ -1442,7 +1643,7 @@ void MainComponent::timerCallback()
             try { writeRepo->refreshDuplicates(); }
             catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
         }
-        reloadLibrary(); folders.refresh(*readRepo);
+        reloadLibrary(); folders.refresh(*readRepo); refreshFavorites();
         // New or changed audio invalidates its smart result; rebuild metadata in the background.
         if (! p.cancelled && smart && ! smart->progress().running) smart->start();
     }
@@ -1482,6 +1683,7 @@ void MainComponent::lookAndFeelChanged()
     subtitle.setColour(juce::Label::textColourId,theme::muted);
     libraryHeading.setColour(juce::Label::textColourId,theme::muted);
     rootsLabel.setColour(juce::Label::textColourId,theme::muted);
+    favoritesLabel.setColour(juce::Label::textColourId,theme::muted);
     status.setColour(juce::Label::textColourId,theme::muted);
     tagsLabel.setColour(juce::Label::textColourId,theme::muted);
     stageLabel.setColour(juce::Label::textColourId,theme::muted);
@@ -1641,6 +1843,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     const auto isDefault = dbPath.getFullPathName() == defaultDatabaseFile().getFullPathName();
     appSettings.databasePath = isDefault ? juce::String() : dbPath.getFullPathName();
     selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
+    favorites.clearSelection();
     filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
     filter.matchAnyTag = false; filter.starredOnly = false;
     filter.hideDuplicates = false; filter.hideEmpty = appSettings.hideEmpty; filter.duplicateHash.clear();
@@ -1649,6 +1852,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     selectedTags.setTags({});
     writeRepo->refreshDuplicates();
     folders.refresh(*readRepo);
+    refreshFavorites();
     reloadLibrary();
     juce::String message = "Catalog: " + dbPath.getFullPathName();
     if (moveCurrent) message += "  |  previous catalog kept at " + previous.getFullPathName();
@@ -1716,6 +1920,18 @@ void MainComponent::resized()
     newFiles.setBounds(scanRow); sidebar.removeFromTop(8);
     reanalyze.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(6);
     smartButton.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(24);
+    if (favorites.isVisible() && ! appSettings.favoriteFolders.isEmpty())
+    {
+        const int desired = juce::jlimit(70, 190, 24 + appSettings.favoriteFolders.size() * 26);
+        const int height = juce::jmin(desired, sidebar.getHeight() / 2);
+        if (height >= 40)
+        {
+            auto area = sidebar.removeFromBottom(height);
+            favoritesLabel.setBounds(area.removeFromTop(18));
+            favorites.setBounds(area);
+            sidebar.removeFromBottom(6);
+        }
+    }
     folders.setBounds(sidebar);
     auto analysis = analysisBounds.reduced(16,16);
     analysisHeading.setBounds(analysis.removeFromTop(30)); analysis.removeFromTop(8);

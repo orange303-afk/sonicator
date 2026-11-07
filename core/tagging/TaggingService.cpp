@@ -8,6 +8,7 @@ TaggingService::~TaggingService()
 bool TaggingService::startTagFolder(const juce::String& folder, int64_t tagId)
 {
     if (folder.isEmpty() || tagId <= 0) return false;
+    clearing = false;
     if (! begin("Tag folder")) return false;
     scope = Scope::Folder;
     folderScope = folder;
@@ -22,6 +23,7 @@ bool TaggingService::startTagFolder(const juce::String& folder, int64_t tagId)
 bool TaggingService::startTagSelected(const std::vector<int64_t>& sampleIds, int64_t tagId)
 {
     if (sampleIds.empty() || tagId <= 0) return false;
+    clearing = false;
     if (! begin("Tag selected files")) return false;
     scope = Scope::Selected;
     folderScope.clear();
@@ -41,10 +43,41 @@ bool TaggingService::begin(const juce::String& operation)
     std::lock_guard lock(stateMutex);
     state = {};
     state.running = true;
+    state.clearing = clearing;
     state.stage = TaggingStage::Preparing;
     state.operation = operation;
     state.message = "Preparing";
     return true;
+}
+bool TaggingService::startResetFolder(const juce::String& folder)
+{
+    if (folder.isEmpty()) return false;
+    clearing = true;
+    if (! begin("Reset tags in folder")) return false;
+    scope = Scope::Folder;
+    folderScope = folder;
+    selectedScope.clear();
+    targetTag = 0;
+    if (startThread()) return true;
+    std::lock_guard lock(stateMutex);
+    state.running = false; state.stage = TaggingStage::Failed;
+    state.message = "Cannot start tag reset";
+    return false;
+}
+bool TaggingService::startResetSelected(const std::vector<int64_t>& sampleIds)
+{
+    if (sampleIds.empty()) return false;
+    clearing = true;
+    if (! begin("Reset tags in selection")) return false;
+    scope = Scope::Selected;
+    folderScope.clear();
+    selectedScope = sampleIds;
+    targetTag = 0;
+    if (startThread()) return true;
+    std::lock_guard lock(stateMutex);
+    state.running = false; state.stage = TaggingStage::Failed;
+    state.message = "Cannot start tag reset";
+    return false;
 }
 void TaggingService::cancel()
 {
@@ -76,7 +109,7 @@ void TaggingService::run()
             std::lock_guard lock(stateMutex);
             state.total = (int) ids.size();
             state.stage = TaggingStage::Applying;
-            state.message = "Assigning tag";
+            state.message = clearing ? "Removing tags" : "Assigning tag";
             state.current = scope == Scope::Folder ? folderScope : juce::String("selected files");
         }
         for (size_t start = 0; start < ids.size();)
@@ -90,9 +123,15 @@ void TaggingService::run()
             const size_t end = std::min(ids.size(), start + (size_t) batchSize);
             std::vector<int64_t> batch(ids.begin() + (long) start, ids.begin() + (long) end);
             SampleRepository::TagAssignmentOutcome outcome;
+            const auto runBatch = [this](const std::vector<int64_t>& ids)
+            {
+                return clearing
+                    ? repo.clearTagsBatch(ids, [this] { return cancelled.load(); })
+                    : repo.assignTagBatch(ids, targetTag, [this] { return cancelled.load(); });
+            };
             try
             {
-                outcome = repo.assignTagBatch(batch, targetTag, [this] { return cancelled.load(); });
+                outcome = runBatch(batch);
             }
             catch (const std::exception& batchError)
             {
@@ -103,8 +142,7 @@ void TaggingService::run()
                     if (cancelled) break;
                     try
                     {
-                        const auto single = repo.assignTagBatch({ id }, targetTag,
-                            [this] { return cancelled.load(); });
+                        auto single = runBatch({ id });
                         if (single.cancelled) { outcome.cancelled = true; break; }
                         outcome.added += single.added;
                     }
@@ -140,7 +178,7 @@ void TaggingService::run()
         {
             std::lock_guard lock(stateMutex);
             const int applied = state.applied;
-            if (applied > 0)
+            if (! clearing && applied > 0)
             {
                 try { repo.recordRecentTag(targetTag); }
                 catch (...) {}
@@ -150,12 +188,16 @@ void TaggingService::run()
             if (state.cancelled)
             {
                 state.stage = TaggingStage::Cancelled;
-                state.message = "Cancelled; " + juce::String(applied) + " assignment(s) kept";
+                state.message = clearing
+                    ? "Cancelled; " + juce::String(applied) + " assignment(s) removed"
+                    : "Cancelled; " + juce::String(applied) + " assignment(s) kept";
             }
             else
             {
                 state.stage = TaggingStage::Complete;
-                state.message = "Tagged " + juce::String(applied) + " file(s)";
+                state.message = clearing
+                    ? "Removed " + juce::String(applied) + " tag assignment(s)"
+                    : "Tagged " + juce::String(applied) + " file(s)";
             }
         }
     }

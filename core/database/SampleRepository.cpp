@@ -996,6 +996,7 @@ SampleRepository::TagAssignmentOutcome SampleRepository::assignTagBatch(
             if (isCancelled && isCancelled())
             {
                 detail::exec(db.handle, "ROLLBACK;");
+                outcome.added = 0;
                 outcome.cancelled = true;
                 return outcome;
             }
@@ -1031,6 +1032,7 @@ SampleRepository::TagAssignmentOutcome SampleRepository::assignTagPairs(
             if (isCancelled && isCancelled())
             {
                 detail::exec(db.handle, "ROLLBACK;");
+                outcome.added = 0;
                 outcome.cancelled = true;
                 return outcome;
             }
@@ -1049,6 +1051,74 @@ SampleRepository::TagAssignmentOutcome SampleRepository::assignTagPairs(
         throw;
     }
     return outcome;
+}
+SampleRepository::TagAssignmentOutcome SampleRepository::clearTagsBatch(
+    const std::vector<int64_t>& sampleIds, const std::function<bool()>& isCancelled)
+{
+    TagAssignmentOutcome outcome;
+    if (sampleIds.empty()) return outcome;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement s(db.handle, "DELETE FROM sample_tags WHERE sample_id=?");
+        for (auto id : sampleIds)
+        {
+            if (isCancelled && isCancelled())
+            {
+                detail::exec(db.handle, "ROLLBACK;");
+                outcome.added = 0;
+                outcome.cancelled = true;
+                return outcome;
+            }
+            if (id <= 0) continue;
+            s.integer(1, id); s.step();
+            const int removed = sqlite3_changes(db.handle);
+            if (removed > 0) outcome.added += removed;
+            s.reset();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+    return outcome;
+}
+int SampleRepository::countTaggedInFolder(const juce::String& folder) const
+{
+    if (folder.isEmpty()) return 0;
+    std::lock_guard lock(db.mutex);
+    auto [lower, upper] = folderRange(folder);
+    detail::Statement s(db.handle,
+        "SELECT COUNT(DISTINCT s.id) FROM samples s JOIN sample_tags st ON st.sample_id=s.id"
+        " WHERE s.path>=? AND s.path<?");
+    s.text(1, lower); s.text(2, upper);
+    return s.step() ? (int) s.integer(0) : 0;
+}
+int SampleRepository::countTaggedSamples(const std::vector<int64_t>& sampleIds) const
+{
+    if (sampleIds.empty()) return 0;
+    auto ids = sampleIds;
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    std::lock_guard lock(db.mutex);
+    int count = 0;
+    constexpr size_t chunkSize = 400;
+    for (size_t start = 0; start < ids.size(); start += chunkSize)
+    {
+        const size_t end = std::min(ids.size(), start + chunkSize);
+        juce::String placeholders;
+        for (size_t i = start; i < end; ++i) placeholders += (i == start ? "?" : ",?");
+        detail::Statement s(db.handle,
+            ("SELECT COUNT(DISTINCT sample_id) FROM sample_tags WHERE sample_id IN ("
+             + placeholders + ")").toRawUTF8());
+        int index = 1;
+        for (size_t i = start; i < end; ++i) s.integer(index++, ids[i]);
+        if (s.step()) count += (int) s.integer(0);
+    }
+    return count;
 }
 void SampleRepository::recordRecentTag(int64_t tagId)
 {

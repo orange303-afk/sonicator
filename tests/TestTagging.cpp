@@ -92,3 +92,76 @@ TEST_CASE("Empty and unavailable folders complete a tag job without assignments"
     REQUIRE(f.repo->recentTags().empty());
     REQUIRE_FALSE(service.startTagFolder({}, f.tagId));
 }
+TEST_CASE("Clearing tags removes links recursively and is idempotent", "[tagging][reset]")
+{
+    ScopeFixture f;
+    const auto other = f.repo->createTag("Other", 0xff222222);
+    REQUIRE(f.repo->assignTag({ f.ids[0], f.ids[1], f.ids[2] }, f.tagId) == 3);
+    REQUIRE(f.repo->assignTag({ f.ids[0] }, other) == 1);
+    REQUIRE(f.repo->countTaggedInFolder(f.folder) == 3);
+    REQUIRE(f.repo->countTaggedSamples({ f.ids[0], f.ids[2], 99999999 }) == 2);
+    const auto outcome = f.repo->clearTagsBatch({ f.ids[0], f.ids[1], 99999999 }, {});
+    REQUIRE(outcome.added == 3);
+    REQUIRE_FALSE(outcome.cancelled);
+    REQUIRE(f.repo->tagsForSample(f.ids[0]).empty());
+    REQUIRE(f.repo->tagsForSample(f.ids[1]).empty());
+    REQUIRE(f.repo->tagsForSample(f.ids[2]).size() == 1);
+    REQUIRE(f.repo->countTaggedInFolder(f.folder) == 1); // ids[2]
+    REQUIRE(f.repo->tags().size() == 16); // tag definitions survive
+    REQUIRE(f.repo->clearTagsBatch({ f.ids[0], f.ids[1] }, {}).added == 0);
+    REQUIRE(f.repo->recentTags().empty());
+}
+TEST_CASE("Clearing tags rolls back the unfinished transaction when cancelled", "[tagging][reset][cancel]")
+{
+    ScopeFixture f;
+    REQUIRE(f.repo->assignTag({ f.ids[0], f.ids[1], f.ids[2] }, f.tagId) == 3);
+    int calls = 0;
+    const auto outcome = f.repo->clearTagsBatch({ f.ids[0], f.ids[1], f.ids[2] },
+        [&calls] { return ++calls > 1; });
+    REQUIRE(outcome.cancelled);
+    REQUIRE(outcome.added == 0);
+    for (int i = 0; i < 3; ++i)
+        REQUIRE(f.repo->tagsForSample(f.ids[(size_t) i]).size() == 1);
+}
+TEST_CASE("Folder reset removes every tag link and preserves stars, overrides and history", "[tagging][reset][folders]")
+{
+    ScopeFixture f;
+    const auto other = f.repo->createTag("Other", 0xff222222);
+    REQUIRE(f.repo->assignTag(f.ids, f.tagId) == 6);
+    REQUIRE(f.repo->assignTag({ f.ids[0] }, other) == 1);
+    f.repo->setStarred({ f.ids[0] }, true);
+    SmartOverride overrideValue; overrideValue.textValue = "Kick";
+    f.repo->setSmartOverride(f.ids[0], SmartField::Type, overrideValue);
+    f.repo->recordRecentTag(f.tagId);
+    TaggingService service(*f.repo);
+    REQUIRE(service.startResetFolder(f.folder));
+    REQUIRE(service.waitUntilFinished(15000));
+    const auto p = service.progress();
+    REQUIRE(p.clearing);
+    REQUIRE_FALSE(p.cancelled);
+    REQUIRE(p.applied == 7);
+    for (auto id : f.ids) REQUIRE(f.repo->tagsForSample(id).empty());
+    REQUIRE(f.repo->tags().size() == 16);
+    REQUIRE(f.repo->findById(f.ids[0])->starred);
+    REQUIRE(f.repo->smartOverrides(f.ids[0]).size() == 1);
+    REQUIRE(f.repo->recentTags().size() == 1);
+    REQUIRE(service.startResetFolder(f.folder));
+    REQUIRE(service.waitUntilFinished(15000));
+    REQUIRE(service.progress().applied == 0);
+}
+TEST_CASE("Reset cancellation keeps completed batches and reports the real removed count", "[tagging][reset][cancel]")
+{
+    ScopeFixture f;
+    REQUIRE(f.repo->assignTag(f.ids, f.tagId) == 6);
+    TaggingService service(*f.repo, 1);
+    service.onBatch = [&service](const TaggingProgress& p) { if (p.applied >= 2) service.cancel(); };
+    REQUIRE(service.startResetSelected(f.ids));
+    REQUIRE(service.waitUntilFinished(15000));
+    const auto p = service.progress();
+    REQUIRE(p.cancelled);
+    REQUIRE(p.applied >= 2);
+    REQUIRE(p.applied < 6);
+    int remaining = 0;
+    for (auto id : f.ids) remaining += f.repo->tagsForSample(id).empty() ? 0 : 1;
+    REQUIRE(remaining == 6 - p.applied);
+}

@@ -122,3 +122,27 @@ TEST_CASE("Preview toggles round-trip and defaults are stable", "[settings][prev
     REQUIRE_FALSE(malformed.midiPreview);
     REQUIRE(malformed.autoPreview);
 }
+TEST_CASE("Favorite folders are global and round-trip through settings", "[settings][favorites]")
+{
+    TestDirectory t;
+    SettingsStore store(t.dir.getChildFile("favorites.json"));
+    REQUIRE(store.load().favoriteFolders.isEmpty());
+    store.update([](AppSettings& saved)
+    {
+        saved.favoriteFolders.add("/lib/Drums");
+        saved.favoriteFolders.add("");
+        saved.favoriteFolders.add("/lib/Bass");
+    });
+    auto loaded = store.load();
+    REQUIRE(loaded.favoriteFolders.size() == 2);
+    REQUIRE(loaded.favoriteFolders[0] == "/lib/Drums");
+    REQUIRE(loaded.favoriteFolders[1] == "/lib/Bass");
+    // An unrelated update must keep the favorite list.
+    store.update([](AppSettings& saved) { saved.hideEmpty = true; });
+    loaded = store.load();
+    REQUIRE(loaded.favoriteFolders.size() == 2);
+    REQUIRE(loaded.hideEmpty);
+    store.update([](AppSettings& saved) { saved.favoriteFolders.remove(0); });
+    REQUIRE(store.load().favoriteFolders.size() == 1);
+    REQUIRE(store.load().favoriteFolders[0] == "/lib/Bass");
+}

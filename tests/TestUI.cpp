@@ -402,3 +402,37 @@ TEST_CASE("AutoTag dialog virtualizes proposals and honours include toggles", "[
     table->getModel()->cellClicked(0, 1, click);
     REQUIRE(apply->isEnabled()); // already-assigned rows cannot be re-enabled
 }
+TEST_CASE("Favorite tree keeps a folder and its catalogued descendants expandable", "[ui][folders][favorites]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("favorites.sqlite")); SampleRepository repo(db); repo.createTables();
+    const auto rootPath = t.dir.getChildFile("lib").getFullPathName(); repo.addRoot(rootPath);
+    auto add = [&](const juce::String& relative)
+    {
+        SampleRecord r; r.filePath = rootPath + "/" + relative;
+        r.fileName = juce::File(r.filePath).getFileName(); repo.upsert(r);
+    };
+    add("Drums/kick.wav"); add("Drums/deep/more/snare.wav"); add("Bass/bass.wav");
+    FolderTree favorites; favorites.refresh(repo, { rootPath + "/Drums" }, false);
+    auto* tree = dynamic_cast<juce::TreeView*>(favorites.getChildComponent(0)); REQUIRE(tree != nullptr);
+    auto* root = tree->getRootItem(); REQUIRE(root != nullptr);
+    REQUIRE(root->getNumSubItems() == 1);
+    auto* drums = root->getSubItem(0); REQUIRE(drums != nullptr);
+    REQUIRE(drums->getUniqueName() == rootPath + "/Drums");
+    REQUIRE(drums->mightContainSubItems());
+    juce::String selected; favorites.onFolder = [&](juce::String path) { selected = path; };
+    drums->setSelected(true, true);
+    REQUIRE(selected == rootPath + "/Drums");
+    drums->setOpen(true);
+    REQUIRE(drums->getNumSubItems() == 1);
+    auto* deep = drums->getSubItem(0);
+    REQUIRE(deep->getUniqueName() == rootPath + "/Drums/deep");
+    deep->setOpen(true);
+    REQUIRE(deep->getNumSubItems() == 1);
+    REQUIRE(deep->getSubItem(0)->getUniqueName() == rootPath + "/Drums/deep/more");
+    // A missing favorite remains a root and does not fall back to another folder.
+    FolderTree missing; missing.refresh(repo, { rootPath + "/NotThere" }, false);
+    tree = dynamic_cast<juce::TreeView*>(missing.getChildComponent(0)); REQUIRE(tree != nullptr);
+    root = tree->getRootItem(); REQUIRE(root != nullptr);
+    REQUIRE(root->getNumSubItems() == 1);
+    REQUIRE(root->getSubItem(0)->getUniqueName() == rootPath + "/NotThere");
+}

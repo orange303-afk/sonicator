@@ -24,6 +24,26 @@ keeps five rows. Only explicit human assignments update it: quick items, the **T
 tag**, and **Tag folder**. Bulk AutoTag deliberately does not touch it, so worker batch order cannot
 scramble the menu.
 
+## Reset tags
+
+`Reset tags...` is available for a selection and for a folder subtree. It removes every tag
+assignment in the confirmed scope, not the tag definitions. The confirmation shows the selected
+file count or the folder path with subfolders, the number of catalogued files and the number that
+currently have tags. Stars, smart overrides, measured features, original files and recent-tag
+history are untouched. Work runs in the same background batches as folder Tag, with cancellation
+and the actual removed count. A repeated reset is a no-op.
+
+## Favorite folders
+
+The folder menu toggles `Add to favorites` / `Remove from favorites`; a folder already visible
+inside a favorite shows a disabled `Already in favorites`. Adding a parent absorbs redundant
+descendant favorites. The `FAVORITES` section below the folder tree is a second expandable tree:
+each saved path is a root and catalogued subfolders materialize on expansion. Clicking a node
+filters the library and clears the normal tree's selection. Right-clicking a favorite root removes
+it. A path that is no longer available stays listed and is painted muted. The list is global across
+catalogs and persists in `settings.json`; a favorite that has no rows in the current catalog remains
+visible.
+
 ## Folder actions
 
 Right-clicking a folder in the sidebar offers:
@@ -132,6 +152,8 @@ Known limits:
 
 - Applied AutoTag reasons are not persisted in this stage; they are shown before applying. There is
   no inspector consumer yet.
+- Favorite folders are global, not per catalog, by the owner's decision. A favorite from another
+  catalog stays in the list but has no files until that catalog is opened.
 - Folder names are used as context only, not as proof.
 - If a built-in instrument tag is renamed or deleted, AutoTag reports `tag-missing` instead of
   recreating it.

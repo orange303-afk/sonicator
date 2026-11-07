@@ -654,3 +654,31 @@ TEST_CASE("Preview toggles are restored on restart and saved when changed", "[ui
     gate->onClick();
     REQUIRE((bool) juce::JSON::parse(settings)["rexGate"]);
 }
+TEST_CASE("Shell shows the favorites section only when favorite folders exist", "[ui][favorites]")
+{
+    TestDirectory t;
+    const auto catalog = t.dir.getChildFile("favorites-shell.sqlite");
+    const auto settings = t.dir.getChildFile("favorites-settings.json");
+    AppSettings withFavorite;
+    withFavorite.favoriteFolders.add(t.dir.getChildFile("lib/Drums").getFullPathName());
+    MainComponent app(catalog, false, withFavorite, settings);
+    auto* label = dynamic_cast<juce::Label*>(app.findChildWithID("favoritesLabel"));
+    auto* tree = dynamic_cast<FolderTree*>(app.findChildWithID("favoritesTree"));
+    REQUIRE(label != nullptr);
+    REQUIRE(tree != nullptr);
+    REQUIRE(label->isVisible());
+    REQUIRE(tree->isVisible());
+    auto* folders = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree"));
+    REQUIRE(folders != nullptr);
+    REQUIRE(tree->getBounds().getHeight() > 0);
+    REQUIRE(tree->getBounds().getY() >= folders->getBounds().getBottom());
+
+    AppSettings withoutFavorite;
+    MainComponent empty(t.dir.getChildFile("favorites-empty.sqlite"), false, withoutFavorite, settings);
+    auto* emptyLabel = dynamic_cast<juce::Label*>(empty.findChildWithID("favoritesLabel"));
+    auto* emptyTree = dynamic_cast<FolderTree*>(empty.findChildWithID("favoritesTree"));
+    REQUIRE(emptyLabel != nullptr);
+    REQUIRE(emptyTree != nullptr);
+    REQUIRE_FALSE(emptyLabel->isVisible());
+    REQUIRE_FALSE(emptyTree->isVisible());
+}

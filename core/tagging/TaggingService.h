@@ -9,7 +9,7 @@ enum class TaggingStage { Idle, Preparing, Applying, Complete, Cancelled, Failed
 // Progress for a bulk tag operation. The counts are real work, never a fabricated percentage.
 struct TaggingProgress
 {
-    bool running = false, cancelled = false;
+    bool running = false, cancelled = false, clearing = false;
     TaggingStage stage = TaggingStage::Idle;
     int total = 0, processed = 0, applied = 0, errors = 0;
     juce::String operation, current, message, lastError;
@@ -25,6 +25,9 @@ public:
     ~TaggingService() override;
     bool startTagFolder(const juce::String& folder, int64_t tagId);
     bool startTagSelected(const std::vector<int64_t>& sampleIds, int64_t tagId);
+    // Removes every tag link from the scope. Tag definitions and recent-tag history are untouched.
+    bool startResetFolder(const juce::String& folder);
+    bool startResetSelected(const std::vector<int64_t>& sampleIds);
     void cancel();
     TaggingProgress progress() const;
     bool waitUntilFinished(int timeoutMs) { return waitForThreadToExit(timeoutMs); }
@@ -39,6 +42,7 @@ private:
     juce::String folderScope;
     std::vector<int64_t> selectedScope;
     int64_t targetTag = 0;
+    bool clearing = false;
     mutable std::mutex stateMutex;
     TaggingProgress state;
     std::atomic<bool> cancelled { false };

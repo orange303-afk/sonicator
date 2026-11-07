@@ -11,6 +11,7 @@ struct AppSettings
     int pageSize = 10000; // 0 means every match on one virtual page
     juce::String databasePath; // empty means the default catalog location
     juce::StringArray searchHistory; // most recent first, at most 10 entries
+    juce::StringArray favoriteFolders; // global across catalogs, in display order
     bool hideEmpty = false;
     // Preview panel toggles. Persisted so a restart keeps the same audition behaviour.
     bool midiPreview = false;

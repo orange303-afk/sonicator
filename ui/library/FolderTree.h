@@ -11,6 +11,9 @@ public:
     FolderTree();
     ~FolderTree() override;
     void refresh(SampleRepository&);
+    // Builds a tree for an explicit root list. With showAllSamples=false the container root is
+    // hidden and the supplied folders appear as top-level expandable entries.
+    void refresh(SampleRepository&, const juce::StringArray& rootPaths, bool showAllSamples);
     void resized() override;
     void clearSelection();
     void lookAndFeelChanged() override;

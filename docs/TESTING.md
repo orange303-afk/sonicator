@@ -2,7 +2,9 @@
 
 ## Tags, AutoTag and folder actions (2026-11-08)
 
-- macOS Debug: **238 cases / 1869 assertions**, all passed; CTest 1/1, about 24 s. Windows, Explorer integration and physical acceptance were not run.
+- macOS Debug: **245 cases / 1949 assertions**, all passed; CTest 1/1, about 27 s. Windows, Explorer integration and physical acceptance were not run.
+- Reset tags: selection and recursive folder scope, tag links only, tag definitions/stars/overrides/recent history preserved, idempotence and cancellation rollback with the actual removed count.
+- Favorite folders: global `settings.json` round-trip and unrelated-update preservation; second favorite tree shows a root and its catalogued descendants, expands like the normal tree, preserves click callback and keeps a missing root visible without fallback.
 - Schema **8** adds `recent_tags`. Migration uses the existing SQLite backup and keeps ids, tags, stars, duplicates, overrides and measured features. Migration/reopen/isolation covered.
 - Recent tags: five unique newest-first entries, repeat assignment moves a tag up, rename and delete are reflected, persistence and per-catalog isolation, batch assignment counts only new links and never removes links, quick items never untoggle. The context menu shows no empty section; AutoTag does not update the history.
 - Folder scope: recursive ids, separator-aware sibling-prefix rejection, independence from filters/pagination, empty and unavailable folders, subtree Scan without a new root, missing reconciliation restricted to the subtree.
