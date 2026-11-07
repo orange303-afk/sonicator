@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "ui/library/FileListPanel.h"
+#include "ui/library/SearchField.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/library/FolderTree.h"
 #include "ui/library/TagStrip.h"
@@ -10,6 +11,28 @@
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
 using namespace sonicator;
+TEST_CASE("Search field requests history on left click, not on typing or right click", "[ui][search-history]")
+{
+    SearchField field;
+    field.setPopupMenuEnabled(false);
+    int requests = 0;
+    field.onHistoryRequest = [&] { ++requests; };
+    const auto now = juce::Time::getCurrentTime();
+    auto click = [&](int flags)
+    {
+        field.mouseDown(juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(),
+            { 4.0f, 4.0f }, juce::ModifierKeys(flags), 1.0f, 0, 0, 0, 0,
+            &field, &field, now, { 4.0f, 4.0f }, now, 1, false));
+    };
+    click(juce::ModifierKeys::leftButtonModifier);
+    REQUIRE(requests == 1);
+    field.setText("pad c4");
+    REQUIRE(requests == 1);
+    click(juce::ModifierKeys::leftButtonModifier);
+    REQUIRE(requests == 2); // repeat click while the field already has focus
+    click(juce::ModifierKeys::rightButtonModifier);
+    REQUIRE(requests == 2);
+}
 TEST_CASE("Auto Preview is independently switchable while MIDI remains enabled", "[ui][auto-preview]")
 {
     TestDirectory t; AudioEngine engine(false); PreviewPanel preview(engine,t.dir.getChildFile("cache"));

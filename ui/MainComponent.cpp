@@ -71,7 +71,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     theme::apply(appSettings.theme);
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,32>{&preview,&library,&search,&searchHistory,&addFolder,&rescan,&reanalyze,&newFiles,
+    for (auto* c : std::array<juce::Component*,31>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
          &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel})
@@ -115,8 +115,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         recordSearchHistory(filter.text);
     };
     search.onFocusLost = [this] { recordSearchHistory(search.getText().trim()); };
-    searchHistory.setTooltip("Last 10 searches");
-    searchHistory.onClick = [this] { showSearchHistory(); };
+    search.setTooltip("Click for the last 10 searches; Escape dismisses history");
+    search.onHistoryRequest = [this] { showSearchHistory(); };
     search.onEscapeKey = [this]
     {
         search.clear(); pendingSearch.clear(); filter.text.clear(); pageOffset = 0; reloadLibrary();
@@ -164,11 +164,13 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         filter.starredOnly = ! filter.starredOnly; pageOffset = 0; reloadLibrary();
     };
     hideEmpty.setComponentID("hideEmpty");
-    hideEmpty.setToggleState(false,juce::dontSendNotification);
+    filter.hideEmpty = appSettings.hideEmpty;
+    hideEmpty.setToggleState(filter.hideEmpty,juce::dontSendNotification);
     hideEmpty.setTooltip("Hide files quieter than -60 dBFS (peak below 0.001)");
     hideEmpty.onClick = [this]
     {
-        filter.hideEmpty = hideEmpty.getToggleState(); pageOffset = 0; reloadLibrary();
+        filter.hideEmpty = hideEmpty.getToggleState();
+        persistHideEmpty(); pageOffset = 0; reloadLibrary();
     };
     clearFilters.onClick = [this]
     {
@@ -176,6 +178,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
         filter.matchAnyTag = false; filter.starredOnly = false;
         filter.hideDuplicates = false; filter.hideEmpty = false; filter.duplicateHash.clear();
+        persistHideEmpty();
         pageOffset = 0; reloadLibrary();
     };
     editTags.onClick = [this] { showEditTagsMenu(); };
@@ -197,8 +200,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
     preview.onAction = [this] { library.focusForNavigation(); };
-    for (auto* button : std::array<juce::Button*,16>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
-          &tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&searchHistory})
+    for (auto* button : std::array<juce::Button*,15>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
+          &tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         if (button == &addFolder || button == &settings) continue; // Modal dialogs must retain their own focus.
@@ -283,11 +286,11 @@ void MainComponent::showSearchHistory()
 {
     juce::PopupMenu menu;
     const auto history = appSettings.searchHistory;
-    if (history.isEmpty()) menu.addItem(1, "No recent searches", false, false);
-    else for (int i = 0; i < history.size(); ++i) menu.addItem(i + 1, history[i]);
-    if (! history.isEmpty()) { menu.addSeparator(); menu.addItem(100, "Clear history"); }
+    if (history.isEmpty()) return;
+    for (int i = 0; i < history.size(); ++i) menu.addItem(i + 1, history[i]);
+    menu.addSeparator(); menu.addItem(100, "Clear history");
     juce::Component::SafePointer<MainComponent> safe(this);
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&searchHistory),
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&search),
         [safe, history](int result)
         {
             if (safe == nullptr) return;
@@ -295,12 +298,25 @@ void MainComponent::showSearchHistory()
             {
                 safe->appSettings.searchHistory.clear();
                 try { safe->settingsStore.update([](AppSettings& saved) { saved.searchHistory.clear(); }); } catch (...) {}
+                if (safe->isShowing()) safe->search.grabKeyboardFocus();
                 return;
             }
-            if (result <= 0 || result > history.size()) return;
+            if (result <= 0 || result > history.size())
+            {
+                if (safe->isShowing()) safe->search.grabKeyboardFocus();
+                return;
+            }
             safe->search.setText(history[result - 1], true);
             safe->searchLibrary(history[result - 1]);
+            if (safe->isShowing()) safe->search.grabKeyboardFocus();
         });
+}
+void MainComponent::persistHideEmpty()
+{
+    appSettings.hideEmpty = filter.hideEmpty;
+    try { settingsStore.update([this](AppSettings& saved) { saved.hideEmpty = filter.hideEmpty; }); }
+    catch (const std::exception& e)
+    { status.setText("Cannot save Hide empty: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification); }
 }
 void MainComponent::setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny)
 {
@@ -1122,7 +1138,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
     filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
     filter.matchAnyTag = false; filter.starredOnly = false;
-    filter.hideDuplicates = false; filter.hideEmpty = false; filter.duplicateHash.clear();
+    filter.hideDuplicates = false; filter.hideEmpty = appSettings.hideEmpty; filter.duplicateHash.clear();
     search.clear(); pendingSearch.clear();
     analysisDetails.setText("Select a sample to inspect its measured audio features.",juce::dontSendNotification);
     selectedTags.setTags({});
@@ -1179,8 +1195,6 @@ void MainComponent::resized()
     heading.setBounds(branding.removeFromTop(30)); subtitle.setBounds(branding);
     settings.setBounds(header.removeFromRight(115).withSizeKeepingCentre(115,32));
     header.removeFromRight(16);
-    searchHistory.setBounds(header.removeFromRight(74).withSizeKeepingCentre(70,30));
-    header.removeFromRight(8);
     search.setBounds(header.withSizeKeepingCentre(header.getWidth(),34));
     preview.setBounds(r.removeFromBottom(156));
     auto footer = r.removeFromBottom(42).reduced(12,5);

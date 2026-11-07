@@ -2,6 +2,22 @@
 #include "core/settings/AppSettings.h"
 #include "TestHelpers.h"
 using namespace sonicator;
+TEST_CASE("Hide empty defaults off and survives unrelated settings updates", "[settings][hide-empty]")
+{
+    TestDirectory t;
+    const auto file = t.dir.getChildFile("preferences.json");
+    SettingsStore store(file);
+    REQUIRE_FALSE(store.load().hideEmpty);
+    REQUIRE(file.replaceWithText("{\"hideEmpty\":\"false\"}"));
+    REQUIRE_FALSE(store.load().hideEmpty); // malformed strings are not interpreted as true
+    store.update([](AppSettings& saved) { saved.hideEmpty = true; });
+    store.update([](AppSettings& saved) { saved.windowWidth = 1200; saved.theme = ThemeMode::Light; });
+    REQUIRE(store.load().hideEmpty);
+    store.update([](AppSettings& saved) { saved.hideEmpty = false; });
+    REQUIRE_FALSE(store.load().hideEmpty);
+    REQUIRE(store.load().windowWidth == 1200);
+    REQUIRE(store.load().theme == ThemeMode::Light);
+}
 TEST_CASE("Settings persist theme, scale, language and catalog path", "[settings]")
 {
     TestDirectory t; auto file = t.dir.getChildFile("settings.json");

@@ -15,7 +15,31 @@ TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation",
     for (auto* child : app.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    REQUIRE(buttons == 16);
+    REQUIRE(buttons == 15); // history is invoked by the search field, not a toolbar button
+}
+TEST_CASE("Hide empty restores on startup and saves toggles without losing other settings", "[ui][settings][hide-empty]")
+{
+    TestDirectory t;
+    const auto settings = t.dir.getChildFile("settings.json");
+    REQUIRE(settings.replaceWithText("{\"hideEmpty\":true,\"language\":\"English\",\"searchHistory\":[\"pad\"]}"));
+    SettingsStore store(settings);
+    {
+        MainComponent app(t.dir.getChildFile("catalog.sqlite"), false, store.load(), settings);
+        auto* toggle = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty"));
+        REQUIRE(toggle != nullptr);
+        REQUIRE(toggle->getToggleState());
+        toggle->setToggleState(false, juce::dontSendNotification);
+        toggle->onClick();
+        REQUIRE_FALSE((bool) juce::JSON::parse(settings)["hideEmpty"]);
+        REQUIRE(store.load().searchHistory[0] == "pad");
+        toggle->setToggleState(true, juce::dontSendNotification);
+        toggle->onClick();
+        REQUIRE((bool) juce::JSON::parse(settings)["hideEmpty"]);
+    }
+    MainComponent reopened(t.dir.getChildFile("catalog.sqlite"), false, store.load(), settings);
+    auto* restored = dynamic_cast<juce::ToggleButton*>(reopened.findChildWithID("hideEmpty"));
+    REQUIRE(restored != nullptr);
+    REQUIRE(restored->getToggleState());
 }
 TEST_CASE("Large catalog startup restores the actual page and folder tree", "[.catalog-ui]")
 {

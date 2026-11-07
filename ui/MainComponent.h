@@ -1,6 +1,7 @@
 #pragma once
 #include "ui/shell/Theme.h"
 #include "ui/library/FileListPanel.h"
+#include "ui/library/SearchField.h"
 #include "ui/library/FolderTree.h"
 #include "ui/library/TagStrip.h"
 #include "ui/preview/PreviewPanel.h"
@@ -35,6 +36,7 @@ public:
     void searchLibrary(const juce::String&);
     void recordSearchHistory(const juce::String&);
     void showSearchHistory();
+    void persistHideEmpty();
     void setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny = false);
 private:
     SonicatorLookAndFeel look;
@@ -52,8 +54,7 @@ private:
     std::vector<Tag> allTags;
     int totalCatalogCount = 0;
     int64_t selectedSampleId = 0;
-    juce::TextEditor search;
-    juce::TextButton searchHistory { "History" };
+    SearchField search;
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" };
     juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" }, backup { "Backup" };
     juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" },

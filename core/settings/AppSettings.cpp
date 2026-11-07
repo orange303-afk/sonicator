@@ -42,6 +42,8 @@ AppSettings SettingsStore::load() const
     settings.pageSize = (pageSize == 100 || pageSize == 1000 || pageSize == 10000 || pageSize == 0)
         ? pageSize : 10000;
     settings.databasePath = object->getProperty("database").toString();
+    const auto hide = object->getProperty("hideEmpty");
+    settings.hideEmpty = hide.isBool() && (bool) hide;
     if (const auto* history = object->getProperty("searchHistory").getArray())
         for (const auto& entry : *history)
             if (settings.searchHistory.size() < 10)
@@ -65,6 +67,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("language", settings.language);
     object->setProperty("pageSize", settings.pageSize);
     object->setProperty("database", settings.databasePath);
+    object->setProperty("hideEmpty", settings.hideEmpty);
     juce::Array<juce::var> history;
     for (int i = 0; i < juce::jmin(10, settings.searchHistory.size()); ++i)
         history.add(settings.searchHistory[i]);
