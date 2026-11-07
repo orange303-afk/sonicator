@@ -50,10 +50,18 @@ tree.
 
 ## Storage and migration
 
-Favorites use the existing `settings.json` mechanism (`favoriteFolders` string array), so the
-catalog schema stays at 8 and no migration is needed. The list is global; folder paths from another
-catalog stay in the list but have no matching rows until that catalog is opened. Reset tags does
-not change the schema.
+Favorites use the existing `settings.json` mechanism (`favoriteFolders` and `favoritesPanelHeight`),
+so favorites need no catalog migration. The list is global; folder paths from another catalog stay
+in the list but have no matching rows until that catalog is opened. A separate follow-up uses schema
+9 to add the new built-in instrument tags; reset tags itself does not change the schema. The
+favorites divider height is persisted as well.
+
+## Follow-up (2026-11-08)
+
+Schema 9 adds the built-in Crash, Ride, Tom, Rim, Fill, Riser, Downfilter, Upfilter, Snap, Shaker
+and Tamb tags, and AutoTag uses the matching classes. Crash no longer falls back to Percussion. The
+favorites divider is draggable and its position persists as `favoritesPanelHeight` in the global
+settings file.
 
 ## Verification
 

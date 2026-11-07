@@ -37,7 +37,7 @@ and the actual removed count. A repeated reset is a no-op.
 
 The folder menu toggles `Add to favorites` / `Remove from favorites`; a folder already visible
 inside a favorite shows a disabled `Already in favorites`. Adding a parent absorbs redundant
-descendant favorites. The `FAVORITES` section below the folder tree is a second expandable tree:
+descendant favorites. The `FAVORITES` section below the folder tree is a second expandable tree; the divider above it is draggable and its height is saved in `settings.json`:
 each saved path is a root and catalogued subfolders materialize on expansion. Clicking a node
 filters the library and clears the normal tree's selection. Right-clicking a favorite root removes
 it. A path that is no longer available stays listed and is painted muted. The list is global across
@@ -72,15 +72,26 @@ command that discovers files.
 
 ### What it may propose
 
-Only sound/instrument types that already exist as tags in the catalog:
+Only sound/instrument types that already exist as tags in the catalog. Schema 9 adds Crash, Ride, Tom, Rim, Fill, Riser, Downfilter, Upfilter, Snap, Shaker and Tamb to the built-in set; an existing catalog receives them with its normal backup on upgrade:
 
 | Class | Exact filename tokens |
 |---|---|
 | Kick | kick, kicks, kickdrum, kik, bd, bassdrum, bass drum, kick drum, 808 kick |
-| Snare | snare, snares, snr, sd, rim, rimshot, sidestick, snare drum |
+| Snare | snare, snares, snr, sd, snare drum |
 | Clap | clap, claps, handclap |
 | Hat | hat, hats, hihat, hi-hat, hh |
-| Percussion | perc, percussion, tom(s), conga, bongo, djembe, tabla, cowbell, woodblock, shaker, tambourine, crash, ride, splash, cymbal(s) |
+| Percussion | perc, percussion, conga, bongo, djembe, tabla, cowbell, woodblock, cymbal(s), splash |
+| Crash | crash, crashes |
+| Ride | ride, rides |
+| Tom | tom, toms |
+| Rim | rim, rimshot(s), sidestick |
+| Shaker | shaker, shakers |
+| Tamb | tamb, tambourine(s) |
+| Snap | snap, snaps, fingersnap |
+| Fill | fill, fills, drumfill |
+| Riser | riser, risers |
+| Upfilter | upfilter, upfilters, uplifter, uplift |
+| Downfilter | downfilter, downfilters, downlifter, downlift |
 | Bass | bass, bassline, 808 bass |
 | Sub | sub, subbass, sub bass |
 | Lead | lead(s), arp, arpeggio, pluck(s), stab, riff |
@@ -88,7 +99,7 @@ Only sound/instrument types that already exist as tags in the catalog:
 | Keys | keys, piano, organ, rhodes, wurli, clav |
 | Guitar | guitar, gtr |
 | Vocal | vocal(s), vox, choir, acapella |
-| FX | fx, sfx, effect(s), noise, sweep, riser, impact, foley, downlifter, uplifter |
+| FX | fx, sfx, effect(s), noise, sweep, impact, foley |
 
 Compound rules take precedence: **bass drum** is Kick, not Bass plus Kick; **sub bass** is Sub;
 **808 kick** is Kick and **808 bass** is Bass. A bare **808** is ambiguous between kick and bass and
@@ -110,8 +121,10 @@ Accepted evidence:
 - valid stored Type candidates with a known source (WAV/AIFF metadata, ASD, RX2 and so on);
 - a completed, resolved smart Type result from a source other than the folder name.
 
-A folder or pack name is context only. It never establishes a type by itself and cannot veto a type
-stated by the filename or metadata. Candidates from an older extractor version, stale smart
+Stored filename-derived smart candidates are ignored because AutoTag parses the same filename with
+its own instrument-specific table; this keeps a broader legacy smart class such as Percussion from
+vetoing a specific Crash, Tom or Rim proposal. A folder or pack name is context only. It never
+establishes a type by itself and cannot veto a type stated by the filename or metadata. Candidates from an older extractor version, stale smart
 results, invalid candidates and changed files are not evidence. Two rows from one source are not
 independent confirmations; the engine looks for one unambiguous class, not a vote count.
 

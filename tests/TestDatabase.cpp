@@ -100,7 +100,7 @@ TEST_CASE("Schema v1 migrates in place, keeps rows, and backs up once", "[databa
     REQUIRE(backups.size() == 1);
     REQUIRE(rawScalar(backups[0], "SELECT COUNT(*) FROM samples") == 3);
     REQUIRE(rawScalar(backups[0], "PRAGMA user_version") == 1);
-    REQUIRE(rawScalar(file, "PRAGMA user_version") == 8);
+    REQUIRE(rawScalar(file, "PRAGMA user_version") == 9);
     REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='samples_name_id'") == 1);
     { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.count() == 3); }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
@@ -181,7 +181,7 @@ TEST_CASE("Tags seed once, combine as all/any/exclude and survive reanalysis and
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
         auto seeded = repo.tags();
-        REQUIRE(seeded.size() == 15);
+        REQUIRE(seeded.size() == 26);
         REQUIRE(seeded.front().builtin);
         for (const auto& tag : seeded)
             if (tag.name == "Kick") kickId = tag.id;
@@ -190,7 +190,7 @@ TEST_CASE("Tags seed once, combine as all/any/exclude and survive reanalysis and
         customId = repo.createTag("My Tag", 0xff123456);
         REQUIRE(customId > 0);
         REQUIRE(repo.createTag("my tag", 0xff654321) == customId);
-        REQUIRE(repo.tags().size() == 16);
+        REQUIRE(repo.tags().size() == 27);
 
         sampleA = repo.upsert(sample("/a.wav", "a.wav"));
         const auto sampleB = repo.upsert(sample("/b.wav", "b.wav"));
@@ -225,15 +225,15 @@ TEST_CASE("Tags seed once, combine as all/any/exclude and survive reanalysis and
     }
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(repo.tags().size() == 16);
+        REQUIRE(repo.tags().size() == 27);
         bool renamed = false;
         for (const auto& tag : repo.tags()) if (tag.name == "Renamed") renamed = true;
         REQUIRE(renamed);
         REQUIRE(repo.tagsForSample(sampleA).size() == 2);
         repo.deleteTag(repo.createTag("Temporary", 0xff010203));
-        REQUIRE(repo.tags().size() == 16);
+        REQUIRE(repo.tags().size() == 27);
         repo.deleteTag(customId);
-        REQUIRE(repo.tags().size() == 15);
+        REQUIRE(repo.tags().size() == 26);
         REQUIRE(repo.tagsForSample(sampleC).empty());
     }
 }
@@ -262,12 +262,12 @@ TEST_CASE("Schema v2 migrates to tags and a backfilled Unicode search key", "[da
         LibraryFilter f; f.text = juce::String::fromUTF8("тест");
         REQUIRE(repo.query(f).total == 1);
         f.text = "kick"; REQUIRE(repo.query(f).total == 1);
-        REQUIRE(repo.tags().size() == 15);
-        REQUIRE(rawScalar(file, "PRAGMA user_version") == 8);
+        REQUIRE(repo.tags().size() == 26);
+        REQUIRE(rawScalar(file, "PRAGMA user_version") == 9);
         REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM samples WHERE version=1") == 2);
     }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "v2.sqlite.backup-*").size() == 1);
-    { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.tags().size() == 15); }
+    { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.tags().size() == 26); }
 }
 TEST_CASE("User backup is a consistent copy and refuses unsafe destinations", "[database][backup]")
 {
@@ -286,7 +286,7 @@ TEST_CASE("User backup is a consistent copy and refuses unsafe destinations", "[
         REQUIRE(copyRepo.count() == 1);
         REQUIRE(copyRepo.findByPath("/backup/sample.wav")->fileHash == "h");
         REQUIRE(copyRepo.tagsForSample(id).size() == 1);
-        REQUIRE(rawScalar(backup, "PRAGMA user_version") == 8);
+        REQUIRE(rawScalar(backup, "PRAGMA user_version") == 9);
     }
     REQUIRE_THROWS(repo.backupTo(file));
     REQUIRE_THROWS(repo.backupTo(backup));
@@ -516,4 +516,36 @@ TEST_CASE("A Windows-style root relocates on a POSIX host", "[database][relocati
     REQUIRE(moved->id == id);
     REQUIRE(repo.roots().contains(newRoot.getFullPathName()));
     REQUIRE_FALSE(repo.roots().contains("C:\\Samples\\Drums"));
+}
+TEST_CASE("Schema 8 catalogs gain the new instrument tags without touching user tags", "[database][migration][tags]")
+{
+    TestDirectory t; const auto file = t.dir.getChildFile("tags-v8.sqlite");
+    {
+        Database db(file); SampleRepository repo(db); repo.createTables();
+        repo.createTag("My Tag", 0xff123456);
+    }
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        REQUIRE(sqlite3_exec(raw,
+            "DELETE FROM tags WHERE name IN ('Crash','Ride','Tom','Rim','Fill','Riser',"
+            "'Downfilter','Upfilter','Snap','Shaker','Tamb'); PRAGMA user_version=8;",
+            nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(raw);
+    }
+    {
+        Database db(file); SampleRepository repo(db); repo.createTables();
+        const auto tags = repo.tags();
+        REQUIRE(tags.size() == 27); // 26 built-ins plus My Tag
+        bool hasCrash = false, hasTom = false, hasUser = false;
+        for (const auto& tag : tags)
+        {
+            if (tag.name == "Crash") hasCrash = true;
+            if (tag.name == "Tom") hasTom = true;
+            if (tag.name == "My Tag") hasUser = true;
+        }
+        REQUIRE(hasCrash); REQUIRE(hasTom); REQUIRE(hasUser);
+        REQUIRE(rawScalar(file, "PRAGMA user_version") == 9);
+    }
+    REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "tags-v8.sqlite.backup-*").size() == 1);
 }

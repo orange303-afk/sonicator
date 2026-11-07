@@ -12,6 +12,7 @@ struct AppSettings
     juce::String databasePath; // empty means the default catalog location
     juce::StringArray searchHistory; // most recent first, at most 10 entries
     juce::StringArray favoriteFolders; // global across catalogs, in display order
+    int favoritesPanelHeight = 200;    // user-dragged divider position
     bool hideEmpty = false;
     // Preview panel toggles. Persisted so a restart keeps the same audition behaviour.
     bool midiPreview = false;

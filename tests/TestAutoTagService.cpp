@@ -43,7 +43,7 @@ TEST_CASE("AutoTag preparation proposes explained instruments and writes nothing
     const auto ambiguous = f.add("Drums/kick snare.wav");
     const auto folderOnly = f.add("Kicks/sample.wav");
     const auto bassDrum = f.add("Drums/bass drum.wav");
-    const auto fx = f.add("Drums/noise riser.wav");
+    const auto fx = f.add("Drums/noise.wav");
     AutoTagService service(*f.repo);
     REQUIRE(service.startSelected({ kick, snare, ambiguous, folderOnly, bassDrum, fx }));
     REQUIRE(service.waitUntilFinished(20000));
@@ -214,5 +214,27 @@ TEST_CASE("Empty folder AutoTag preparation produces no proposals and writes not
     REQUIRE(service.takeResult(result));
     REQUIRE(result.checked == 0);
     REQUIRE(result.proposals.empty());
-    REQUIRE(f.repo->tags().size() == 15);
+    REQUIRE(f.repo->tags().size() == 26);
+}
+TEST_CASE("AutoTag writes Crash rather than Percussion for a crash file", "[autotag][service][instruments]")
+{
+    AutoFixture f;
+    const auto crash = f.add("Drums/crash_01.wav");
+    const auto crashTag = f.tag("Crash");
+    const auto percussionTag = f.tag("Percussion");
+    REQUIRE(crashTag > 0);
+    REQUIRE(percussionTag > 0);
+    AutoTagService service(*f.repo);
+    REQUIRE(service.startSelected({ crash }));
+    REQUIRE(service.waitUntilFinished(20000));
+    AutoTagResult result;
+    REQUIRE(service.takeResult(result));
+    REQUIRE(result.proposals.size() == 1);
+    REQUIRE(result.proposals.front().canonicalType == "Crash");
+    REQUIRE(result.proposals.front().tagId == crashTag);
+    REQUIRE(service.startApply(result.proposals));
+    REQUIRE(service.waitUntilFinished(20000));
+    REQUIRE(service.applyResult().applied == 1);
+    REQUIRE(f.tagged(crash, crashTag) == 1);
+    REQUIRE(f.tagged(crash, percussionTag) == 0);
 }

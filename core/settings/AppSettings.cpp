@@ -67,6 +67,9 @@ AppSettings SettingsStore::load() const
             const auto text = entry.toString().trim();
             if (text.isNotEmpty()) settings.favoriteFolders.addIfNotAlreadyThere(text);
         }
+    const int favoritesHeight = (int) object->getProperty("favoritesPanelHeight");
+    if (favoritesHeight >= 60 && favoritesHeight <= 2000)
+        settings.favoritesPanelHeight = favoritesHeight;
     settings.windowX = (int) object->getProperty("windowX");
     settings.windowY = (int) object->getProperty("windowY");
     settings.windowWidth = juce::jmax(0, (int) object->getProperty("windowWidth"));
@@ -97,6 +100,7 @@ void SettingsStore::save(const AppSettings& settings) const
     for (const auto& folder : settings.favoriteFolders)
         if (folder.trim().isNotEmpty()) favorites.add(folder);
     object->setProperty("favoriteFolders", favorites);
+    object->setProperty("favoritesPanelHeight", settings.favoritesPanelHeight);
     object->setProperty("windowX", settings.windowX);
     object->setProperty("windowY", settings.windowY);
     object->setProperty("windowWidth", settings.windowWidth);

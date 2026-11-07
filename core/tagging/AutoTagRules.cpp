@@ -7,10 +7,21 @@ struct Alias { const char* type; const char* tokens; };
 // substring, unlike the broader smart-analysis heuristics.
 constexpr Alias instrumentAliases[] = {
     { "Kick", "kick|kicks|kickdrum|kik|bd|bassdrum" },
-    { "Snare", "snare|snares|snr|sd|rim|rimshot|sidestick|snaredrum" },
+    { "Snare", "snare|snares|snr|sd|snaredrum" },
     { "Clap", "clap|claps|handclap" },
     { "Hat", "hat|hats|hihat|hh" },
-    { "Percussion", "perc|percussion|tom|toms|conga|bongo|djembe|tabla|cowbell|woodblock|shaker|tambourine|crash|ride|splash|cymbal|cymbals" },
+    { "Percussion", "perc|percussion|conga|bongo|djembe|tabla|cowbell|woodblock|cymbal|cymbals|splash" },
+    { "Crash", "crash|crashes" },
+    { "Ride", "ride|rides" },
+    { "Tom", "tom|toms" },
+    { "Rim", "rim|rimshot|rimshots|sidestick" },
+    { "Shaker", "shaker|shakers" },
+    { "Tamb", "tamb|tambourine|tambourines" },
+    { "Snap", "snap|snaps|fingersnap" },
+    { "Fill", "fill|fills|drumfill" },
+    { "Riser", "riser|risers" },
+    { "Upfilter", "upfilter|upfilters|uplifter|uplift" },
+    { "Downfilter", "downfilter|downfilters|downlifter|downlift" },
     { "Bass", "bass|bassline|808bass" },
     { "Sub", "sub|subbass" },
     { "Lead", "lead|leads|arp|arpeggio|pluck|plucks|stab|riff" },
@@ -18,7 +29,7 @@ constexpr Alias instrumentAliases[] = {
     { "Keys", "keys|piano|organ|rhodes|wurli|clav" },
     { "Guitar", "guitar|gtr" },
     { "Vocal", "vocal|vocals|vox|choir|acapella" },
-    { "FX", "fx|sfx|effect|effects|noise|sweep|riser|impact|foley|downlifter|uplifter" }
+    { "FX", "fx|sfx|effect|effects|noise|sweep|impact|foley" }
 };
 constexpr const char* unsupportedTokens = "synth|chords|chord|poly|brass|trumpet|sax|saxophone|horn|horns|"
                                           "strings|string|violin|cello|viola";
@@ -182,6 +193,11 @@ AutoTagDecision AutoTagRules::evaluate(const AutoTagInput& in, const AutoTagOpti
         {
             if (result.typeSource == "folder")
                 folderProvenance = true;
+            else if (result.typeSource == "filename")
+            {
+                // AutoTag parses the filename itself with a richer, instrument-specific table.
+                // The stored smart candidate may still use a broader legacy class.
+            }
             else if (result.typeSource.isNotEmpty())
             {
                 const auto type = canonicalFromAliases(result.type);
@@ -206,6 +222,7 @@ AutoTagDecision AutoTagRules::evaluate(const AutoTagInput& in, const AutoTagOpti
     {
         if (candidate.field != SmartField::Type) continue;
         if (candidate.status != CandidateStatus::Valid) continue;
+        if (candidate.source == "filename") continue; // redundant with the AutoTag tokenizer
         if (candidate.source == "folder")
         {
             folderProvenance = true;

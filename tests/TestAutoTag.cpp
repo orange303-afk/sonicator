@@ -5,8 +5,10 @@ namespace {
 AutoTagOptions options()
 {
     AutoTagOptions o;
-    const char* names[] = { "Kick", "Snare", "Clap", "Hat", "Percussion", "Bass", "Sub",
-                            "Lead", "Pad", "Keys", "Guitar", "Vocal", "FX" };
+    const char* names[] = { "Kick", "Snare", "Clap", "Hat", "Percussion", "Crash", "Ride",
+                            "Tom", "Rim", "Shaker", "Tamb", "Snap", "Fill", "Riser",
+                            "Upfilter", "Downfilter", "Bass", "Sub", "Lead", "Pad", "Keys",
+                            "Guitar", "Vocal", "FX" };
     int64_t id = 1;
     for (auto name : names) o.tagIds[name] = id++;
     return o;
@@ -50,12 +52,12 @@ TEST_CASE("AutoTag maps instrument tokens and abbreviations", "[autotag][rules]"
     REQUIRE(proposalType(input("/lib/snare_01.wav")) == "Snare");
     REQUIRE(proposalType(input("/lib/SD.wav")) == "Snare");
     REQUIRE(proposalType(input("/lib/hihat.wav")) == "Hat");
-    REQUIRE(proposalType(input("/lib/tambourine.wav")) == "Percussion");
+    REQUIRE(proposalType(input("/lib/tambourine.wav")) == "Tamb");
     REQUIRE(proposalType(input("/lib/bassline.wav")) == "Bass");
     REQUIRE(proposalType(input("/lib/pads.wav")) == "Pad");
     REQUIRE(proposalType(input("/lib/rhodes.wav")) == "Keys");
     REQUIRE(proposalType(input("/lib/Snares.wav")) == "Snare");
-    REQUIRE(proposalType(input("/lib/fx_riser.wav")) == "FX");
+    REQUIRE(proposalType(input("/lib/fx_sweep.wav")) == "FX");
     REQUIRE(proposalType(input("/lib/vox_take.wav")) == "Vocal");
 }
 TEST_CASE("AutoTag compound rules take precedence over single tokens", "[autotag][rules]")
@@ -175,4 +177,30 @@ TEST_CASE("AutoTag evaluation is deterministic and explains its evidence", "[aut
     REQUIRE(first.proposal->reason == second.proposal->reason);
     REQUIRE(first.proposal->reason.containsIgnoreCase("bass drum"));
     REQUIRE(first.proposal->source == "filename");
+}
+TEST_CASE("AutoTag gives crash and the new instrument classes their own tags", "[autotag][rules][instruments]")
+{
+    REQUIRE(proposalType(input("/lib/crash.wav")) == "Crash");
+    REQUIRE(proposalType(input("/lib/crash_01.wav")) == "Crash");
+    REQUIRE(proposalType(input("/lib/ride.wav")) == "Ride");
+    REQUIRE(proposalType(input("/lib/tom.wav")) == "Tom");
+    REQUIRE(proposalType(input("/lib/toms.wav")) == "Tom");
+    REQUIRE(proposalType(input("/lib/rimshot.wav")) == "Rim");
+    REQUIRE(proposalType(input("/lib/sidestick.wav")) == "Rim");
+    REQUIRE(proposalType(input("/lib/shaker.wav")) == "Shaker");
+    REQUIRE(proposalType(input("/lib/tambourine.wav")) == "Tamb");
+    REQUIRE(proposalType(input("/lib/snap.wav")) == "Snap");
+    REQUIRE(proposalType(input("/lib/drum fill.wav")) == "Fill");
+    REQUIRE(proposalType(input("/lib/riser.wav")) == "Riser");
+    REQUIRE(proposalType(input("/lib/uplifter.wav")) == "Upfilter");
+    REQUIRE(proposalType(input("/lib/downlifter.wav")) == "Downfilter");
+    REQUIRE(proposalType(input("/lib/cymbal.wav")) == "Percussion");
+    REQUIRE(proposalType(input("/lib/splash.wav")) == "Percussion");
+    // A broader legacy smart class from the filename must not veto the specific AutoTag class.
+    auto tom = input("/lib/tom.wav");
+    tom.result = resolved("percussion", "filename");
+    REQUIRE(proposalType(tom) == "Tom");
+    auto candidate = input("/lib/tom.wav");
+    candidate.candidates.push_back(typeCandidate("filename", "percussion"));
+    REQUIRE(proposalType(candidate) == "Tom");
 }

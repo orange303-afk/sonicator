@@ -11,6 +11,22 @@
 #include "core/tagging/AutoTagService.h"
 #include "core/settings/AppSettings.h"
 namespace sonicator {
+class FavoritesSplitter final : public juce::Component
+{
+public:
+    FavoritesSplitter();
+    void paint(juce::Graphics&) override;
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseDrag(const juce::MouseEvent&) override;
+    void mouseUp(const juce::MouseEvent&) override;
+    void mouseEnter(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
+    std::function<int()> getHeight;
+    std::function<void(int)> setHeight;
+    std::function<void()> onRelease;
+private:
+    int dragStartHeight = 0;
+};
 class MainComponent final : public juce::Component,
                             private juce::Timer,
                             private juce::DarkModeSettingListener
@@ -54,6 +70,8 @@ private:
     FolderTree folders;
     FolderTree favorites;
     juce::Label favoritesLabel;
+    FavoritesSplitter favoritesSplitter;
+    int favoritePanelHeight = 200;
     juce::String selectedFolder;
     LibraryFilter filter;
     std::vector<Tag> allTags;

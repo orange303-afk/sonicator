@@ -9,7 +9,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred";
-constexpr int schemaVersion = 8;
+constexpr int schemaVersion = 9;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -29,7 +29,18 @@ constexpr StandardTag standardTags[] = {
     { "Hat", 0xffd7dd6a }, { "Percussion", 0xff8fd06a }, { "Bass", 0xff4fb8c8 },
     { "Sub", 0xff4f8fd0 }, { "Lead", 0xff7a6aea }, { "Pad", 0xffa96ae0 },
     { "Keys", 0xffd06ab8 }, { "Guitar", 0xffd06a7a }, { "Vocal", 0xff6ad0a0 },
-    { "FX", 0xff8a8f9c }, { "Loop", 0xff9ad06a }, { "One-shot", 0xffc8a06a }
+    { "FX", 0xff8a8f9c }, { "Loop", 0xff9ad06a }, { "One-shot", 0xffc8a06a },
+    { "Crash", 0xffe07a4a }, { "Ride", 0xffd9b45a }, { "Tom", 0xff9ac06a },
+    { "Rim", 0xffc0a06a }, { "Fill", 0xffb0b0b0 }, { "Riser", 0xff6ac0d0 },
+    { "Downfilter", 0xff7a8ad0 }, { "Upfilter", 0xffb07ad0 }, { "Snap", 0xffe09a6a },
+    { "Shaker", 0xffc8d06a }, { "Tamb", 0xffe0c05a }
+};
+// Added by schema 9. An upgrade inserts only these, so a user-deleted older tag is not recreated.
+constexpr StandardTag schema9Tags[] = {
+    { "Crash", 0xffe07a4a }, { "Ride", 0xffd9b45a }, { "Tom", 0xff9ac06a },
+    { "Rim", 0xffc0a06a }, { "Fill", 0xffb0b0b0 }, { "Riser", 0xff6ac0d0 },
+    { "Downfilter", 0xff7a8ad0 }, { "Upfilter", 0xffb07ad0 }, { "Snap", 0xffe09a6a },
+    { "Shaker", 0xffc8d06a }, { "Tamb", 0xffe0c05a }
 };
 std::pair<juce::String,juce::String> folderRange(const juce::String& folder)
 {
@@ -559,7 +570,17 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=8;");
+        if (current < 9)
+        {
+            detail::Statement insert(db.handle,
+                "INSERT OR IGNORE INTO tags(name,colour,builtin) VALUES(?,?,1)");
+            for (const auto& tag : schema9Tags)
+            {
+                insert.reset(); insert.text(1, tag.name);
+                insert.integer(2, (int64_t) tag.colour); insert.step();
+            }
+        }
+        detail::exec(db.handle, "PRAGMA user_version=9;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)

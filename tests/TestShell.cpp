@@ -672,6 +672,24 @@ TEST_CASE("Shell shows the favorites section only when favorite folders exist", 
     REQUIRE(folders != nullptr);
     REQUIRE(tree->getBounds().getHeight() > 0);
     REQUIRE(tree->getBounds().getY() >= folders->getBounds().getBottom());
+    auto* splitter = dynamic_cast<juce::Component*>(app.findChildWithID("favoritesSplitter"));
+    REQUIRE(splitter != nullptr);
+    REQUIRE(splitter->isVisible());
+    const int oldHeight = tree->getBounds().getHeight();
+    const auto now = juce::Time::getCurrentTime();
+    const juce::Point<float> start(10.0f, 4.0f), end(10.0f, -36.0f);
+    juce::MouseEvent down(juce::Desktop::getInstance().getMainMouseSource(), start,
+        juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier), 1.0f, 0, 0, 0, 0,
+        splitter, splitter, now, start, now, 1, false);
+    splitter->mouseDown(down);
+    juce::MouseEvent drag(juce::Desktop::getInstance().getMainMouseSource(), end,
+        juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier), 1.0f, 0, 0, 0, 0,
+        splitter, splitter, now, start, now, 1, true);
+    splitter->mouseDrag(drag);
+    splitter->mouseUp(drag);
+    REQUIRE(tree->getBounds().getHeight() > oldHeight);
+    SettingsStore saved(settings);
+    REQUIRE(saved.load().favoritesPanelHeight > 200);
 
     AppSettings withoutFavorite;
     MainComponent empty(t.dir.getChildFile("favorites-empty.sqlite"), false, withoutFavorite, settings);

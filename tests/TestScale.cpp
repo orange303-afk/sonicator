@@ -120,7 +120,7 @@ TEST_CASE("Three hundred thousand rows finalize quickly with correct missing fla
         REQUIRE(migrateSeconds < 60.0);
         LibraryFilter f; f.text = "ghost_150000";
         REQUIRE(repo.query(f, 10000, 0).total == 1);
-        REQUIRE(repo.tags().size() == 15);
+        REQUIRE(repo.tags().size() == 26);
     }
 }
 TEST_CASE("Index and reopen ten thousand real WAV files", "[.benchmark]")

@@ -145,4 +145,8 @@ TEST_CASE("Favorite folders are global and round-trip through settings", "[setti
     store.update([](AppSettings& saved) { saved.favoriteFolders.remove(0); });
     REQUIRE(store.load().favoriteFolders.size() == 1);
     REQUIRE(store.load().favoriteFolders[0] == "/lib/Bass");
+    store.update([](AppSettings& saved) { saved.favoritesPanelHeight = 320; });
+    REQUIRE(store.load().favoritesPanelHeight == 320);
+    store.file().replaceWithText("{\"favoritesPanelHeight\":-4}");
+    REQUIRE(store.load().favoritesPanelHeight == 200);
 }

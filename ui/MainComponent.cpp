@@ -63,6 +63,38 @@ public:
     void inputAttemptWhenModal() override { exitModalState(0); }
 };
 }
+FavoritesSplitter::FavoritesSplitter()
+{
+    setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
+    setWantsKeyboardFocus(false);
+    setMouseClickGrabsKeyboardFocus(false);
+}
+void FavoritesSplitter::paint(juce::Graphics& g)
+{
+    g.setColour(theme::isDark ? theme::line : theme::selection);
+    const auto area = getLocalBounds().reduced(6, 3).toFloat();
+    g.fillRoundedRectangle(area, 2.0f);
+    if (isMouseOver())
+    {
+        g.setColour(theme::accent.withAlpha(0.9f));
+        g.fillRoundedRectangle(area.withSizeKeepingCentre(area.getWidth(), 2.0f), 1.0f);
+    }
+}
+void FavoritesSplitter::mouseDown(const juce::MouseEvent&)
+{
+    dragStartHeight = getHeight != nullptr ? getHeight() : 0;
+}
+void FavoritesSplitter::mouseDrag(const juce::MouseEvent& e)
+{
+    if (setHeight != nullptr)
+        setHeight(dragStartHeight - e.getDistanceFromDragStartY());
+}
+void FavoritesSplitter::mouseUp(const juce::MouseEvent&)
+{
+    if (onRelease != nullptr) onRelease();
+}
+void FavoritesSplitter::mouseEnter(const juce::MouseEvent&) { repaint(); }
+void FavoritesSplitter::mouseExit(const juce::MouseEvent&) { repaint(); }
 juce::File MainComponent::defaultDatabaseFile()
 {
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
@@ -159,11 +191,28 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     addAndMakeVisible(folders); rootsLabel.setVisible(false);
     folders.setComponentID("folderTree");
-    addAndMakeVisible(favoritesLabel); addAndMakeVisible(favorites);
+    addAndMakeVisible(favoritesLabel); addAndMakeVisible(favorites); addAndMakeVisible(favoritesSplitter);
     favoritesLabel.setText("FAVORITES",juce::dontSendNotification);
     favoritesLabel.setFont(juce::FontOptions(11)); favoritesLabel.setColour(juce::Label::textColourId,theme::muted);
     favoritesLabel.setComponentID("favoritesLabel"); favorites.setComponentID("favoritesTree");
-    favoritesLabel.setVisible(false); favorites.setVisible(false);
+    favoritesSplitter.setComponentID("favoritesSplitter");
+    favoritesLabel.setVisible(false); favorites.setVisible(false); favoritesSplitter.setVisible(false);
+    favoritePanelHeight = appSettings.favoritesPanelHeight;
+    favoritesSplitter.getHeight = [this] { return favoritePanelHeight; };
+    favoritesSplitter.setHeight = [this](int height)
+    {
+        favoritePanelHeight = juce::jlimit(60, 2000, height);
+        resized();
+    };
+    favoritesSplitter.onRelease = [this]
+    {
+        try { settingsStore.update([this](AppSettings& saved) { saved.favoritesPanelHeight = favoritePanelHeight; }); }
+        catch (const std::exception& e)
+        {
+            status.setText("Could not save the favorites divider: " + juce::String::fromUTF8(e.what()),
+                juce::dontSendNotification);
+        }
+    };
     folders.onFolder = [this](juce::String path)
     {
         favorites.clearSelection();
@@ -976,6 +1025,7 @@ void MainComponent::refreshFavorites()
     const bool hasFavorites = ! appSettings.favoriteFolders.isEmpty();
     favoritesLabel.setVisible(hasFavorites);
     favorites.setVisible(hasFavorites);
+    favoritesSplitter.setVisible(hasFavorites);
     if (! hasFavorites) favorites.clearSelection();
     resized();
 }
@@ -1684,6 +1734,7 @@ void MainComponent::lookAndFeelChanged()
     libraryHeading.setColour(juce::Label::textColourId,theme::muted);
     rootsLabel.setColour(juce::Label::textColourId,theme::muted);
     favoritesLabel.setColour(juce::Label::textColourId,theme::muted);
+    favoritesSplitter.repaint();
     status.setColour(juce::Label::textColourId,theme::muted);
     tagsLabel.setColour(juce::Label::textColourId,theme::muted);
     stageLabel.setColour(juce::Label::textColourId,theme::muted);
@@ -1922,16 +1973,15 @@ void MainComponent::resized()
     smartButton.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(24);
     if (favorites.isVisible() && ! appSettings.favoriteFolders.isEmpty())
     {
-        const int desired = juce::jlimit(70, 190, 24 + appSettings.favoriteFolders.size() * 26);
-        const int height = juce::jmin(desired, sidebar.getHeight() / 2);
-        if (height >= 40)
-        {
-            auto area = sidebar.removeFromBottom(height);
-            favoritesLabel.setBounds(area.removeFromTop(18));
-            favorites.setBounds(area);
-            sidebar.removeFromBottom(6);
-        }
+        const int maxHeight = juce::jmax(80, sidebar.getHeight() - 24);
+        favoritePanelHeight = juce::jlimit(60, maxHeight, favoritePanelHeight);
+        auto area = sidebar.removeFromBottom(favoritePanelHeight);
+        favoritesSplitter.setVisible(true);
+        favoritesSplitter.setBounds(sidebar.removeFromBottom(10));
+        favoritesLabel.setBounds(area.removeFromTop(18));
+        favorites.setBounds(area);
     }
+    else favoritesSplitter.setVisible(false);
     folders.setBounds(sidebar);
     auto analysis = analysisBounds.reduced(16,16);
     analysisHeading.setBounds(analysis.removeFromTop(30)); analysis.removeFromTop(8);

@@ -107,7 +107,7 @@ TEST_CASE("Clearing tags removes links recursively and is idempotent", "[tagging
     REQUIRE(f.repo->tagsForSample(f.ids[1]).empty());
     REQUIRE(f.repo->tagsForSample(f.ids[2]).size() == 1);
     REQUIRE(f.repo->countTaggedInFolder(f.folder) == 1); // ids[2]
-    REQUIRE(f.repo->tags().size() == 16); // tag definitions survive
+    REQUIRE(f.repo->tags().size() == 27); // tag definitions survive
     REQUIRE(f.repo->clearTagsBatch({ f.ids[0], f.ids[1] }, {}).added == 0);
     REQUIRE(f.repo->recentTags().empty());
 }
@@ -141,7 +141,7 @@ TEST_CASE("Folder reset removes every tag link and preserves stars, overrides an
     REQUIRE_FALSE(p.cancelled);
     REQUIRE(p.applied == 7);
     for (auto id : f.ids) REQUIRE(f.repo->tagsForSample(id).empty());
-    REQUIRE(f.repo->tags().size() == 16);
+    REQUIRE(f.repo->tags().size() == 27);
     REQUIRE(f.repo->findById(f.ids[0])->starred);
     REQUIRE(f.repo->smartOverrides(f.ids[0]).size() == 1);
     REQUIRE(f.repo->recentTags().size() == 1);
