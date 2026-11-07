@@ -1,6 +1,7 @@
 #pragma once
 #include "core/database/LibraryQuery.h"
 #include "core/database/SampleRecord.h"
+#include "core/smart/SmartTypes.h"
 #include "core/export/ExternalFileDrag.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <map>
@@ -20,6 +21,7 @@ public:
         std::vector<SampleRecord> records;
         std::map<int64_t, std::vector<Tag>> tags;
         std::map<int64_t, int> duplicates;
+        std::map<int64_t, SmartDisplay> smart;
     };
     using RowLoader = std::function<LoadedRows(const std::vector<int64_t>&)>;
     void setSamples(std::vector<SampleRecord>);
@@ -27,6 +29,7 @@ public:
     void setVirtualSamples(std::vector<int64_t> orderedIds, RowLoader);
     void setRowTags(std::map<int64_t, std::vector<Tag>>);
     void setDuplicateCounts(std::map<int64_t, int>);
+    void setSmartDisplays(std::map<int64_t, SmartDisplay>);
     void setSearchText(const juce::String&);
     void selectRow(int row) { table.selectRow(row); }
     void selectRows(const std::vector<int>& rows);
@@ -72,6 +75,7 @@ private:
     RowLoader rowLoader;
     std::map<int64_t, std::vector<Tag>> rowTags;
     std::map<int64_t, int> duplicateCounts;
+    std::map<int64_t, SmartDisplay> smartDisplays;
     juce::String search;
     int sortColumn = 1;
     bool ascending = true;

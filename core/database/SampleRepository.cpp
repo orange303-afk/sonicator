@@ -1,6 +1,7 @@
 #include "SampleRepository.h"
 #include "SearchSyntax.h"
 #include "core/smart/KeyNames.h"
+#include "core/smart/SmartResolver.h"
 #include "PathRelocation.h"
 #include "SqliteHelpers.h"
 #include <algorithm>
@@ -8,7 +9,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred";
-constexpr int schemaVersion = 6;
+constexpr int schemaVersion = 7;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -84,6 +85,42 @@ juce::String foldForSearch(const juce::String& text)
     for (auto c : text) out += juce::String::charToString(foldCase(c));
     return out;
 }
+// Effective values used by whole-catalog sorting. The correlated subqueries are covered by the
+// primary keys (sample_id) and by (sample_id, field), so they stay index lookups per row.
+juce::String effectiveTypeSql()
+{
+    return "(CASE WHEN EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+           " AND so.field='type') THEN (SELECT CASE WHEN so.cleared=0 THEN NULLIF(so.text_value,'') END"
+           " FROM smart_overrides so WHERE so.sample_id=samples.id AND so.field='type')"
+           " ELSE (SELECT NULLIF(sr.type,'') FROM smart_results sr WHERE sr.sample_id=samples.id)"
+           " END)";
+}
+juce::String effectiveBpmSql()
+{
+    return "(CASE WHEN EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+           " AND so.field='bpm') THEN (SELECT CASE WHEN so.cleared=0"
+           " AND so.numeric_value>=20 AND so.numeric_value<=400 THEN so.numeric_value END"
+           " FROM smart_overrides so WHERE so.sample_id=samples.id AND so.field='bpm')"
+           " ELSE (SELECT CASE WHEN sr.has_bpm=1 THEN sr.bpm END FROM smart_results sr"
+           " WHERE sr.sample_id=samples.id) END)";
+}
+juce::String effectiveKeyTonicSql()
+{
+    return "(CASE WHEN EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+           " AND so.field='key') THEN (SELECT CASE WHEN so.cleared=0 AND so.numeric_value>=0"
+           " THEN so.numeric_value END FROM smart_overrides so"
+           " WHERE so.sample_id=samples.id AND so.field='key')"
+           " ELSE (SELECT CASE WHEN sr.key_tonic>=0 THEN sr.key_tonic END FROM smart_results sr"
+           " WHERE sr.sample_id=samples.id) END)";
+}
+juce::String effectiveKeyModeSql()
+{
+    return "(CASE WHEN EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+           " AND so.field='key') THEN (SELECT NULLIF(so.aux_text,'') FROM smart_overrides so"
+           " WHERE so.sample_id=samples.id AND so.field='key')"
+           " ELSE (SELECT NULLIF(sr.key_mode,'') FROM smart_results sr"
+           " WHERE sr.sample_id=samples.id) END)";
+}
 juce::String orderBy(LibrarySort sort, bool ascending)
 {
     juce::String column;
@@ -94,6 +131,26 @@ juce::String orderBy(LibrarySort sort, bool ascending)
         case LibrarySort::Rate:     column = "samples.sampleRate"; break;
         case LibrarySort::Channels: column = "samples.numChannels"; break;
         case LibrarySort::Status:   column = "samples.error COLLATE NOCASE"; break;
+        case LibrarySort::Type:
+        {
+            const auto expr = effectiveTypeSql();
+            return "(" + expr + " IS NULL) ASC, " + expr + " COLLATE NOCASE "
+                 + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
+        }
+        case LibrarySort::Bpm:
+        {
+            const auto expr = effectiveBpmSql();
+            return "(" + expr + " IS NULL) ASC, " + expr + " "
+                 + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
+        }
+        case LibrarySort::Key:
+        {
+            const auto tonic = effectiveKeyTonicSql();
+            const auto mode = effectiveKeyModeSql();
+            return "(" + tonic + " IS NULL) ASC, " + tonic + " "
+                 + (ascending ? "ASC" : "DESC") + ", " + mode + " COLLATE NOCASE "
+                 + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
+        }
         case LibrarySort::Name:
         default:                    column = "samples.name COLLATE NOCASE"; break;
     }
@@ -149,33 +206,56 @@ FilterSql buildFilterSql(const LibraryFilter& filter)
                 break;
             }
             case SearchKind::TypeOnly:
-                addText(" AND EXISTS(SELECT 1 FROM smart_results sr WHERE sr.sample_id=samples.id"
-                        " AND sr.type=? COLLATE NOCASE)", term.text);
+                // A manual type is the effective type, so it must win over the automatic one.
+                addText(" AND (EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                        " AND so.field='type' AND so.cleared=0 AND so.text_value=? COLLATE NOCASE)"
+                        " OR (NOT EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                        " AND so.field='type') AND EXISTS(SELECT 1 FROM smart_results sr"
+                        " WHERE sr.sample_id=samples.id AND sr.type=? COLLATE NOCASE)))", term.text);
+                sql.params.emplace_back(term.text);
                 break;
             case SearchKind::TypeOrText:
-                sql.where += " AND (EXISTS(SELECT 1 FROM smart_results sr WHERE sr.sample_id=samples.id"
-                             " AND sr.type=? COLLATE NOCASE) OR samples.search_key LIKE ? ESCAPE '\\')";
+                sql.where += " AND ((EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                             " AND so.field='type' AND so.cleared=0 AND so.text_value=? COLLATE NOCASE)"
+                             " OR (NOT EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                             " AND so.field='type') AND EXISTS(SELECT 1 FROM smart_results sr"
+                             " WHERE sr.sample_id=samples.id AND sr.type=? COLLATE NOCASE)))"
+                             " OR samples.search_key LIKE ? ESCAPE '\\')";
+                sql.params.emplace_back(term.text);
                 sql.params.emplace_back(term.text);
                 sql.params.emplace_back(like(term.text));
                 break;
             case SearchKind::KeyOnly:
             case SearchKind::KeyOrText:
             {
-                juce::String condition = "EXISTS(SELECT 1 FROM smart_results sr WHERE sr.sample_id=samples.id"
-                    " AND sr.key_tonic=? AND sr.key_state IN ('resolved','conflicting','overridden')";
+                juce::String condition =
+                    "EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                    " AND so.field='key' AND so.cleared=0 AND so.numeric_value=?";
+                if (term.mode.isNotEmpty()) condition += " AND so.aux_text=?";
+                condition += ") OR (NOT EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                             " AND so.field='key') AND EXISTS(SELECT 1 FROM smart_results sr"
+                             " WHERE sr.sample_id=samples.id AND sr.key_tonic=?"
+                             " AND sr.key_state IN ('resolved','ambiguous','conflicting','default','overridden')";
                 if (term.mode.isNotEmpty()) condition += " AND sr.key_mode=?";
-                condition += ")";
+                condition += "))";
                 if (term.kind == SearchKind::KeyOrText)
                     condition += " OR samples.search_key LIKE ? ESCAPE '\\'";
                 sql.where += " AND (" + condition + ")";
+                sql.params.emplace_back((int64_t) term.tonic);
+                if (term.mode.isNotEmpty()) sql.params.emplace_back(term.mode);
                 sql.params.emplace_back((int64_t) term.tonic);
                 if (term.mode.isNotEmpty()) sql.params.emplace_back(term.mode);
                 if (term.kind == SearchKind::KeyOrText) sql.params.emplace_back(like(term.text));
                 break;
             }
             case SearchKind::NoteOnly:
-                sql.where += " AND EXISTS(SELECT 1 FROM smart_results sr WHERE sr.sample_id=samples.id"
-                             " AND sr.root_note=? AND sr.root_state IN ('resolved','conflicting','overridden'))";
+                sql.where += " AND (EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                             " AND so.field='root_note' AND so.cleared=0 AND so.numeric_value=?)"
+                             " OR (NOT EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                             " AND so.field='root_note') AND EXISTS(SELECT 1 FROM smart_results sr"
+                             " WHERE sr.sample_id=samples.id AND sr.root_note=?"
+                             " AND sr.root_state IN ('resolved','conflicting','overridden'))))";
+                sql.params.emplace_back((int64_t) term.midi);
                 sql.params.emplace_back((int64_t) term.midi);
                 break;
         }
@@ -236,8 +316,7 @@ Tag readTag(const detail::Statement& s, int offset, int countColumn = -1)
     if (countColumn >= 0) tag.sampleCount = (int) s.integer(countColumn);
     return tag;
 }
-void backupDatabase(sqlite3* source, const juce::File& destination)
-{
+void backupDatabase(sqlite3* source, const juce::File& destination){
     sqlite3* out = nullptr;
     if (sqlite3_open_v2(destination.getFullPathName().toRawUTF8(), &out,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr) != SQLITE_OK)
@@ -272,6 +351,18 @@ void backupDatabase(sqlite3* source, const juce::File& destination)
         destination.deleteFile();
         throw std::runtime_error("Database backup failed: " + error.toStdString());
     }
+}
+// Adds a column only when it is missing, so a fresh schema and an upgraded one end up equal.
+void ensureColumn(sqlite3* handle, const char* table, const char* column, const char* definition)
+{
+    bool found = false;
+    {
+        detail::Statement info(handle, ("PRAGMA table_info(" + juce::String(table) + ")").toRawUTF8());
+        while (info.step()) if (info.text(1) == column) { found = true; break; }
+    }
+    if (! found)
+        detail::exec(handle, ("ALTER TABLE " + juce::String(table) + " ADD COLUMN "
+                              + juce::String(column) + " " + juce::String(definition) + ";").toRawUTF8());
 }
 }
 juce::String SampleRepository::searchKey(const juce::String& name, const juce::String& path)
@@ -321,7 +412,12 @@ void SampleRepository::createTables()
             "sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
             "field TEXT NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL,"
             "detail TEXT NOT NULL DEFAULT '', text_value TEXT NOT NULL DEFAULT '',"
-            "numeric_value REAL NOT NULL DEFAULT 0,"
+            "numeric_value REAL NOT NULL DEFAULT 0, aux_value REAL NOT NULL DEFAULT 0,"
+            "extractor_id TEXT NOT NULL DEFAULT '', extractor_version INTEGER NOT NULL DEFAULT 0,"
+            "raw_value TEXT NOT NULL DEFAULT '', input_kind TEXT NOT NULL DEFAULT '',"
+            "input_path TEXT NOT NULL DEFAULT '', fingerprint TEXT NOT NULL DEFAULT '',"
+            "limitation TEXT NOT NULL DEFAULT '', variable_tempo INTEGER NOT NULL DEFAULT 0,"
+            "extracted_at INTEGER NOT NULL DEFAULT 0,"
             "PRIMARY KEY(sample_id, field, source, detail)) WITHOUT ROWID;"
             "CREATE INDEX IF NOT EXISTS smart_candidates_field ON smart_candidates(field, numeric_value);"
             "CREATE TABLE IF NOT EXISTS smart_results ("
@@ -332,17 +428,44 @@ void SampleRepository::createTables()
             "root_note INTEGER NOT NULL DEFAULT -1,"
             "type_state TEXT NOT NULL DEFAULT 'unknown', structure_state TEXT NOT NULL DEFAULT 'unknown',"
             "bpm_state TEXT NOT NULL DEFAULT 'unknown', key_state TEXT NOT NULL DEFAULT 'unknown',"
-            "root_state TEXT NOT NULL DEFAULT 'unknown', explanation TEXT NOT NULL DEFAULT '',"
-            "resolver_version INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;"
+            "root_state TEXT NOT NULL DEFAULT 'unknown',"
+            "pitch_midi INTEGER NOT NULL DEFAULT -1, pitch_cents REAL NOT NULL DEFAULT 0,"
+            "pitch_state TEXT NOT NULL DEFAULT 'unknown',"
+            "type_source TEXT NOT NULL DEFAULT '', structure_source TEXT NOT NULL DEFAULT '',"
+            "bpm_source TEXT NOT NULL DEFAULT '', key_source TEXT NOT NULL DEFAULT '',"
+            "pitch_source TEXT NOT NULL DEFAULT '', root_source TEXT NOT NULL DEFAULT '',"
+            "type_override TEXT NOT NULL DEFAULT 'none', structure_override TEXT NOT NULL DEFAULT 'none',"
+            "bpm_override TEXT NOT NULL DEFAULT 'none', key_override TEXT NOT NULL DEFAULT 'none',"
+            "pitch_override TEXT NOT NULL DEFAULT 'none', root_override TEXT NOT NULL DEFAULT 'none',"
+            "explanation TEXT NOT NULL DEFAULT '',"
+            "revision INTEGER NOT NULL DEFAULT 0, generation INTEGER NOT NULL DEFAULT 0,"
+            "pipeline_state TEXT NOT NULL DEFAULT 'not_analyzed',"
+            "extractor_version INTEGER NOT NULL DEFAULT 0, resolver_version INTEGER NOT NULL DEFAULT 0,"
+            "dsp_version INTEGER NOT NULL DEFAULT 0, analyzed_at INTEGER NOT NULL DEFAULT 0,"
+            "error_code TEXT NOT NULL DEFAULT '', error_detail TEXT NOT NULL DEFAULT '',"
+            "updated_at INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;"
             "CREATE TABLE IF NOT EXISTS smart_overrides ("
             "sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
             "field TEXT NOT NULL, cleared INTEGER NOT NULL DEFAULT 0,"
+            "not_applicable INTEGER NOT NULL DEFAULT 0,"
             "text_value TEXT NOT NULL DEFAULT '', numeric_value REAL NOT NULL DEFAULT 0,"
+            "aux_value REAL NOT NULL DEFAULT 0, aux_text TEXT NOT NULL DEFAULT '',"
             "updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(sample_id, field)) WITHOUT ROWID;"
             "CREATE TABLE IF NOT EXISTS smart_inputs ("
             "sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
             "kind TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,"
-            "modified INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(sample_id, kind, path)) WITHOUT ROWID;");
+            "modified INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(sample_id, kind, path)) WITHOUT ROWID;"
+            "CREATE TABLE IF NOT EXISTS smart_extractions ("
+            "sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
+            "source TEXT NOT NULL, extractor_version INTEGER NOT NULL DEFAULT 0,"
+            "status TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '',"
+            "updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(sample_id, source)) WITHOUT ROWID;"
+            "CREATE TABLE IF NOT EXISTS smart_failures ("
+            "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE,"
+            "code TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '',"
+            "attempts INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;"
+            "CREATE TABLE IF NOT EXISTS smart_meta ("
+            "key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;");
         // Databases created before schema 3 predate the folded search column.
         bool hasSearchKey = false, hasStarred = false;
         {
@@ -355,6 +478,52 @@ void SampleRepository::createTables()
             while (info.step()) if (info.text(1) == "starred") hasStarred = true;
         }
         if (! hasStarred) detail::exec(db.handle, "ALTER TABLE samples ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;");
+        // Schema 7 extends smart storage in place. Existing rows keep their identity, tags, stars,
+        // measured features, duplicate groups and overrides; only new columns/tables are added.
+        ensureColumn(db.handle, "smart_candidates", "aux_value", "REAL NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_candidates", "extractor_id", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_candidates", "extractor_version", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_candidates", "raw_value", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_candidates", "input_kind", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_candidates", "input_path", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_candidates", "fingerprint", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_candidates", "limitation", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_candidates", "variable_tempo", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_candidates", "extracted_at", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_results", "pitch_midi", "INTEGER NOT NULL DEFAULT -1");
+        ensureColumn(db.handle, "smart_results", "pitch_cents", "REAL NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_results", "pitch_state", "TEXT NOT NULL DEFAULT 'unknown'");
+        ensureColumn(db.handle, "smart_results", "type_source", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_results", "structure_source", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_results", "bpm_source", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_results", "key_source", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_results", "pitch_source", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_results", "root_source", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_results", "type_override", "TEXT NOT NULL DEFAULT 'none'");
+        ensureColumn(db.handle, "smart_results", "structure_override", "TEXT NOT NULL DEFAULT 'none'");
+        ensureColumn(db.handle, "smart_results", "bpm_override", "TEXT NOT NULL DEFAULT 'none'");
+        ensureColumn(db.handle, "smart_results", "key_override", "TEXT NOT NULL DEFAULT 'none'");
+        ensureColumn(db.handle, "smart_results", "pitch_override", "TEXT NOT NULL DEFAULT 'none'");
+        ensureColumn(db.handle, "smart_results", "root_override", "TEXT NOT NULL DEFAULT 'none'");
+        ensureColumn(db.handle, "smart_results", "revision", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_results", "generation", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_results", "pipeline_state", "TEXT NOT NULL DEFAULT 'not_analyzed'");
+        ensureColumn(db.handle, "smart_results", "extractor_version", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_results", "dsp_version", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_results", "analyzed_at", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_results", "error_code", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_results", "error_detail", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_overrides", "not_applicable", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_overrides", "aux_value", "REAL NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "smart_overrides", "aux_text", "TEXT NOT NULL DEFAULT ''");
+        detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS smart_results_pipeline"
+                                " ON smart_results(pipeline_state, sample_id);");
+        // Rows written by schema 6 predate pipeline_state and versions. Their values are still
+        // useful provenance, so they are marked stale (visible, not current) instead of
+        // "not analyzed", which would hide data the user already has.
+        if (current >= 1 && current < 7)
+            detail::exec(db.handle, "UPDATE smart_results SET pipeline_state='stale'"
+                                    " WHERE pipeline_state='not_analyzed';");
         // Rows written by the build that bumped the version to 2 measured the same feature set, so
         // they are relabelled rather than reanalyzed. Only during this one-time upgrade.
         if (current >= 1 && current < 2) detail::exec(db.handle, "UPDATE samples SET version=1 WHERE version=2;");
@@ -387,7 +556,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=6;");
+        detail::exec(db.handle, "PRAGMA user_version=7;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -415,10 +584,13 @@ int64_t SampleRepository::upsert(const SampleRecord& r)
     s.text(20,searchKey(r.fileName,r.filePath)); s.integer(21,r.starred ? 1 : 0);
     if (! s.step()) throw std::runtime_error("Insert did not return a sample ID");
     const auto id = s.integer(0);
-    // Reanalysed audio invalidates the derived smart result; candidates and overrides are kept
-    // and the next smart run rebuilds the result from them.
-    detail::Statement invalidate(db.handle, "DELETE FROM smart_results WHERE sample_id=?");
-    invalidate.integer(1, id); invalidate.step();
+    // Reanalysed audio makes the derived smart result stale; candidates, overrides and the last
+    // completed values are kept and the next smart run rebuilds them. The row is not deleted, so
+    // the UI can still show the previous value as stale instead of pretending it was never known.
+    detail::Statement invalidate(db.handle,
+        "UPDATE smart_results SET pipeline_state='stale', updated_at=? WHERE sample_id=?");
+    invalidate.integer(1, juce::Time::currentTimeMillis());
+    invalidate.integer(2, id); invalidate.step();
     return id;
 }
 std::optional<SampleRecord> SampleRepository::findByPath(const juce::String& path) const
@@ -912,43 +1084,34 @@ std::vector<SampleRecord> SampleRepository::duplicateMembers(int64_t sampleId) c
     while (s.step()) out.push_back(read(s));
     return out;
 }
-void SampleRepository::replaceSmartCandidates(int64_t sampleId, const std::vector<SmartCandidate>& candidates)
+namespace {
+SmartOverrideMap readOverrides(sqlite3* h, int64_t sampleId)
 {
-    std::lock_guard lock(db.mutex);
-    detail::exec(db.handle, "BEGIN IMMEDIATE;");
-    try
+    detail::Statement s(h, "SELECT field,cleared,not_applicable,text_value,numeric_value,aux_value"
+                           " FROM smart_overrides WHERE sample_id=?");
+    s.integer(1, sampleId);
+    SmartOverrideMap out;
+    while (s.step())
     {
-        detail::Statement remove(db.handle, "DELETE FROM smart_candidates WHERE sample_id=?");
-        remove.integer(1, sampleId); remove.step();
-        detail::Statement insert(db.handle,
-            "INSERT OR REPLACE INTO smart_candidates"
-            "(sample_id,field,source,status,detail,text_value,numeric_value) VALUES(?,?,?,?,?,?,?)");
-        for (const auto& c : candidates)
-        {
-            insert.reset();
-            insert.integer(1, sampleId);
-            insert.text(2, smartFieldKey(c.field));
-            insert.text(3, c.source);
-            insert.text(4, candidateStatusKey(c.status));
-            insert.text(5, c.detail);
-            insert.text(6, c.textValue);
-            insert.real(7, c.numericValue);
-            insert.step();
-        }
-        detail::exec(db.handle, "COMMIT;");
+        auto field = smartFieldFromKey(s.text(0));
+        if (! field) continue;
+        SmartOverride value;
+        value.cleared = s.integer(1) != 0;
+        value.notApplicable = s.integer(2) != 0;
+        value.textValue = s.text(3);
+        value.numericValue = s.real(4);
+        value.auxValue = s.real(5);
+        out[*field] = value;
     }
-    catch (...)
-    {
-        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
-        throw;
-    }
+    return out;
 }
-std::vector<SmartCandidate> SampleRepository::smartCandidates(int64_t sampleId) const
+std::vector<SmartCandidate> readCandidates(sqlite3* h, int64_t sampleId)
 {
-    std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,
-        "SELECT field,source,status,detail,text_value,numeric_value FROM smart_candidates"
-        " WHERE sample_id=? ORDER BY field,source,detail");
+    detail::Statement s(h,
+        "SELECT field,source,status,detail,text_value,numeric_value,aux_value,"
+        "extractor_id,extractor_version,raw_value,input_kind,input_path,fingerprint,limitation,"
+        "variable_tempo,extracted_at"
+        " FROM smart_candidates WHERE sample_id=? ORDER BY field,source,detail");
     s.integer(1, sampleId);
     std::vector<SmartCandidate> out;
     while (s.step())
@@ -960,90 +1123,537 @@ std::vector<SmartCandidate> SampleRepository::smartCandidates(int64_t sampleId) 
         c.detail = s.text(3);
         c.textValue = s.text(4);
         c.numericValue = s.real(5);
+        c.auxValue = s.real(6);
+        c.extractorId = s.text(7);
+        c.extractorVersion = (int) s.integer(8);
+        c.rawValue = s.text(9);
+        c.inputKind = s.text(10);
+        c.inputPath = s.text(11);
+        c.fingerprint = s.text(12);
+        c.limitation = s.text(13);
+        c.variableTempo = s.integer(14) != 0;
+        c.extractedAt = s.integer(15);
         out.push_back(c);
     }
     return out;
 }
-void SampleRepository::setSmartResult(int64_t sampleId, const SmartResult& r)
+std::vector<SmartInput> readInputs(sqlite3* h, int64_t sampleId)
 {
-    std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,
-        "INSERT OR REPLACE INTO smart_results"
-        "(sample_id,type,structure,bpm,has_bpm,key_tonic,key_mode,root_note,type_state,"
-        "structure_state,bpm_state,key_state,root_state,explanation,resolver_version,updated_at)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    detail::Statement s(h, "SELECT kind,path,size,modified FROM smart_inputs"
+                           " WHERE sample_id=? ORDER BY kind,path");
     s.integer(1, sampleId);
-    s.text(2, r.type); s.text(3, r.structure);
-    s.real(4, r.bpm); s.integer(5, r.hasBpm ? 1 : 0);
-    s.integer(6, r.keyTonic); s.text(7, r.keyMode); s.integer(8, r.rootNote);
-    s.text(9, smartStateKey(r.typeState)); s.text(10, smartStateKey(r.structureState));
-    s.text(11, smartStateKey(r.bpmState)); s.text(12, smartStateKey(r.keyState));
-    s.text(13, smartStateKey(r.rootState)); s.text(14, r.explanation);
-    s.integer(15, 1);
-    s.integer(16, juce::Time::currentTimeMillis());
-    s.step();
+    std::vector<SmartInput> out;
+    while (s.step()) out.push_back({ s.text(0), s.text(1), s.integer(2), s.integer(3) });
+    return out;
 }
-namespace {
-SmartState stateFromKey(const juce::String& key)
+std::vector<SmartExtraction> readExtractions(sqlite3* h, int64_t sampleId)
 {
-    for (auto state : { SmartState::Unknown, SmartState::Resolved, SmartState::Ambiguous,
-                        SmartState::Conflicting, SmartState::Unsupported, SmartState::Default,
-                        SmartState::Overridden })
-        if (smartStateKey(state) == key) return state;
-    return SmartState::Unknown;
+    detail::Statement s(h, "SELECT source,extractor_version,status,error,updated_at"
+                           " FROM smart_extractions WHERE sample_id=? ORDER BY source");
+    s.integer(1, sampleId);
+    std::vector<SmartExtraction> out;
+    while (s.step()) out.push_back({ s.text(0), (int) s.integer(1), s.text(2), s.text(3), s.integer(4) });
+    return out;
 }
-}
-std::optional<SmartResult> SampleRepository::smartResult(int64_t sampleId) const
+std::optional<SmartResult> readResult(sqlite3* h, int64_t sampleId)
 {
-    std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,
-        "SELECT type,structure,bpm,has_bpm,key_tonic,key_mode,root_note,type_state,"
-        "structure_state,bpm_state,key_state,root_state,explanation FROM smart_results WHERE sample_id=?");
+    detail::Statement s(h,
+        "SELECT type,structure,bpm,has_bpm,key_tonic,key_mode,root_note,"
+        "type_state,structure_state,bpm_state,key_state,root_state,"
+        "pitch_midi,pitch_cents,pitch_state,"
+        "type_source,structure_source,bpm_source,key_source,pitch_source,root_source,"
+        "type_override,structure_override,bpm_override,key_override,pitch_override,root_override,"
+        "explanation,revision,generation,pipeline_state,extractor_version,resolver_version,dsp_version,"
+        "analyzed_at,error_code,error_detail,updated_at"
+        " FROM smart_results WHERE sample_id=?");
     s.integer(1, sampleId);
     if (! s.step()) return std::nullopt;
     SmartResult r;
     r.type = s.text(0); r.structure = s.text(1);
     r.bpm = s.real(2); r.hasBpm = s.integer(3) != 0;
     r.keyTonic = (int) s.integer(4); r.keyMode = s.text(5); r.rootNote = (int) s.integer(6);
-    r.typeState = stateFromKey(s.text(7)); r.structureState = stateFromKey(s.text(8));
-    r.bpmState = stateFromKey(s.text(9)); r.keyState = stateFromKey(s.text(10));
-    r.rootState = stateFromKey(s.text(11)); r.explanation = s.text(12);
+    r.typeState = smartStateFromKey(s.text(7)).value_or(SmartState::Unknown);
+    r.structureState = smartStateFromKey(s.text(8)).value_or(SmartState::Unknown);
+    r.bpmState = smartStateFromKey(s.text(9)).value_or(SmartState::Unknown);
+    r.keyState = smartStateFromKey(s.text(10)).value_or(SmartState::Unknown);
+    r.rootState = smartStateFromKey(s.text(11)).value_or(SmartState::Unknown);
+    r.pitchMidi = (int) s.integer(12); r.pitchCents = s.real(13);
+    r.pitchState = smartStateFromKey(s.text(14)).value_or(SmartState::Unknown);
+    r.typeSource = s.text(15); r.structureSource = s.text(16); r.bpmSource = s.text(17);
+    r.keySource = s.text(18); r.pitchSource = s.text(19); r.rootSource = s.text(20);
+    r.typeOverride = overrideStateFromKey(s.text(21)).value_or(OverrideState::None);
+    r.structureOverride = overrideStateFromKey(s.text(22)).value_or(OverrideState::None);
+    r.bpmOverride = overrideStateFromKey(s.text(23)).value_or(OverrideState::None);
+    r.keyOverride = overrideStateFromKey(s.text(24)).value_or(OverrideState::None);
+    r.pitchOverride = overrideStateFromKey(s.text(25)).value_or(OverrideState::None);
+    r.rootOverride = overrideStateFromKey(s.text(26)).value_or(OverrideState::None);
+    r.explanation = s.text(27);
+    r.revision = s.integer(28); r.generation = s.integer(29);
+    r.pipelineState = smartPipelineStateFromKey(s.text(30)).value_or(SmartPipelineState::NotAnalyzed);
+    r.extractorVersion = (int) s.integer(31); r.resolverVersion = (int) s.integer(32);
+    r.dspVersion = (int) s.integer(33);
+    r.analyzedAt = s.integer(34); r.errorCode = s.text(35); r.errorDetail = s.text(36);
+    r.hasPitch = r.pitchMidi >= 0 && r.pitchState != SmartState::Unknown
+                 && r.pitchState != SmartState::NotApplicable;
     return r;
+}
+void writeCandidates(sqlite3* h, int64_t sampleId, const std::vector<SmartCandidate>& candidates)
+{
+    {
+        detail::Statement remove(h, "DELETE FROM smart_candidates WHERE sample_id=?");
+        remove.integer(1, sampleId); remove.step();
+    }
+    detail::Statement insert(h,
+        "INSERT OR REPLACE INTO smart_candidates"
+        "(sample_id,field,source,status,detail,text_value,numeric_value,aux_value,"
+        "extractor_id,extractor_version,raw_value,input_kind,input_path,fingerprint,limitation,"
+        "variable_tempo,extracted_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    for (const auto& c : candidates)
+    {
+        insert.reset();
+        insert.integer(1, sampleId);
+        insert.text(2, smartFieldKey(c.field));
+        insert.text(3, c.source);
+        insert.text(4, candidateStatusKey(c.status));
+        insert.text(5, c.detail);
+        insert.text(6, c.textValue);
+        insert.real(7, c.numericValue);
+        insert.real(8, c.auxValue);
+        insert.text(9, c.extractorId);
+        insert.integer(10, c.extractorVersion);
+        insert.text(11, c.rawValue);
+        insert.text(12, c.inputKind);
+        insert.text(13, c.inputPath);
+        insert.text(14, c.fingerprint);
+        insert.text(15, c.limitation);
+        insert.integer(16, c.variableTempo ? 1 : 0);
+        insert.integer(17, c.extractedAt);
+        insert.step();
+    }
+}
+void writeInputs(sqlite3* h, int64_t sampleId, const std::vector<SmartInput>& inputs)
+{
+    {
+        detail::Statement remove(h, "DELETE FROM smart_inputs WHERE sample_id=?");
+        remove.integer(1, sampleId); remove.step();
+    }
+    detail::Statement insert(h,
+        "INSERT OR REPLACE INTO smart_inputs(sample_id,kind,path,size,modified) VALUES(?,?,?,?,?)");
+    for (const auto& input : inputs)
+    {
+        insert.reset(); insert.integer(1, sampleId); insert.text(2, input.kind);
+        insert.text(3, input.path); insert.integer(4, input.size); insert.integer(5, input.modified);
+        insert.step();
+    }
+}
+void writeExtractions(sqlite3* h, int64_t sampleId, const std::vector<SmartExtraction>& extractions)
+{
+    {
+        detail::Statement remove(h, "DELETE FROM smart_extractions WHERE sample_id=?");
+        remove.integer(1, sampleId); remove.step();
+    }
+    detail::Statement insert(h,
+        "INSERT OR REPLACE INTO smart_extractions"
+        "(sample_id,source,extractor_version,status,error,updated_at) VALUES(?,?,?,?,?,?)");
+    for (const auto& e : extractions)
+    {
+        insert.reset(); insert.integer(1, sampleId); insert.text(2, e.source);
+        insert.integer(3, e.extractorVersion); insert.text(4, e.status);
+        insert.text(5, e.error); insert.integer(6, e.updatedAt);
+        insert.step();
+    }
+}
+void writeResult(sqlite3* h, int64_t sampleId, const SmartResult& r)
+{
+    detail::Statement s(h,
+        "INSERT OR REPLACE INTO smart_results"
+        "(sample_id,type,structure,bpm,has_bpm,key_tonic,key_mode,root_note,"
+        "type_state,structure_state,bpm_state,key_state,root_state,"
+        "pitch_midi,pitch_cents,pitch_state,"
+        "type_source,structure_source,bpm_source,key_source,pitch_source,root_source,"
+        "type_override,structure_override,bpm_override,key_override,pitch_override,root_override,"
+        "explanation,revision,generation,pipeline_state,extractor_version,resolver_version,dsp_version,"
+        "analyzed_at,error_code,error_detail,updated_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    s.integer(1, sampleId);
+    s.text(2, r.type); s.text(3, r.structure);
+    s.real(4, r.bpm); s.integer(5, r.hasBpm ? 1 : 0);
+    s.integer(6, r.keyTonic); s.text(7, r.keyMode); s.integer(8, r.rootNote);
+    s.text(9, smartStateKey(r.typeState)); s.text(10, smartStateKey(r.structureState));
+    s.text(11, smartStateKey(r.bpmState)); s.text(12, smartStateKey(r.keyState));
+    s.text(13, smartStateKey(r.rootState));
+    s.integer(14, r.pitchMidi); s.real(15, r.pitchCents); s.text(16, smartStateKey(r.pitchState));
+    s.text(17, r.typeSource); s.text(18, r.structureSource); s.text(19, r.bpmSource);
+    s.text(20, r.keySource); s.text(21, r.pitchSource); s.text(22, r.rootSource);
+    s.text(23, overrideStateKey(r.typeOverride)); s.text(24, overrideStateKey(r.structureOverride));
+    s.text(25, overrideStateKey(r.bpmOverride)); s.text(26, overrideStateKey(r.keyOverride));
+    s.text(27, overrideStateKey(r.pitchOverride)); s.text(28, overrideStateKey(r.rootOverride));
+    s.text(29, r.explanation);
+    s.integer(30, r.revision); s.integer(31, r.generation);
+    s.text(32, smartPipelineStateKey(r.pipelineState));
+    s.integer(33, r.extractorVersion); s.integer(34, r.resolverVersion); s.integer(35, r.dspVersion);
+    s.integer(36, r.analyzedAt); s.text(37, r.errorCode); s.text(38, r.errorDetail);
+    s.integer(39, juce::Time::currentTimeMillis());
+    s.step();
+}
+int64_t nextGeneration(sqlite3* h)
+{
+    detail::exec(h, "INSERT OR IGNORE INTO smart_meta(key,value) VALUES('generation',0);");
+    detail::exec(h, "UPDATE smart_meta SET value=value+1 WHERE key='generation';");
+    detail::Statement s(h, "SELECT value FROM smart_meta WHERE key='generation'");
+    return s.step() ? s.integer(0) : 0;
+}
+void clearFailure(sqlite3* h, int64_t sampleId)
+{
+    detail::Statement s(h, "DELETE FROM smart_failures WHERE sample_id=?");
+    s.integer(1, sampleId); s.step();
+}
+void writeFailure(sqlite3* h, int64_t sampleId, const juce::String& code, const juce::String& message)
+{
+    detail::Statement s(h,
+        "INSERT INTO smart_failures(sample_id,code,message,attempts,updated_at) VALUES(?,?,?,1,?)"
+        " ON CONFLICT(sample_id) DO UPDATE SET code=excluded.code,message=excluded.message,"
+        "attempts=smart_failures.attempts+1,updated_at=excluded.updated_at");
+    s.integer(1, sampleId); s.text(2, code); s.text(3, message);
+    s.integer(4, juce::Time::currentTimeMillis()); s.step();
+}
+// Re-resolves a stored result from its candidates and the current overrides. Used by override
+// edits, so a display value never waits for the next background pass.
+SmartResult resolvedFromStored(sqlite3* h, int64_t sampleId, bool* found)
+{
+    auto candidates = readCandidates(h, sampleId);
+    auto overrides = readOverrides(h, sampleId);
+    auto result = resolveSmart(candidates, overrides);
+    if (auto existing = readResult(h, sampleId))
+    {
+        *found = true;
+        result.revision = existing->revision;
+        result.generation = existing->generation;
+        result.pipelineState = existing->pipelineState;
+        result.extractorVersion = existing->extractorVersion;
+        result.resolverVersion = existing->resolverVersion;
+        result.dspVersion = existing->dspVersion;
+        result.analyzedAt = existing->analyzedAt;
+        result.errorCode = existing->errorCode;
+        result.errorDetail = existing->errorDetail;
+    }
+    else
+    {
+        *found = false;
+        result.pipelineState = SmartPipelineState::NotAnalyzed;
+        result.extractorVersion = smartExtractorsVersion;
+        result.resolverVersion = smartResolverVersion;
+        result.dspVersion = smartDspVersion;
+    }
+    return result;
+}
+} // namespace
+
+void SampleRepository::replaceSmartCandidates(int64_t sampleId, const std::vector<SmartCandidate>& candidates)
+{
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        writeCandidates(db.handle, sampleId, candidates);
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+std::vector<SmartCandidate> SampleRepository::smartCandidates(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    return readCandidates(db.handle, sampleId);
+}
+void SampleRepository::setSmartResult(int64_t sampleId, const SmartResult& r)
+{
+    std::lock_guard lock(db.mutex);
+    writeResult(db.handle, sampleId, r);
+}
+std::optional<SmartResult> SampleRepository::smartResult(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    return readResult(db.handle, sampleId);
+}
+int64_t SampleRepository::smartRevision(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "SELECT revision FROM smart_results WHERE sample_id=?");
+    s.integer(1, sampleId);
+    return s.step() ? s.integer(0) : 0;
+}
+SmartPublicationOutcome SampleRepository::publishSmartAnalysis(const SmartPublication& publication)
+{
+    std::lock_guard lock(db.mutex);
+    SmartPublicationOutcome outcome;
+    if (publication.catalogPath.isNotEmpty()
+        && publication.catalogPath != db.file().getFullPathName())
+    {
+        outcome.reason = "catalog-changed";
+        return outcome;
+    }
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        bool hasRow = false;
+        int64_t currentRevision = 0;
+        {
+            detail::Statement current(db.handle, "SELECT revision FROM smart_results WHERE sample_id=?");
+            current.integer(1, publication.sampleId);
+            hasRow = current.step();
+            currentRevision = hasRow ? current.integer(0) : 0;
+        }
+        if ((hasRow && currentRevision != publication.expectedRevision)
+            || (! hasRow && publication.expectedRevision != 0))
+        {
+            detail::exec(db.handle, "ROLLBACK;");
+            outcome.reason = "revision-changed";
+            outcome.revision = currentRevision;
+            return outcome;
+        }
+        const auto candidates = publication.candidates;
+        const auto overrides = readOverrides(db.handle, publication.sampleId);
+        auto result = resolveSmart(candidates, overrides);
+        result.revision = publication.expectedRevision + 1;
+        result.generation = publication.generation > 0 ? publication.generation
+                                                       : nextGeneration(db.handle);
+        result.pipelineState = SmartPipelineState::Complete;
+        result.extractorVersion = publication.extractorVersion;
+        result.resolverVersion = publication.resolverVersion;
+        result.dspVersion = publication.dspVersion;
+        result.analyzedAt = juce::Time::currentTimeMillis();
+        result.errorCode.clear();
+        result.errorDetail.clear();
+        writeCandidates(db.handle, publication.sampleId, candidates);
+        writeInputs(db.handle, publication.sampleId, publication.inputs);
+        writeExtractions(db.handle, publication.sampleId, publication.extractions);
+        writeResult(db.handle, publication.sampleId, result);
+        clearFailure(db.handle, publication.sampleId);
+        detail::exec(db.handle, "COMMIT;");
+        outcome.published = true;
+        outcome.revision = result.revision;
+        outcome.result = result;
+        return outcome;
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+void SampleRepository::markSmartStale(int64_t sampleId)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "INSERT INTO smart_results(sample_id,pipeline_state,updated_at) VALUES(?,'stale',?)"
+        " ON CONFLICT(sample_id) DO UPDATE SET pipeline_state='stale',"
+        " error_code='',error_detail='',updated_at=excluded.updated_at");
+    s.integer(1, sampleId);
+    s.integer(2, juce::Time::currentTimeMillis());
+    s.step();
+}
+void SampleRepository::markSmartError(int64_t sampleId, const juce::String& code,
+                                      const juce::String& message)
+{
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        {
+            detail::Statement s(db.handle,
+                "INSERT INTO smart_results(sample_id,pipeline_state,error_code,error_detail,updated_at)"
+                " VALUES(?,'error',?,?,?)"
+                " ON CONFLICT(sample_id) DO UPDATE SET pipeline_state='error',"
+                " error_code=excluded.error_code,error_detail=excluded.error_detail,"
+                " updated_at=excluded.updated_at");
+            s.integer(1, sampleId); s.text(2, code); s.text(3, message);
+            s.integer(4, juce::Time::currentTimeMillis()); s.step();
+        }
+        writeFailure(db.handle, sampleId, code, message);
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+std::optional<SmartFailure> SampleRepository::smartFailure(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT code,message,attempts,updated_at FROM smart_failures WHERE sample_id=?");
+    s.integer(1, sampleId);
+    if (! s.step()) return std::nullopt;
+    return SmartFailure{ s.text(0), s.text(1), (int) s.integer(2), s.integer(3) };
 }
 void SampleRepository::setSmartOverride(int64_t sampleId, SmartField field, const SmartOverride& value)
 {
     std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,
-        "INSERT OR REPLACE INTO smart_overrides(sample_id,field,cleared,text_value,numeric_value,updated_at)"
-        " VALUES(?,?,?,?,?,?)");
-    s.integer(1, sampleId); s.text(2, smartFieldKey(field));
-    s.integer(3, value.cleared ? 1 : 0); s.text(4, value.textValue);
-    s.real(5, value.numericValue); s.integer(6, juce::Time::currentTimeMillis());
-    s.step();
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        SmartOverride stored = value;
+        // Keys and pitches are stored in a queryable form as well as text.
+        if (field == SmartField::Key && ! value.cleared)
+        {
+            if (auto key = parseKeyValue(value.textValue))
+            {
+                stored.numericValue = key->tonic;
+                stored.auxText = key->mode;
+            }
+        }
+        {
+            detail::Statement s(db.handle,
+                "INSERT OR REPLACE INTO smart_overrides"
+                "(sample_id,field,cleared,not_applicable,text_value,numeric_value,aux_value,aux_text,updated_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?)");
+            s.integer(1, sampleId); s.text(2, smartFieldKey(field));
+            s.integer(3, stored.cleared ? 1 : 0);
+            s.integer(4, stored.notApplicable ? 1 : 0);
+            s.text(5, stored.textValue); s.real(6, stored.numericValue);
+            s.real(7, stored.auxValue); s.text(8, stored.auxText);
+            s.integer(9, juce::Time::currentTimeMillis());
+            s.step();
+        }
+        bool found = false;
+        auto result = resolvedFromStored(db.handle, sampleId, &found);
+        result.revision += 1;
+        result.analyzedAt = juce::Time::currentTimeMillis();
+        writeResult(db.handle, sampleId, result);
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
 }
 void SampleRepository::clearSmartOverride(int64_t sampleId, SmartField field)
 {
     std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle, "DELETE FROM smart_overrides WHERE sample_id=? AND field=?");
-    s.integer(1, sampleId); s.text(2, smartFieldKey(field)); s.step();
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        {
+            detail::Statement s(db.handle, "DELETE FROM smart_overrides WHERE sample_id=? AND field=?");
+            s.integer(1, sampleId); s.text(2, smartFieldKey(field)); s.step();
+        }
+        bool found = false;
+        auto result = resolvedFromStored(db.handle, sampleId, &found);
+        result.revision += 1;
+        result.analyzedAt = juce::Time::currentTimeMillis();
+        if (found || ! readCandidates(db.handle, sampleId).empty())
+            writeResult(db.handle, sampleId, result);
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
 }
 SmartOverrideMap SampleRepository::smartOverrides(int64_t sampleId) const
 {
     std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,
-        "SELECT field,cleared,text_value,numeric_value FROM smart_overrides WHERE sample_id=?");
-    s.integer(1, sampleId);
-    SmartOverrideMap out;
-    while (s.step())
+    return readOverrides(db.handle, sampleId);
+}
+std::vector<SmartExtraction> SampleRepository::smartExtractions(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    return readExtractions(db.handle, sampleId);
+}
+std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vector<int64_t>& sampleIds) const
+{
+    std::map<int64_t, SmartDisplay> out;
+    if (sampleIds.empty()) return out;
+    std::lock_guard lock(db.mutex);
+    constexpr size_t chunkSize = 400;
+    for (size_t start = 0; start < sampleIds.size(); start += chunkSize)
     {
-        auto field = smartFieldFromKey(s.text(0));
-        if (! field) continue;
-        SmartOverride value;
-        value.cleared = s.integer(1) != 0;
-        value.textValue = s.text(2);
-        value.numericValue = s.real(3);
-        out[*field] = value;
+        const size_t end = std::min(sampleIds.size(), start + chunkSize);
+        juce::String placeholders;
+        for (size_t i = start; i < end; ++i)
+        {
+            if (i != start) placeholders += ",";
+            placeholders += "?";
+        }
+        detail::Statement results(db.handle,
+            ("SELECT sample_id,type,type_state,bpm,has_bpm,bpm_state,key_tonic,key_mode,key_state,"
+             "pipeline_state FROM smart_results WHERE sample_id IN (" + placeholders + ")").toRawUTF8());
+        for (size_t i = start; i < end; ++i) results.integer((int) (i - start + 1), sampleIds[i]);
+        while (results.step())
+        {
+            SmartDisplay d;
+            const auto id = results.integer(0);
+            d.type = results.text(1);
+            d.typeState = smartStateFromKey(results.text(2)).value_or(SmartState::Unknown);
+            d.bpm = results.real(3);
+            d.hasBpm = results.integer(4) != 0;
+            d.bpmState = smartStateFromKey(results.text(5)).value_or(SmartState::Unknown);
+            const int tonic = (int) results.integer(6);
+            const auto mode = results.text(7);
+            d.keyState = smartStateFromKey(results.text(8)).value_or(SmartState::Unknown);
+            d.key = keyDisplayName(tonic, mode);
+            d.pipelineState = smartPipelineStateFromKey(results.text(9))
+                                  .value_or(SmartPipelineState::NotAnalyzed);
+            // A pre-v7 row can carry values without a pipeline state. It is not "never analyzed":
+            // show the values with the stale marker until a pass rewrites them.
+            if (d.pipelineState == SmartPipelineState::NotAnalyzed
+                && (d.type.isNotEmpty() || d.hasBpm || d.key.isNotEmpty()))
+                d.pipelineState = SmartPipelineState::Stale;
+            out[id] = d;
+        }
+        detail::Statement overrides(db.handle,
+            ("SELECT sample_id,field,cleared,not_applicable,text_value,numeric_value"
+             " FROM smart_overrides WHERE sample_id IN (" + placeholders + ")"
+             " AND field IN ('type','bpm','key')").toRawUTF8());
+        for (size_t i = start; i < end; ++i) overrides.integer((int) (i - start + 1), sampleIds[i]);
+        while (overrides.step())
+        {
+            const auto id = overrides.integer(0);
+            auto& d = out[id];
+            const auto field = overrides.text(1);
+            const bool cleared = overrides.integer(2) != 0;
+            const bool notApplicable = overrides.integer(3) != 0;
+            const auto state = notApplicable ? OverrideState::NotApplicable
+                            : cleared ? OverrideState::Unknown : OverrideState::Value;
+            if (field == "type")
+            {
+                d.typeOverride = state;
+                if (state == OverrideState::Value) d.type = overrides.text(4);
+                else d.type.clear();
+            }
+            else if (field == "bpm")
+            {
+                d.bpmOverride = state;
+                const auto value = overrides.real(5);
+                const bool valid = state == OverrideState::Value && std::isfinite(value)
+                                   && value >= 20.0 && value <= 400.0;
+                d.hasBpm = valid;
+                d.bpm = valid ? value : 0.0;
+            }
+            else if (field == "key")
+            {
+                d.keyOverride = state;
+                if (state == OverrideState::Value)
+                {
+                    if (auto key = parseKeyValue(overrides.text(4)))
+                        d.key = keyDisplayName(key->tonic, key->mode);
+                    else
+                        d.key = overrides.text(4);
+                }
+                else d.key.clear();
+            }
+        }
     }
+    // Rows without a smart result still need a display entry with the default state.
+    for (auto id : sampleIds) if (out.find(id) == out.end()) out[id] = {};
     return out;
 }
 void SampleRepository::setSmartInputs(int64_t sampleId, const std::vector<SmartInput>& inputs)
@@ -1052,16 +1662,7 @@ void SampleRepository::setSmartInputs(int64_t sampleId, const std::vector<SmartI
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
     try
     {
-        detail::Statement remove(db.handle, "DELETE FROM smart_inputs WHERE sample_id=?");
-        remove.integer(1, sampleId); remove.step();
-        detail::Statement insert(db.handle,
-            "INSERT OR REPLACE INTO smart_inputs(sample_id,kind,path,size,modified) VALUES(?,?,?,?,?)");
-        for (const auto& input : inputs)
-        {
-            insert.reset(); insert.integer(1, sampleId); insert.text(2, input.kind);
-            insert.text(3, input.path); insert.integer(4, input.size); insert.integer(5, input.modified);
-            insert.step();
-        }
+        writeInputs(db.handle, sampleId, inputs);
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -1073,13 +1674,7 @@ void SampleRepository::setSmartInputs(int64_t sampleId, const std::vector<SmartI
 std::vector<SmartInput> SampleRepository::smartInputs(int64_t sampleId) const
 {
     std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,
-        "SELECT kind,path,size,modified FROM smart_inputs WHERE sample_id=? ORDER BY kind,path");
-    s.integer(1, sampleId);
-    std::vector<SmartInput> out;
-    while (s.step())
-        out.push_back({ s.text(0), s.text(1), s.integer(2), s.integer(3) });
-    return out;
+    return readInputs(db.handle, sampleId);
 }
 std::optional<SampleRecord> SampleRepository::findById(int64_t id) const
 {
@@ -1087,15 +1682,33 @@ std::optional<SampleRecord> SampleRepository::findById(int64_t id) const
     const auto sql = juce::String("SELECT ") + columns + " FROM samples WHERE id=?";
     detail::Statement s(db.handle, sql.toRawUTF8());
     s.integer(1, id);
-    if (! s.step()) return std::nullopt;
-    return read(s);
+    return s.step() ? std::optional<SampleRecord>(read(s)) : std::nullopt;
 }
-std::vector<int64_t> SampleRepository::samplesNeedingSmartAnalysis(int64_t afterId, int limit) const
+std::vector<int64_t> SampleRepository::samplesNeedingSmartAnalysis(int64_t afterId, int limit,
+                                                                   int extractorVersion,
+                                                                   int resolverVersion,
+                                                                   int dspVersion) const
 {
     std::lock_guard lock(db.mutex);
     detail::Statement s(db.handle,
         "SELECT s.id FROM samples s LEFT JOIN smart_results r ON r.sample_id=s.id"
-        " WHERE s.id>? AND r.sample_id IS NULL ORDER BY s.id LIMIT ?");
+        " WHERE s.id>? AND (r.sample_id IS NULL"
+        " OR r.pipeline_state IN ('stale','error','not_analyzed')"
+        " OR r.extractor_version<>? OR r.resolver_version<>? OR r.dsp_version<>?"
+        " OR r.revision<=0) ORDER BY s.id LIMIT ?");
+    s.integer(1, afterId);
+    s.integer(2, extractorVersion); s.integer(3, resolverVersion); s.integer(4, dspVersion);
+    s.integer(5, limit);
+    std::vector<int64_t> out;
+    while (s.step()) out.push_back(s.integer(0));
+    return out;
+}
+std::vector<int64_t> SampleRepository::samplesWithSmartResultAfterId(int64_t afterId, int limit) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT sample_id FROM smart_results WHERE sample_id>? AND pipeline_state='complete'"
+        " ORDER BY sample_id LIMIT ?");
     s.integer(1, afterId); s.integer(2, limit);
     std::vector<int64_t> out;
     while (s.step()) out.push_back(s.integer(0));

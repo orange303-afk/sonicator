@@ -93,3 +93,32 @@ TEST_CASE("Search history round-trips and is capped at ten entries", "[settings]
     REQUIRE(loaded.searchHistory.size() == 10);
     REQUIRE(loaded.searchHistory[0] == "query 0");
 }
+TEST_CASE("Preview toggles round-trip and defaults are stable", "[settings][preview]")
+{
+    TestDirectory t;
+    SettingsStore store(t.dir.getChildFile("preview.json"));
+    const auto defaults = store.load();
+    REQUIRE_FALSE(defaults.midiPreview);
+    REQUIRE_FALSE(defaults.skipSilence);
+    REQUIRE(defaults.autoPreview);
+    REQUIRE_FALSE(defaults.loopPreview);
+    REQUIRE(defaults.rexGate);
+    AppSettings settings;
+    settings.midiPreview = true;
+    settings.skipSilence = true;
+    settings.autoPreview = false;
+    settings.loopPreview = true;
+    settings.rexGate = false;
+    store.save(settings);
+    const auto loaded = store.load();
+    REQUIRE(loaded.midiPreview);
+    REQUIRE(loaded.skipSilence);
+    REQUIRE_FALSE(loaded.autoPreview);
+    REQUIRE(loaded.loopPreview);
+    REQUIRE_FALSE(loaded.rexGate);
+    // Malformed values keep the defaults instead of being read as true.
+    REQUIRE(store.file().replaceWithText("{\"midiPreview\":\"yes\",\"autoPreview\":1}"));
+    const auto malformed = store.load();
+    REQUIRE_FALSE(malformed.midiPreview);
+    REQUIRE(malformed.autoPreview);
+}

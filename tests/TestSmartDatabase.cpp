@@ -30,7 +30,7 @@ SmartCandidate candidate(SmartField field, juce::String source, juce::String tex
     return c;
 }
 }
-TEST_CASE("Schema 5 catalogs upgrade to schema 6 with a backup and keep identity", "[smart][database]")
+TEST_CASE("Schema 5 catalogs upgrade to schema 7 with a backup and keep identity", "[smart][database]")
 {
     auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
         .getNonexistentChildFile("sonicator-smart-upgrade", ".sqlite");
@@ -47,7 +47,7 @@ TEST_CASE("Schema 5 catalogs upgrade to schema 6 with a backup and keep identity
     rawExec(file, "PRAGMA user_version=5;");
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 6);
+        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 7);
         auto r = repo.findByPath("/lib/kick.wav");
         REQUIRE(r.has_value());
         REQUIRE(r->id == id);
@@ -80,6 +80,11 @@ TEST_CASE("Smart candidates are replaced atomically and results survive reopen",
         result.bpm = 120; result.hasBpm = true; result.bpmState = SmartState::Resolved;
         result.keyTonic = 0; result.keyMode = "minor"; result.keyState = SmartState::Conflicting;
         result.explanation = "bpm: wav_acid=120";
+        result.pipelineState = SmartPipelineState::Complete;
+        result.revision = 1;
+        result.extractorVersion = smartExtractorsVersion;
+        result.resolverVersion = smartResolverVersion;
+        result.dspVersion = smartDspVersion;
         repo.setSmartResult(id, result);
         REQUIRE(repo.samplesNeedingSmartAnalysis(0, 10).empty());
     }
@@ -112,7 +117,8 @@ TEST_CASE("Overrides survive candidate replacement and can be cleared", "[smart]
         REQUIRE(overrides[SmartField::Key].textValue == "D minor");
         auto result = resolveSmart(repo.smartCandidates(id), overrides);
         REQUIRE(result.keyTonic == 2);
-        REQUIRE(result.keyState == SmartState::Overridden);
+        REQUIRE(result.keyState == SmartState::Resolved);
+        REQUIRE(result.keyOverride == OverrideState::Value);
         repo.clearSmartOverride(id, SmartField::Key);
         REQUIRE(repo.smartOverrides(id).empty());
     }

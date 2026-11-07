@@ -44,6 +44,16 @@ AppSettings SettingsStore::load() const
     settings.databasePath = object->getProperty("database").toString();
     const auto hide = object->getProperty("hideEmpty");
     settings.hideEmpty = hide.isBool() && (bool) hide;
+    auto readBool = [object](const char* key, bool fallback)
+    {
+        const auto value = object->getProperty(key);
+        return value.isBool() ? (bool) value : fallback;
+    };
+    settings.midiPreview = readBool("midiPreview", settings.midiPreview);
+    settings.skipSilence = readBool("skipSilence", settings.skipSilence);
+    settings.autoPreview = readBool("autoPreview", settings.autoPreview);
+    settings.loopPreview = readBool("loopPreview", settings.loopPreview);
+    settings.rexGate = readBool("rexGate", settings.rexGate);
     if (const auto* history = object->getProperty("searchHistory").getArray())
         for (const auto& entry : *history)
             if (settings.searchHistory.size() < 10)
@@ -68,6 +78,11 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("pageSize", settings.pageSize);
     object->setProperty("database", settings.databasePath);
     object->setProperty("hideEmpty", settings.hideEmpty);
+    object->setProperty("midiPreview", settings.midiPreview);
+    object->setProperty("skipSilence", settings.skipSilence);
+    object->setProperty("autoPreview", settings.autoPreview);
+    object->setProperty("loopPreview", settings.loopPreview);
+    object->setProperty("rexGate", settings.rexGate);
     juce::Array<juce::var> history;
     for (int i = 0; i < juce::jmin(10, settings.searchHistory.size()); ++i)
         history.add(settings.searchHistory[i]);

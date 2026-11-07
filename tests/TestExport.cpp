@@ -289,3 +289,61 @@ TEST_CASE("Replacing a selection does not block the caller on an in-flight expor
     REQUIRE(state.end == Catch::Approx(0.6));
     REQUIRE(state.isReady());
 }
+TEST_CASE("A REX2 selection renders decoded PCM to a WAV", "[export][rex]")
+{
+    TestDirectory t;
+    Rex2Audio audio;
+    audio.channels = 2;
+    audio.sampleRate = 44100;
+    audio.frames = 44100;
+    audio.left.resize((size_t) audio.frames);
+    audio.right.resize((size_t) audio.frames);
+    for (int64_t i = 0; i < audio.frames; ++i)
+    {
+        const auto value = 0.6f * std::sin(2.0f * juce::MathConstants<float>::pi * 120.0f
+                                           * (float) i / 44100.0f);
+        audio.left[(size_t) i] = value;
+        audio.right[(size_t) i] = -value;
+    }
+    auto source = t.dir.getChildFile("loop.rx2");
+    REQUIRE(source.replaceWithText("synthetic rex marker"));
+    const auto folder = t.dir.getChildFile("rex-exports");
+    const auto result = AudioExporter().exportRexSelection(audio, source, 0.25, 0.5, folder);
+    REQUIRE(result.success);
+    auto reader = readerFor(result.file);
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->lengthInSamples == 11025);
+    REQUIRE(reader->numChannels == 2);
+    REQUIRE(reader->sampleRate == Catch::Approx(44100.0));
+    REQUIRE(reader->bitsPerSample == 24);
+    juce::AudioBuffer<float> first(2, 1);
+    REQUIRE(reader->read(first.getArrayOfWritePointers(), 2, 0, 1));
+    REQUIRE(first.getSample(0, 0) > 0.0f);
+    REQUIRE(first.getSample(1, 0) < 0.0f);
+}
+TEST_CASE("A per-request exporter renders a REX selection in the background", "[export][rex]")
+{
+    TestDirectory t;
+    Rex2Audio audio;
+    audio.channels = 1;
+    audio.sampleRate = 44100;
+    audio.frames = 44100;
+    audio.left.assign((size_t) audio.frames, 0.25f);
+    auto source = t.dir.getChildFile("worker.rx2");
+    REQUIRE(source.replaceWithText("synthetic rex marker"));
+    const auto folder = t.dir.getChildFile("rex-worker-exports");
+    SelectionExporter exporter(folder);
+    exporter.prepare(source, 0.1, 0.3,
+        [audio](const juce::File& file, double start, double end,
+                const juce::File& destination, CancelCheck cancel)
+        {
+            return AudioExporter().exportRexSelection(audio, file, start, end, destination, cancel);
+        });
+    REQUIRE(exporter.waitUntilFinished(5000));
+    const auto state = exporter.state();
+    REQUIRE(state.isReady());
+    auto reader = readerFor(state.file);
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->lengthInSamples == 8820);
+    REQUIRE(reader->numChannels == 1);
+}

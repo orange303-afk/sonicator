@@ -15,7 +15,7 @@ TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation",
     for (auto* child : app.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    REQUIRE(buttons == 15); // history is invoked by the search field, not a toolbar button
+    REQUIRE(buttons == 16); // history is invoked by the search field, not a toolbar button
 }
 TEST_CASE("Hide empty restores on startup and saves toggles without losing other settings", "[ui][settings][hide-empty]")
 {
@@ -588,4 +588,69 @@ TEST_CASE("Relocating through the dialog writes a backup and rewrites the catalo
     REQUIRE(status != nullptr);
     REQUIRE(status->getText().contains("Relocated 1 file(s)"));
     REQUIRE(status->getText().contains("Backup"));
+}
+TEST_CASE("The bottom status bar shows the selected file path and smart values", "[ui][status]")
+{
+    TestDirectory t;
+    const auto catalog = t.dir.getChildFile("status.sqlite");
+    const auto audio = t.wave("status-pad.wav");
+    {
+        Database db(catalog); SampleRepository repo(db); repo.createTables();
+        SampleRecord r;
+        r.filePath = audio.getFullPathName(); r.fileName = audio.getFileName();
+        r.fileHash = "h"; r.version = basicFeaturesVersion;
+        r.format = "WAV"; r.duration = 1; r.sampleRate = 44100; r.numChannels = 1;
+        const auto id = repo.upsert(r);
+        SmartPublication publication;
+        publication.sampleId = id;
+        publication.candidates = {
+            { SmartField::Type, "filename", "pad", "pad", 0 },
+            { SmartField::Bpm, "filename", "128bpm", {}, 128 },
+            { SmartField::Key, "filename", "A minor", "A minor", 0 } };
+        publication.catalogPath = repo.catalogPath();
+        REQUIRE(repo.publishSmartAnalysis(publication).published);
+    }
+    MainComponent app(catalog, false);
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr);
+    REQUIRE(library->getNumRows() == 1);
+    library->selectedRowsChanged(0);
+    auto* status = dynamic_cast<juce::Label*>(app.findChildWithID("selectionStatus"));
+    REQUIRE(status != nullptr);
+    REQUIRE(status->getText().contains(audio.getFullPathName()));
+    REQUIRE(status->getText().contains("Type: pad"));
+    REQUIRE(status->getText().contains("BPM: 128"));
+    REQUIRE(status->getText().contains("Key: A minor"));
+}
+TEST_CASE("Preview toggles are restored on restart and saved when changed", "[ui][settings][preview]")
+{
+    TestDirectory t;
+    const auto catalog = t.dir.getChildFile("preview-settings.sqlite");
+    { Database db(catalog); SampleRepository repo(db); repo.createTables(); }
+    const auto settings = t.dir.getChildFile("settings.json");
+    REQUIRE(settings.replaceWithText(
+        "{\"midiPreview\":true,\"skipSilence\":true,\"autoPreview\":false,"
+        "\"loopPreview\":true,\"rexGate\":false}"));
+    SettingsStore store(settings);
+    MainComponent app(catalog, false, store.load(), settings);
+    auto* preview = app.findChildWithID("preview");
+    REQUIRE(preview != nullptr);
+    auto* midi = dynamic_cast<juce::ToggleButton*>(preview->findChildWithID("midiPreview"));
+    auto* skip = dynamic_cast<juce::ToggleButton*>(preview->findChildWithID("skipSilence"));
+    auto* autoPreview = dynamic_cast<juce::ToggleButton*>(preview->findChildWithID("autoPreview"));
+    auto* loop = dynamic_cast<juce::ToggleButton*>(preview->findChildWithID("loop"));
+    auto* gate = dynamic_cast<juce::ToggleButton*>(preview->findChildWithID("rexGate"));
+    REQUIRE(midi != nullptr); REQUIRE(skip != nullptr); REQUIRE(autoPreview != nullptr);
+    REQUIRE(loop != nullptr); REQUIRE(gate != nullptr);
+    REQUIRE(midi->getToggleState());
+    REQUIRE(skip->getToggleState());
+    REQUIRE_FALSE(autoPreview->getToggleState());
+    REQUIRE(loop->getToggleState());
+    REQUIRE_FALSE(gate->getToggleState());
+    autoPreview->setToggleState(true, juce::dontSendNotification);
+    autoPreview->onClick();
+    REQUIRE((bool) juce::JSON::parse(settings)["autoPreview"]);
+    gate->setToggleState(true, juce::dontSendNotification);
+    gate->onClick();
+    REQUIRE((bool) juce::JSON::parse(settings)["rexGate"]);
 }

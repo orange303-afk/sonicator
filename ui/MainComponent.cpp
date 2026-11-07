@@ -71,10 +71,10 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     theme::apply(appSettings.theme);
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,31>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
+    for (auto* c : std::array<juce::Component*,33>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
          &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
-         &selectedTags,&analysisViewport,&stageLabel})
+         &selectedTags,&analysisViewport,&stageLabel,&selectionStatus})
         if (c != nullptr) addAndMakeVisible(c);
     heading.setText("SONICATOR",juce::dontSendNotification);
     heading.setFont(juce::FontOptions(24,juce::Font::bold));
@@ -93,7 +93,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     analysisDetails.setJustificationType(juce::Justification::topLeft); analysisDetails.setFont(juce::FontOptions(13));
     analysisViewport.setViewedComponent(&analysisDetails,false);
     analysisViewport.setScrollBarsShown(true,false);
-    stageLabel.setText("CORE BROWSER  /  PHASE 1\n\nClassification, BPM and key\nare not available in this stage.",juce::dontSendNotification);
+    stageLabel.setText("SMART METADATA\n\nType, BPM and Key are in the\nlibrary columns. Smart metadata\nanalyzes new or changed files.",juce::dontSendNotification);
     stageLabel.setFont(juce::FontOptions(11)); stageLabel.setColour(juce::Label::textColourId,theme::muted);
     stageLabel.setJustificationType(juce::Justification::topLeft);
     status.setFont(juce::FontOptions(12)); status.setColour(juce::Label::textColourId,theme::muted);
@@ -123,7 +123,13 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     search.setComponentID("search");
     selectedTags.setComponentID("selectedTags");
+    preview.setComponentID("preview");
     library.setComponentID("library"); status.setComponentID("importStatus"); analysisDetails.setComponentID("analysisDetails");
+    selectionStatus.setComponentID("selectionStatus");
+    selectionStatus.setFont(juce::FontOptions(11));
+    selectionStatus.setColour(juce::Label::textColourId,theme::muted);
+    selectionStatus.setJustificationType(juce::Justification::centredLeft);
+    selectionStatus.setText("No sample selected",juce::dontSendNotification);
     library.onSelected = [this](const SampleRecord& r) { selectSample(r); };
     library.onDragMessage = [this](const juce::String& message) { status.setText(message,juce::dontSendNotification); };
     library.onContextMenu = [this](const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> position)
@@ -139,6 +145,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             case 4: filter.sort = LibrarySort::Rate; break;
             case 5: filter.sort = LibrarySort::Channels; break;
             case 6: filter.sort = LibrarySort::Status; break;
+            case 10: filter.sort = LibrarySort::Type; break;
+            case 11: filter.sort = LibrarySort::Bpm; break;
+            case 12: filter.sort = LibrarySort::Key; break;
             default: filter.sort = LibrarySort::Name; break;
         }
         filter.ascending = ascending; pageOffset = 0; reloadLibrary();
@@ -155,8 +164,32 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         catch (const std::exception& e) { status.setText("Backup failed: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
     };
     backup.setTooltip("Save a consistent copy of the catalog database");
-    pause.onClick = [this] { if (indexer) indexer->setPaused(! indexer->progress().paused); };
-    cancel.onClick = [this] { if (indexer) indexer->cancel(); };
+    smartButton.onClick = [this]
+    {
+        if (! smart || ! readRepo) return;
+        if (indexer && indexer->progress().running)
+        {
+            status.setText("Wait for the library scan to finish before smart analysis.",juce::dontSendNotification);
+            return;
+        }
+        if (smart->progress().running) return;
+        if (! smart->start())
+            status.setText("Smart metadata analysis could not start.",juce::dontSendNotification);
+    };
+    smartButton.setTooltip("Read Type / BPM / Key metadata for missing or changed files in the background");
+    pause.onClick = [this]
+    {
+        // Pause and Cancel act on whichever background job is running.
+        if (indexer && indexer->progress().running)
+            indexer->setPaused(! indexer->progress().paused);
+        else if (smart && smart->progress().running)
+            smart->setPaused(! smart->progress().paused);
+    };
+    cancel.onClick = [this]
+    {
+        if (indexer && indexer->progress().running) indexer->cancel();
+        else if (smart) smart->cancel();
+    };
     settings.onClick = [this] { showSettings(); };
     tagFilter.onClick = [this] { showTagFilterMenu(); };
     starredButton.onClick = [this]
@@ -200,7 +233,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
     preview.onAction = [this] { library.focusForNavigation(); };
-    for (auto* button : std::array<juce::Button*,15>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
+    preview.onSettingsChanged = [this] { persistPreviewSettings(); };
+    preview.applyPersistedSettings(appSettings);
+    for (auto* button : std::array<juce::Button*,16>{&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,&pause,&cancel,&settings,&backup,
           &tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
@@ -243,6 +278,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     pause.setEnabled(false); cancel.setEnabled(false);
     addFolder.setEnabled(indexer != nullptr); rescan.setEnabled(indexer != nullptr);
     reanalyze.setEnabled(indexer != nullptr); newFiles.setEnabled(indexer != nullptr);
+    smartButton.setEnabled(indexer != nullptr);
     backup.setEnabled(indexer != nullptr);
     sendLookAndFeelChange();
     startTimerHz(10);
@@ -310,6 +346,27 @@ void MainComponent::showSearchHistory()
             safe->searchLibrary(history[result - 1]);
             if (safe->isShowing()) safe->search.grabKeyboardFocus();
         });
+}
+void MainComponent::persistPreviewSettings()
+{
+    appSettings.midiPreview = preview.midiPreviewEnabled();
+    appSettings.skipSilence = preview.skipSilenceEnabled();
+    appSettings.autoPreview = preview.autoPreviewEnabled();
+    appSettings.loopPreview = preview.loopEnabled();
+    appSettings.rexGate = preview.rexGateEnabled();
+    try
+    {
+        settingsStore.update([this](AppSettings& saved)
+        {
+            saved.midiPreview = appSettings.midiPreview;
+            saved.skipSilence = appSettings.skipSilence;
+            saved.autoPreview = appSettings.autoPreview;
+            saved.loopPreview = appSettings.loopPreview;
+            saved.rexGate = appSettings.rexGate;
+        });
+    }
+    catch (const std::exception& e)
+    { status.setText("Cannot save preview settings: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification); }
 }
 void MainComponent::persistHideEmpty()
 {
@@ -548,6 +605,7 @@ void MainComponent::reloadLibrary()
                     loaded.records = readRepo->recordsByIds(pageIds);
                     loaded.tags = readRepo->tagsForSamples(pageIds);
                     loaded.duplicates = readRepo->duplicateCounts(pageIds);
+                    loaded.smart = readRepo->smartDisplays(pageIds);
                 }
                 return loaded;
             });
@@ -571,6 +629,7 @@ void MainComponent::reloadLibrary()
             library.setSamples(std::move(page.samples));
             library.setRowTags(readRepo->tagsForSamples(ids));
             library.setDuplicateCounts(readRepo->duplicateCounts(ids));
+            library.setSmartDisplays(readRepo->smartDisplays(ids));
             juce::String text = juce::String(catalogCount) + (filter.hasTextOrTagFilter() ? " matching" : " samples")
                 + "  |  " + juce::String(shown) + " on page " + juce::String(pageOffset/pageSize+1);
             if (filter.matchAnyTag && ! filter.includeTags.empty()) text += "  |  any tag";
@@ -582,6 +641,11 @@ void MainComponent::reloadLibrary()
         rootsLabel.setText(readRepo->roots().isEmpty() ? "No sample folders yet.\n\nOriginal files stay untouched."
             : "FOLDERS\n\n" + readRepo->roots().joinIntoString("\n\n"),juce::dontSendNotification);
         updateSelectedTags();
+        if (selectedSampleId > 0)
+        {
+            if (auto selected = readRepo->findById(selectedSampleId)) updateSelectionStatus(*selected);
+        }
+        else selectionStatus.setText("No sample selected",juce::dontSendNotification);
         (void) shown;
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
@@ -594,6 +658,69 @@ void MainComponent::updateTagControls()
     starredButton.setToggleState(filter.starredOnly,juce::dontSendNotification);
     hideEmpty.setToggleState(filter.hideEmpty,juce::dontSendNotification);
     clearFilters.setEnabled(filter.hasTextOrTagFilter());
+}
+void MainComponent::updateSelectionStatus(const SampleRecord& r)
+{
+    juce::String text = r.filePath;
+    if (readRepo != nullptr)
+    {
+        SmartDisplay d;
+        try { d = readRepo->smartDisplays({ r.id })[r.id]; } catch (...) {}
+        auto field = [&d](int column)
+        {
+            juce::String value;
+            if (column == 10)
+            {
+                value = d.type.isNotEmpty() ? d.type : (d.pipelineState == SmartPipelineState::NotAnalyzed ? "--" : "?");
+                if (d.typeOverride == OverrideState::Value) value += " (manual)";
+                else if (d.typeOverride == OverrideState::Unknown) value = "manual: unknown";
+                else if (d.typeOverride == OverrideState::NotApplicable) value = "manual: n/a";
+                if (d.typeState == SmartState::Conflicting) value += " (conflict)";
+                else if (d.typeState == SmartState::Ambiguous) value += " (ambiguous)";
+            }
+            else if (column == 11)
+            {
+                value = d.hasBpm ? (std::abs(d.bpm - std::round(d.bpm)) < 0.05
+                                        ? juce::String((int) std::round(d.bpm))
+                                        : juce::String(d.bpm, 1))
+                                 : (d.pipelineState == SmartPipelineState::NotAnalyzed ? "--" : "?");
+                if (d.bpmOverride == OverrideState::Value) value += " (manual)";
+                else if (d.bpmOverride == OverrideState::Unknown) value = "manual: unknown";
+                else if (d.bpmOverride == OverrideState::NotApplicable) value = "manual: n/a";
+                if (d.bpmState == SmartState::Conflicting) value += " (conflict)";
+                else if (d.bpmState == SmartState::Ambiguous) value += " (ambiguous)";
+            }
+            else
+            {
+                value = d.key.isNotEmpty() ? d.key : (d.pipelineState == SmartPipelineState::NotAnalyzed ? "--" : "?");
+                if (d.keyOverride == OverrideState::Value) value += " (manual)";
+                else if (d.keyOverride == OverrideState::Unknown) value = "manual: unknown";
+                else if (d.keyOverride == OverrideState::NotApplicable) value = "manual: n/a";
+                if (d.keyState == SmartState::Conflicting) value += " (conflict)";
+                else if (d.keyState == SmartState::Ambiguous) value += " (ambiguous)";
+            }
+            if (d.pipelineState == SmartPipelineState::Stale) value += " (stale)";
+            if (d.pipelineState == SmartPipelineState::Error) value += " (error)";
+            return value;
+        };
+        text += "   |   Type: " + field(10) + "   BPM: " + field(11) + "   Key: " + field(12);
+        if (const auto tags = readRepo->tagsForSample(r.id); ! tags.empty())
+        {
+            juce::StringArray names;
+            for (const auto& tag : tags) names.add(tag.name);
+            text += "   |   Tags: " + names.joinIntoString(", ");
+        }
+    }
+    text += "   |   " + r.format
+          + (r.sampleRate > 0 ? "  " + juce::String(r.sampleRate / 1000.0, 1) + " kHz" : juce::String())
+          + (r.numChannels > 0 ? "  " + juce::String(r.numChannels) + " ch" : juce::String())
+          + (r.bitsPerSample > 0 ? "  " + juce::String(r.bitsPerSample) + "-bit" : juce::String())
+          + (r.duration > 0 ? "  " + juce::String(r.duration, 2) + " s" : juce::String());
+    if (r.starred) text += "   |   Starred";
+    if (r.missing) text += "   |   FILE MISSING";
+    if (r.error.isNotEmpty()) text += "   |   " + r.error;
+    selectionStatus.setText(text, juce::dontSendNotification);
+    selectionStatus.setTooltip(r.filePath);
 }
 void MainComponent::updateSelectedTags()
 {
@@ -634,6 +761,7 @@ void MainComponent::selectSample(const SampleRecord& r)
     }
     analysisDetails.setText(details,juce::dontSendNotification);
     analysisDetails.setTooltip(r.filePath);
+    updateSelectionStatus(r);
     updateSelectedTags();
     if (! preview.loadFile(juce::File(r.filePath))) status.setText(engine.error(),juce::dontSendNotification);
 }
@@ -839,6 +967,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     tagsMenu.addItem(9003, "New tag...");
     menu.addSubMenu("Tag", tagsMenu);
     menu.addItem(9001, allStarred ? "Unstar" : "Star", true, false, starMenuImage());
+    const bool smartAvailable = smart != nullptr && ! (indexer && indexer->progress().running);
+    menu.addItem(9005, selection.size() > 1 ? "Analyze selected (" + juce::String(selection.size()) + ")"
+                                            : juce::String("Analyze selected"),
+                 smartAvailable);
 #if JUCE_MAC
     const juce::String openLabel = "Open in Finder";
 #elif JUCE_WINDOWS
@@ -880,6 +1012,24 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     if (file.existsAsFile()) file.revealToUser();
                     else if (file.getParentDirectory().isDirectory()) file.getParentDirectory().revealToUser();
                     else safe->status.setText("Folder is not available.",juce::dontSendNotification);
+                }
+                else if (result == 9005)
+                {
+                    if (safe->smart == nullptr) return;
+                    std::vector<int64_t> selectedIds;
+                    for (const auto& record : files) selectedIds.push_back(record.id);
+                    if (! selectedIds.empty() && safe->smart->progress().running)
+                    {
+                        int queued = 0;
+                        for (auto id : selectedIds) if (safe->smart->requestSample(id)) ++queued;
+                        safe->status.setText("Queued " + juce::String(queued)
+                            + " sample(s) for smart analysis", juce::dontSendNotification);
+                    }
+                    else if (safe->smart->startSelected(selectedIds))
+                        safe->status.setText("Analyzing " + juce::String(selectedIds.size())
+                            + " selected sample(s)", juce::dontSendNotification);
+                    else
+                        safe->status.setText("Smart analysis could not start", juce::dontSendNotification);
                 }
                 else if (result == 9004)
                 {
@@ -942,16 +1092,41 @@ void MainComponent::timerCallback()
 {
     if (! indexer) return;
     auto p = indexer->progress();
-    pause.setEnabled(p.running); cancel.setEnabled(p.running);
-    addFolder.setEnabled(! p.running); rescan.setEnabled(! p.running);
-    reanalyze.setEnabled(! p.running); newFiles.setEnabled(! p.running);
-    pause.setButtonText(p.paused ? "Resume" : "Pause");
+    const auto s = smart ? smart->progress() : SmartProgress {};
+    const bool smartRunning = s.running;
+    const bool busy = p.running || smartRunning;
+    pause.setEnabled(busy); cancel.setEnabled(busy);
+    addFolder.setEnabled(! busy); rescan.setEnabled(! busy);
+    reanalyze.setEnabled(! busy); newFiles.setEnabled(! busy);
+    smartButton.setEnabled(! busy);
+    pause.setButtonText((p.running ? p.paused : s.paused) ? "Resume" : "Pause");
     if (p.running || wasRunning)
     {
         status.setText((p.paused ? "Paused  |  " : juce::String()) + p.message + "  "
             + juce::String(p.processed) + "/" + juce::String(p.total) + "  |  analyzed " + juce::String(p.analyzed)
             + "  skipped " + juce::String(p.skipped) + "  errors " + juce::String(p.failed)
             + "  duplicates " + juce::String(p.duplicates) + (p.running ? "  |  " + p.current : ""),juce::dontSendNotification);
+        status.setTooltip(status.getText());
+    }
+    else if (smartRunning || smartWasRunning)
+    {
+        juce::String stage;
+        switch (s.stage)
+        {
+            case SmartStage::Scanning: stage = "Scanning"; break;
+            case SmartStage::Verifying: stage = "Verifying"; break;
+            case SmartStage::Extracting: stage = "Reading metadata"; break;
+            case SmartStage::Publishing: stage = "Saving"; break;
+            case SmartStage::Complete: stage = "Complete"; break;
+            case SmartStage::Cancelled: stage = "Cancelled"; break;
+            case SmartStage::Failed: stage = "Failed"; break;
+            case SmartStage::Idle: break;
+        }
+        status.setText((s.paused ? "Paused  |  " : juce::String()) + stage
+            + (s.message.isNotEmpty() ? "  |  " + s.message : juce::String())
+            + (s.total > 0 ? "  " + juce::String(s.processed) + "/" + juce::String(s.total) : juce::String())
+            + "  errors " + juce::String(s.failed) + "  stale " + juce::String(s.stale)
+            + (s.running && s.current.isNotEmpty() ? "  |  " + s.current : juce::String()),juce::dontSendNotification);
         status.setTooltip(status.getText());
     }
     if (p.running)
@@ -972,6 +1147,8 @@ void MainComponent::timerCallback()
         if (! p.cancelled && smart && ! smart->progress().running) smart->start();
     }
     wasRunning = p.running;
+    if (smartWasRunning && ! smartRunning) reloadLibrary();
+    smartWasRunning = smartRunning;
     const auto now = juce::Time::getMillisecondCounter();
     if (pendingSearch.trim() != filter.text && now - lastSearchChange >= 250)
     {
@@ -1008,10 +1185,12 @@ void MainComponent::refreshTheme()
 }
 void MainComponent::applySettings(const AppSettings& next)
 {
-    const auto database = appSettings.databasePath;
-    appSettings = next;
-    appSettings.databasePath = database;
-    appSettings.scalePercent = AppSettings::clampScale(appSettings.scalePercent);
+    // The settings dialog edits theme, scale and language only. Other fields (catalog path,
+    // filters, page size, preview toggles, window bounds) belong to their own writers and must
+    // not be replaced by a stale copy taken when the dialog opened.
+    appSettings.theme = next.theme;
+    appSettings.scalePercent = AppSettings::clampScale(next.scalePercent);
+    appSettings.language = next.language;
     refreshTheme();
     juce::Desktop::getInstance().setGlobalScaleFactor(
         juce::jlimit(0.75f, 2.0f, appSettings.scalePercent / 100.0f));
@@ -1196,6 +1375,7 @@ void MainComponent::resized()
     settings.setBounds(header.removeFromRight(115).withSizeKeepingCentre(115,32));
     header.removeFromRight(16);
     search.setBounds(header.withSizeKeepingCentre(header.getWidth(),34));
+    selectionStatus.setBounds(r.removeFromBottom(24).reduced(12,1));
     preview.setBounds(r.removeFromBottom(156));
     auto footer = r.removeFromBottom(42).reduced(12,5);
     cancel.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
@@ -1208,7 +1388,8 @@ void MainComponent::resized()
     auto scanRow = sidebar.removeFromTop(32);
     rescan.setBounds(scanRow.removeFromLeft((scanRow.getWidth() - 6) / 2)); scanRow.removeFromLeft(6);
     newFiles.setBounds(scanRow); sidebar.removeFromTop(8);
-    reanalyze.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(24);
+    reanalyze.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(6);
+    smartButton.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(24);
     folders.setBounds(sidebar);
     auto analysis = analysisBounds.reduced(16,16);
     analysisHeading.setBounds(analysis.removeFromTop(30)); analysis.removeFromTop(8);

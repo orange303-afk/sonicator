@@ -37,6 +37,7 @@ public:
     void recordSearchHistory(const juce::String&);
     void showSearchHistory();
     void persistHideEmpty();
+    void persistPreviewSettings();
     void setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny = false);
 private:
     SonicatorLookAndFeel look;
@@ -55,14 +56,14 @@ private:
     int totalCatalogCount = 0;
     int64_t selectedSampleId = 0;
     SearchField search;
-    juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" };
+    juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" }, smartButton { "Smart metadata" };
     juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" }, backup { "Backup" };
     juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" },
                      clearFilters { "Clear filters" }, editTags { "Edit tags..." };
     juce::ToggleButton hideEmpty { "Hide empty" };
     juce::TextButton previousPage { "<" }, nextPage { ">" };
     juce::ComboBox pageSizeBox;
-    juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel;
+    juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel, selectionStatus;
     TagStrip selectedTags;
     juce::Viewport analysisViewport;
     juce::Label stageLabel;
@@ -73,7 +74,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog;
     int pageOffset = 0, catalogCount = 0, pageSize = 10000;
-    bool wasRunning = false;
+    bool wasRunning = false, smartWasRunning = false;
     uint32_t lastRefreshMs = 0, lastSearchChange = 0;
     juce::String pendingSearch;
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
@@ -85,6 +86,7 @@ private:
     void reloadLibrary();
     void updateTagControls();
     void selectSample(const SampleRecord&);
+    void updateSelectionStatus(const SampleRecord&);
     void updateSelectedTags();
     void showAudioSettings();
     void showSettings();

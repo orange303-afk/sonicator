@@ -17,6 +17,8 @@ std::optional<MusicalKey> parseKeyToken(const juce::String& token);
 // True when the text is a complete key token (used for INFO IKEY, TKEY and similar fields).
 std::optional<MusicalKey> parseKeyValue(const juce::String& value);
 juce::String canonicalKeyName(int tonic, const juce::String& mode);
+// "A minor", or just "A" when only the tonic is known. Empty for an invalid tonic.
+juce::String keyDisplayName(int tonic, const juce::String& mode);
 struct NoteName
 {
     int tonic = -1;   // 0 = C .. 11 = B

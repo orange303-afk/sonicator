@@ -21,6 +21,27 @@ struct RelocationResult
 {
     int64_t movedFiles = 0, conflicts = 0;
 };
+// One atomic publication of a finished analysis generation.
+struct SmartPublication
+{
+    int64_t sampleId = 0;
+    int64_t expectedRevision = 0;      // revision read before the job started
+    std::vector<SmartCandidate> candidates;
+    std::vector<SmartInput> inputs;
+    std::vector<SmartExtraction> extractions;
+    int extractorVersion = smartExtractorsVersion;
+    int resolverVersion = smartResolverVersion;
+    int dspVersion = smartDspVersion;
+    int64_t generation = 0;            // 0 = allocate a new catalog generation
+    juce::String catalogPath;          // empty = no catalog guard
+};
+struct SmartPublicationOutcome
+{
+    bool published = false;
+    juce::String reason;               // revision-changed, catalog-changed
+    int64_t revision = 0;
+    SmartResult result;
+};
 class SampleRepository
 {
 public:
@@ -75,14 +96,40 @@ public:
     std::vector<SmartCandidate> smartCandidates(int64_t sampleId) const;
     void setSmartResult(int64_t sampleId, const SmartResult&);
     std::optional<SmartResult> smartResult(int64_t sampleId) const;
+    // Revision of the stored result; 0 when nothing was published yet. A job reads it before
+    // analysis and passes it back to publishSmartAnalysis, so a stale job cannot overwrite a
+    // newer result.
+    int64_t smartRevision(int64_t sampleId) const;
+    // Publishes candidates, extractions, input fingerprints and the resolved result in one
+    // transaction. Overrides are read inside that transaction and survive untouched.
+    SmartPublicationOutcome publishSmartAnalysis(const SmartPublication&);
+    // Keeps the last completed values but marks them as not current. Used when a dependency
+    // changed during analysis or an extractor version is behind.
+    void markSmartStale(int64_t sampleId);
+    // Records a structured failure without discarding the previous completed generation.
+    void markSmartError(int64_t sampleId, const juce::String& code, const juce::String& message);
+    std::optional<SmartFailure> smartFailure(int64_t sampleId) const;
     void setSmartOverride(int64_t sampleId, SmartField field, const SmartOverride&);
     void clearSmartOverride(int64_t sampleId, SmartField field);
     SmartOverrideMap smartOverrides(int64_t sampleId) const;
-    // Samples that have no stored result yet, ordered by id. Used by the incremental job.
-    std::vector<int64_t> samplesNeedingSmartAnalysis(int64_t afterId, int limit) const;
+    std::vector<SmartExtraction> smartExtractions(int64_t sampleId) const;
+    // Effective Type/BPM/Key for a block of rows, with overrides applied. Used by the library
+    // columns and the selection status bar; never loads the whole catalog.
+    std::map<int64_t, SmartDisplay> smartDisplays(const std::vector<int64_t>& sampleIds) const;
+    // Samples whose result is missing, stale, failed or produced by another version, ordered by
+    // id. Discovery of changed sidecars happens in the service by comparing fingerprints.
+    std::vector<int64_t> samplesNeedingSmartAnalysis(int64_t afterId, int limit,
+        int extractorVersion = smartExtractorsVersion,
+        int resolverVersion = smartResolverVersion,
+        int dspVersion = smartDspVersion) const;
+    // Completed results, used by the incremental pass to verify their stored fingerprints.
+    std::vector<int64_t> samplesWithSmartResultAfterId(int64_t afterId, int limit) const;
     void setSmartInputs(int64_t sampleId, const std::vector<SmartInput>&);
     std::vector<SmartInput> smartInputs(int64_t sampleId) const;
     std::optional<SampleRecord> findById(int64_t) const;
+    // Identity of the catalog this repository writes to. A background job captures it at start
+    // and refuses to publish into a different catalog.
+    juce::String catalogPath() const { return db.file().getFullPathName(); }
 private:
     Database& db;
 };

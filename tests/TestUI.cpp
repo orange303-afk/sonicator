@@ -304,3 +304,32 @@ TEST_CASE("Relocation panel enables applying only after every folder is chosen",
     REQUIRE(panel.canApply()); // the previous valid target is kept
     REQUIRE(panel.relocations()[1].newRoot == other.getFullPathName());
 }
+TEST_CASE("Type, BPM and Key columns render every display state", "[ui][columns]")
+{
+    FileListPanel list;
+    SampleRecord a, b, c;
+    a.id = 1; a.fileName = "pad.wav"; a.format = "WAV"; a.duration = 2; a.sampleRate = 44100; a.numChannels = 2;
+    b.id = 2; b.fileName = "unknown.wav"; b.format = "WAV";
+    c.id = 3; c.fileName = "not-analyzed.wav"; c.format = "WAV";
+    list.setSamples({a, b, c});
+    SmartDisplay pad;
+    pad.type = "pad"; pad.typeState = SmartState::Resolved;
+    pad.bpm = 128; pad.hasBpm = true; pad.bpmState = SmartState::Conflicting;
+    pad.key = "A minor"; pad.keyState = SmartState::Resolved;
+    pad.pipelineState = SmartPipelineState::Complete;
+    pad.bpmOverride = OverrideState::Value;
+    SmartDisplay unknown;
+    unknown.pipelineState = SmartPipelineState::Complete;
+    unknown.typeState = SmartState::Unknown;
+    unknown.bpmState = SmartState::Unknown;
+    unknown.keyState = SmartState::Unknown;
+    list.setSmartDisplays({ { 1, pad }, { 2, unknown } });
+    list.setSize(860, 200);
+    REQUIRE(list.getNumRows() == 3);
+    REQUIRE(list.createComponentSnapshot(list.getLocalBounds()).isValid());
+    int column = 0; bool forwards = true;
+    list.onSortChanged = [&](int c, bool f) { column = c; forwards = f; };
+    list.sortOrderChanged(11, false);
+    REQUIRE(column == 11);
+    REQUIRE_FALSE(forwards);
+}

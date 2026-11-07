@@ -12,6 +12,12 @@ struct AppSettings
     juce::String databasePath; // empty means the default catalog location
     juce::StringArray searchHistory; // most recent first, at most 10 entries
     bool hideEmpty = false;
+    // Preview panel toggles. Persisted so a restart keeps the same audition behaviour.
+    bool midiPreview = false;
+    bool skipSilence = false;
+    bool autoPreview = true;
+    bool loopPreview = false;
+    bool rexGate = true;
     int windowX = 0, windowY = 0, windowWidth = 0, windowHeight = 0;
     bool hasWindowBounds() const { return windowWidth > 0 && windowHeight > 0; }
     static juce::File defaultSettingsFile();

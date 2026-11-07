@@ -25,6 +25,62 @@ void drawStar(juce::Graphics& g, juce::Rectangle<float> r, bool filled)
     else g.strokePath(path, juce::PathStrokeType(1.0f));
 }
 }
+namespace {
+juce::String formatBpm(double bpm)
+{
+    return std::abs(bpm - std::round(bpm)) < 0.05 ? juce::String((int) std::round(bpm))
+                                                  : juce::String(bpm, 1);
+}
+juce::String withSmartMarkers(juce::String value, const SmartDisplay& d, int column)
+{
+    const bool edited = column == 10 ? d.typeOverride != OverrideState::None
+                      : column == 11 ? d.bpmOverride != OverrideState::None
+                                     : d.keyOverride != OverrideState::None;
+    const auto state = column == 10 ? d.typeState : column == 11 ? d.bpmState : d.keyState;
+    if (edited) value += " *";
+    if (state == SmartState::Conflicting) value += " !";
+    else if (state == SmartState::Ambiguous) value += " ?";
+    if (d.pipelineState == SmartPipelineState::Stale) value += " ~";
+    return value;
+}
+juce::String smartCellText(const SmartDisplay& d, int column)
+{
+    juce::String value;
+    const bool notAnalyzed = d.pipelineState == SmartPipelineState::NotAnalyzed;
+    if (column == 10)
+    {
+        if (d.typeOverride == OverrideState::NotApplicable) return "n/a";
+        if (d.typeOverride == OverrideState::Unknown) return "edited unknown";
+        if (d.type.isNotEmpty())
+            value = d.type.substring(0, 1).toUpperCase() + d.type.substring(1);
+        else if (d.typeState == SmartState::Unsupported || d.typeState == SmartState::NotApplicable)
+            return "n/a";
+        else if (d.typeState == SmartState::Error) return "!";
+        else value = notAnalyzed ? "--" : "?";
+    }
+    else if (column == 11)
+    {
+        if (d.bpmOverride == OverrideState::NotApplicable) return "n/a";
+        if (d.bpmOverride == OverrideState::Unknown) return "edited unknown";
+        if (d.hasBpm) value = formatBpm(d.bpm);
+        else if (d.bpmState == SmartState::NotApplicable || d.bpmState == SmartState::Unsupported)
+            return "n/a";
+        else if (d.bpmState == SmartState::Error) return "!";
+        else value = notAnalyzed ? "--" : "?";
+    }
+    else
+    {
+        if (d.keyOverride == OverrideState::NotApplicable) return "n/a";
+        if (d.keyOverride == OverrideState::Unknown) return "edited unknown";
+        if (d.key.isNotEmpty()) value = d.key;
+        else if (d.keyState == SmartState::NotApplicable || d.keyState == SmartState::Unsupported)
+            return "n/a";
+        else if (d.keyState == SmartState::Error) return "!";
+        else value = notAnalyzed ? "--" : "?";
+    }
+    return withSmartMarkers(value, d, column);
+}
+} // namespace
 FileListPanel::FileListPanel()
 {
     addAndMakeVisible(table); table.setRowHeight(34);
@@ -33,14 +89,20 @@ FileListPanel::FileListPanel()
     table.addMouseListener(&rowDragListener, true);
     auto& h = table.getHeader();
     h.addColumn("",8,30,24,40);
-    h.addColumn("SAMPLE",1,250,120,1200);
-    h.addColumn("FORMAT",2,70,55,120);
-    h.addColumn("LENGTH",3,85,60,140);
-    h.addColumn("RATE",4,85,60,140);
-    h.addColumn("CH",5,45,35,70);
-    h.addColumn("TAGS",7,145,80,350);
-    h.addColumn("DUPLICATES",9,88,70,130);
-    h.addColumn("STATUS",6,120,80,350);
+    h.addColumn("SAMPLE",1,210,110,1200);
+    h.addColumn("TYPE",10,80,50,170);
+    h.addColumn("BPM",11,54,40,110);
+    h.addColumn("KEY",12,74,50,160);
+    h.addColumn("FORMAT",2,66,48,120);
+    h.addColumn("LENGTH",3,78,56,140);
+    h.addColumn("RATE",4,78,56,140);
+    h.addColumn("CH",5,40,30,70);
+    h.addColumn("TAGS",7,130,70,350);
+    h.addColumn("DUPLICATES",9,84,64,130);
+    h.addColumn("STATUS",6,110,70,350);
+    // Twelve columns do not fit a narrow library pane; shrink them to the available width
+    // instead of clipping the right-hand columns.
+    h.setStretchToFitActive(true);
     h.setSortColumnId(1,true);
 }
 void FileListPanel::lookAndFeelChanged() { refreshTheme(); }
@@ -142,6 +204,7 @@ void FileListPanel::loadVirtualBlock(int row)
     }
     for (auto& [id, tags] : loaded.tags) rowTags[id] = std::move(tags);
     for (auto& [id, count] : loaded.duplicates) duplicateCounts[id] = count;
+    for (auto& [id, display] : loaded.smart) smartDisplays[id] = std::move(display);
     evictVirtualRows(row);
 }
 void FileListPanel::evictVirtualRows(int centreRow)
@@ -157,6 +220,9 @@ void FileListPanel::evictVirtualRows(int centreRow)
         }
         else ++it;
     }
+    for (auto it = smartDisplays.begin(); it != smartDisplays.end();)
+        if (virtualRows.find(it->first) == virtualRows.end()) it = smartDisplays.erase(it);
+        else ++it;
 }
 void FileListPanel::setVirtualSamples(std::vector<int64_t> orderedIds, RowLoader loader)
 {
@@ -171,7 +237,7 @@ void FileListPanel::setVirtualSamples(std::vector<int64_t> orderedIds, RowLoader
     virtualIds = std::move(orderedIds);
     virtualRows.clear();
     all.clear(); visible.clear(); search.clear();
-    rowTags.clear(); duplicateCounts.clear();
+    rowTags.clear(); duplicateCounts.clear(); smartDisplays.clear();
     rowLoader = std::move(loader);
     table.deselectAllRows();
     table.updateContent();
@@ -201,7 +267,7 @@ void FileListPanel::setSamples(std::vector<SampleRecord> records)
     if (leadRow >= 0 && leadRow < getNumRows()) leadId = idAt(leadRow);
     const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
     virtualMode = false; virtualIds.clear(); virtualRows.clear(); rowLoader = nullptr;
-    rowTags.clear(); duplicateCounts.clear();
+    rowTags.clear(); duplicateCounts.clear(); smartDisplays.clear();
     all = std::move(records); rebuild();
     if (selectedIds.empty()) return;
     int restoredLead = -1;
@@ -222,6 +288,11 @@ void FileListPanel::setRowTags(std::map<int64_t, std::vector<Tag>> tags)
 void FileListPanel::setDuplicateCounts(std::map<int64_t, int> counts)
 {
     duplicateCounts = std::move(counts);
+    table.repaint();
+}
+void FileListPanel::setSmartDisplays(std::map<int64_t, SmartDisplay> displays)
+{
+    smartDisplays = std::move(displays);
     table.repaint();
 }
 void FileListPanel::setSearchText(const juce::String& text)
@@ -297,6 +368,16 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
             g.drawText(juce::String(juce::CharPointer_UTF8("\xc3\x97")) + juce::String(found->second),
                        8,0,w-12,h,juce::Justification::centredLeft,true);
         }
+        return;
+    }
+    if (col == 10 || col == 11 || col == 12)
+    {
+        const auto found = smartDisplays.find(r.id);
+        const auto value = found == smartDisplays.end() ? juce::String("--")
+                                                        : smartCellText(found->second, col);
+        g.setColour(value == "--" ? theme::muted.withAlpha(0.5f) : theme::muted);
+        g.setFont(juce::FontOptions(12));
+        g.drawText(value, 8, 0, w - 12, h, juce::Justification::centredLeft, true);
         return;
     }
     if (col == 7)

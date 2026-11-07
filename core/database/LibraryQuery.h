@@ -11,7 +11,7 @@ struct Tag
     bool builtin = false;
     int sampleCount = 0;
 };
-enum class LibrarySort { Name, Format, Duration, Rate, Channels, Status };
+enum class LibrarySort { Name, Format, Duration, Rate, Channels, Status, Type, Bpm, Key };
 struct LibraryFilter
 {
     juce::String text;

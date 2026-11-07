@@ -1,5 +1,6 @@
 #pragma once
 #include "core/audio/AudioEngine.h"
+#include "core/settings/AppSettings.h"
 #include "core/export/SelectionExporter.h"
 #include "ui/waveform/WaveformDisplay.h"
 namespace sonicator {
@@ -10,6 +11,13 @@ public:
                  const juce::File& exportFolder = AudioExporter::defaultExportFolder());
     ~PreviewPanel() override { stopTimer(); }
     bool loadFile(const juce::File&);
+    // Restores preview toggles and their engine state. Does not notify onSettingsChanged.
+    void applyPersistedSettings(const AppSettings&);
+    bool midiPreviewEnabled() const { return engine.isMidiPreview(); }
+    bool skipSilenceEnabled() const { return engine.isSkipSilence(); }
+    bool autoPreviewEnabled() const { return autoPreview.getToggleState(); }
+    bool loopEnabled() const { return loop.getToggleState(); }
+    bool rexGateEnabled() const { return rexGate.getToggleState(); }
     void selectRange(double start, double end);
     selection::Range selectedRange() const { return waveform.selection(); }
     void clearSelection() { waveform.clearSelection(); }
@@ -20,6 +28,8 @@ public:
     void updateSelectionPlayback();
     double waveformLength() const { return waveform.totalLength(); }
     std::function<void()> onAction;
+    // Called after a user changes one of the persisted preview toggles.
+    std::function<void()> onSettingsChanged;
     void resized() override;
     void lookAndFeelChanged() override;
     void paint(juce::Graphics&) override;

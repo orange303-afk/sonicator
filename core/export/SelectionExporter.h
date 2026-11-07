@@ -24,7 +24,9 @@ public:
                                                       const juce::File&, CancelCheck)>;
     explicit SelectionExporter(juce::File exportFolder, ExportFunction exportFunction = {});
     ~SelectionExporter();
-    void prepare(const juce::File& source, double start, double end);
+    // custom overrides the exporter for this request only (e.g. REX2 decoded PCM). It runs on
+    // the worker thread and must not touch the audio engine or UI.
+    void prepare(const juce::File& source, double start, double end, ExportFunction custom = {});
     void cancel();
     State state() const;
     // Waits for the current generation to finish; returns false on timeout.
@@ -35,6 +37,7 @@ private:
         juce::File source;
         double start = 0, end = 0;
         juce::uint64 generation = 0;
+        ExportFunction custom;
     };
     juce::File folder;
     ExportFunction exporter;

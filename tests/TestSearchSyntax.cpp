@@ -94,3 +94,19 @@ TEST_CASE("Literal percent and underscore never become SQL wildcards", "[search]
     REQUIRE(count(repo, "kick_01") == 0);
     REQUIRE(count(repo, "foo:bar") == 0);
 }
+TEST_CASE("Manual overrides are the effective type and key in search", "[search][database]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("search-override.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    const auto sample = addSample(repo, "mystery.wav", "WAV");
+    SmartOverride type; type.textValue = "pad";
+    repo.setSmartOverride(sample, SmartField::Type, type);
+    SmartOverride key; key.textValue = "D minor";
+    repo.setSmartOverride(sample, SmartField::Key, key);
+    REQUIRE(count(repo, "type:pad") == 1);
+    REQUIRE(count(repo, "key:Dm") == 1);
+    REQUIRE(count(repo, "type:kick") == 0);
+    SmartOverride unknownType; unknownType.cleared = true;
+    repo.setSmartOverride(sample, SmartField::Type, unknownType);
+    REQUIRE(count(repo, "type:pad") == 0);
+}

@@ -24,7 +24,11 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
             filename.setText(engine.error(),juce::dontSendNotification);
     };
     rexGate.setTooltip("Gate stops a REX2 slice on NoteOff; off lets the slice ring out (one-shot)");
-    rexGate.onClick = [this] { engine.setRexGateMode(rexGate.getToggleState()); };
+    rexGate.onClick = [this]
+    {
+        engine.setRexGateMode(rexGate.getToggleState());
+        if (onSettingsChanged) onSettingsChanged();
+    };
     filename.setText("No sample selected",juce::dontSendNotification);
     filename.setFont(juce::FontOptions(14,juce::Font::bold));
     time.setColour(juce::Label::textColourId,theme::muted);
@@ -37,8 +41,16 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     waveform.onExternalDragRequested = [this] { beginExternalDrag(); };
     play.onClick = [this] { togglePlayback(); };
     stop.onClick = [this] { engine.stop(); };
-    loop.onClick = [this] { applyTransportLooping(); };
-    skipSilence.onClick = [this] { engine.setSkipSilence(skipSilence.getToggleState()); };
+    loop.onClick = [this]
+    {
+        applyTransportLooping();
+        if (onSettingsChanged) onSettingsChanged();
+    };
+    skipSilence.onClick = [this]
+    {
+        engine.setSkipSilence(skipSilence.getToggleState());
+        if (onSettingsChanged) onSettingsChanged();
+    };
     skipSilence.setTooltip("Next trigger starts one frame before the first nonzero frame; original audio is unchanged");
     midi.setTooltip("16 voices; MIDI note 60 = original pitch; 2 ms attack / 20 ms release. Inputs: Audio settings");
     midi.onClick = [this]
@@ -46,9 +58,14 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
         if (! engine.setMidiPreview(midi.getToggleState()))
         { midi.setToggleState(false,juce::dontSendNotification); filename.setText(engine.error(),juce::dontSendNotification); }
         else if (loadedFile != juce::File()) filename.setText(loadedFile.getFileName(),juce::dontSendNotification);
+        if (onSettingsChanged) onSettingsChanged();
     };
+    autoPreview.onClick = [this] { if (onSettingsChanged) onSettingsChanged(); };
     autoPreview.setComponentID("autoPreview");
     loop.setComponentID("loop");
+    midi.setComponentID("midiPreview");
+    skipSilence.setComponentID("skipSilence");
+    rexGate.setComponentID("rexGate");
     autoPreview.setToggleState(true,juce::dontSendNotification);
     autoPreview.setTooltip("Automatically audition newly selected files, independently of MIDI Preview");
     clearSelectionButton.setComponentID("clearSelection");
@@ -121,6 +138,19 @@ bool PreviewPanel::loadFile(const juce::File& file)
     if (success && ! soundFont && autoPreview.getToggleState()) engine.play();
     return success;
 }
+void PreviewPanel::applyPersistedSettings(const AppSettings& settings)
+{
+    autoPreview.setToggleState(settings.autoPreview, juce::dontSendNotification);
+    loop.setToggleState(settings.loopPreview, juce::dontSendNotification);
+    skipSilence.setToggleState(settings.skipSilence, juce::dontSendNotification);
+    engine.setSkipSilence(settings.skipSilence);
+    rexGate.setToggleState(settings.rexGate, juce::dontSendNotification);
+    engine.setRexGateMode(settings.rexGate);
+    midi.setToggleState(settings.midiPreview, juce::dontSendNotification);
+    if (! engine.setMidiPreview(settings.midiPreview))
+        midi.setToggleState(engine.isMidiPreview(), juce::dontSendNotification);
+    applyTransportLooping();
+}
 void PreviewPanel::selectRange(double start, double end)
 {
     waveform.setSelection(selection::orderedRange(start,end,engine.length()));
@@ -137,7 +167,22 @@ void PreviewPanel::selectionChanged(selection::Range range)
     }
     clearSelectionButton.setVisible(true);
     selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
-    exporter.prepare(loadedFile,range.start,range.end);
+    if (engine.isRex2Mode())
+    {
+        // REX2 has no AudioFormatReader: render the selected time range from the PCM that the
+        // preview already decoded. The shared pointer keeps the samples alive on the worker.
+        if (auto audio = engine.rexAudio())
+        {
+            exporter.prepare(loadedFile, range.start, range.end,
+                [audio](const juce::File& source, double start, double end,
+                        const juce::File& folder, CancelCheck cancel)
+                {
+                    return AudioExporter().exportRexSelection(*audio, source, start, end, folder, cancel);
+                });
+        }
+        else exporter.prepare(loadedFile, range.start, range.end);
+    }
+    else exporter.prepare(loadedFile,range.start,range.end);
     applyTransportLooping();
     refreshSelectionStatus();
 }

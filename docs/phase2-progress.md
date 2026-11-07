@@ -3,7 +3,22 @@
 ## Current state
 
 - Metadata-first foundation: name/path, WAV/AIFF, ASD and REX2 candidates,
-  resolver, schema v6, overrides storage and background service.
+  resolver, schema v7, overrides storage and background service.
+- Foundation hardening (2026-11-07): one atomic publication of candidates,
+  extractions, fingerprints and result; independent extractor/resolver/DSP
+  versions; revision and catalog guards; structured failures; sidecar
+  fingerprint verification with an in-job reprocess pass; override edits that
+  never get overwritten by an in-flight job; explicit **Smart metadata** button
+  with pause/cancel and progress. See `docs/SMART_ANALYSIS.md`.
+- **Analyze selected** in the row context menu queues a chosen set into the smart
+  job, including while a pass is already running.
+- **Auto Preview / MIDI Preview / Skip Silence / Loop / Gate** persist with
+  **Hide empty** and are restored on launch.
+- REX2 waveform selections render from the decoded PCM and drag out as normal
+  24-bit WAV files; ordinary selections keep the existing export path.
+- Library Type/BPM/Key columns with textual state markers and whole-catalog SQL
+  sorting; a bottom selection bar shows the full path, effective smart values and
+  measured format/rate/duration. Header columns stretch to fit a narrow pane.
 - RX2/SF2 assets can be indexed and found by filename masks or extension filters.
 - SF2 MIDI preview supports selecting drum and melodic presets; this is a limited
   renderer, not a complete SoundFont synthesizer.
@@ -18,16 +33,11 @@
 
 ## Next development slice
 
-Continue the existing smart-analysis plan in
-`docs/superpowers/plans/2026-11-07-phase2-smart-analysis.md`, starting with
-Type/BPM/Key columns, inspector/provenance/conflict explanations, global filters
-and sorting, and user override editing. Then implement and evaluate DSP BPM and
-pitch/key fallback on appropriate material. Do not equate sampler root with key.
-
-Before extending the pipeline, verify atomic publication of candidates/results/
-inputs, extractor version tracking, automatic sidecar invalidation and cancellation
-coverage: the current foundation is not a declaration that those requirements are
-fully complete. Do not rehash/recompute basic features to add smart results.
+The foundation and columns are complete for this slice; the next plan continues with
+the inspector (provenance, alternatives, conflicts), global metadata filters and the
+user override editing UI. Then implement and evaluate DSP BPM
+and pitch/key fallback on appropriate material. Do not equate sampler root with key.
+Do not rehash/recompute basic features to add smart results.
 
 ## Verification and constraints
 

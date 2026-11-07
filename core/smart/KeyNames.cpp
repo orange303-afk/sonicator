@@ -22,6 +22,13 @@ juce::String canonicalKeyName(int tonic, const juce::String& mode)
     if (tonic < 0 || tonic > 11) return {};
     return juce::String(sharpNames[tonic]) + " " + (mode.isEmpty() ? "unknown" : mode);
 }
+juce::String keyDisplayName(int tonic, const juce::String& mode)
+{
+    if (tonic < 0 || tonic > 11) return {};
+    const juce::String name(sharpNames[tonic]);
+    if (mode.isEmpty() || mode == "unknown") return name;
+    return name + " " + mode;
+}
 std::optional<MusicalKey> parseKeyToken(const juce::String& token)
 {
     auto text = token.trim();

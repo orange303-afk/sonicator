@@ -1,5 +1,6 @@
 #pragma once
 #include "core/scanner/FileScanner.h"
+#include "core/rex/Rex2Decoder.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 namespace sonicator {
 struct ExportResult
@@ -24,5 +25,10 @@ public:
                              const juce::File& destination, CancelCheck cancel = {}) const;
     ExportResult exportSelection(const juce::File& source, double start, double end,
                                  const juce::File& folder, CancelCheck cancel = {}) const;
+    // REX2 has no reader in AudioFormatManager, so a waveform selection is rendered from the
+    // already-decoded PCM. The source file name is used for the WAV stem only.
+    ExportResult exportRexSelection(const Rex2Audio& audio, const juce::File& source,
+                                    double start, double end, const juce::File& folder,
+                                    CancelCheck cancel = {}) const;
 };
 } // namespace sonicator

@@ -18,11 +18,12 @@ SelectionExporter::~SelectionExporter()
     finishedCondition.notify_all();
     if (worker.joinable()) worker.join();
 }
-void SelectionExporter::prepare(const juce::File& source, double start, double end)
+void SelectionExporter::prepare(const juce::File& source, double start, double end,
+                                ExportFunction custom)
 {
     {
         std::lock_guard lock(stateMutex);
-        pendingRequest = { source, start, end, ++generation };
+        pendingRequest = { source, start, end, ++generation, std::move(custom) };
         hasPendingRequest = true;
         jobFinished = false;
         current = {};
@@ -73,9 +74,11 @@ void SelectionExporter::run()
             std::lock_guard lock(stateMutex);
             return stopping || jobGeneration != generation;
         };
-        const auto result = exporter
-            ? exporter(request.source, request.start, request.end, folder, cancelled)
-            : AudioExporter().exportSelection(request.source, request.start, request.end, folder, cancelled);
+        const auto result = request.custom
+            ? request.custom(request.source, request.start, request.end, folder, cancelled)
+            : exporter
+                ? exporter(request.source, request.start, request.end, folder, cancelled)
+                : AudioExporter().exportSelection(request.source, request.start, request.end, folder, cancelled);
         {
             std::lock_guard lock(stateMutex);
             if (jobGeneration == generation)

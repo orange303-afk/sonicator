@@ -8,7 +8,7 @@ Folder queries use the existing path index with separator-aware prefix bounds (D
 
 ## Ordinary preview
 
-**Auto Preview** is on by default: selecting a new file plays it, including when MIDI Preview is enabled. Turning it off makes selection silent; explicit **Play** remains available in both modes. Programmatic selection restoration does not call the selection action. Reloading an unchanged selected path preserves its transport position. **Play** restarts after EOF; with **Loop** off, EOF stops permanently until another explicit Play. A changed file (size/mtime) is reloaded rather than treating its old preview as current.
+**Auto Preview** is on by default: selecting a new file plays it, including when MIDI Preview is enabled. Turning it off makes selection silent; explicit **Play** remains available in both modes. **Auto Preview**, **MIDI Preview**, **Skip Silence**, **Loop** and **Gate** are persisted in `settings.json` and restored on the next launch. Programmatic selection restoration does not call the selection action. Reloading an unchanged selected path preserves its transport position. **Play** restarts after EOF; with **Loop** off, EOF stops permanently until another explicit Play. A changed file (size/mtime) is reloaded rather than treating its old preview as current.
 
 Buttons and checkboxes do not take keyboard focus on click; nonmodal toolbar and preview actions restore focus to the file list so Up/Down continue navigating. Search and the folder tree retain their own keyboard behaviour when explicitly focused; modal dialogs/choosers must retain focus while open. The header uses a larger tightly cropped wordmark without a separate decorative icon; the OS app icon is unchanged.
 
@@ -33,7 +33,7 @@ The overlay draws a translucent accent range, start/end lines and a compact `0.2
 
 Selection export is WAV only and never modifies the source. It preserves the source sample rate and channel count; 16-bit sources stay 16-bit PCM, 24/32-bit integer sources become 24-bit PCM, float sources become 32-bit float, and compressed sources become 24-bit PCM. There is no gain change, normalization, fade or time-stretch. Export writes `destination + ".part"` in bounded chunks and renames only after success, so a failed or cancelled export leaves no partial file.
 
-Exported selections live under `Sonicator/exports/` and are **not** deleted automatically: a DAW project or a message may still reference them. The folder grows until you remove files manually; a cleanup action is a later Settings feature. More than 64 channels is refused explicitly rather than downmixed.
+REX2 selections are rendered from the decoded PCM kept for the preview, not through `AudioFormatManager` (which cannot read `.rx2`). The rendered file is a normal 24-bit WAV with the source rate and channels, so the same drag works in a DAW, Finder or a messenger. Exported selections live under `Sonicator/exports/` and are **not** deleted automatically: a DAW project or a message may still reference them. The folder grows until you remove files manually; a cleanup action is a later Settings feature. More than 64 channels is refused explicitly rather than downmixed.
 
 External drag into DAWs/messengers is verified on macOS in this stage. Windows uses the same JUCE file-URL path but still needs separate verification.
 

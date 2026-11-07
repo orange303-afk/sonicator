@@ -134,6 +134,11 @@ TEST_CASE("Reanalysed audio invalidates the stored smart result but keeps overri
     repo.setSmartOverride(id, SmartField::Bpm, overrideValue);
     record.duration = 1.0;
     repo.upsert(record);
-    REQUIRE_FALSE(repo.smartResult(id).has_value());
+    // The previous completed generation is retained but marked stale; it is never presented as
+    // current, and a manual override is untouched by the invalidation.
+    auto stale = repo.smartResult(id);
+    REQUIRE(stale.has_value());
+    REQUIRE(stale->pipelineState == SmartPipelineState::Stale);
+    REQUIRE(stale->bpm == Catch::Approx(90.0)); // the manual override is still effective
     REQUIRE(repo.smartOverrides(id).count(SmartField::Bpm) == 1);
 }
