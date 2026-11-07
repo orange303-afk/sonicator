@@ -1,4 +1,5 @@
 #include "IndexingService.h"
+#include "core/smart/AssetAnalyzer.h"
 #include <unordered_set>
 namespace sonicator {
 IndexingService::~IndexingService() { cancel(); waitForThreadToExit(-1); }
@@ -89,11 +90,14 @@ void IndexingService::run()
             }
             if (! forceAnalysis && previous && previous->error.isEmpty() && ! previous->missing
                 && previous->fileSize == entry.fileSize && previous->dateModified == entry.dateModified
-                && previous->version == basicFeaturesVersion)
+                && (previous->version == basicFeaturesVersion
+                    || previous->version == metadataOnlyVersion))
             {
                 std::lock_guard lock(stateMutex); ++state.processed; ++state.skipped; continue;
             }
-            auto result = BasicAnalyzer().analyzeAndHash(file, [this] { return checkpoint(); });
+            auto result = FileScanner::isMetadataOnlyFormat(file)
+                ? analyzeMetadataAsset(file, [this] { return checkpoint(); })
+                : BasicAnalyzer().analyzeAndHash(file, [this] { return checkpoint(); });
             if (cancelled) break;
             repo.upsert(result);
             bool duplicate = result.fileHash.isNotEmpty() && repo.countHash(result.fileHash) > 1;

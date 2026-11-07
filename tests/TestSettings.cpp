@@ -64,3 +64,16 @@ TEST_CASE("Page size persists and invalid values fall back", "[settings][paging]
     file.replaceWithText("{\"pageSize\":7}");
     REQUIRE(store.load().pageSize == 10000);
 }
+
+TEST_CASE("Search history round-trips and is capped at ten entries", "[settings][search]")
+{
+    TestDirectory t;
+    SettingsStore store(t.dir.getChildFile("settings.json"));
+    AppSettings settings; settings.databasePath = "/catalog.sqlite";
+    for (int i = 0; i < 12; ++i) settings.searchHistory.add("query " + juce::String(i));
+    while (settings.searchHistory.size() > 10) settings.searchHistory.remove(10);
+    store.save(settings);
+    const auto loaded = store.load();
+    REQUIRE(loaded.searchHistory.size() == 10);
+    REQUIRE(loaded.searchHistory[0] == "query 0");
+}

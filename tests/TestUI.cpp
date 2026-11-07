@@ -27,7 +27,7 @@ TEST_CASE("Preview controls leave keyboard navigation with the library", "[ui][f
     for (auto* child : preview.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    REQUIRE(buttons == 7);
+    REQUIRE(buttons == 8);
 }
 TEST_CASE("Added folder tree includes deep descendants and responds to arrow keys", "[ui][folders]")
 {

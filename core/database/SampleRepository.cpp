@@ -1,4 +1,6 @@
 #include "SampleRepository.h"
+#include "SearchSyntax.h"
+#include "core/smart/KeyNames.h"
 #include "PathRelocation.h"
 #include "SqliteHelpers.h"
 #include <algorithm>
@@ -6,7 +8,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred";
-constexpr int schemaVersion = 5;
+constexpr int schemaVersion = 6;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -113,14 +115,69 @@ FilterSql buildFilterSql(const LibraryFilter& filter)
     {
         sql.where += text; sql.params.emplace_back(value);
     };
-    if (filter.text.trim().isNotEmpty())
+    for (const auto& term : parseSearchTerms(filter.text))
     {
-        auto tokens = juce::StringArray::fromTokens(filter.text.trim(), " \t\r\n", "");
-        for (const auto& token : tokens)
+        auto like = [&](const juce::String& value) { return "%" + escapeLike(foldForSearch(value)) + "%"; };
+        switch (term.kind)
         {
-            if (token.isEmpty()) continue;
-            addText(" AND samples.search_key LIKE ? ESCAPE '\\'",
-                    "%" + escapeLike(foldForSearch(token)) + "%");
+            case SearchKind::Text:
+                addText(" AND samples.search_key LIKE ? ESCAPE '\\'", like(term.text));
+                break;
+            case SearchKind::Glob:
+                addText(" AND samples.name LIKE ? ESCAPE '\\'", globToLike(term.text));
+                break;
+            case SearchKind::Format:
+            case SearchKind::GlobOr:
+            {
+                juce::String condition;
+                for (const auto& value : term.values)
+                {
+                    if (condition.isNotEmpty()) condition += " OR ";
+                    if (term.kind == SearchKind::Format)
+                        condition += "(samples.format = ? COLLATE NOCASE OR samples.name LIKE ? ESCAPE '\\')";
+                    else
+                        condition += "samples.name LIKE ? ESCAPE '\\'";
+                }
+                if (condition.isEmpty()) break;
+                sql.where += " AND (" + condition + ")";
+                for (const auto& value : term.values)
+                {
+                    if (term.kind == SearchKind::Format) sql.params.emplace_back(value);
+                    sql.params.emplace_back(term.kind == SearchKind::Format
+                                            ? "%." + value : globToLike(value));
+                }
+                break;
+            }
+            case SearchKind::TypeOnly:
+                addText(" AND EXISTS(SELECT 1 FROM smart_results sr WHERE sr.sample_id=samples.id"
+                        " AND sr.type=? COLLATE NOCASE)", term.text);
+                break;
+            case SearchKind::TypeOrText:
+                sql.where += " AND (EXISTS(SELECT 1 FROM smart_results sr WHERE sr.sample_id=samples.id"
+                             " AND sr.type=? COLLATE NOCASE) OR samples.search_key LIKE ? ESCAPE '\\')";
+                sql.params.emplace_back(term.text);
+                sql.params.emplace_back(like(term.text));
+                break;
+            case SearchKind::KeyOnly:
+            case SearchKind::KeyOrText:
+            {
+                juce::String condition = "EXISTS(SELECT 1 FROM smart_results sr WHERE sr.sample_id=samples.id"
+                    " AND sr.key_tonic=? AND sr.key_state IN ('resolved','conflicting','overridden')";
+                if (term.mode.isNotEmpty()) condition += " AND sr.key_mode=?";
+                condition += ")";
+                if (term.kind == SearchKind::KeyOrText)
+                    condition += " OR samples.search_key LIKE ? ESCAPE '\\'";
+                sql.where += " AND (" + condition + ")";
+                sql.params.emplace_back((int64_t) term.tonic);
+                if (term.mode.isNotEmpty()) sql.params.emplace_back(term.mode);
+                if (term.kind == SearchKind::KeyOrText) sql.params.emplace_back(like(term.text));
+                break;
+            }
+            case SearchKind::NoteOnly:
+                sql.where += " AND EXISTS(SELECT 1 FROM smart_results sr WHERE sr.sample_id=samples.id"
+                             " AND sr.root_note=? AND sr.root_state IN ('resolved','conflicting','overridden'))";
+                sql.params.emplace_back((int64_t) term.midi);
+                break;
         }
     }
     if (filter.folder.isNotEmpty())
@@ -152,7 +209,8 @@ FilterSql buildFilterSql(const LibraryFilter& filter)
     for (auto id : filter.excludeTags)
         addInt(" AND NOT EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
     if (filter.starredOnly) sql.where += " AND samples.starred=1";
-    if (filter.hideEmpty) sql.where += " AND samples.peak>=0.001";
+    // Metadata-only containers have no decoded peak, so "Hide empty" must not hide them.
+    if (filter.hideEmpty) sql.where += " AND (samples.peak>=0.001 OR samples.version=-1)";
     if (filter.hideDuplicates)
         sql.where += " AND NOT EXISTS(SELECT 1 FROM duplicates d WHERE d.sample_id=samples.id AND d.is_representative=0)";
     if (filter.duplicateHash.isNotEmpty())
@@ -258,7 +316,33 @@ void SampleRepository::createTables()
             "representative_id INTEGER NOT NULL, group_hash TEXT NOT NULL, group_size INTEGER NOT NULL,"
             "is_representative INTEGER NOT NULL DEFAULT 0);"
             "CREATE INDEX IF NOT EXISTS duplicates_hash ON duplicates(group_hash);"
-            "CREATE INDEX IF NOT EXISTS duplicates_rep ON duplicates(representative_id);");
+            "CREATE INDEX IF NOT EXISTS duplicates_rep ON duplicates(representative_id);"
+            "CREATE TABLE IF NOT EXISTS smart_candidates ("
+            "sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
+            "field TEXT NOT NULL, source TEXT NOT NULL, status TEXT NOT NULL,"
+            "detail TEXT NOT NULL DEFAULT '', text_value TEXT NOT NULL DEFAULT '',"
+            "numeric_value REAL NOT NULL DEFAULT 0,"
+            "PRIMARY KEY(sample_id, field, source, detail)) WITHOUT ROWID;"
+            "CREATE INDEX IF NOT EXISTS smart_candidates_field ON smart_candidates(field, numeric_value);"
+            "CREATE TABLE IF NOT EXISTS smart_results ("
+            "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE,"
+            "type TEXT NOT NULL DEFAULT '', structure TEXT NOT NULL DEFAULT '',"
+            "bpm REAL NOT NULL DEFAULT 0, has_bpm INTEGER NOT NULL DEFAULT 0,"
+            "key_tonic INTEGER NOT NULL DEFAULT -1, key_mode TEXT NOT NULL DEFAULT '',"
+            "root_note INTEGER NOT NULL DEFAULT -1,"
+            "type_state TEXT NOT NULL DEFAULT 'unknown', structure_state TEXT NOT NULL DEFAULT 'unknown',"
+            "bpm_state TEXT NOT NULL DEFAULT 'unknown', key_state TEXT NOT NULL DEFAULT 'unknown',"
+            "root_state TEXT NOT NULL DEFAULT 'unknown', explanation TEXT NOT NULL DEFAULT '',"
+            "resolver_version INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;"
+            "CREATE TABLE IF NOT EXISTS smart_overrides ("
+            "sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
+            "field TEXT NOT NULL, cleared INTEGER NOT NULL DEFAULT 0,"
+            "text_value TEXT NOT NULL DEFAULT '', numeric_value REAL NOT NULL DEFAULT 0,"
+            "updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(sample_id, field)) WITHOUT ROWID;"
+            "CREATE TABLE IF NOT EXISTS smart_inputs ("
+            "sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,"
+            "kind TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0,"
+            "modified INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(sample_id, kind, path)) WITHOUT ROWID;");
         // Databases created before schema 3 predate the folded search column.
         bool hasSearchKey = false, hasStarred = false;
         {
@@ -303,7 +387,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=5;");
+        detail::exec(db.handle, "PRAGMA user_version=6;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -330,7 +414,12 @@ int64_t SampleRepository::upsert(const SampleRecord& r)
     s.real(17,r.spectralRolloff); s.real(18,r.spectralFlatness); s.integer(19,r.missing ? 1 : 0);
     s.text(20,searchKey(r.fileName,r.filePath)); s.integer(21,r.starred ? 1 : 0);
     if (! s.step()) throw std::runtime_error("Insert did not return a sample ID");
-    return s.integer(0);
+    const auto id = s.integer(0);
+    // Reanalysed audio invalidates the derived smart result; candidates and overrides are kept
+    // and the next smart run rebuilds the result from them.
+    detail::Statement invalidate(db.handle, "DELETE FROM smart_results WHERE sample_id=?");
+    invalidate.integer(1, id); invalidate.step();
+    return id;
 }
 std::optional<SampleRecord> SampleRepository::findByPath(const juce::String& path) const
 {
@@ -821,6 +910,195 @@ std::vector<SampleRecord> SampleRepository::duplicateMembers(int64_t sampleId) c
     detail::Statement s(db.handle, sql.toRawUTF8()); s.text(1, hash);
     std::vector<SampleRecord> out;
     while (s.step()) out.push_back(read(s));
+    return out;
+}
+void SampleRepository::replaceSmartCandidates(int64_t sampleId, const std::vector<SmartCandidate>& candidates)
+{
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement remove(db.handle, "DELETE FROM smart_candidates WHERE sample_id=?");
+        remove.integer(1, sampleId); remove.step();
+        detail::Statement insert(db.handle,
+            "INSERT OR REPLACE INTO smart_candidates"
+            "(sample_id,field,source,status,detail,text_value,numeric_value) VALUES(?,?,?,?,?,?,?)");
+        for (const auto& c : candidates)
+        {
+            insert.reset();
+            insert.integer(1, sampleId);
+            insert.text(2, smartFieldKey(c.field));
+            insert.text(3, c.source);
+            insert.text(4, candidateStatusKey(c.status));
+            insert.text(5, c.detail);
+            insert.text(6, c.textValue);
+            insert.real(7, c.numericValue);
+            insert.step();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+std::vector<SmartCandidate> SampleRepository::smartCandidates(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT field,source,status,detail,text_value,numeric_value FROM smart_candidates"
+        " WHERE sample_id=? ORDER BY field,source,detail");
+    s.integer(1, sampleId);
+    std::vector<SmartCandidate> out;
+    while (s.step())
+    {
+        SmartCandidate c;
+        c.field = smartFieldFromKey(s.text(0)).value_or(SmartField::Type);
+        c.source = s.text(1);
+        c.status = candidateStatusFromKey(s.text(2)).value_or(CandidateStatus::Invalid);
+        c.detail = s.text(3);
+        c.textValue = s.text(4);
+        c.numericValue = s.real(5);
+        out.push_back(c);
+    }
+    return out;
+}
+void SampleRepository::setSmartResult(int64_t sampleId, const SmartResult& r)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "INSERT OR REPLACE INTO smart_results"
+        "(sample_id,type,structure,bpm,has_bpm,key_tonic,key_mode,root_note,type_state,"
+        "structure_state,bpm_state,key_state,root_state,explanation,resolver_version,updated_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+    s.integer(1, sampleId);
+    s.text(2, r.type); s.text(3, r.structure);
+    s.real(4, r.bpm); s.integer(5, r.hasBpm ? 1 : 0);
+    s.integer(6, r.keyTonic); s.text(7, r.keyMode); s.integer(8, r.rootNote);
+    s.text(9, smartStateKey(r.typeState)); s.text(10, smartStateKey(r.structureState));
+    s.text(11, smartStateKey(r.bpmState)); s.text(12, smartStateKey(r.keyState));
+    s.text(13, smartStateKey(r.rootState)); s.text(14, r.explanation);
+    s.integer(15, 1);
+    s.integer(16, juce::Time::currentTimeMillis());
+    s.step();
+}
+namespace {
+SmartState stateFromKey(const juce::String& key)
+{
+    for (auto state : { SmartState::Unknown, SmartState::Resolved, SmartState::Ambiguous,
+                        SmartState::Conflicting, SmartState::Unsupported, SmartState::Default,
+                        SmartState::Overridden })
+        if (smartStateKey(state) == key) return state;
+    return SmartState::Unknown;
+}
+}
+std::optional<SmartResult> SampleRepository::smartResult(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT type,structure,bpm,has_bpm,key_tonic,key_mode,root_note,type_state,"
+        "structure_state,bpm_state,key_state,root_state,explanation FROM smart_results WHERE sample_id=?");
+    s.integer(1, sampleId);
+    if (! s.step()) return std::nullopt;
+    SmartResult r;
+    r.type = s.text(0); r.structure = s.text(1);
+    r.bpm = s.real(2); r.hasBpm = s.integer(3) != 0;
+    r.keyTonic = (int) s.integer(4); r.keyMode = s.text(5); r.rootNote = (int) s.integer(6);
+    r.typeState = stateFromKey(s.text(7)); r.structureState = stateFromKey(s.text(8));
+    r.bpmState = stateFromKey(s.text(9)); r.keyState = stateFromKey(s.text(10));
+    r.rootState = stateFromKey(s.text(11)); r.explanation = s.text(12);
+    return r;
+}
+void SampleRepository::setSmartOverride(int64_t sampleId, SmartField field, const SmartOverride& value)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "INSERT OR REPLACE INTO smart_overrides(sample_id,field,cleared,text_value,numeric_value,updated_at)"
+        " VALUES(?,?,?,?,?,?)");
+    s.integer(1, sampleId); s.text(2, smartFieldKey(field));
+    s.integer(3, value.cleared ? 1 : 0); s.text(4, value.textValue);
+    s.real(5, value.numericValue); s.integer(6, juce::Time::currentTimeMillis());
+    s.step();
+}
+void SampleRepository::clearSmartOverride(int64_t sampleId, SmartField field)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "DELETE FROM smart_overrides WHERE sample_id=? AND field=?");
+    s.integer(1, sampleId); s.text(2, smartFieldKey(field)); s.step();
+}
+SmartOverrideMap SampleRepository::smartOverrides(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT field,cleared,text_value,numeric_value FROM smart_overrides WHERE sample_id=?");
+    s.integer(1, sampleId);
+    SmartOverrideMap out;
+    while (s.step())
+    {
+        auto field = smartFieldFromKey(s.text(0));
+        if (! field) continue;
+        SmartOverride value;
+        value.cleared = s.integer(1) != 0;
+        value.textValue = s.text(2);
+        value.numericValue = s.real(3);
+        out[*field] = value;
+    }
+    return out;
+}
+void SampleRepository::setSmartInputs(int64_t sampleId, const std::vector<SmartInput>& inputs)
+{
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement remove(db.handle, "DELETE FROM smart_inputs WHERE sample_id=?");
+        remove.integer(1, sampleId); remove.step();
+        detail::Statement insert(db.handle,
+            "INSERT OR REPLACE INTO smart_inputs(sample_id,kind,path,size,modified) VALUES(?,?,?,?,?)");
+        for (const auto& input : inputs)
+        {
+            insert.reset(); insert.integer(1, sampleId); insert.text(2, input.kind);
+            insert.text(3, input.path); insert.integer(4, input.size); insert.integer(5, input.modified);
+            insert.step();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+std::vector<SmartInput> SampleRepository::smartInputs(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT kind,path,size,modified FROM smart_inputs WHERE sample_id=? ORDER BY kind,path");
+    s.integer(1, sampleId);
+    std::vector<SmartInput> out;
+    while (s.step())
+        out.push_back({ s.text(0), s.text(1), s.integer(2), s.integer(3) });
+    return out;
+}
+std::optional<SampleRecord> SampleRepository::findById(int64_t id) const
+{
+    std::lock_guard lock(db.mutex);
+    const auto sql = juce::String("SELECT ") + columns + " FROM samples WHERE id=?";
+    detail::Statement s(db.handle, sql.toRawUTF8());
+    s.integer(1, id);
+    if (! s.step()) return std::nullopt;
+    return read(s);
+}
+std::vector<int64_t> SampleRepository::samplesNeedingSmartAnalysis(int64_t afterId, int limit) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT s.id FROM samples s LEFT JOIN smart_results r ON r.sample_id=s.id"
+        " WHERE s.id>? AND r.sample_id IS NULL ORDER BY s.id LIMIT ?");
+    s.integer(1, afterId); s.integer(2, limit);
+    std::vector<int64_t> out;
+    while (s.step()) out.push_back(s.integer(0));
     return out;
 }
 } // namespace sonicator

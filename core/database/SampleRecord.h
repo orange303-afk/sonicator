@@ -5,6 +5,9 @@ namespace sonicator {
 // channels, peak, rms, centroid, rolloff, flatness and the file hash. Bump it only when
 // that output changes, and record the change in docs/ARCHITECTURE.md.
 inline constexpr int basicFeaturesVersion = 1;
+// RX2/SF2 are indexed as library assets, not decoded audio: the row carries file identity and the
+// metadata extracted by core/smart, so it is never mistaken for a measured Phase 1 result.
+inline constexpr int metadataOnlyVersion = -1;
 struct SampleRecord
 {
     int64_t id = 0;

@@ -24,6 +24,14 @@ AudioEngine::~AudioEngine()
     readAhead.stopThread(-1);
     devices.closeAudioDevice();
 }
+void AudioEngine::preparePreviewBlock(int blockSize)
+{
+    output.prepareToPlay(blockSize, deviceSampleRate());
+}
+void AudioEngine::renderPreviewBlock(juce::AudioBuffer<float>& buffer, int numSamples)
+{
+    output.getNextAudioBlock({ &buffer, 0, numSamples });
+}
 void AudioEngine::attach()
 {
     source.setSource(reader.get(), deviceMode ? 32768 : 0, deviceMode ? &readAhead : nullptr, inputRate);
@@ -35,10 +43,22 @@ bool AudioEngine::loadFile(const juce::File& file)
     source.stop();
     if (deviceMode) player.setSource(nullptr);
     sampler.clear();
+    clearContainers();
     loadedFile = juce::File(); audibleStart = -1; startAtNextPlay = true;
     source.setSource(nullptr); reader.reset();
     lastError = validateContainer(file);
     if (lastError.isNotEmpty()) { if (deviceMode) player.setSource(&output); return false; }
+    const auto extension = file.getFileExtension().toLowerCase();
+    if (extension == ".sf2")
+    {
+        if (deviceMode) player.setSource(&output);
+        return previewSoundFont(file);
+    }
+    if (extension == ".rx2")
+    {
+        if (deviceMode) player.setSource(&output);
+        return previewRex2(file);
+    }
     std::unique_ptr<juce::AudioFormatReader> decoded(formats.createReaderFor(file));
     if (! decoded || decoded->sampleRate <= 0 || decoded->lengthInSamples <= 0)
     {
@@ -57,6 +77,7 @@ bool AudioEngine::loadFile(const juce::File& file)
 }
 void AudioEngine::play()
 {
+    if (rexMode) { rexSampler.startAudition(looping); return; }
     if (! reader) return;
     if (source.hasStreamFinished() || startAtNextPlay)
     {
@@ -70,17 +91,117 @@ void AudioEngine::play()
     }
     source.start();
 }
-void AudioEngine::pause() { source.stop(); }
+void AudioEngine::clearContainers()
+{
+    sf2Mode = false;
+    output.sf2Mode = false;
+    sf2Sampler.reset();
+    sf2Bank.clear();
+    rexMode = false;
+    output.rexMode = false;
+    rexSampler.reset();
+}
+double AudioEngine::deviceSampleRate() const
+{
+    if (deviceMode)
+        if (auto* device = devices.getCurrentAudioDevice())
+            return device->getCurrentSampleRate();
+    return 44100.0;
+}
+juce::String AudioEngine::soundFontPresetLabel(int index) const
+{
+    if (index < 0 || index >= (int) sf2Bank.presets().size()) return {};
+    const auto& preset = sf2Bank.presets()[(size_t) index];
+    return juce::String(preset.bank) + ":" + juce::String(preset.program) + "  " + preset.name;
+}
+bool AudioEngine::selectSoundFontPreset(int index)
+{
+    if (! sf2Mode) return false;
+    if (deviceMode) player.setSource(nullptr);
+    juce::String error;
+    const bool ok = sf2Sampler.load(sf2Bank, index, error);
+    if (! ok) lastError = error;
+    else
+    {
+        sf2Sampler.prepare(deviceSampleRate());
+        output.sf2Mode = true;
+        lastError.clear();
+    }
+    if (deviceMode) player.setSource(&output);
+    return ok;
+}
+bool AudioEngine::previewRex2(const juce::File& file, int startNote)
+{
+    if (deviceMode) player.setSource(nullptr);
+    clearContainers();
+    juce::String error;
+    if (! rexSampler.load(file, startNote, error))
+    {
+        lastError = error;
+        if (deviceMode) player.setSource(&output);
+        return false;
+    }
+    rexSampler.prepare(deviceSampleRate());
+    rexMode = true;
+    output.rexMode = true;
+    loadedFile = file;
+    lastError.clear();
+    if (! isMidiPreview()) setMidiPreview(true);
+    if (deviceMode) player.setSource(&output);
+    return true;
+}
+bool AudioEngine::previewSoundFont(const juce::File& file, int presetIndex)
+{
+    if (deviceMode) player.setSource(nullptr);
+    clearContainers();
+    juce::String error;
+    if (! sf2Bank.load(file, error))
+    {
+        lastError = error;
+        if (deviceMode) player.setSource(&output);
+        return false;
+    }
+    int index = presetIndex;
+    if (index < 0)
+    {
+        index = sf2Bank.firstDrumPreset();
+        if (index < 0) index = 0; // a bank without a drum kit opens its first melodic preset
+    }
+    if (index >= (int) sf2Bank.presets().size() || ! sf2Sampler.load(sf2Bank, index, error))
+    {
+        lastError = error.isNotEmpty() ? error : "Cannot load SoundFont preset";
+        if (deviceMode) player.setSource(&output);
+        return false;
+    }
+    sf2Sampler.prepare(deviceSampleRate());
+    sf2Mode = true;
+    output.sf2Mode = true;
+    loadedFile = file;
+    lastError.clear();
+    if (! isMidiPreview()) setMidiPreview(true);
+    if (deviceMode) player.setSource(&output);
+    return true;
+}
+void AudioEngine::pause()
+{
+    if (rexMode) { rexSampler.pauseAudition(); return; }
+    source.stop();
+}
 void AudioEngine::stop()
 {
+    if (rexMode) rexSampler.stopAudition();
     source.stop(); source.setPosition(0); startAtNextPlay = true;
     if (deviceMode) player.setSource(nullptr);
     sampler.reset();
+    sf2Sampler.reset();
+    rexSampler.reset();
     if (deviceMode) player.setSource(&output);
 }
 void AudioEngine::seek(double seconds)
 {
-    if (std::isfinite(seconds)) { source.setPosition(juce::jlimit(0.0, length(), seconds)); startAtNextPlay = false; }
+    if (! std::isfinite(seconds)) return;
+    if (rexMode) { rexSampler.seekAudition(juce::jlimit(0.0, length(), seconds)); return; }
+    source.setPosition(juce::jlimit(0.0, length(), seconds)); startAtNextPlay = false;
 }
 void AudioEngine::setVolume(float gain)
 {
@@ -92,6 +213,7 @@ void AudioEngine::setLooping(bool enabled)
     if (looping == enabled) return;
     looping = enabled;
     sampler.loop = enabled;
+    if (rexMode) { rexSampler.setAuditionLoop(enabled); return; }
     if (! reader) return;
     auto positionBefore = position(); bool resume = isPlaying();
     source.stop(); source.setSource(nullptr);
@@ -105,7 +227,7 @@ bool AudioEngine::setMidiPreview(bool enabled)
     source.stop(); startAtNextPlay = true;
     if (deviceMode) player.setSource(nullptr);
     sampler.clear(); lastError.clear();
-    if (enabled && loadedFile != juce::File()) lastError = sampler.load(loadedFile);
+    if (enabled && loadedFile != juce::File() && ! sf2Mode && ! rexMode) lastError = sampler.load(loadedFile);
     output.midi = enabled && lastError.isEmpty();
     if (deviceMode)
     {

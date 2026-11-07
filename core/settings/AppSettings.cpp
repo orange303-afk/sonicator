@@ -42,6 +42,13 @@ AppSettings SettingsStore::load() const
     settings.pageSize = (pageSize == 100 || pageSize == 1000 || pageSize == 10000 || pageSize == 0)
         ? pageSize : 10000;
     settings.databasePath = object->getProperty("database").toString();
+    if (const auto* history = object->getProperty("searchHistory").getArray())
+        for (const auto& entry : *history)
+            if (settings.searchHistory.size() < 10)
+            {
+                const auto text = entry.toString();
+                if (text.isNotEmpty()) settings.searchHistory.add(text);
+            }
     settings.windowX = (int) object->getProperty("windowX");
     settings.windowY = (int) object->getProperty("windowY");
     settings.windowWidth = juce::jmax(0, (int) object->getProperty("windowWidth"));
@@ -58,6 +65,10 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("language", settings.language);
     object->setProperty("pageSize", settings.pageSize);
     object->setProperty("database", settings.databasePath);
+    juce::Array<juce::var> history;
+    for (int i = 0; i < juce::jmin(10, settings.searchHistory.size()); ++i)
+        history.add(settings.searchHistory[i]);
+    object->setProperty("searchHistory", history);
     object->setProperty("windowX", settings.windowX);
     object->setProperty("windowY", settings.windowY);
     object->setProperty("windowWidth", settings.windowWidth);

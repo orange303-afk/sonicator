@@ -160,7 +160,7 @@ void MidiSampler::render(juce::AudioBuffer<float>& out,int start,int count,const
 }
 void PreviewOutput::prepareToPlay(int blockSize,double rate)
 {
-    transport.prepareToPlay(blockSize,rate); sampler.prepare(rate); messages.ensureSize(65536);
+    transport.prepareToPlay(blockSize,rate); sampler.prepare(rate); sf2.prepare(rate); rex.prepare(rate); messages.ensureSize(65536);
     midiBuffer.setSize(2,juce::jmax(1,blockSize));
     messages.clear(); collector.drain(messages); messages.clear();
 }
@@ -168,22 +168,30 @@ void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
     messages.clear(); if (collector.drain(messages)) sampler.reset();
     const bool midiEnabled = midi.load();
+    const bool kitEnabled = sf2Mode.load() && midi.load();
+    const bool sliceEnabled = rexMode.load() && midi.load();
     // Chunk both paths: JUCE's resampler can otherwise resize its internal buffer for
     // callbacks larger than prepareToPlay's block size, even though our MIDI scratch fits.
     for (int offset = 0; offset < info.numSamples;)
     {
         const int count = juce::jmin(midiBuffer.getNumSamples(),info.numSamples-offset);
         transport.getNextAudioBlock({info.buffer,info.startSample+offset,count});
-        if (midiEnabled)
+        if (midiEnabled || kitEnabled || sliceEnabled)
         {
-            sampler.render(midiBuffer,0,count,messages);
+            if (kitEnabled) sf2.render(midiBuffer,0,count,messages);
+            else if (sliceEnabled) rex.render(midiBuffer,0,count,messages);
+            else sampler.render(midiBuffer,0,count,messages);
             for (int ch = 0; ch < info.buffer->getNumChannels(); ++ch)
                 info.buffer->addFrom(ch,info.startSample+offset,midiBuffer,juce::jmin(ch,1),0,count,gain.load());
         }
         messages.clear(); // Input is block-quantised; never retrigger notes for later chunks.
         offset += count;
     }
-    if (! midiEnabled) return;
+    lastOutputPeak = info.buffer->getMagnitude(0, info.startSample, info.numSamples);
+    if (info.buffer->getNumChannels() > 1)
+        lastOutputPeak = juce::jmax(lastOutputPeak.load(),
+            info.buffer->getMagnitude(1, info.startSample, info.numSamples));
+    if (! midiEnabled && ! kitEnabled && ! sliceEnabled) return;
     // Smooth safety knee for dense chords; no hard clipping at the hardware output.
     for (int ch = 0; ch < info.buffer->getNumChannels(); ++ch)
         for (int i = info.startSample; i < info.startSample+info.numSamples; ++i)

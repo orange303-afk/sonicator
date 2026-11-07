@@ -16,3 +16,10 @@ Verified directly against upstream on 2026-11-06.
 WAV/AIFF/FLAC/MP3 decoding is provided by `juce_audio_formats`. MP3 decoding is explicitly enabled for consistent macOS/Windows behavior. No FFmpeg dependency is introduced.
 
 This inventory is engineering guidance, not legal advice. SONICATOR's own final distribution licence remains an owner decision; do not ship closed-source binaries merely because this development build succeeds.
+# REX2 decoder reference
+
+The DWOP decoder in `core/rex/Rex2Decoder.cpp` is adapted from
+[VelociLoops](https://github.com/kunitoki/VelociLoops), whose LICENSE is the
+Unlicense (public-domain dedication and warranty disclaimer), not MIT.
+Reference source: `src/velociloops.cpp`; verified license:
+https://github.com/kunitoki/VelociLoops/blob/main/LICENSE.

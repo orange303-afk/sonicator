@@ -71,7 +71,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     theme::apply(appSettings.theme);
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,31>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,
+    for (auto* c : std::array<juce::Component*,32>{&preview,&library,&search,&searchHistory,&addFolder,&rescan,&reanalyze,&newFiles,
          &pause,&cancel,&settings,&backup,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel})
@@ -100,7 +100,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     countLabel.setFont(juce::FontOptions(12));
     tagsLabel.setText("TAGS",juce::dontSendNotification);
     tagsLabel.setFont(juce::FontOptions(11)); tagsLabel.setColour(juce::Label::textColourId,theme::muted);
-    search.setTextToShowWhenEmpty("Search entire library...",theme::muted);
+    search.setTextToShowWhenEmpty("Search: *.rx2, ext:wav, type:pad, key:Am, C4",theme::muted);
     search.setJustification(juce::Justification::centredLeft);
     search.setIndents(10, 0);
     search.onTextChange = [this]
@@ -112,7 +112,11 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     {
         pendingSearch = search.getText();
         filter.text = pendingSearch.trim(); pageOffset = 0; reloadLibrary();
+        recordSearchHistory(filter.text);
     };
+    search.onFocusLost = [this] { recordSearchHistory(search.getText().trim()); };
+    searchHistory.setTooltip("Last 10 searches");
+    searchHistory.onClick = [this] { showSearchHistory(); };
     search.onEscapeKey = [this]
     {
         search.clear(); pendingSearch.clear(); filter.text.clear(); pageOffset = 0; reloadLibrary();
@@ -193,8 +197,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
     preview.onAction = [this] { library.focusForNavigation(); };
-    for (auto* button : std::array<juce::Button*,15>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
-          &tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage})
+    for (auto* button : std::array<juce::Button*,16>{&addFolder,&rescan,&reanalyze,&newFiles,&pause,&cancel,&settings,&backup,
+          &tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&searchHistory})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         if (button == &addFolder || button == &settings) continue; // Modal dialogs must retain their own focus.
@@ -213,6 +217,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         writeRepo->refreshDuplicates();
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         indexer = std::make_unique<IndexingService>(*writeRepo);
+        smart = std::make_unique<SmartAnalysisService>(*writeRepo);
         folders.refresh(*readRepo);
         reloadLibrary();
         status.setText(catalogCount > 0
@@ -245,7 +250,7 @@ MainComponent::~MainComponent()
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
     stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
     settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
-    indexer.reset(); setLookAndFeel(nullptr);
+    smart.reset(); indexer.reset(); setLookAndFeel(nullptr);
 }
 bool MainComponent::contains(const std::vector<int64_t>& values, int64_t id)
 {
@@ -263,6 +268,39 @@ void MainComponent::searchLibrary(const juce::String& text)
     lastSearchChange = juce::Time::getMillisecondCounter();
     pageOffset = 0;
     reloadLibrary();
+}
+void MainComponent::recordSearchHistory(const juce::String& text)
+{
+    if (text.isEmpty()) return;
+    if (! appSettings.searchHistory.contains(text))
+    {
+        appSettings.searchHistory.insert(0, text);
+        while (appSettings.searchHistory.size() > 10) appSettings.searchHistory.remove(appSettings.searchHistory.size() - 1);
+        try { settingsStore.update([this](AppSettings& saved) { saved.searchHistory = appSettings.searchHistory; }); } catch (...) {}
+    }
+}
+void MainComponent::showSearchHistory()
+{
+    juce::PopupMenu menu;
+    const auto history = appSettings.searchHistory;
+    if (history.isEmpty()) menu.addItem(1, "No recent searches", false, false);
+    else for (int i = 0; i < history.size(); ++i) menu.addItem(i + 1, history[i]);
+    if (! history.isEmpty()) { menu.addSeparator(); menu.addItem(100, "Clear history"); }
+    juce::Component::SafePointer<MainComponent> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&searchHistory),
+        [safe, history](int result)
+        {
+            if (safe == nullptr) return;
+            if (result == 100)
+            {
+                safe->appSettings.searchHistory.clear();
+                try { safe->settingsStore.update([](AppSettings& saved) { saved.searchHistory.clear(); }); } catch (...) {}
+                return;
+            }
+            if (result <= 0 || result > history.size()) return;
+            safe->search.setText(history[result - 1], true);
+            safe->searchLibrary(history[result - 1]);
+        });
 }
 void MainComponent::setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny)
 {
@@ -914,6 +952,8 @@ void MainComponent::timerCallback()
             catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
         }
         reloadLibrary(); folders.refresh(*readRepo);
+        // New or changed audio invalidates its smart result; rebuild metadata in the background.
+        if (! p.cancelled && smart && ! smart->progress().running) smart->start();
     }
     wasRunning = p.running;
     const auto now = juce::Time::getMillisecondCounter();
@@ -934,7 +974,7 @@ void MainComponent::lookAndFeelChanged()
     status.setColour(juce::Label::textColourId,theme::muted);
     tagsLabel.setColour(juce::Label::textColourId,theme::muted);
     stageLabel.setColour(juce::Label::textColourId,theme::muted);
-    search.setTextToShowWhenEmpty("Search entire library...",theme::muted);
+    search.setTextToShowWhenEmpty("Search: *.rx2, ext:wav, type:pad, key:Am, C4",theme::muted);
     search.setJustification(juce::Justification::centredLeft);
     search.setIndents(10, 0);
     repaint();
@@ -1068,11 +1108,13 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
         if (moveCurrent) error += " The copy was kept at " + target.getFullPathName();
         return false;
     }
+    if (smart) { smart->cancel(); smart->waitUntilFinished(-1); smart.reset(); }
     if (indexer) { indexer->cancel(); indexer->waitUntilFinished(-1); indexer.reset(); }
     writeRepo.reset(); writeDb.reset(); readRepo.reset(); readDb.reset();
     writeDb = std::move(newWriteDb); writeRepo = std::move(newWriteRepo);
     readDb = std::move(newReadDb); readRepo = std::move(newReadRepo);
     indexer = std::make_unique<IndexingService>(*writeRepo);
+    smart = std::make_unique<SmartAnalysisService>(*writeRepo);
     const auto previous = dbPath;
     dbPath = target;
     const auto isDefault = dbPath.getFullPathName() == defaultDatabaseFile().getFullPathName();
@@ -1136,7 +1178,10 @@ void MainComponent::resized()
     auto branding = header.removeFromLeft(310); header.removeFromLeft(32);
     heading.setBounds(branding.removeFromTop(30)); subtitle.setBounds(branding);
     settings.setBounds(header.removeFromRight(115).withSizeKeepingCentre(115,32));
-    header.removeFromRight(16); search.setBounds(header.withSizeKeepingCentre(header.getWidth(),34));
+    header.removeFromRight(16);
+    searchHistory.setBounds(header.removeFromRight(74).withSizeKeepingCentre(70,30));
+    header.removeFromRight(8);
+    search.setBounds(header.withSizeKeepingCentre(header.getWidth(),34));
     preview.setBounds(r.removeFromBottom(156));
     auto footer = r.removeFromBottom(42).reduced(12,5);
     cancel.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);

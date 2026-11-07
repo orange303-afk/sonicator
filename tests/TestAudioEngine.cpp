@@ -18,7 +18,7 @@ TEST_CASE("Oversized output callbacks chunk the transport as well as MIDI", "[au
         bool isLooping() const override { return false; }
     } probe;
     juce::AudioTransportSource transport; transport.setSource(&probe);
-    MidiSampler sampler; PreviewOutput output(transport,sampler); output.prepareToPlay(64,44100);
+    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; PreviewOutput output(transport,sampler,kit,rex); output.prepareToPlay(64,44100);
     transport.start(); juce::AudioBuffer<float> buffer(2,600);
     buffer.setSample(0,0,0.123f); output.getNextAudioBlock({&buffer,16,512});
     REQUIRE(probe.largest <= 64); REQUIRE(probe.calls == 8); REQUIRE(probe.position == 512);
@@ -31,8 +31,8 @@ TEST_CASE("MIDI output mixes ordinary preview instead of silencing it", "[audio]
     juce::AudioFormatManager formats; formats.registerBasicFormats();
     juce::AudioFormatReaderSource reader(formats.createReaderFor(file),true);
     juce::AudioTransportSource transport; transport.setSource(&reader,0,nullptr,44100);
-    MidiSampler sampler; REQUIRE(sampler.load(file).isEmpty());
-    PreviewOutput output(transport,sampler); output.prepareToPlay(128,44100); output.midi = true;
+    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; REQUIRE(sampler.load(file).isEmpty());
+    PreviewOutput output(transport,sampler,kit,rex); output.prepareToPlay(128,44100); output.midi = true;
     transport.start(); juce::AudioBuffer<float> buffer(2,512);
     output.getNextAudioBlock({&buffer,0,512});
     REQUIRE(buffer.getMagnitude(0,512) > 0.5f);

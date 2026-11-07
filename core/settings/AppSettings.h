@@ -10,6 +10,7 @@ struct AppSettings
     juce::String language = "English";
     int pageSize = 10000; // 0 means every match on one virtual page
     juce::String databasePath; // empty means the default catalog location
+    juce::StringArray searchHistory; // most recent first, at most 10 entries
     int windowX = 0, windowY = 0, windowWidth = 0, windowHeight = 0;
     bool hasWindowBounds() const { return windowWidth > 0 && windowHeight > 0; }
     static juce::File defaultSettingsFile();

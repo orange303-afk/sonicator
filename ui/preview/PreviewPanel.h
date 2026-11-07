@@ -31,6 +31,9 @@ private:
     WaveformDisplay waveform;
     juce::Label filename, time;
     juce::TextButton play { "Play" }, stop { "Stop" };
+    juce::ComboBox presetBox;
+    juce::ToggleButton rexGate { "Gate" };
+    juce::Label rexInfo;
     juce::ToggleButton loop { "Loop" };
     juce::ToggleButton midi { "MIDI Preview" }, skipSilence { "Skip Silence" };
     juce::ToggleButton autoPreview { "Auto Preview" };

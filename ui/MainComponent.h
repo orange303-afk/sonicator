@@ -5,6 +5,7 @@
 #include "ui/library/TagStrip.h"
 #include "ui/preview/PreviewPanel.h"
 #include "core/indexing/IndexingService.h"
+#include "core/smart/SmartAnalysisService.h"
 #include "core/settings/AppSettings.h"
 namespace sonicator {
 class MainComponent final : public juce::Component,
@@ -32,6 +33,8 @@ public:
     bool switchCatalog(const juce::File& target, bool moveCurrent, juce::String& error);
     // Applies a whole-catalog search immediately (typing uses a 250 ms debounce instead).
     void searchLibrary(const juce::String&);
+    void recordSearchHistory(const juce::String&);
+    void showSearchHistory();
     void setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny = false);
 private:
     SonicatorLookAndFeel look;
@@ -50,6 +53,7 @@ private:
     int totalCatalogCount = 0;
     int64_t selectedSampleId = 0;
     juce::TextEditor search;
+    juce::TextButton searchHistory { "History" };
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" };
     juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" }, backup { "Backup" };
     juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" },
@@ -64,6 +68,7 @@ private:
     std::unique_ptr<Database> readDb, writeDb;
     std::unique_ptr<SampleRepository> readRepo, writeRepo;
     std::unique_ptr<IndexingService> indexer;
+    std::unique_ptr<SmartAnalysisService> smart;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog;
     int pageOffset = 0, catalogCount = 0, pageSize = 10000;

@@ -1,8 +1,13 @@
 #include "FileScanner.h"
 #include <stdexcept>
 namespace sonicator {
+bool FileScanner::isMetadataOnlyFormat(const juce::File& f)
+{
+    return f.hasFileExtension("rx2;sf2");
+}
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {
+    if (isMetadataOnlyFormat(f)) return true;
     if (! f.hasFileExtension("wav;aif;aiff;flac;mp3")) return false;
     if (f.getFileName().startsWith("._"))
         if (auto input = f.createInputStream())

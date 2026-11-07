@@ -1,4 +1,5 @@
 #include "WaveformDisplay.h"
+#include <algorithm>
 #include "ui/shell/Theme.h"
 #include <cmath>
 namespace sonicator {
@@ -29,9 +30,45 @@ WaveformDisplay::~WaveformDisplay()
 void WaveformDisplay::setFile(const juce::File& file)
 {
     position = 0;
+    peakMin.clear(); peakMax.clear(); sliceTimes.clear(); activeSlices.clear(); customLength = 0;
     clearSelection();
     if (file.existsAsFile()) thumbnail.setSource(new juce::FileInputSource(file,true));
     else thumbnail.setSource(nullptr);
+    repaint();
+}
+void WaveformDisplay::setPeaks(const std::vector<float>& samples, int sampleRate,
+                               const std::vector<int64_t>& sliceStarts)
+{
+    position = 0;
+    clearSelection();
+    thumbnail.setSource(nullptr);
+    peakMin.clear(); peakMax.clear(); sliceTimes.clear(); activeSlices.clear();
+    customLength = sampleRate > 0 ? (double) samples.size() / sampleRate : 0;
+    if (samples.empty() || customLength <= 0) { repaint(); return; }
+    constexpr int bins = 2048;
+    peakMin.assign((size_t) bins, 0.0f);
+    peakMax.assign((size_t) bins, 0.0f);
+    for (int bin = 0; bin < bins; ++bin)
+    {
+        const auto begin = (size_t) ((int64_t) samples.size() * bin / bins);
+        const auto end = (size_t) ((int64_t) samples.size() * (bin + 1) / bins);
+        float low = 0, high = 0;
+        for (size_t i = begin; i < end; ++i)
+        {
+            low = juce::jmin(low, samples[i]);
+            high = juce::jmax(high, samples[i]);
+        }
+        peakMin[(size_t) bin] = low;
+        peakMax[(size_t) bin] = high;
+    }
+    for (auto start : sliceStarts)
+        sliceTimes.push_back((double) start / sampleRate);
+    repaint();
+}
+void WaveformDisplay::setActiveSlices(std::vector<int> indices)
+{
+    if (indices == activeSlices) return;
+    activeSlices = std::move(indices);
     repaint();
 }
 void WaveformDisplay::setSelection(selection::Range r)
@@ -79,13 +116,43 @@ void WaveformDisplay::updateSelectionDuringDrag(double time)
 void WaveformDisplay::paint(juce::Graphics& g)
 {
     g.setColour(theme::table); g.fillRect(getLocalBounds());
-    if (thumbnail.getTotalLength() <= 0)
+    const auto total = totalLength();
+    if (total <= 0)
     {
         g.setColour(theme::muted); g.drawText("Select a sample to preview",getLocalBounds(),juce::Justification::centred); return;
     }
-    g.setColour(theme::accent);
-    thumbnail.drawChannels(g,getLocalBounds().reduced(6,10),0,thumbnail.getTotalLength(),0.85f);
-    const auto total = thumbnail.getTotalLength();
+    const auto area = getLocalBounds().reduced(6,10).toFloat();
+    if (! peakMin.empty())
+    {
+        const auto centre = area.getCentreY();
+        const auto half = area.getHeight() * 0.5f;
+        g.setColour(theme::accent);
+        for (int bin = 0; bin < (int) peakMin.size(); ++bin)
+        {
+            const auto x = area.getX() + area.getWidth() * ((float) bin + 0.5f) / (float) peakMin.size();
+            g.drawVerticalLine((int) x, centre - peakMax[(size_t) bin] * half,
+                               centre - peakMin[(size_t) bin] * half);
+        }
+        for (size_t i = 0; i < sliceTimes.size(); ++i)
+        {
+            const auto x = selection::xAtTime(sliceTimes[i], getWidth(), total);
+            g.setColour(theme::muted.withAlpha(0.55f));
+            g.drawVerticalLine((int) x, area.getY(), area.getBottom());
+            if (std::find(activeSlices.begin(), activeSlices.end(), (int) i) != activeSlices.end())
+            {
+                const auto next = i + 1 < sliceTimes.size() ? sliceTimes[i + 1] : total;
+                const auto x2 = selection::xAtTime(next, getWidth(), total);
+                g.setColour(theme::accent.withAlpha(0.28f));
+                g.fillRect(juce::Rectangle<float>(x, area.getY(), juce::jmax(1.0f, x2 - x), area.getHeight()));
+            }
+        }
+        g.setColour(theme::accent);
+    }
+    else
+    {
+        g.setColour(theme::accent);
+        thumbnail.drawChannels(g,area.toNearestInt(),0,total,0.85f);
+    }
     if (currentSelection.valid())
     {
         const auto x1 = selection::xAtTime(currentSelection.start, getWidth(), total);
@@ -105,7 +172,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
         g.setColour(theme::text);
         g.drawText(label, labelBounds, juce::Justification::centred);
     }
-    float progress = 6 + (float) juce::jlimit(0.0,1.0,position/thumbnail.getTotalLength()) * (getWidth()-12);
+    float progress = 6 + (float) juce::jlimit(0.0,1.0,position/total) * (getWidth()-12);
     g.setColour(theme::accent); g.drawVerticalLine((int) progress,5,(float) getHeight()-5);
 }
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)

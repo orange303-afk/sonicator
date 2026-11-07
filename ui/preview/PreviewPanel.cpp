@@ -5,9 +5,26 @@ namespace sonicator {
 PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,const juce::File& exportFolder)
     : engine(audio),waveform(cacheFolder),exporter(exportFolder)
 {
-    for (auto* c : std::array<juce::Component*,12>{&waveform, &filename, &time, &play, &stop, &loop, &volume,
-                                                   &midi, &skipSilence, &autoPreview, &clearSelectionButton, &selectionStatus})
+    for (auto* c : std::array<juce::Component*,15>{&waveform, &filename, &time, &play, &stop, &loop, &volume,
+                                                   &midi, &skipSilence, &autoPreview, &clearSelectionButton, &selectionStatus,
+                                                   &presetBox, &rexGate, &rexInfo})
         addAndMakeVisible(c);
+    presetBox.setVisible(false); rexGate.setVisible(false); rexInfo.setVisible(false);
+    rexInfo.setFont(juce::FontOptions(12));
+    rexInfo.setColour(juce::Label::textColourId,theme::muted);
+    rexInfo.setJustificationType(juce::Justification::centredLeft);
+    presetBox.setTooltip("SoundFont preset (bank:program name); selecting one keeps MIDI Preview active");
+    presetBox.onChange = [this]
+    {
+        const int index = presetBox.getSelectedId() - 1;
+        if (index < 0) return;
+        if (engine.selectSoundFontPreset(index))
+            filename.setText(loadedFile.getFileName() + "  —  " + engine.soundFontPresetName(),juce::dontSendNotification);
+        else
+            filename.setText(engine.error(),juce::dontSendNotification);
+    };
+    rexGate.setTooltip("Gate stops a REX2 slice on NoteOff; off lets the slice ring out (one-shot)");
+    rexGate.onClick = [this] { engine.setRexGateMode(rexGate.getToggleState()); };
     filename.setText("No sample selected",juce::dontSendNotification);
     filename.setFont(juce::FontOptions(14,juce::Font::bold));
     time.setColour(juce::Label::textColourId,theme::muted);
@@ -42,7 +59,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     selectionStatus.setColour(juce::Label::textColourId,theme::muted);
     selectionStatus.setFont(juce::FontOptions(12));
     selectionStatus.setJustificationType(juce::Justification::centredLeft);
-    for (auto* button : std::array<juce::Button*,7>{&play,&stop,&loop,&midi,&skipSilence,&autoPreview,&clearSelectionButton})
+    for (auto* button : std::array<juce::Button*,8>{&play,&stop,&loop,&midi,&skipSilence,&autoPreview,&clearSelectionButton,&rexGate})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         auto action = button->onClick;
@@ -56,12 +73,52 @@ bool PreviewPanel::loadFile(const juce::File& file)
     if (file == loadedFile && file != juce::File() && file.getSize() == loadedSize
         && file.getLastModificationTime().toMilliseconds() == loadedModified) return true;
     bool success = engine.loadFile(file);
+    const bool soundFont = success && engine.isSoundFontMode();
     loadedFile = success ? file : juce::File();
     loadedSize = success ? file.getSize() : 0;
     loadedModified = success ? file.getLastModificationTime().toMilliseconds() : 0;
-    filename.setText(success ? file.getFileName() : engine.error(),juce::dontSendNotification);
-    waveform.setFile(success ? file : juce::File());
-    if (success && autoPreview.getToggleState()) engine.play();
+    const bool rex = success && engine.isRex2Mode();
+    if (soundFont)
+    {
+        presetBox.clear(juce::dontSendNotification);
+        for (int i = 0; i < engine.soundFontPresetCount(); ++i)
+            presetBox.addItem(engine.soundFontPresetLabel(i), i + 1);
+        presetBox.setSelectedId(engine.soundFontPresetIndex() + 1,juce::dontSendNotification);
+        presetBox.setVisible(true);
+        rexGate.setVisible(false);
+        rexInfo.setVisible(false);
+        filename.setText(file.getFileName() + "  —  " + engine.soundFontPresetName(),juce::dontSendNotification);
+    }
+    else if (rex)
+    {
+        presetBox.setVisible(false);
+        rexGate.setVisible(true);
+        rexInfo.setVisible(true);
+        rexGate.setToggleState(engine.rexGateMode(),juce::dontSendNotification);
+        const int last = engine.rexStartNote() + engine.rexSliceCount() - 1;
+        filename.setText(file.getFileName(),juce::dontSendNotification);
+        rexInfo.setText(juce::String(engine.rexSliceCount()) + " slices  ·  MIDI "
+            + juce::String(engine.rexStartNote()) + "–" + juce::String(last),
+            juce::dontSendNotification);
+    }
+    else
+    {
+        presetBox.setVisible(false);
+        rexGate.setVisible(false);
+        rexInfo.setVisible(false);
+        filename.setText(success ? file.getFileName() : engine.error(),juce::dontSendNotification);
+    }
+    if (rex)
+    {
+        if (auto audio = engine.rexAudio())
+            waveform.setPeaks(audio->left, audio->sampleRate, engine.rexSliceStarts());
+        else
+            waveform.setFile(juce::File());
+    }
+    else
+        waveform.setFile(success && ! soundFont ? file : juce::File());
+    midi.setToggleState(engine.isMidiPreview(),juce::dontSendNotification);
+    if (success && ! soundFont && autoPreview.getToggleState()) engine.play();
     return success;
 }
 void PreviewPanel::selectRange(double start, double end)
@@ -171,7 +228,29 @@ void PreviewPanel::timerCallback()
     updateSelectionPlayback();
     refreshSelectionStatus();
     waveform.setPosition(engine.position());
+    if (engine.isRex2Mode()) waveform.setActiveSlices(engine.rexActiveSlices());
     time.setText(juce::String(engine.position(),2) + " / " + juce::String(engine.length(),2) + " s",juce::dontSendNotification);
+    if (rexInfo.isVisible() && engine.isRex2Mode())
+    {
+        const int first = engine.rexStartNote();
+        const int last = first + engine.rexSliceCount() - 1;
+        const int received = engine.rexLastMidiNote();
+        juce::String text = juce::String(engine.rexSliceCount()) + " slices  ·  MIDI "
+            + juce::String(first) + "–" + juce::String(last);
+        if (received >= 0)
+            text += "  ·  last " + juce::String(received)
+                  + (received < first || received > last ? " (outside)" : "")
+                  + "  ·  voices " + juce::String(engine.rexActiveVoices())
+                  + "  ·  vel " + juce::String(engine.rexLastVelocity(),2)
+                  + "  ·  mix " + juce::String(engine.rexMixPeak(),3)
+                  + "  ·  env " + juce::String(engine.rexFirstEnvelope(),2)
+                  + "  ·  pos " + juce::String(engine.rexFirstPosition(),0)
+                  + "  ·  out " + juce::String(engine.outputPeak(),3)
+                  + "  ·  gain " + juce::String(engine.outputGain(),2)
+                  + "  ·  peak " + juce::String(engine.rexDecodedPeak(),2)
+                  + "  ·  vol " + juce::String(engine.getVolume(),2);
+        if (rexInfo.getText() != text) rexInfo.setText(text,juce::dontSendNotification);
+    }
     play.setButtonText(engine.isPlaying() ? "Pause" : "Play");
 }
 void PreviewPanel::lookAndFeelChanged()
@@ -196,6 +275,10 @@ void PreviewPanel::resized()
     time.setBounds(top);
     r.removeFromTop(8);
     auto controls = r.removeFromRight(330); r.removeFromRight(16); waveform.setBounds(r);
+    auto extra = controls.removeFromTop(26);
+    presetBox.setBounds(extra);
+    rexGate.setBounds(extra.removeFromLeft(90));
+    rexInfo.setBounds(extra);
     auto modes = controls.removeFromTop(28);
     midi.setBounds(modes.removeFromLeft(145)); skipSilence.setBounds(modes);
     auto options = controls.removeFromTop(26);

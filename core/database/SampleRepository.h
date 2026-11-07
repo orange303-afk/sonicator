@@ -2,6 +2,7 @@
 #include "Database.h"
 #include "LibraryQuery.h"
 #include "SampleRecord.h"
+#include "core/smart/SmartTypes.h"
 #include <map>
 #include <optional>
 #include <vector>
@@ -68,6 +69,20 @@ public:
     std::vector<SampleRecord> duplicateMembers(int64_t sampleId) const;
     // Lower-cased name + newline + lower-cased path, used by whole-catalog text search.
     static juce::String searchKey(const juce::String& name, const juce::String& path);
+    // Phase 2 smart analysis. Candidates and overrides are stored separately from measured
+    // Phase 1 features, so reanalysis never rewrites them and a rescan never clears them.
+    void replaceSmartCandidates(int64_t sampleId, const std::vector<SmartCandidate>&);
+    std::vector<SmartCandidate> smartCandidates(int64_t sampleId) const;
+    void setSmartResult(int64_t sampleId, const SmartResult&);
+    std::optional<SmartResult> smartResult(int64_t sampleId) const;
+    void setSmartOverride(int64_t sampleId, SmartField field, const SmartOverride&);
+    void clearSmartOverride(int64_t sampleId, SmartField field);
+    SmartOverrideMap smartOverrides(int64_t sampleId) const;
+    // Samples that have no stored result yet, ordered by id. Used by the incremental job.
+    std::vector<int64_t> samplesNeedingSmartAnalysis(int64_t afterId, int limit) const;
+    void setSmartInputs(int64_t sampleId, const std::vector<SmartInput>&);
+    std::vector<SmartInput> smartInputs(int64_t sampleId) const;
+    std::optional<SampleRecord> findById(int64_t) const;
 private:
     Database& db;
 };

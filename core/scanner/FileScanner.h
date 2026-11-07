@@ -13,6 +13,9 @@ class FileScanner
 {
 public:
     static bool isSupportedFormat(const juce::File&);
+    // REX2/SoundFont containers are indexed for search and preview metadata but never sent to
+    // the audio DSP analyzer.
+    static bool isMetadataOnlyFormat(const juce::File&);
     static std::vector<AudioFileInfo> scanDirectory(const juce::File&, CancelCheck = {});
     static juce::String computeFileHash(const juce::File&, CancelCheck = {});
 };

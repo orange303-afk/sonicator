@@ -15,7 +15,7 @@ TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation",
     for (auto* child : app.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    REQUIRE(buttons == 15);
+    REQUIRE(buttons == 16);
 }
 TEST_CASE("Large catalog startup restores the actual page and folder tree", "[.catalog-ui]")
 {
