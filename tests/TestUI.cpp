@@ -493,4 +493,6 @@ TEST_CASE("Folder tree hides ignored folders unless Show ignored is on", "[ui][f
     repo.upsert(hiddenRoot); repo.ignorePath(onlyHidden, true);
     tree.refresh(repo, { onlyHidden }, true, false);
     REQUIRE_FALSE(tree.selectPath(onlyHidden));
+    tree.refresh(repo, { onlyHidden }, true, true);
+    REQUIRE(tree.selectPath(onlyHidden));
 }

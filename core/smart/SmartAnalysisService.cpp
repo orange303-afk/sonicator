@@ -111,10 +111,11 @@ bool SmartAnalysisService::startSelected(const std::vector<int64_t>& sampleIds)
     waitForThreadToExit(-1);
     cancelled = false;
     { std::lock_guard lock(pauseMutex); paused = false; }
+    const auto visible = repo.visibleIds(sampleIds);
     {
         std::lock_guard lock(queueMutex);
         queue.clear(); queued.clear();
-        for (auto id : sampleIds)
+        for (auto id : visible)
             if (id > 0 && queued.insert(id).second) queue.push_back(id);
         if (queue.empty()) return false;
         mode = Mode::Selected;
@@ -124,7 +125,7 @@ bool SmartAnalysisService::startSelected(const std::vector<int64_t>& sampleIds)
         state = {};
         state.running = true;
         state.stage = SmartStage::Extracting;
-        state.total = (int) sampleIds.size();
+        state.total = (int) visible.size();
         state.message = "Analyzing selected samples";
     }
     if (! startThread())
@@ -170,6 +171,7 @@ bool SmartAnalysisService::startFolder(const juce::String& folder)
 bool SmartAnalysisService::requestSample(int64_t sampleId)
 {
     if (sampleId <= 0) return false;
+    if (repo.visibleIds({ sampleId }).empty()) return false;
     {
         std::lock_guard lock(queueMutex);
         if (queued.count(sampleId) != 0) return true;

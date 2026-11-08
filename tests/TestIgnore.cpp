@@ -95,3 +95,59 @@ TEST_CASE("Ignored rows leave queries, counts, folder scopes and duplicate group
     REQUIRE_FALSE(repo.duplicateInfo(ignoredFile).has_value());
     REQUIRE(repo.samplesNeedingSmartAnalysis(0, 100) == std::vector<int64_t>{ keep });
 }
+
+TEST_CASE("Large ignore lists keep queries working", "[ignore][database][large]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("large.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    SampleRecord keep; keep.filePath = "/lib/keep.wav"; keep.fileName = "keep.wav"; repo.upsert(keep);
+    for (int i = 0; i < 998; ++i)
+        repo.ignorePath("/lib/files/f" + juce::String(i) + ".wav", false);
+    for (int i = 0; i < 120; ++i)
+        repo.ignorePath("/lib/folders/f" + juce::String(i), true);
+    LibraryFilter f; f.folder = "/lib";
+    REQUIRE(repo.query(f).total == 1);
+    REQUIRE(repo.count() == 1);
+    REQUIRE(repo.queryIds(f).size() == 1);
+}
+
+TEST_CASE("visibleIds keeps only rows that are not ignored", "[ignore][database][bulk]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("visible.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    SampleRecord a, b; a.filePath = "/lib/a.wav"; a.fileName = "a.wav";
+    b.filePath = "/lib/skip/b.wav"; b.fileName = "b.wav";
+    const auto keep = repo.upsert(a);
+    const auto hidden = repo.upsert(b);
+    repo.ignorePath("/lib/skip", true);
+    REQUIRE(repo.visibleIds({ keep, hidden }) == std::vector<int64_t>{ keep });
+    REQUIRE(repo.visibleIds({ hidden }).empty());
+}
+
+TEST_CASE("Smart verification skips ignored completed results", "[ignore][database][smart]")
+{
+    TestDirectory t;
+    auto file = t.dir.getChildFile("smart.sqlite");
+    int64_t keep = 0, hidden = 0;
+    {
+        Database db(file); SampleRepository repo(db); repo.createTables();
+        SampleRecord a, b; a.filePath = "/lib/a.wav"; a.fileName = "a.wav";
+        b.filePath = "/lib/skip/b.wav"; b.fileName = "b.wav";
+        keep = repo.upsert(a); hidden = repo.upsert(b);
+    }
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        const auto sql = "INSERT INTO smart_results(sample_id,pipeline_state) VALUES("
+            + juce::String(keep) + ",'complete'),(" + juce::String(hidden) + ",'complete');";
+        REQUIRE(sqlite3_exec(raw, sql.toRawUTF8(), nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(raw);
+    }
+    {
+        Database db(file); SampleRepository repo(db); repo.createTables();
+        repo.ignorePath("/lib/skip", true);
+        REQUIRE(repo.samplesWithSmartResultAfterId(0, 100) == std::vector<int64_t>{ keep });
+        const auto needing = repo.samplesNeedingSmartAnalysis(0, 100);
+        REQUIRE(std::find(needing.begin(), needing.end(), hidden) == needing.end());
+    }
+}

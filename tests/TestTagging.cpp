@@ -165,3 +165,20 @@ TEST_CASE("Reset cancellation keeps completed batches and reports the real remov
     for (auto id : f.ids) remaining += f.repo->tagsForSample(id).empty() ? 0 : 1;
     REQUIRE(remaining == 6 - p.applied);
 }
+
+TEST_CASE("Selected tag jobs skip ignored rows", "[tagging][ignore]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("tag-ignore.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    SampleRecord a, b; a.filePath = "/lib/a.wav"; a.fileName = "a.wav";
+    b.filePath = "/lib/skip/b.wav"; b.fileName = "b.wav";
+    const auto keep = repo.upsert(a);
+    const auto hidden = repo.upsert(b);
+    repo.ignorePath("/lib/skip", true);
+    const auto tag = repo.createTag("Kick", 0xff00ff00);
+    TaggingService service(repo);
+    REQUIRE(service.startTagSelected({ keep, hidden }, tag));
+    REQUIRE(service.waitUntilFinished(20000));
+    REQUIRE(repo.tagsForSample(keep).size() == 1);
+    REQUIRE(repo.tagsForSample(hidden).empty());
+}

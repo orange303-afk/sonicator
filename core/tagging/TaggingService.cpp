@@ -103,7 +103,7 @@ void TaggingService::run()
         }
         else
         {
-            ids = selectedScope;
+            ids = repo.visibleIds(selectedScope);
         }
         {
             std::lock_guard lock(stateMutex);

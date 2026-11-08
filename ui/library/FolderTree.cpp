@@ -125,7 +125,7 @@ void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPa
     ignoredEntries = repo.ignoredPaths();
     auto openness = tree.getOpennessState(false);
     tree.setRootItem(nullptr); root.reset(); children.clear(); images.clear(); failedImages.clear(); virtualFolders.clear(); roots = rootPaths;
-    if (showAllSamples)
+    if (showAllSamples && ! revealIgnored)
         for (int i = roots.size(); --i >= 0;)
             if (isPathIgnored(roots[i], ignoredEntries)) roots.remove(i);
     tree.setRootItemVisible(showAllSamples);

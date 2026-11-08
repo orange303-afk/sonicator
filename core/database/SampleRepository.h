@@ -68,7 +68,7 @@ public:
     void ignorePath(const juce::String& path, bool folder);
     void unignorePath(const juce::String& path);
     void setMissing(const std::vector<int64_t>& ids);
-    int count() const;
+    int count(bool includeIgnored = false) const;
     int countInFolder(const juce::String& folder) const;
     std::vector<SampleRecord> pageInFolder(const juce::String& folder, int limit = 10000, int offset = 0) const;
     // Whole-catalog query. Text, folder and tags are combined with AND; the returned total is the
@@ -77,6 +77,8 @@ public:
     // Every matching ID in the same order as query(). Used by the virtual all-on-one-page view.
     std::vector<int64_t> queryIds(const LibraryFilter&) const;
     std::vector<SampleRecord> recordsByIds(const std::vector<int64_t>&) const;
+    // The subset of ids that is not hidden by an ignore entry, preserving input order.
+    std::vector<int64_t> visibleIds(const std::vector<int64_t>& ids) const;
     int countHash(const juce::String&) const;
     void addRoot(const juce::String&);
     juce::StringArray roots() const;

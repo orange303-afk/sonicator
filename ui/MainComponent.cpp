@@ -1188,7 +1188,9 @@ void MainComponent::showTagColourMenu(int64_t tagId)
 int MainComponent::assignTagAndRemember(const std::vector<int64_t>& sampleIds, int64_t tagId)
 {
     if (writeRepo == nullptr || sampleIds.empty() || tagId <= 0) return 0;
-    const int added = writeRepo->assignTag(sampleIds, tagId);
+    const auto visible = writeRepo->visibleIds(sampleIds);
+    if (visible.empty()) return 0;
+    const int added = writeRepo->assignTag(visible, tagId);
     if (added > 0) writeRepo->recordRecentTag(tagId);
     return added;
 }
@@ -1355,8 +1357,12 @@ void MainComponent::resetTagsSelected(const std::vector<int64_t>& sampleIds)
         status.setText("Close the AutoTag review before resetting tags.",juce::dontSendNotification);
         return;
     }
+    std::vector<int64_t> visible;
+    try { visible = readRepo->visibleIds(sampleIds); }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
+    if (visible.empty()) { status.setText("The selected files are ignored.",juce::dontSendNotification); return; }
     int tagged = 0;
-    try { tagged = readRepo->countTaggedSamples(sampleIds); }
+    try { tagged = readRepo->countTaggedSamples(visible); }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
     if (tagged == 0)
     {
@@ -1364,11 +1370,11 @@ void MainComponent::resetTagsSelected(const std::vector<int64_t>& sampleIds)
         return;
     }
     dialogs::showAlert(*this, "Reset tags",
-        "Remove all tag assignments from " + juce::String(sampleIds.size())
+        "Remove all tag assignments from " + juce::String(visible.size())
             + " selected file(s)?\n\n" + juce::String(tagged)
             + " file(s) currently have tags.\n\nTag definitions, stars, smart overrides and original files are kept.",
         { { "Reset", 1 }, { "Cancel", 0 } },
-        [safe = juce::Component::SafePointer<MainComponent>(this), sampleIds](int choice)
+        [safe = juce::Component::SafePointer<MainComponent>(this), visible](int choice)
         {
             if (safe == nullptr || choice != 1 || safe->tagging == nullptr) return;
             if (safe->autoTag != nullptr && safe->autoTag->progress().running)
@@ -1376,7 +1382,7 @@ void MainComponent::resetTagsSelected(const std::vector<int64_t>& sampleIds)
                 safe->status.setText("Wait for AutoTag to finish before resetting tags.",juce::dontSendNotification);
                 return;
             }
-            if (safe->tagging->startResetSelected(sampleIds))
+            if (safe->tagging->startResetSelected(visible))
                 safe->status.setText("Removing tags from selected files",juce::dontSendNotification);
             else
                 safe->status.setText("Tag reset could not start.",juce::dontSendNotification);
@@ -1422,6 +1428,10 @@ void MainComponent::resetTagsFolder(const juce::String& path, int catalogued)
 void MainComponent::startAutoTagSelected(const std::vector<int64_t>& sampleIds)
 {
     if (autoTag == nullptr || sampleIds.empty()) return;
+    std::vector<int64_t> visible;
+    try { visible = readRepo == nullptr ? sampleIds : readRepo->visibleIds(sampleIds); }
+    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()), juce::dontSendNotification); return; }
+    if (visible.empty()) { status.setText("The selected files are ignored.", juce::dontSendNotification); return; }
     if (autoTagDialog != nullptr)
     {
         autoTagDialog->toFront(true);
@@ -1443,11 +1453,11 @@ void MainComponent::startAutoTagSelected(const std::vector<int64_t>& sampleIds)
         status.setText("Wait for smart analysis to finish before AutoTag.", juce::dontSendNotification);
         return;
     }
-    if (autoTag->startSelected(sampleIds))
+    if (autoTag->startSelected(visible))
     {
         autoTagPreparing = true;
         autoTagWasRunning = true;
-        status.setText("Preparing AutoTag proposals for " + juce::String(sampleIds.size())
+        status.setText("Preparing AutoTag proposals for " + juce::String(visible.size())
             + " selected file(s)", juce::dontSendNotification);
     }
     else

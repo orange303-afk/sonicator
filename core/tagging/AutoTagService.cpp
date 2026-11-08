@@ -135,7 +135,7 @@ void AutoTagService::prepare()
     }
     else
     {
-        ids = selectedIds;
+        ids = repo.visibleIds(selectedIds);
         std::sort(ids.begin(), ids.end());
         ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
     }
