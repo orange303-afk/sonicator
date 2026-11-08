@@ -9,8 +9,9 @@
 - Message thread: controls, device setup, file selection/reader replacement, debounced whole-catalog queries, user-triggered database backup, rendering. Search, sorting and tag filtering stay on this thread because the measured 300k-row query is below a perceptible hitch; no UI-queue callbacks are posted per keypress.
 - Indexing thread: directory enumeration, chunked analysis, full-file hashing, database writes, reconciliation of missing paths.
 - Dedicated preview read-ahead thread: JUCE buffering source, independent of the analyzer.
+- Dedicated tracker render thread: libxmp decodes the whole module into a bounded preallocated ring; the device callback only copies stereo frames from that ring. Loading, seeking and source decoding run on the message thread while the output is detached, or on the render thread, never inside the device callback.
 - Dedicated thumbnail cache thread: waveform extraction, independent of preview.
-- Device callback: JUCE AudioSourcePlayer → AudioTransportSource → buffering/resampling source. No project DB, FFT analysis, file scanning or ML runs here. JUCE transport internally locks; do not claim strict lock-free safety.
+- Device callback: JUCE AudioSourcePlayer → AudioTransportSource → buffering/resampling source, or the tracker ring, or a preallocated MIDI voice bank. No project DB, FFT analysis, file scanning or ML runs here. JUCE transport internally locks; do not claim strict lock-free safety.
 
 UI and worker use separate SQLite connections in WAL mode. Each connection's repository operations are serialized by its own mutex. Progress is a small locked snapshot polled at 10 Hz, not a callback posted for every discovered file. No callbacks capture a raw window pointer. Folder chooser uses a JUCE SafePointer.
 
@@ -26,7 +27,9 @@ Upsert by path preserves sample ID. Two files with the same content keep indepen
 
 `basicFeaturesVersion = 1` describes the measured feature set stored in `SampleRecord`: duration, rate, bits, channels, peak, RMS, centroid, rolloff, flatness and hash. The earlier bump to 2 was reverted: every stored version-1 row already contains that full set, so keeping 2 would have invalidated 298,899 valid results without adding data. Future analyzers get their own versioned storage instead of forcing a global bump.
 
-Metadata-only containers (`.rx2`, `.sf2`) are catalogued through `core/smart/AssetAnalyzer` with `version = metadataOnlyVersion` (-1): file identity and readable container metadata, no DSP descriptors, and the unchanged-file skip accepts that version. Their zero peak is exempt from **Hide empty**. Legacy `.rex`/`.rcy` are not indexed.
+Metadata-only containers (`.rx2`, `.sf2`, `.exs`, `.nki` and the tracker candidates `.mod`, `.xm`, `.s3m`) are catalogued through `core/smart/AssetAnalyzer` with `version = metadataOnlyVersion` (-1): file identity and readable container metadata, no DSP descriptors, and the unchanged-file skip accepts that version. Legacy `.rex`/`.rcy` are not indexed. Tracker candidates are confirmed by `core/legacy/LegacyFormatProbe`; an unrecognised candidate keeps a precise error instead of an audio row, and the detected format (for example an S3M renamed to `.mod`) is stored in the format column.
+
+Tracker documents are an independent path: `TrackerDocument` reads a bounded module and exposes sample slots plus lazily decoded immutable PCM; `TrackerSongRenderer` owns libxmp on its worker and a two-second ring; `SampleVoicePlayer` renders the selected source chromatically. Source PCM extraction is deliberately separate from playback, so a format libxmp can play is not automatically claimed as extractable. PCM offsets, frame counts and conversions are checked 64-bit arithmetic, and one source is capped at 128 MiB decoded with a 256 MiB document cache cap.
 
 Scan modes: a full rescan analyzes new, changed and failed paths and reconciles missing records; `NewOnly` is additive — it analyzes paths absent from the catalog and never reconciles or retouches known rows. Cancellation is checked during discovery, hashing and each decode/FFT chunk; a result is written only after the file has been analyzed completely, so a cancelled reanalysis keeps the previous successful row.
 
@@ -67,8 +70,13 @@ nonzero size. `refreshDuplicates` rebuilds the derived table in one transaction:
 per group, chosen by starred, present on disk, analyzed without error, shortest path, then lowest
 ID. Missing copies never beat present ones. The `DUPLICATES` column shows the group size and
 `Show all copies` filters by the group hash. The internal `hideDuplicates` filter still exists but
-has no toolbar control in this stage. `LibraryFilter::hideEmpty` adds `peak >= 0.001`, hiding files
-quieter than -60 dBFS (digital silence and noise floor). The table is refreshed
+has no toolbar control in this stage. `LibraryFilter::hideEmpty` is the one **Hide empty and
+unsupported** control: it adds `peak >= 0.001` (or metadata-only `version = -1`) and excludes
+`compatibility IN (unsupported, invalid)`. `AssetCompatibility` is stored per sample (schema 10,
+default `unknown`); legacy rows, missing files, cancellations and transient I/O stay `unknown` and
+are never hidden by a guess. An incompatible row draws a red prohibition sign in the 14x14 star
+cell instead of a star; the stored star is untouched and returns once the asset is compatible. The
+status column shows `Unsupported` or `Invalid` separately. The table is refreshed
 after every non-cancelled index run, at startup, after a catalog switch and after starring (which
 can change the representative). This is byte equality only; decoded-PCM equality across containers
 is not implemented.

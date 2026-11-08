@@ -4,6 +4,7 @@
 #include "ui/library/SearchField.h"
 #include "ui/library/FolderTree.h"
 #include "ui/library/TagStrip.h"
+#include "ui/disc/DiscBrowserPanel.h"
 #include "ui/preview/PreviewPanel.h"
 #include "core/indexing/IndexingService.h"
 #include "core/smart/SmartAnalysisService.h"
@@ -41,7 +42,7 @@ public:
     void paint(juce::Graphics& g) override;
     void resized() override;
     void lookAndFeelChanged() override;
-    bool keyPressed(const juce::KeyPress& k) override { return preview.keyPressed(k); }
+    bool keyPressed(const juce::KeyPress& k) override;
     void beginImport(const juce::File&);
     bool refreshIfCatalogChanged();
     juce::File backupCatalog();
@@ -84,7 +85,7 @@ private:
     juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" };
     juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" },
                      clearFilters { "Clear filters" }, editTags { "Edit tags..." };
-    juce::ToggleButton hideEmpty { "Hide empty" };
+    juce::ToggleButton hideEmpty { "Hide empty and unsupported" };
     juce::TextButton previousPage { "<" }, nextPage { ">" };
     juce::ComboBox pageSizeBox;
     juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel, selectionStatus;
@@ -99,6 +100,7 @@ private:
     std::unique_ptr<AutoTagService> autoTag;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog, autoTagDialog;
+    std::unique_ptr<DiscBrowserPanel> discBrowser;
     int pageOffset = 0, catalogCount = 0, pageSize = 10000;
     bool wasRunning = false, smartWasRunning = false, taggingWasRunning = false;
     bool autoTagPreparing = false, autoTagWasRunning = false;
@@ -115,6 +117,16 @@ private:
     void reloadLibrary();
     void updateTagControls();
     void selectSample(const SampleRecord&);
+    void openDiscImage(const SampleRecord&);
+    bool openSelectedDiscIfAny();
+    struct EnterKeyListener final : public juce::KeyListener
+    {
+        explicit EnterKeyListener(MainComponent& component) : owner(component) {}
+        bool keyPressed(const juce::KeyPress&, juce::Component*) override;
+    private:
+        MainComponent& owner;
+    };
+    EnterKeyListener enterKeyListener { *this };
     void updateSelectionStatus(const SampleRecord&);
     void updateSelectedTags();
     void showAudioSettings();

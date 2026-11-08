@@ -12,6 +12,12 @@
 #include <map>
 namespace sonicator {
 namespace {
+bool isDiscImageFormat(const juce::String& format)
+{
+    return format == "ISO" || format == "AKAI" || format == "CUE" || format == "MDX";
+}
+}
+namespace {
 struct PaletteColour { const char* name; uint32_t colour; };
 constexpr PaletteColour tagPalette[] = {
     { "Red", 0xffe05a5a }, { "Orange", 0xffe08a45 }, { "Yellow", 0xffe0b84a },
@@ -170,6 +176,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     selectionStatus.setJustificationType(juce::Justification::centredLeft);
     selectionStatus.setText("No sample selected",juce::dontSendNotification);
     library.onSelected = [this](const SampleRecord& r) { selectSample(r); };
+    library.onOpen = [this](const SampleRecord& r) { openDiscImage(r); };
     library.onDragMessage = [this](const juce::String& message) { status.setText(message,juce::dontSendNotification); };
     library.onContextMenu = [this](const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> position)
     {
@@ -359,7 +366,13 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
                     sessionSamplePath = record->filePath;
                     updateSelectionStatus(*record);
                     updateSelectedTags();
-                    preview.loadFile(juce::File(record->filePath), false);
+                    if (isDiscImageFormat(record->format))
+                    {
+                        preview.clearDiscSource();
+                        status.setText("Double-click the image or press Enter to browse its contents",
+                                      juce::dontSendNotification);
+                    }
+                    else preview.loadFile(juce::File(record->filePath), false);
                 }
             }
         }
@@ -387,12 +400,14 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     reanalyze.setEnabled(indexer != nullptr); newFiles.setEnabled(indexer != nullptr);
     smartButton.setEnabled(indexer != nullptr);
     sendLookAndFeelChange();
+    addKeyListener(&enterKeyListener);
     startTimerHz(10);
     juce::Desktop::getInstance().addDarkModeSettingListener(this);
 }
 MainComponent::~MainComponent()
 {
     if (persistSessionState) saveSessionState();
+    removeKeyListener(&enterKeyListener);
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
     stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
     settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
@@ -871,7 +886,69 @@ void MainComponent::selectSample(const SampleRecord& r)
     analysisDetails.setTooltip(r.filePath);
     updateSelectionStatus(r);
     updateSelectedTags();
+    if (isDiscImageFormat(r.format))
+    {
+        // A metadata-only image never leaves the previous source audible under a new label.
+        preview.clearDiscSource();
+        status.setText(r.error.isNotEmpty() ? r.error
+            : "Double-click the image to browse partitions, folders and samples", juce::dontSendNotification);
+        return;
+    }
     if (! preview.loadFile(juce::File(r.filePath))) status.setText(engine.error(),juce::dontSendNotification);
+}
+
+bool MainComponent::EnterKeyListener::keyPressed(const juce::KeyPress& key, juce::Component*)
+{
+    return key.getKeyCode() == juce::KeyPress::returnKey && owner.openSelectedDiscIfAny();
+}
+
+bool MainComponent::openSelectedDiscIfAny()
+{
+    if (discBrowser != nullptr && discBrowser->isVisible()) return false;
+    const auto selected = library.getSelectedSamples();
+    if (selected.empty() || ! isDiscImageFormat(selected[0].format)) return false;
+    openDiscImage(selected[0]);
+    return true;
+}
+
+bool MainComponent::keyPressed(const juce::KeyPress& key)
+{
+    // Enter opens the selected container wherever focus is; ordinary rows keep their normal
+    // transport keys. This also drives the session-restored row without a mouse click.
+    if (key.getKeyCode() == juce::KeyPress::returnKey && openSelectedDiscIfAny()) return true;
+    return preview.keyPressed(key);
+}
+
+void MainComponent::openDiscImage(const SampleRecord& r)
+{
+    if (! isDiscImageFormat(r.format)) return;
+    if (isIncompatible(r.compatibility))
+    {
+        status.setText(r.error.isNotEmpty() ? r.error : "This image is not supported", juce::dontSendNotification);
+        return;
+    }
+    if (! discBrowser)
+    {
+        discBrowser = std::make_unique<DiscBrowserPanel>();
+        discBrowser->onExit = [this]
+        {
+            if (discBrowser != nullptr) discBrowser->setVisible(false);
+            library.focusForNavigation();
+        };
+        discBrowser->onSampleSelected = [this](const juce::File& container, const juce::String& stem,
+                                               SampleAudioPtr audio)
+        {
+            if (! preview.loadDiscSample(container, stem, std::move(audio), false, 0, 0, false, true))
+                status.setText(engine.error(), juce::dontSendNotification);
+            else
+                status.setText("Browsing " + container.getFileName(), juce::dontSendNotification);
+        };
+        addChildComponent(*discBrowser);
+    }
+    discBrowser->setBounds(library.getBounds());
+    discBrowser->setVisible(true);
+    discBrowser->toFront(true);
+    discBrowser->open(juce::File(r.filePath));
 }
 void MainComponent::showTagFilterMenu()
 {
@@ -2046,10 +2123,11 @@ void MainComponent::resized()
     previousPage.setBounds(bar.removeFromRight(30)); countLabel.setBounds(bar);
     list.removeFromTop(4);
     auto filterBar = list.removeFromTop(30);
-    tagFilter.setBounds(filterBar.removeFromLeft(84)); filterBar.removeFromLeft(6);
-    starredButton.setBounds(filterBar.removeFromLeft(96)); filterBar.removeFromLeft(6);
-    hideEmpty.setBounds(filterBar.removeFromLeft(96)); filterBar.removeFromLeft(6);
-    clearFilters.setBounds(filterBar.removeFromLeft(110));
+    tagFilter.setBounds(filterBar.removeFromLeft(64)); filterBar.removeFromLeft(6);
+    starredButton.setBounds(filterBar.removeFromLeft(76)); filterBar.removeFromLeft(6);
+    hideEmpty.setBounds(filterBar.removeFromLeft(186)); filterBar.removeFromLeft(6);
+    clearFilters.setBounds(filterBar.removeFromLeft(92));
     list.removeFromTop(8); library.setBounds(list);
+    if (discBrowser != nullptr) discBrowser->setBounds(library.getBounds());
 }
 } // namespace sonicator

@@ -3,7 +3,9 @@
 #include "core/sf2/Sf2KitSampler.h"
 #include "core/rex/Rex2SlicePlayer.h"
 #include "SampleAudition.h"
+#include "SampleVoicePlayer.h"
 #include "core/sampler/ExternalKitSampler.h"
+#include "core/tracker/TrackerSongRenderer.h"
 #include <array>
 #include <atomic>
 namespace sonicator {
@@ -58,8 +60,9 @@ class PreviewOutput final : public juce::AudioSource
 {
 public:
     PreviewOutput(juce::AudioTransportSource& t,MidiSampler& s,Sf2KitSampler& f,Rex2SlicePlayer& r,
-                  SampleAudition& a,ExternalKitSampler& e)
-        : transport(t),sampler(s),sf2(f),rex(r),audition(a),external(e) {}
+                  SampleAudition& a,ExternalKitSampler& e,TrackerSongRenderer& ts,
+                  SampleVoicePlayer& sv)
+        : transport(t),sampler(s),sf2(f),rex(r),audition(a),external(e),tracker(ts),sampleVoices(sv) {}
     void prepareToPlay(int,double) override;
     void releaseResources() override { transport.releaseResources(); }
     void getNextAudioBlock(const juce::AudioSourceChannelInfo&) override;
@@ -68,6 +71,9 @@ public:
     std::atomic<bool> sf2Mode {false};
     std::atomic<bool> externalMode {false};
     std::atomic<bool> rexMode {false};
+    std::atomic<bool> trackerSongMode {false};
+    std::atomic<bool> trackerSampleMidi {false};
+    std::atomic<bool> discMidi {false};
     std::atomic<float> gain {0.7f};
     std::atomic<float> lastOutputPeak {0.0f};
 private:
@@ -77,6 +83,8 @@ private:
     Rex2SlicePlayer& rex;
     SampleAudition& audition;
     ExternalKitSampler& external;
+    TrackerSongRenderer& tracker;
+    SampleVoicePlayer& sampleVoices;
     juce::MidiBuffer messages;
     juce::AudioBuffer<float> midiBuffer;
 };

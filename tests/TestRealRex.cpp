@@ -16,7 +16,8 @@ TEST_CASE("REX MIDI boost does not boost whole loop audition", "[.real-rex-gain]
     REQUIRE(auditionReference.load(juce::File(path), 36, error));
     juce::AudioTransportSource transport; MidiSampler sampler; Sf2KitSampler kit;
     SampleAudition audition; ExternalKitSampler external;
-    PreviewOutput output(transport, sampler, kit, rex, audition, external);
+    TrackerSongRenderer tracker; SampleVoicePlayer voices;
+    PreviewOutput output(transport, sampler, kit, rex, audition, external, tracker, voices);
     output.prepareToPlay(128, 44100); output.midi = true; output.rexMode = true; output.gain = 0.5f;
     reference.prepare(44100); auditionReference.prepare(44100);
     juce::AudioBuffer<float> midiOnly(2, 4096), auditionOnly(2, 4096), mixed(2, 4096);
@@ -213,7 +214,9 @@ TEST_CASE("REX2 slices respond to different notes and to NoteOff", "[.real-rex-p
     juce::AudioTransportSource transport; transport.setSource(&silent);
     MidiSampler ordinary; Sf2KitSampler sf2; Rex2SlicePlayer slices;
     REQUIRE(slices.load(file, 36, error));
-    SampleAudition auditionSource; ExternalKitSampler externalSource; PreviewOutput output(transport, ordinary, sf2, slices, auditionSource, externalSource);
+    SampleAudition auditionSource; ExternalKitSampler externalSource;
+    TrackerSongRenderer tracker; SampleVoicePlayer voices;
+    PreviewOutput output(transport, ordinary, sf2, slices, auditionSource, externalSource, tracker, voices);
     output.prepareToPlay(512, 44100);
     output.midi = true; output.rexMode = true;
     output.collector.push(juce::MidiMessage::noteOn(1, 36, 1.0f));

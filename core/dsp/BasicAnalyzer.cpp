@@ -9,13 +9,15 @@ SampleRecord BasicAnalyzer::analyze(const juce::File& file, CancelCheck cancel) 
     r.filePath = file.getFullPathName(); r.fileName = file.getFileName();
     r.format = file.getFileExtension().trimCharactersAtStart(".").toUpperCase();
     r.fileSize = file.getSize(); r.dateModified = file.getLastModificationTime().toMilliseconds();
-    r.error = validateContainer(file);
+    r.error = validateContainer(file, &r.compatibility);
     if (r.error.isNotEmpty()) return r;
     juce::AudioFormatManager formats; formats.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
     if (! reader || reader->sampleRate <= 0 || reader->lengthInSamples <= 0
         || reader->numChannels == 0 || reader->numChannels > 64)
     {
+        // A missing reader may be an unsupported codec or a corrupt file. Guessing would either
+        // hide a real format gap or label a broken file unsupported, so it stays unknown.
         r.error = "Unsupported, empty or corrupt audio file"; return r;
     }
     r.duration = reader->lengthInSamples / reader->sampleRate;
@@ -33,14 +35,20 @@ SampleRecord BasicAnalyzer::analyze(const juce::File& file, CancelCheck cancel) 
         if (cancel && cancel()) { r.error = "Cancelled"; return r; }
         int count = (int) juce::jmin<int64_t>(n, reader->lengthInSamples - offset);
         buffer.clear();
-        if (! reader->read(&buffer, 0, count, offset, true, true)) { r.error = "Audio decode failed"; return r; }
+        if (! reader->read(&buffer, 0, count, offset, true, true))
+        {
+            r.error = "Audio decode failed"; r.compatibility = AssetCompatibility::invalid; return r;
+        }
         for (int channel = 0; channel < r.numChannels; ++channel)
         {
             auto* data = buffer.getReadPointer(channel);
             for (int i = 0; i < count; ++i)
             {
                 double value = data[i];
-                if (! std::isfinite(value)) { r.error = "Non-finite audio sample"; return r; }
+                if (! std::isfinite(value))
+                {
+                    r.error = "Non-finite audio sample"; r.compatibility = AssetCompatibility::invalid; return r;
+                }
                 r.peakLevel = juce::jmax(r.peakLevel, std::abs(value));
                 sumSquares += value * value;
             }
@@ -71,6 +79,7 @@ SampleRecord BasicAnalyzer::analyze(const juce::File& file, CancelCheck cancel) 
         r.spectralFlatness = juce::jlimit(0.0, 1.0, std::exp(logSum / bins) / (total / bins));
     }
     r.dateAnalyzed = juce::Time::currentTimeMillis(); r.version = basicFeaturesVersion;
+    r.compatibility = AssetCompatibility::supported;
     return r;
 }
 SampleRecord BasicAnalyzer::analyzeAndHash(const juce::File& file, CancelCheck cancel) const

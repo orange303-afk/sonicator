@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include "ContainerValidation.h"
+#include "core/legacy/LegacyFormatProbe.h"
 #include <algorithm>
 #include <cmath>
 namespace sonicator {
@@ -65,6 +66,11 @@ bool AudioEngine::loadFile(const juce::File& file)
         if (deviceMode) player.setSource(&output);
         return previewFileInstrument(file);
     }
+    if (isLegacyTrackerExtension(file))
+    {
+        if (deviceMode) player.setSource(&output);
+        return previewTracker(file);
+    }
     std::unique_ptr<juce::AudioFormatReader> decoded(formats.createReaderFor(file));
     if (! decoded || decoded->sampleRate <= 0 || decoded->lengthInSamples <= 0)
     {
@@ -83,6 +89,20 @@ bool AudioEngine::loadFile(const juce::File& file)
 }
 void AudioEngine::play()
 {
+    if (trackerMode)
+    {
+        if (trackerSampleChosen) { sf2Audition.play(looping); return; }
+        // Restarting after the end flushes the renderer ring, so the consumer must be detached.
+        if (trackerSong.isFinished())
+        {
+            if (deviceMode) player.setSource(nullptr);
+            trackerSong.stop();
+            trackerSong.play();
+            if (deviceMode) player.setSource(&output);
+        }
+        else trackerSong.play();
+        return;
+    }
     if (auditionMode()) { sf2Audition.play(looping); return; }
     if (rexMode) { rexSampler.startAudition(looping); return; }
     if (! reader) return;
@@ -117,6 +137,18 @@ void AudioEngine::clearContainers()
     rexMode = false;
     output.rexMode = false;
     rexSampler.reset();
+    trackerMode = false;
+    trackerSampleChosen = false;
+    output.trackerSongMode = false;
+    output.trackerSampleMidi = false;
+    trackerSong.unload();
+    trackerDocument.reset();
+    trackerSampleIdValue = invalidSampleId;
+    trackerSample.reset();
+    discMode = false;
+    output.discMidi = false;
+    discSample.reset();
+    sampleVoices.clear();
 }
 double AudioEngine::deviceSampleRate() const
 {
@@ -264,6 +296,148 @@ bool AudioEngine::selectExternalSample(SampleId id)
     lastError.clear();
     return true;
 }
+bool AudioEngine::previewTracker(const juce::File& file)
+{
+    if (deviceMode) player.setSource(nullptr);
+    clearContainers();
+    juce::String error;
+    auto document = TrackerDocument::open(file, error);
+    if (document == nullptr)
+    {
+        lastError = error.isNotEmpty() ? error : "Cannot open this tracker module";
+        if (deviceMode) player.setSource(&output);
+        return false;
+    }
+    if (! trackerSong.load(file, deviceSampleRate(), error))
+    {
+        lastError = error.isNotEmpty() ? error : "Cannot start the tracker player";
+        if (deviceMode) player.setSource(&output);
+        return false;
+    }
+    trackerDocument = std::move(document);
+    trackerSong.setLooping(looping);
+    trackerMode = true;
+    trackerSampleChosen = false;
+    trackerSampleIdValue = invalidSampleId;
+    output.trackerSongMode = true;
+    output.trackerSampleMidi = false;
+    ++trackerGenerationValue;
+    loadedFile = file;
+    lastError.clear();
+    if (deviceMode) player.setSource(&output);
+    return true;
+}
+
+const TrackerDocumentInfo& AudioEngine::trackerInfo() const
+{
+    static const TrackerDocumentInfo empty;
+    return trackerDocument != nullptr ? trackerDocument->info() : empty;
+}
+
+const std::vector<TrackerSampleSlot>& AudioEngine::trackerSlots() const
+{
+    static const std::vector<TrackerSampleSlot> empty;
+    return trackerDocument != nullptr ? trackerDocument->slots() : empty;
+}
+
+bool AudioEngine::selectTrackerSample(SampleId id)
+{
+    if (! trackerMode || trackerDocument == nullptr)
+    { lastError = "No tracker module is loaded"; return false; }
+    const auto& slots = trackerDocument->slots();
+    if (id < 0 || id >= (int) slots.size()) { lastError = "Sample slot is out of range"; return false; }
+    const auto& slot = slots[(size_t) id];
+    if (slot.empty) { lastError = "Sample slot is empty"; return false; }
+    if (slot.fmInstrument) { lastError = "AdLib instrument has no PCM sample"; return false; }
+    if (slot.error.isNotEmpty()) { lastError = slot.error; return false; }
+    juce::String error;
+    auto audio = trackerDocument->sampleAudio((int) id, error);
+    if (audio == nullptr)
+    { lastError = error.isNotEmpty() ? error : "Cannot decode this sample"; return false; }
+    // The song stops here; its position is kept by the renderer so returning to it is explicit.
+    trackerSong.pause();
+    discMode = false;
+    output.discMidi = false;
+    discSample.reset();
+    {
+        const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        sf2Audition.setAudio(audio);
+        sf2Audition.prepare(deviceSampleRate());
+        if (slot.looping) sf2Audition.setLoopRange(slot.loopStart, slot.loopEnd, slot.pingPong);
+        sampleVoices.setSource(audio, slot.looping, slot.loopStart, slot.loopEnd, slot.pingPong);
+    }
+    trackerSample = audio;
+    trackerSampleIdValue = id;
+    trackerSampleChosen = true;
+    output.trackerSongMode = false;
+    output.trackerSampleMidi = true;
+    ++trackerGenerationValue;
+    lastError.clear();
+    return true;
+}
+
+bool AudioEngine::selectTrackerWholeSong()
+{    if (! trackerMode) { lastError = "No tracker module is loaded"; return false; }
+    trackerSampleChosen = false;
+    trackerSampleIdValue = invalidSampleId;
+    trackerSample.reset();
+    {
+        const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        sf2Audition.stop();
+        sf2Audition.clear();
+        sampleVoices.reset();
+    }
+    output.trackerSongMode = true;
+    output.trackerSampleMidi = false;
+    ++trackerGenerationValue;
+    lastError.clear();
+    return true;
+}
+
+bool AudioEngine::setDiscSample(const SampleAudioPtr& audio, bool looping, int64_t loopStart,
+                                int64_t loopEnd, bool pingPong)
+{
+    if (audio == nullptr || audio->frames <= 0 || audio->sampleRate <= 0)
+    {
+        lastError = "The decoded disc sample is empty";
+        return false;
+    }
+    if (deviceMode) player.setSource(nullptr);
+    clearContainers();
+    {
+        const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        sf2Audition.setAudio(audio);
+        sf2Audition.prepare(deviceSampleRate());
+        if (looping) sf2Audition.setLoopRange(loopStart, loopEnd, pingPong);
+        sampleVoices.setSource(audio, looping, loopStart, loopEnd, pingPong);
+    }
+    discMode = true;
+    discSample = audio;
+    ++discGenerationValue;
+    output.discMidi = true;
+    lastError.clear();
+    if (deviceMode) player.setSource(&output);
+    return true;
+}
+
+void AudioEngine::clearDiscSample()
+{
+    if (deviceMode) player.setSource(nullptr);
+    {
+        const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        sf2Audition.stop();
+        sf2Audition.clear();
+        sampleVoices.reset();
+        sampleVoices.clear();
+    }
+    discMode = false;
+    output.discMidi = false;
+    discSample.reset();
+    ++discGenerationValue;
+    lastError.clear();
+    if (deviceMode) player.setSource(&output);
+}
+
 bool AudioEngine::previewRex2(const juce::File& file, int startNote)
 {
     if (deviceMode) player.setSource(nullptr);
@@ -321,6 +495,12 @@ bool AudioEngine::previewSoundFont(const juce::File& file, int presetIndex)
 }
 void AudioEngine::pause()
 {
+    if (trackerMode)
+    {
+        if (trackerSampleChosen) sf2Audition.pause();
+        else trackerSong.pause();
+        return;
+    }
     if (auditionMode()) { sf2Audition.pause(); return; }
     if (rexMode) { rexSampler.pauseAudition(); return; }
     source.stop();
@@ -329,17 +509,31 @@ void AudioEngine::stop()
 {
     if (auditionMode()) sf2Audition.stop();
     if (rexMode) rexSampler.stopAudition();
+    if (trackerMode && trackerSampleChosen) sf2Audition.stop();
     source.stop(); source.setPosition(0); startAtNextPlay = true;
     if (deviceMode) player.setSource(nullptr);
     sampler.reset();
     sf2Sampler.reset();
     externalSampler.reset();
     rexSampler.reset();
+    sampleVoices.reset();
+    // Stop always returns the composition to its beginning, including when a sample is selected.
+    if (trackerMode) trackerSong.stop();
     if (deviceMode) player.setSource(&output);
 }
 void AudioEngine::seek(double seconds)
 {
     if (! std::isfinite(seconds)) return;
+    if (trackerMode)
+    {
+        if (trackerSampleChosen) { sf2Audition.seek(juce::jlimit(0.0, length(), seconds)); return; }
+        const double target = juce::jlimit(0.0, length(), seconds);
+        // The renderer flushes its ring, so the consumer must be detached while it happens.
+        if (deviceMode) player.setSource(nullptr);
+        trackerSong.seek(target);
+        if (deviceMode) player.setSource(&output);
+        return;
+    }
     if (auditionMode()) { sf2Audition.seek(juce::jlimit(0.0, length(), seconds)); return; }
     if (rexMode) { rexSampler.seekAudition(juce::jlimit(0.0, length(), seconds)); return; }
     source.setPosition(juce::jlimit(0.0, length(), seconds)); startAtNextPlay = false;
@@ -354,6 +548,13 @@ void AudioEngine::setLooping(bool enabled)
     if (looping == enabled) return;
     looping = enabled;
     sampler.loop = enabled;
+    sampleVoices.setLooping(enabled);
+    if (trackerMode)
+    {
+        if (trackerSampleChosen) sf2Audition.setLooping(enabled);
+        else trackerSong.setLooping(enabled);
+        return;
+    }
     if (auditionMode()) { sf2Audition.setLooping(enabled); return; }
     if (rexMode) { rexSampler.setAuditionLoop(enabled); return; }
     if (! reader) return;
@@ -368,8 +569,9 @@ bool AudioEngine::setMidiPreview(bool enabled)
     if (enabled == isMidiPreview()) return true;
     source.stop(); startAtNextPlay = true;
     if (deviceMode) player.setSource(nullptr);
-    sampler.clear(); lastError.clear();
-    if (enabled && loadedFile != juce::File() && ! sf2Mode && ! externalMode && ! rexMode) lastError = sampler.load(loadedFile);
+    sampler.clear(); sampleVoices.reset(); lastError.clear();
+    if (enabled && loadedFile != juce::File() && ! sf2Mode && ! externalMode && ! rexMode
+        && ! trackerMode && ! discMode) lastError = sampler.load(loadedFile);
     output.midi = enabled && lastError.isEmpty();
     if (deviceMode)
     {

@@ -229,3 +229,196 @@ TEST_CASE("A selection ending at EOF loops back without playing the file start",
     REQUIRE(lowest >= 0.79);
     engine.transport().releaseResources();
 }
+
+namespace
+{
+juce::MouseEvent waveformClick(WaveformDisplay& waveform, float x, int clicks,
+                               juce::ModifierKeys mods = juce::ModifierKeys())
+{
+    const auto now = juce::Time::getCurrentTime();
+    return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(), { x, 30.0f },
+                            mods, 1.0f, 0, 0, 0, 0, &waveform, &waveform, now,
+                            { x, 30.0f }, now, clicks, false);
+}
+void singleWaveformClick(WaveformDisplay& waveform, float x)
+{
+    const auto event = waveformClick(waveform, x, 1);
+    waveform.mouseDown(event);
+    waveform.mouseUp(event);
+}
+} // namespace
+
+TEST_CASE("Double-clicking the waveform selects the whole source", "[selection][waveform-double-click]")
+{
+    TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(1000, 0.2f), 100, {});
+    REQUIRE(waveform.totalLength() == Catch::Approx(10.0));
+    int changes = 0, seeks = 0; selection::Range last;
+    waveform.onSelectionChanged = [&](selection::Range r) { ++changes; last = r; };
+    waveform.onSeek = [&](double) { ++seeks; };
+
+    singleWaveformClick(waveform, 120.0f);
+    REQUIRE(seeks == 1);
+    REQUIRE_FALSE(waveform.selection().valid());
+    changes = 0;
+
+    // JUCE delivers the second mouseUp before mouseDoubleClick, and that mouseUp carries 2 clicks.
+    const auto second = waveformClick(waveform, 120.0f, 2);
+    waveform.mouseDown(second);
+    waveform.mouseUp(second);
+    waveform.mouseDoubleClick(second);
+    REQUIRE(waveform.selection().start == Catch::Approx(0.0));
+    REQUIRE(waveform.selection().end == Catch::Approx(10.0));
+    REQUIRE(last.start == Catch::Approx(0.0));
+    REQUIRE(last.end == Catch::Approx(10.0));
+    REQUIRE(changes == 1);
+    REQUIRE(seeks == 1); // the second mouseUp of a double-click must not seek
+}
+
+TEST_CASE("A double-click replaces a partial selection without a duplicate export", "[selection][waveform-double-click]")
+{
+    TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(1000, 0.2f), 100, {});
+    int changes = 0;
+    waveform.onSelectionChanged = [&](selection::Range) { ++changes; };
+    waveform.setSelection({ 2.0, 4.0 });
+    REQUIRE(changes == 1);
+
+    singleWaveformClick(waveform, 300.0f); // first click of the pair clears the old range
+    REQUIRE_FALSE(waveform.selection().valid());
+    changes = 0;
+
+    const auto second = waveformClick(waveform, 300.0f, 2);
+    waveform.mouseDown(second);
+    waveform.mouseUp(second);
+    waveform.mouseDoubleClick(second);
+    REQUIRE(waveform.selection().start == Catch::Approx(0.0));
+    REQUIRE(waveform.selection().end == Catch::Approx(10.0));
+    REQUIRE(changes == 1);
+}
+
+TEST_CASE("Double-clicking an already full selection does not republish it", "[selection][waveform-double-click]")
+{
+    TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(1000, 0.2f), 100, {});
+    int changes = 0;
+    waveform.onSelectionChanged = [&](selection::Range) { ++changes; };
+    waveform.setSelection({ 0.0, 10.0 });
+    changes = 0;
+
+    const auto second = waveformClick(waveform, 300.0f, 2);
+    waveform.mouseDown(second);
+    waveform.mouseUp(second);
+    waveform.mouseDoubleClick(second);
+    REQUIRE(changes == 0);
+    REQUIRE(waveform.selection().start == Catch::Approx(0.0));
+    REQUIRE(waveform.selection().end == Catch::Approx(10.0));
+}
+
+TEST_CASE("Double-clicking an empty waveform does nothing", "[selection][waveform-double-click]")
+{
+    TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    int changes = 0, seeks = 0;
+    waveform.onSelectionChanged = [&](selection::Range) { ++changes; };
+    waveform.onSeek = [&](double) { ++seeks; };
+    const auto second = waveformClick(waveform, 120.0f, 2);
+    waveform.mouseDown(second);
+    waveform.mouseUp(second);
+    waveform.mouseDoubleClick(second);
+    REQUIRE_FALSE(waveform.selection().valid());
+    REQUIRE(changes == 0);
+    REQUIRE(seeks == 0);
+}
+
+TEST_CASE("Right-button double-click does not select the waveform", "[selection][waveform-double-click]")
+{
+    TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(1000, 0.2f), 100, {});
+    int changes = 0;
+    waveform.onSelectionChanged = [&](selection::Range) { ++changes; };
+    const auto second = waveformClick(waveform, 120.0f, 2, juce::ModifierKeys::rightButtonModifier);
+    waveform.mouseDown(second);
+    waveform.mouseUp(second);
+    waveform.mouseDoubleClick(second);
+    REQUIRE_FALSE(waveform.selection().valid());
+    REQUIRE(changes == 0);
+}
+
+TEST_CASE("Double-click then export covers the last frame of the source", "[selection][waveform-double-click]")
+{
+    TestDirectory t; AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("ten-frames.wav", 440, 1, 10)));
+    engine.stop();
+    WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(10, 0.2f), 10, {});
+    // Mirrors PreviewPanel's own wiring: the selected range drives the export worker.
+    waveform.onSelectionChanged = [&](selection::Range r) { preview.selectRange(r.start, r.end); };
+
+    const auto second = waveformClick(waveform, 120.0f, 2);
+    waveform.mouseDown(second);
+    waveform.mouseUp(second);
+    waveform.mouseDoubleClick(second);
+    REQUIRE(preview.selectedRange().valid());
+    REQUIRE(preview.waitForSelectionPreparation(5000));
+    REQUIRE(preview.isSelectionReady());
+    juce::AudioFormatManager formats; formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(preview.preparedSelection()));
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->lengthInSamples == 10);
+}
+
+namespace
+{
+juce::File writeConstantWave(TestDirectory& t, const juce::String& name, float value, int frames)
+{
+    auto file = t.dir.getChildFile(name);
+    file.deleteFile();
+    auto out = file.createOutputStream();
+    const int bytes = frames * 2;
+    out->write("RIFF", 4); out->writeInt(bytes + 36); out->write("WAVEfmt ", 8);
+    out->writeInt(16); out->writeShort(1); out->writeShort(1);
+    out->writeInt(44100); out->writeInt(44100 * 2); out->writeShort(2); out->writeShort(16);
+    out->write("data", 4); out->writeInt(bytes);
+    for (int i = 0; i < frames; ++i) out->writeShort((short) std::lround(value * 32767));
+    return file;
+}
+}
+
+TEST_CASE("Selecting either L or R loads and exports one stereo file", "[selection][stereo-pair]")
+{
+    TestDirectory t; AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    auto left = writeConstantWave(t, "PAIR-L.wav", 0.25f, 100);
+    auto right = writeConstantWave(t, "PAIR-R.wav", -0.5f, 100);
+    REQUIRE(preview.loadFile(left, false));
+    REQUIRE(preview.discSampleAudio() != nullptr);
+    REQUIRE(preview.discSampleAudio()->channels == 2);
+    REQUIRE(preview.discSampleAudio()->frames == 100);
+    REQUIRE(preview.discSampleAudio()->left[0] == Catch::Approx(0.25f).margin(0.0001f));
+    REQUIRE(preview.discSampleAudio()->right[0] == Catch::Approx(-0.5f).margin(0.0001f));
+
+    preview.selectRange(0.0, preview.waveformLength());
+    REQUIRE(preview.waitForSelectionPreparation(5000));
+    REQUIRE(preview.isSelectionReady());
+    juce::AudioFormatManager formats; formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(preview.preparedSelection()));
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->numChannels == 2);
+    REQUIRE(reader->lengthInSamples == 100);
+    juce::AudioBuffer<float> decoded(2, 100);
+    REQUIRE(reader->read(&decoded, 0, 100, 0, true, true));
+    REQUIRE(decoded.getSample(0, 0) == Catch::Approx(0.25f).margin(0.001f));
+    REQUIRE(decoded.getSample(1, 0) == Catch::Approx(-0.5f).margin(0.001f));
+
+    // Selecting the right file resolves the same pair, keeping L on the left.
+    REQUIRE(preview.loadFile(right, false));
+    REQUIRE(preview.discSampleAudio()->left[0] == Catch::Approx(0.25f).margin(0.0001f));
+    REQUIRE(preview.discSampleAudio()->right[0] == Catch::Approx(-0.5f).margin(0.0001f));
+}

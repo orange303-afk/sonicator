@@ -48,10 +48,14 @@ public:
     void selectedRowsChanged(int) override;
     void sortOrderChanged(int,bool) override;
     void cellClicked(int row,int column,const juce::MouseEvent&) override;
+    void cellDoubleClicked(int row,int column,const juce::MouseEvent&) override;
+    void returnKeyPressed(int row) override;
     void resized() override { table.setBounds(getLocalBounds()); }
     void lookAndFeelChanged() override;
     void refreshTheme();
     std::function<void(const SampleRecord&)> onSelected;
+    // Double-click opens a container asset (disc image). Ordinary rows stay selection-only.
+    std::function<void(const SampleRecord&)> onOpen;
     // Header clicks also change the whole-catalog order; the owner re-runs the SQL query.
     std::function<void(int,bool)> onSortChanged;
     std::function<void(const std::vector<SampleRecord>&, const SampleRecord&, juce::Point<int>)> onContextMenu;

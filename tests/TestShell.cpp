@@ -784,3 +784,54 @@ TEST_CASE("Last folder and selected file are restored on restart", "[ui][session
     REQUIRE(status != nullptr);
     REQUIRE(status->getText().contains(kick.getFullPathName()));
 }
+
+TEST_CASE("Hide empty and unsupported hides incompatible assets and keeps their stars", "[ui][empty][asset-compat]")
+{
+    TestDirectory t;
+    auto loud = t.wave("compat-loud.wav");
+    auto silent = t.wave("compat-silent.wav", 0);
+    auto unsupportedPath = t.dir.getChildFile("compat-unsupported.rx2");
+    unsupportedPath.replaceWithText("not a rex file");
+    auto dbPath = t.dir.getChildFile("compat-library.sqlite");
+    int64_t unsupportedId = 0;
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        auto loudRecord = BasicAnalyzer().analyzeAndHash(loud); REQUIRE(loudRecord.error.isEmpty()); repo.upsert(loudRecord);
+        auto silentRecord = BasicAnalyzer().analyzeAndHash(silent); REQUIRE(silentRecord.error.isEmpty()); repo.upsert(silentRecord);
+        SampleRecord unsupported;
+        unsupported.filePath = unsupportedPath.getFullPathName();
+        unsupported.fileName = unsupportedPath.getFileName();
+        unsupported.format = "RX2"; unsupported.version = metadataOnlyVersion;
+        unsupported.error = "Not a supported REX2 file";
+        unsupported.compatibility = AssetCompatibility::unsupported;
+        unsupportedId = repo.upsert(unsupported);
+        repo.setStarred({ unsupportedId }, true);
+        repo.addRoot(t.dir.getFullPathName());
+    }
+    MainComponent app(dbPath,false,{},t.dir.getChildFile("compat-settings.json"));
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    auto* hide = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty"));
+    REQUIRE(library != nullptr); REQUIRE(hide != nullptr);
+    REQUIRE(hide->getButtonText() == "Hide empty and unsupported");
+    REQUIRE(hide->getWidth() >= 170);
+    REQUIRE(hide->getToggleState());
+    REQUIRE(library->getNumRows() == 1);
+    hide->setToggleState(false, juce::sendNotificationSync);
+    REQUIRE(library->getNumRows() == 3);
+    hide->setToggleState(true, juce::sendNotificationSync);
+    REQUIRE(library->getNumRows() == 1);
+    Database db(dbPath); SampleRepository repo(db); repo.createTables();
+    const auto stored = repo.findByPath(unsupportedPath.getFullPathName());
+    REQUIRE(stored.has_value());
+    REQUIRE(stored->starred);
+    REQUIRE(stored->compatibility == AssetCompatibility::unsupported);
+
+    app.setSize(880, 580);
+    const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_COMPAT_SCREENSHOT", {});
+    if (shot.isNotEmpty())
+    {
+        auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
+        juce::PNGImageFormat png;
+        REQUIRE(png.writeImageToStream(app.createComponentSnapshot(app.getLocalBounds()), *stream));
+    }
+}

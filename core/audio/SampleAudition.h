@@ -10,6 +10,9 @@ class SampleAudition
 {
 public:
     void setAudio(SampleAudioPtr);
+    // Optional loop region declared by the source (frames, end exclusive). Calling this with an
+    // invalid range restores the whole-source loop. setAudio always resets to the new source.
+    void setLoopRange(int64_t start, int64_t end, bool pingPong);
     void clear() { setAudio({}); }
     void prepare(double outputRate);
     void play(bool looping);
@@ -29,5 +32,8 @@ private:
     double outputRate = 44100.0;
     std::atomic<int64_t> positionFrames { 0 };
     std::atomic<bool> playing { false }, looping { false };
+    int64_t loopStart = 0, loopEnd = 0;
+    bool pingPong = false;
+    std::atomic<int> direction { 1 };
 };
 } // namespace sonicator

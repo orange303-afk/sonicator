@@ -1,15 +1,20 @@
 #include "PreviewPanel.h"
+#include "core/audio/StereoPair.h"
 #include "core/audio/SelectionPlayback.h"
 #include "ui/shell/Theme.h"
+#include <cmath>
 namespace sonicator {
 PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,const juce::File& exportFolder)
     : engine(audio),waveform(cacheFolder),exporter(exportFolder)
 {
-    for (auto* c : std::array<juce::Component*,16>{&waveform, &filename, &time, &play, &stop, &loop, &volume,
+    for (auto* c : std::array<juce::Component*,19>{&waveform, &songProgress, &filename, &time, &play, &stop, &loop, &volume,
                                                    &midi, &skipSilence, &autoPreview, &clearSelectionButton, &selectionStatus,
-                                                   &presetBox, &sampleBox, &rexGate, &rexInfo})
+                                                   &presetBox, &sampleBox, &rexGate, &rexInfo, &trackerBox, &sampleDragButton})
         addAndMakeVisible(c);
     presetBox.setVisible(false); sampleBox.setVisible(false); rexGate.setVisible(false); rexInfo.setVisible(false);
+    trackerBox.setVisible(false); sampleDragButton.setVisible(false); songProgress.setVisible(false);
+    songProgress.setComponentID("songProgress");
+    songProgress.onSeek = [this](double seconds) { engine.seek(seconds); };
     rexInfo.setFont(juce::FontOptions(12));
     rexInfo.setColour(juce::Label::textColourId,theme::muted);
     rexInfo.setJustificationType(juce::Justification::centredLeft);
@@ -34,8 +39,53 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
         if (row < 0 || row >= (int) instrumentSamples.size()) return;
         applyInstrumentSample(instrumentSamples[(size_t) row].id, true);
     };
-    rexGate.setTooltip("Gate stops a REX2 slice on NoteOff; off lets the slice ring out (one-shot)");
-    rexGate.onClick = [this]
+    for (auto* box : std::array<StepComboBox*,3>{&presetBox, &sampleBox, &trackerBox})
+    {
+        box->setWantsKeyboardFocus(true);
+        box->setMouseClickGrabsKeyboardFocus(true);
+    }
+    trackerBox.setComponentID("trackerSample");
+    trackerBox.setTooltip("Whole tracker song or one of its source samples; selecting a sample stops the song");
+    trackerBox.onChange = [this]
+    {
+        const int id = trackerBox.getSelectedId();
+        if (id <= 0) return;
+        if (id == 1) applyTrackerWholeSong(true);
+        else applyTrackerSample(id - 2, true);
+    };
+    sampleDragButton.setComponentID("dragTrackerSample");
+    sampleDragButton.setTooltip("Drags the whole selected sample as WAV; preparation runs first if needed");
+    sampleDragButton.onDrag = [this]
+    {
+        if (engine.isDiscMode())
+        {
+            const auto state = exporter.state();
+            const double whole = engine.length();
+            if (state.isReady() && std::abs(state.start) < 1.0e-9 && std::abs(state.end - whole) < 1.0e-6)
+            {
+                juce::StringArray files;
+                files.add(state.file.getFullPathName());
+                juce::DragAndDropContainer::performExternalDragDropOfFiles(files, false, &sampleDragButton);
+                return;
+            }
+            prepareWholeDiscSample();
+            return;
+        }
+        if (! engine.isTrackerMode() || ! engine.isTrackerSampleSelected()) return;
+        const auto state = exporter.state();
+        const double whole = engine.length();
+        if (state.isReady() && std::abs(state.start) < 1.0e-9 && std::abs(state.end - whole) < 1.0e-6)
+        {
+            juce::StringArray files;
+            files.add(state.file.getFullPathName());
+            juce::DragAndDropContainer::performExternalDragDropOfFiles(files, false, &sampleDragButton);
+            return;
+        }
+        prepareWholeTrackerSample();
+    };
+    sampleDragButton.setWantsKeyboardFocus(false);
+    sampleDragButton.setMouseClickGrabsKeyboardFocus(false);
+    rexGate.setTooltip("Gate stops a REX2 slice on NoteOff; off lets the slice ring out (one-shot)");    rexGate.onClick = [this]
     {
         engine.setRexGateMode(rexGate.getToggleState());
         if (onSettingsChanged) onSettingsChanged();
@@ -63,7 +113,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
         if (onSettingsChanged) onSettingsChanged();
     };
     skipSilence.setTooltip("Next trigger starts one frame before the first nonzero frame; original audio is unchanged");
-    midi.setTooltip("16 voices; MIDI note 60 = original pitch; 2 ms attack / 20 ms release. Inputs: Audio settings");
+    midi.setTooltip("16 voices for ordinary files; 128 voices and a 2 s release for instruments and a selected tracker sample. Note 60 = original pitch. Inputs: Audio settings");
     midi.onClick = [this]
     {
         if (! engine.setMidiPreview(midi.getToggleState()))
@@ -94,12 +144,29 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
         button->onClick = [this,action] { if (action) action(); if (onAction) onAction(); };
     }
     volume.setWantsKeyboardFocus(false); volume.setMouseClickGrabsKeyboardFocus(false);
+    setComponentID("preview");
     setWantsKeyboardFocus(true); startTimerHz(30);
 }
 bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
 {
     if (file == loadedFile && file != juce::File() && file.getSize() == loadedSize
         && file.getLastModificationTime().toMilliseconds() == loadedModified) return true;
+    // A physical L/R pair becomes one stereo source for playback, MIDI and WAV export.
+    auto pair = loadStereoPair(file);
+    if (pair.paired && pair.ok)
+    {
+        const auto name = parseStereoName(file.getFileName());
+        if (loadDiscSample(file, name.base, pair.audio, false, 0, 0, false, allowAutoPlay))
+        {
+            loadedSize = file.getSize();
+            loadedModified = file.getLastModificationTime().toMilliseconds();
+            return true;
+        }
+    }
+    if (pair.paired && pair.error.isNotEmpty())
+        selectionStatus.setText(pair.error, juce::dontSendNotification);
+    discAudioRef.reset();
+    discStem.clear();
     bool success = engine.loadFile(file);
     const bool instrument = success && engine.isSamplerInstrumentMode();
     const bool soundFont = success && engine.isSoundFontMode();
@@ -107,8 +174,33 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     loadedSize = success ? file.getSize() : 0;
     loadedModified = success ? file.getLastModificationTime().toMilliseconds() : 0;
     const bool rex = success && engine.isRex2Mode();
-    if (instrument)
+    const bool tracker = success && engine.isTrackerMode();
+    if (tracker)
     {
+        presetBox.setVisible(false);
+        sampleBox.setVisible(false);
+        instrumentSamples.clear();
+        currentSampleId = invalidSampleId;
+        rexGate.setVisible(false);
+        rexInfo.setVisible(false);
+        trackerBox.setVisible(true);
+        fillTrackerChoices();
+        sampleDragButton.setVisible(false);
+        waveform.setFile(juce::File()); // no song overview yet; never show the first sample instead
+        waveform.setVisible(false);
+        songProgress.setLength(engine.length());
+        songProgress.setPosition(engine.position());
+        songProgress.setVisible(true);
+        filename.setText(file.getFileName() + "  —  " + engine.trackerSongTitle(),
+                         juce::dontSendNotification);
+        selectionStatus.setText(trackerSummary(), juce::dontSendNotification);
+    }
+    else if (instrument)
+    {
+        trackerBox.setVisible(false);
+        sampleDragButton.setVisible(false);
+        songProgress.setVisible(false);
+        waveform.setVisible(true);
         presetBox.clear(juce::dontSendNotification);
         presetBox.setVisible(soundFont);
         if (soundFont)
@@ -124,6 +216,10 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     }
     else if (rex)
     {
+        trackerBox.setVisible(false);
+        sampleDragButton.setVisible(false);
+        songProgress.setVisible(false);
+        waveform.setVisible(true);
         presetBox.setVisible(false);
         sampleBox.setVisible(false);
         instrumentSamples.clear();
@@ -139,6 +235,10 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     }
     else
     {
+        trackerBox.setVisible(false);
+        sampleDragButton.setVisible(false);
+        songProgress.setVisible(false);
+        waveform.setVisible(true);
         presetBox.setVisible(false);
         sampleBox.setVisible(false);
         instrumentSamples.clear();
@@ -155,9 +255,10 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
         else
             waveform.setFile(juce::File());
     }
-    else if (! instrument)
+    else if (! instrument && ! tracker)
         waveform.setFile(success ? file : juce::File());
     midi.setToggleState(engine.isMidiPreview(),juce::dontSendNotification);
+    resized(); // the tracker/sample selectors appear or disappear with the loaded asset
     if (allowAutoPlay && success && ! soundFont && autoPreview.getToggleState()) engine.play();
     return success;
 }
@@ -265,6 +366,200 @@ juce::String PreviewPanel::instrumentSampleStem() const
         }
     return stem;
 }
+
+void PreviewPanel::fillTrackerChoices()
+{
+    trackerBox.clear(juce::dontSendNotification);
+    trackerBox.addItem("Whole song", 1);
+    for (const auto& slot : engine.trackerSlots())
+    {
+        juce::String label = juce::String(slot.slot + 1) + ". "
+            + (slot.name.isNotEmpty() ? slot.name : juce::String("Sample"));
+        if (slot.empty) label << "  ·  empty";
+        else if (slot.fmInstrument) label << "  ·  FM instrument";
+        else
+        {
+            label << "  ·  " << slot.bitsPerSample << "-bit";
+            if (slot.looping) label << "  ·  loop";
+        }
+        if (slot.error.isNotEmpty()) label << "  ·  " << slot.error;
+        trackerBox.addItem(label, slot.slot + 2);
+    }
+    trackerBox.setSelectedId(engine.isTrackerSampleSelected()
+                                 ? engine.selectedTrackerSampleId() + 2 : 1,
+                             juce::dontSendNotification);
+}
+
+juce::String PreviewPanel::trackerSummary() const
+{
+    const auto& info = engine.trackerInfo();
+    juce::String text = engine.trackerSongFormat().isNotEmpty() ? engine.trackerSongFormat()
+                                                               : info.formatName;
+    if (engine.trackerSongChannels() > 0) text << " · " << engine.trackerSongChannels() << " ch";
+    text << " · " << (int) engine.trackerSlots().size() << " sample slots";
+    if (engine.length() > 0) text << " · " << juce::String(engine.length(), 1) << " s";
+    for (const auto& warning : info.warnings) text << " · " << warning;
+    return text.substring(0, 220);
+}
+
+juce::String PreviewPanel::trackerSampleSummary() const
+{
+    const auto& slots = engine.trackerSlots();
+    const auto id = engine.selectedTrackerSampleId();
+    if (id < 0 || id >= (int) slots.size()) return {};
+    const auto& slot = slots[(size_t) id];
+    juce::String text = "Sample " + juce::String(id + 1) + ": "
+        + (slot.name.isNotEmpty() ? slot.name : juce::String("unnamed"))
+        + " · " + juce::String(slot.frames) + " frames"
+        + " · " + juce::String(slot.sampleRate) + " Hz"
+        + " · " + juce::String(slot.bitsPerSample) + "-bit";
+    if (slot.looping)
+        text << " · loop " << slot.loopStart << "–" << slot.loopEnd
+             << (slot.pingPong ? " ping-pong" : "");
+    return text.substring(0, 220);
+}
+
+juce::String PreviewPanel::trackerSampleStem() const
+{
+    const auto id = engine.selectedTrackerSampleId();
+    juce::String stem = loadedFile.getFileNameWithoutExtension() + "_s" + juce::String(id + 1);
+    const auto& slots = engine.trackerSlots();
+    if (id >= 0 && id < (int) slots.size() && slots[(size_t) id].name.isNotEmpty())
+        stem << "_" << slots[(size_t) id].name;
+    return stem;
+}
+
+bool PreviewPanel::applyTrackerSample(SampleId id, bool manual)
+{
+    if (! engine.selectTrackerSample(id))
+    {
+        selectionStatus.setText(engine.error(), juce::dontSendNotification);
+        return false;
+    }
+    trackerBox.setSelectedId((int) id + 2, juce::dontSendNotification);
+    currentSampleId = id;
+    if (auto audio = engine.trackerSampleAudio())
+        waveform.setPeaks(audio->left, audio->sampleRate, {});
+    else
+        waveform.setFile(juce::File());
+    sampleDragButton.setVisible(true);
+    sampleDragButton.setButtonText("Drag sample");
+    songProgress.setVisible(false);
+    waveform.setVisible(true);
+    resized();
+    selectionStatus.setText(trackerSampleSummary(), juce::dontSendNotification);
+    if (manual && autoPreview.getToggleState())
+    {
+        engine.seek(0);
+        engine.play();
+    }
+    return true;
+}
+
+bool PreviewPanel::selectTrackerSlot(SampleId id) { return applyTrackerSample(id, true); }
+
+void PreviewPanel::selectTrackerWholeSong() { applyTrackerWholeSong(true); }
+
+void PreviewPanel::applyTrackerWholeSong(bool manual)
+{
+    if (! engine.selectTrackerWholeSong()) return;
+    trackerBox.setSelectedId(1, juce::dontSendNotification);
+    waveform.setFile(juce::File());
+    waveform.setVisible(false);
+    songProgress.setLength(engine.length());
+    songProgress.setPosition(engine.position());
+    songProgress.setVisible(true);
+    sampleDragButton.setVisible(false);
+    resized();
+    currentSampleId = invalidSampleId;
+    selectionStatus.setText(trackerSummary(), juce::dontSendNotification);
+    if (manual && autoPreview.getToggleState()) engine.play();
+}
+
+void PreviewPanel::prepareWholeTrackerSample()
+{    auto audio = engine.trackerSampleAudio();
+    if (audio == nullptr) return;
+    const auto stem = trackerSampleStem();
+    const double end = audio->sampleRate > 0 ? (double) audio->frames / (double) audio->sampleRate : 0.0;
+    exporter.prepare(loadedFile, 0.0, end,
+        [audio, stem](const juce::File&, double start, double end, const juce::File& folder,
+                      CancelCheck cancel)
+        {
+            return AudioExporter().exportSampleSelection(*audio, stem, start, end, folder, cancel);
+        });
+    sampleDragButton.setButtonText("Preparing...");
+}
+
+bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::String& stem,
+                                  SampleAudioPtr audio, bool looping, int64_t loopStart,
+                                  int64_t loopEnd, bool pingPong, bool allowAutoPlay)
+{
+    if (! engine.setDiscSample(audio, looping, loopStart, loopEnd, pingPong))
+    {
+        selectionStatus.setText(engine.error(), juce::dontSendNotification);
+        return false;
+    }
+    discAudioRef = std::move(audio);
+    discStem = stem;
+    loadedFile = container;
+    currentSampleId = invalidSampleId;
+    presetBox.setSelectedId(0, juce::dontSendNotification);
+    sampleBox.setSelectedId(0, juce::dontSendNotification);
+    trackerBox.setSelectedId(0, juce::dontSendNotification);
+    presetBox.setVisible(false);
+    sampleBox.setVisible(false);
+    trackerBox.setVisible(false);
+    waveform.setPeaks(discAudioRef->left, discAudioRef->sampleRate, {});
+    waveform.setVisible(true);
+    songProgress.setVisible(false);
+    sampleDragButton.setVisible(true);
+    sampleDragButton.setButtonText("Drag sample");
+    filename.setText(stem + "  —  " + container.getFileName(), juce::dontSendNotification);
+    resized();
+    selectionStatus.setText(discSampleSummary(), juce::dontSendNotification);
+    if (allowAutoPlay && autoPreview.getToggleState())
+    {
+        engine.seek(0);
+        engine.play();
+    }
+    return true;
+}
+
+void PreviewPanel::clearDiscSource()
+{
+    engine.clearDiscSample();
+    discAudioRef.reset();
+    discStem.clear();
+    exporter.cancel();
+    waveform.setFile(juce::File());
+    sampleDragButton.setVisible(false);
+    sampleDragButton.setButtonText("Drag sample");
+    selectionStatus.setText({}, juce::dontSendNotification);
+}
+
+juce::String PreviewPanel::discSampleSummary() const
+{
+    if (discAudioRef == nullptr || discAudioRef->sampleRate <= 0) return {};
+    const double seconds = (double) discAudioRef->frames / (double) discAudioRef->sampleRate;
+    return juce::String(discAudioRef->sampleRate) + " Hz  ·  "
+        + (discAudioRef->channels == 2 ? "stereo" : "mono") + "  ·  "
+        + juce::String(seconds, 3) + " s  ·  source PCM, no transpose";
+}
+
+void PreviewPanel::prepareWholeDiscSample()
+{
+    auto audio = engine.discSampleAudio();
+    if (audio == nullptr) return;
+    const auto stem = discStem;
+    const double end = audio->sampleRate > 0 ? (double) audio->frames / (double) audio->sampleRate : 0.0;
+    exporter.prepare(loadedFile, 0.0, end,
+        [audio, stem](const juce::File&, double start, double end, const juce::File& folder,
+                      CancelCheck cancel)
+        {
+            return AudioExporter().exportSampleSelection(*audio, stem, start, end, folder, cancel);
+        });
+    sampleDragButton.setButtonText("Preparing...");
+}
 void PreviewPanel::applyPersistedSettings(const AppSettings& settings)
 {
     autoPreview.setToggleState(settings.autoPreview, juce::dontSendNotification);
@@ -294,7 +589,38 @@ void PreviewPanel::selectionChanged(selection::Range range)
     }
     clearSelectionButton.setVisible(true);
     selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
-    if (engine.isSamplerInstrumentMode())
+    if (engine.isTrackerMode())
+    {
+        // Only a selected tracker sample owns a waveform selection. In whole-song mode the
+        // selection controls are irrelevant because the song itself is not exported here.
+        if (auto audio = engine.trackerSampleAudio())
+        {
+            const auto stem = trackerSampleStem();
+            exporter.prepare(loadedFile, range.start, range.end,
+                [audio, stem](const juce::File&, double start, double end,
+                              const juce::File& folder, CancelCheck cancel)
+                {
+                    return AudioExporter().exportSampleSelection(*audio, stem, start, end, folder, cancel);
+                });
+        }
+        else exporter.cancel();
+    }
+    else if (engine.isDiscMode())
+    {
+        // The physical image is the export identity; the virtual entry never becomes a path.
+        if (auto audio = engine.discSampleAudio())
+        {
+            const auto stem = discStem;
+            exporter.prepare(loadedFile, range.start, range.end,
+                [audio, stem](const juce::File&, double start, double end,
+                              const juce::File& folder, CancelCheck cancel)
+                {
+                    return AudioExporter().exportSampleSelection(*audio, stem, start, end, folder, cancel);
+                });
+        }
+        else exporter.cancel();
+    }
+    else if (engine.isSamplerInstrumentMode())
     {
         // The selected sample is immutable PCM with no AudioFormatReader. Retaining the shared
         // snapshot keeps the worker safe across bank/preset changes and MIDI-follow updates.
@@ -423,6 +749,11 @@ void PreviewPanel::timerCallback()
     updateSelectionPlayback();
     refreshSelectionStatus();
     waveform.setPosition(engine.position());
+    if (songProgress.isVisible())
+    {
+        songProgress.setLength(engine.length());
+        songProgress.setPosition(engine.position());
+    }
     if (engine.isRex2Mode()) waveform.setActiveSlices(engine.rexActiveSlices());
     time.setText(juce::String(engine.position(),2) + " / " + juce::String(engine.length(),2) + " s",juce::dontSendNotification);
     if (! waveform.selection().valid() && engine.isSamplerInstrumentMode())
@@ -467,6 +798,14 @@ void PreviewPanel::timerCallback()
         if (rexInfo.getText() != text) rexInfo.setText(text,juce::dontSendNotification);
     }
     play.setButtonText(engine.isPlaying() ? "Pause" : "Play");
+    if (sampleDragButton.isVisible())
+    {
+        const auto state = exporter.state();
+        const juce::String text = state.status == SelectionExporter::Status::preparing ? "Preparing..."
+            : state.status == SelectionExporter::Status::failed ? "Prepare failed" : "Drag sample";
+        if (sampleDragButton.getButtonText() != text)
+            sampleDragButton.setButtonText(text);
+    }
 }
 void PreviewPanel::lookAndFeelChanged()
 {
@@ -489,7 +828,7 @@ void PreviewPanel::resized()
     auto top = r.removeFromTop(24); filename.setBounds(top.removeFromLeft(juce::jmax(200,top.getWidth()-160)));
     time.setBounds(top);
     r.removeFromTop(8);
-    auto controls = r.removeFromRight(330); r.removeFromRight(16); waveform.setBounds(r);
+    auto controls = r.removeFromRight(330); r.removeFromRight(16); waveform.setBounds(r); songProgress.setBounds(r);
     auto extra = controls.removeFromTop(26);
     if (presetBox.isVisible())
     {
@@ -498,7 +837,11 @@ void PreviewPanel::resized()
         sampleArea.removeFromLeft(juce::jmax(1, sampleArea.getWidth() / 2 + 3));
         sampleBox.setBounds(sampleArea);
     }
-    else sampleBox.setBounds(extra);
+    else
+    {
+        trackerBox.setBounds(extra);
+        sampleBox.setBounds(extra);
+    }
     rexGate.setBounds(extra.removeFromLeft(90));
     rexInfo.setBounds(extra);
     auto modes = controls.removeFromTop(28);
@@ -509,6 +852,7 @@ void PreviewPanel::resized()
     play.setBounds(buttons.removeFromLeft(78)); buttons.removeFromLeft(6);
     stop.setBounds(buttons.removeFromLeft(60)); buttons.removeFromLeft(12); volume.setBounds(buttons);
     auto selection = controls.removeFromTop(26);
+    if (sampleDragButton.isVisible()) { sampleDragButton.setBounds(selection.removeFromRight(96)); selection.removeFromRight(6); }
     clearSelectionButton.setBounds(selection.removeFromRight(58)); selection.removeFromRight(8);
     selectionStatus.setBounds(selection);
 }

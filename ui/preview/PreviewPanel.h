@@ -3,7 +3,52 @@
 #include "core/settings/AppSettings.h"
 #include "core/export/SelectionExporter.h"
 #include "ui/waveform/WaveformDisplay.h"
+#include "SongProgress.h"
 namespace sonicator {
+// Selector that also steps with Up/Down and the mouse wheel while closed. The popup keeps its
+// own keyboard behaviour when open.
+class StepComboBox final : public juce::ComboBox
+{
+public:
+    void step(int delta)
+    {
+        const int count = getNumItems();
+        if (count <= 0) return;
+        const int index = juce::jlimit(0, count - 1, getSelectedItemIndex() + delta);
+        if (index != getSelectedItemIndex())
+            setSelectedItemIndex(index, juce::sendNotificationSync);
+    }
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& wheel) override
+    {
+        if (wheel.deltaY > 0.001f) step(-1);
+        else if (wheel.deltaY < -0.001f) step(1);
+    }
+    bool keyPressed(const juce::KeyPress& key) override
+    {
+        if (key.getKeyCode() == juce::KeyPress::upKey) { step(-1); return true; }
+        if (key.getKeyCode() == juce::KeyPress::downKey) { step(1); return true; }
+        return juce::ComboBox::keyPressed(key);
+    }
+};
+// A button that starts an external drag of an already prepared WAV. The drag must begin inside a
+// real mouse gesture, so preparation is a separate step performed when the button is pressed.
+class SampleDragButton final : public juce::TextButton
+{
+public:
+    SampleDragButton() : juce::TextButton("Drag sample") {}
+    std::function<void()> onDrag;
+    void mouseUp(const juce::MouseEvent&) override { dragStarted = false; }
+    void mouseDrag(const juce::MouseEvent& event) override
+    {
+        if (! dragStarted && event.getDistanceFromDragStart() > 5 && onDrag)
+        {
+            dragStarted = true;
+            onDrag();
+        }
+    }
+private:
+    bool dragStarted = false;
+};
 class PreviewPanel final : public juce::Component, private juce::Timer
 {
 public:
@@ -13,6 +58,13 @@ public:
     // allowAutoPlay=false loads the file and waveform without starting playback. Used when the
     // last session is restored, so reopening the app does not unexpectedly audition audio.
     bool loadFile(const juce::File&, bool allowAutoPlay = true);
+    // Loads one decoded source from a disc image. The container is the physical image (used only
+    // as export identity); the virtual entry never becomes an OS path.
+    bool loadDiscSample(const juce::File& container, const juce::String& stem, SampleAudioPtr,
+                        bool looping, int64_t loopStart, int64_t loopEnd, bool pingPong,
+                        bool allowAutoPlay = true);
+    void clearDiscSource();
+    SampleAudioPtr discSampleAudio() const { return discAudioRef; }
     // Restores preview toggles and their engine state. Does not notify onSettingsChanged.
     void applyPersistedSettings(const AppSettings&);
     bool midiPreviewEnabled() const { return engine.isMidiPreview(); }
@@ -24,6 +76,14 @@ public:
     SampleId selectedSoundFontSampleId() const { return currentSampleId; }
     int instrumentSampleCount() const { return (int) instrumentSamples.size(); }
     SampleId selectedInstrumentSampleId() const { return currentSampleId; }
+    // Tracker whole-song versus selected-source workflow. Selecting a source stops the song and
+    // keeps its position; the whole-song item resumes it from that position.
+    int trackerSampleCount() const { return (int) engine.trackerSlots().size(); }
+    SampleId selectedTrackerSampleId() const { return engine.selectedTrackerSampleId(); }
+    bool trackerWholeSongSelected() const
+    { return engine.isTrackerMode() && ! engine.isTrackerSampleSelected(); }
+    bool selectTrackerSlot(SampleId);
+    void selectTrackerWholeSong();
     void selectRange(double start, double end);
     selection::Range selectedRange() const { return waveform.selection(); }
     void clearSelection() { waveform.clearSelection(); }
@@ -48,12 +108,17 @@ private:
     juce::File loadedFile;
     int64_t loadedSize = 0, loadedModified = 0;
     WaveformDisplay waveform;
+    SongProgress songProgress;
     juce::Label filename, time;
     juce::TextButton play { "Play" }, stop { "Stop" };
-    juce::ComboBox presetBox;
-    juce::ComboBox sampleBox;
+    StepComboBox presetBox;
+    StepComboBox sampleBox;
+    StepComboBox trackerBox;
+    SampleDragButton sampleDragButton;
     std::vector<SampleDescriptor> instrumentSamples;
     SampleId currentSampleId = invalidSampleId;
+    SampleAudioPtr discAudioRef;
+    juce::String discStem;
     juce::ToggleButton rexGate { "Gate" };
     juce::Label rexInfo;
     juce::ToggleButton loop { "Loop" };
@@ -72,5 +137,14 @@ private:
     void refreshInstrumentSamples();
     bool applyInstrumentSample(SampleId, bool manual);
     juce::String instrumentSampleStem() const;
+    void fillTrackerChoices();
+    bool applyTrackerSample(SampleId, bool manual);
+    void applyTrackerWholeSong(bool manual);
+    juce::String trackerSummary() const;
+    juce::String trackerSampleSummary() const;
+    juce::String trackerSampleStem() const;
+    void prepareWholeTrackerSample();
+    juce::String discSampleSummary() const;
+    void prepareWholeDiscSample();
 };
 } // namespace sonicator

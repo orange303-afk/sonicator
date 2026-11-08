@@ -76,6 +76,8 @@ core/database/               RAII SQLite connection, prepared queries, schema ve
 core/scanner/                recursive discovery and cancellable full-file SHA-256
 core/dsp/                    chunked audio decoding and measured descriptors
 core/audio/                  preview transport, sample-rate conversion, read-ahead, selection boundaries
+core/tracker/                MOD/XM/S3M document parsing, source PCM and whole-song rendering
+core/legacy/                 content-based tracker recognition
 core/export/                 selection WAV export, background preparation, external file drag
 core/indexing/               background import, pause/cancel, incremental updates
 core/settings/               persisted application settings
@@ -123,6 +125,7 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - DSP currently measures duration, sample rate, applicable bit depth, channels, linear peak/RMS, power spectral centroid, 85% power rolloff and power spectral flatness. Not LUFS, spectral density/bands, attack/decay or transient/rhythm analysis yet.
 - FFT size 2048, Hann window, non-overlapping frames. These are engineering descriptors, not calibrated semantic labels or a perceptual similarity model.
 - Analysis supports up to 64 channels; preview uses the first two channels, not a surround downmix. Compressed bit depth can be unavailable.
+- Tracker support covers MOD (15- and 31-sample, M.K./M!K!/FLT/multichannel signatures), XM and S3M for whole-song playback and per-sample PCM export. Playback uses libxmp; PCM extraction is a separate bounded reader, so a format can play without every variant being extractable. AdLib/FM S3M instruments, packed S3M samples, stereo XM samples and unsupported variants keep an explicit status. There is no song overview waveform yet, no tracker editing, no stems and no MT2/IT/MDX; see `docs/PREVIEW.md`.
 - SF2 preview is a bounded sampler: key and velocity ranges, root key, tuning, loop, attenuation, pan and exclusive-class choke. It is not a full SoundFont synthesis engine (no modulators, filters or NRPN). REX2 support is `.rx2` only: DWOP is decoded in memory, at most 128 slices are mapped, and there is no tempo sync or time-stretch. No filesystem watcher; folder changes are discovered by manual rescan. Symbolic directory links are deliberately not followed. AppleDouble metadata forks are excluded by their magic bytes, not merely a filename prefix. Path aliases/case aliases are not merged.
 - Waveform cache holds at most 64 thumbnails. Search, sorting and tag filters run over the whole catalog; a page still contains at most 10,000 rows. Text search folds ASCII, Latin, Greek and Cyrillic case; scripts without case (CJK) match literally. No 500,000-file or GPU/60 FPS claim is made.
 - Files with decode errors are retried on rescan. Missing roots abort that scan with a visible message; records are not deleted. The additive **New files** scan deliberately does not mark missing records.

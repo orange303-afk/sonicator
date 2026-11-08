@@ -1,5 +1,40 @@
 # Phase 1 verification
 
+## Disc images, incompatible-asset badge and double-click selection (2026-11-08)
+
+- macOS Debug and Release: **374 cases / 3,301 assertions**, all passed. New coverage: CUE parsing (MODE1/2048 and 2352, audio before data, PREGAP vs INDEX 00, multi-FILE, mixed-stride refusal, unsafe/missing references, bad times), raw 2352 user-data extraction through the service, sibling-cue discovery and multi-data-track selection; bounded
+  read-only byte/block sources (overflow, short read, sparse >4 GiB, cancellation, unchanged
+  hashes), sector layouts (cooked 2048, Mode 1 raw, XA Form 1, Form 2 refusal), content probe
+  (ISO/Joliet, UDF/MDX unsupported, misaligned CD001, Akai structure), ISO tree/version names/
+  Joliet/multi-extent/out-of-volume, audio from byte streams (WAV 16/float32, FLAC, MP3, 3-channel
+  refusal, truncation, cancellation, block-range source), Akai partition/volume/record/FAT
+  (fragmentation, cycles, early EOF, padding), schema-10 compatibility, the shared filter and badge,
+  disc playback/MIDI and exact WAV export of a 10-frame source.
+- Real read-only image (`/Volumes/1TBSSD/samples/!__OLDSCHOOL/Best Service - Real Mega Rhythm AKAI -
+  Single Sounds.iso`, 629,764,096 bytes): **13 partitions, 60 volumes, 253 programs, 2,681 sample
+  records**, size/mtime/SHA-256 unchanged. The exact counts match the earlier read-only research.
+  PCM is **not** verified: the header/signedness/endianness gate stays open.
+- The raw Akai layout found on the real image differs from a single global table: every partition
+  owns a volume table and FAT, start blocks are partition-relative, and its FAT is big-endian while
+  file fields are little-endian. Detection uses the three reserved `0x0040` markers.
+- Not implemented/established: BIN without CUE or raw-2352 layout guessing, mixed 2048/2352 tracks in one FILE, independent comparison of Akai PCM, MDX,
+  decoded/metadata cache accounting, session restore of a browser, physical MIDI/DAW/listening and
+  Windows/Intel macOS. The toggle caption is **Hide empty and unsupported**; an incompatible row
+  draws a vector prohibition badge in the same 14x14 star cell (the stored star is preserved).
+- Double-click on the waveform selects the whole source; JUCE sends the second `mouseUp` before
+  `mouseDoubleClick`, so that release is skipped instead of clearing or seeking.
+
+## Legacy tracker modules (2026-11-08)
+
+- macOS Debug: **308 cases / 2771 assertions**, all passed; CTest 1/1, **23.85 s**.
+- macOS Release: **308 cases / 2771 assertions**, all passed; CTest 1/1, **22.51 s**.
+- Debug and Release application bundles build and satisfy their ad-hoc signatures (`codesign --verify`). Intel macOS and Windows were not built or run.
+- New coverage: content-based MOD/XM/S3M recognition, 15- and 31-sample MOD layouts, `M.K.`/multichannel tags including the 8-channel pattern stride, XM 1.04 instrument/sample-data layout plus 8/16-bit delta and relative-note tuning, S3M signed/unsigned 8/16-bit PCM plus `SCRS`/C2 speed/loop bounds, renamed S3M under `.mod`, rejection of text and truncated payloads, catalog analysis recording the detected format, whole-song rendering, song/sample switching, 128-voice selected-sample MIDI with a 2-second release, exact PCM WAV export, whole-song versus sample UI state, the retained-source voice table, tracker loop points in ordinary Play for forward and ping-pong loops, whole-song output clearing the callback buffer, normalized interleaved-to-planar ring conversion (including partial libxmp ticks), arrow-key/wheel stepping of the sample and preset selectors, the whole-song progress/scrub bar visibility and length, and its `MM:SS:mmm` time formatting.
+- Real read-only corpus: 48 modules from `!Chicago Music Trader`, **48 opened, 0 rejected, 666 source samples decoded**, **8/8 sampled modules audible**, every checked SHA-256 unchanged. Two real XM modules were run separately after the XM layout correction: `DREAM.XM` (7 samples) and `TUESDAY.XM` (17 samples) both opened and decoded. This is a bounded sample of the collection, not a full-corpus decode or listening test.
+- Playback uses libxmp on a worker with a bounded ring; PCM extraction uses the project's own MOD/XM/S3M readers. The two capabilities are tested separately.
+- Known limits: no song-overview waveform, no MT2/IT/STM/MTM/669 or other rare tracker families, no tracker editing/pattern view/stems, AdLib/FM S3M instruments and packed S3M samples are listed as unsupported for extraction, stereo XM samples are refused rather than mixed down, seeking is row-quantised, and no Amiga filter or historical-player equivalence is claimed. Windows/Intel macOS, physical MIDI and audible DAW import remain owner acceptance checks.
+- A pre-existing debug `juce_String.cpp:314` assertion is still printed by some unrelated tests; it does not fail the suite and is not introduced by this stage.
+
 ## Tags, AutoTag and folder actions (2026-11-08)
 
 - macOS Debug: **253 cases / 2041 assertions**, all passed; CTest 1/1, about 24 s. Windows, Explorer integration and physical acceptance were not run.

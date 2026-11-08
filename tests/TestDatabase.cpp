@@ -100,7 +100,7 @@ TEST_CASE("Schema v1 migrates in place, keeps rows, and backs up once", "[databa
     REQUIRE(backups.size() == 1);
     REQUIRE(rawScalar(backups[0], "SELECT COUNT(*) FROM samples") == 3);
     REQUIRE(rawScalar(backups[0], "PRAGMA user_version") == 1);
-    REQUIRE(rawScalar(file, "PRAGMA user_version") == 9);
+    REQUIRE(rawScalar(file, "PRAGMA user_version") == 10);
     REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='samples_name_id'") == 1);
     { Database db(file); SampleRepository repo(db); repo.createTables(); REQUIRE(repo.count() == 3); }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "legacy.sqlite.backup-*").size() == 1);
@@ -263,7 +263,7 @@ TEST_CASE("Schema v2 migrates to tags and a backfilled Unicode search key", "[da
         REQUIRE(repo.query(f).total == 1);
         f.text = "kick"; REQUIRE(repo.query(f).total == 1);
         REQUIRE(repo.tags().size() == 26);
-        REQUIRE(rawScalar(file, "PRAGMA user_version") == 9);
+        REQUIRE(rawScalar(file, "PRAGMA user_version") == 10);
         REQUIRE(rawScalar(file, "SELECT COUNT(*) FROM samples WHERE version=1") == 2);
     }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "v2.sqlite.backup-*").size() == 1);
@@ -286,7 +286,7 @@ TEST_CASE("User backup is a consistent copy and refuses unsafe destinations", "[
         REQUIRE(copyRepo.count() == 1);
         REQUIRE(copyRepo.findByPath("/backup/sample.wav")->fileHash == "h");
         REQUIRE(copyRepo.tagsForSample(id).size() == 1);
-        REQUIRE(rawScalar(backup, "PRAGMA user_version") == 9);
+        REQUIRE(rawScalar(backup, "PRAGMA user_version") == 10);
     }
     REQUIRE_THROWS(repo.backupTo(file));
     REQUIRE_THROWS(repo.backupTo(backup));
@@ -545,7 +545,32 @@ TEST_CASE("Schema 8 catalogs gain the new instrument tags without touching user 
             if (tag.name == "My Tag") hasUser = true;
         }
         REQUIRE(hasCrash); REQUIRE(hasTom); REQUIRE(hasUser);
-        REQUIRE(rawScalar(file, "PRAGMA user_version") == 9);
+        REQUIRE(rawScalar(file, "PRAGMA user_version") == 10);
     }
     REQUIRE(t.dir.findChildFiles(juce::File::findFiles, false, "tags-v8.sqlite.backup-*").size() == 1);
+}
+
+TEST_CASE("Compatibility round-trips and Hide empty hides incompatible assets", "[database][asset-compat]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("compat.sqlite")); SampleRepository repo(db); repo.createTables();
+    auto make = [](const juce::String& path, AssetCompatibility compatibility, double peak, int version)
+    {
+        SampleRecord r; r.filePath = path; r.fileName = juce::File(path).getFileName();
+        r.fileHash = path; r.format = "WAV"; r.version = version; r.peakLevel = peak;
+        r.compatibility = compatibility; return r;
+    };
+    repo.upsert(make("/lib/supported.wav", AssetCompatibility::supported, 0.5, basicFeaturesVersion));
+    repo.upsert(make("/lib/silent.wav", AssetCompatibility::supported, 0.0, basicFeaturesVersion));
+    repo.upsert(make("/lib/unknown.wav", AssetCompatibility::unknown, 0.5, basicFeaturesVersion));
+    repo.upsert(make("/lib/invalid.wav", AssetCompatibility::invalid, 0.5, basicFeaturesVersion));
+    repo.upsert(make("/lib/unsupported.rx2", AssetCompatibility::unsupported, 0.0, metadataOnlyVersion));
+    REQUIRE(repo.findByPath("/lib/invalid.wav")->compatibility == AssetCompatibility::invalid);
+    REQUIRE(repo.findByPath("/lib/unsupported.rx2")->compatibility == AssetCompatibility::unsupported);
+
+    LibraryFilter filter; filter.hideEmpty = true;
+    const auto page = repo.query(filter);
+    REQUIRE(page.total == 2); // supported + unknown; silent, invalid and unsupported are hidden
+    REQUIRE(repo.queryIds(filter).size() == 2);
+    filter.hideEmpty = false;
+    REQUIRE(repo.query(filter).total == 5);
 }

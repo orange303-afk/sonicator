@@ -23,6 +23,7 @@ public:
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
+    void mouseDoubleClick(const juce::MouseEvent&) override;
     std::function<void(double)> onSeek;
     std::function<void(selection::Range)> onSelectionChanged;
     std::function<void()> onExternalDragRequested;
@@ -40,6 +41,7 @@ private:
     juce::Point<int> dragOrigin;
     double dragAnchor = 0;
     bool pressInsideSelection = false, selectionDragActive = false, externalDragTriggered = false;
+    bool pressWasPrimary = false;
     void updateSelectionDuringDrag(double time);
     void notifySelection();
     void changeListenerCallback(juce::ChangeBroadcaster*) override { repaint(); }

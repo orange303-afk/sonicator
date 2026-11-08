@@ -110,7 +110,7 @@ TEST_CASE("Schema 6 upgrades to 7 keeping smart results, overrides, tags and sta
     rawExec(file, "PRAGMA user_version=6;");
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 9);
+        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 10);
         auto result = repo.smartResult(id);
         REQUIRE(result.has_value());
         REQUIRE(result->hasBpm);
@@ -317,7 +317,7 @@ TEST_CASE("A real schema 6 database gains current schema columns in place", "[sm
         "PRAGMA user_version=6;");
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 9);
+        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 10);
         auto result = repo.smartResult(7);
         REQUIRE(result.has_value());
         REQUIRE(result->bpm == Catch::Approx(128.0));

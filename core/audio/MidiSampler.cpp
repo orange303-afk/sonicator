@@ -160,7 +160,9 @@ void MidiSampler::render(juce::AudioBuffer<float>& out,int start,int count,const
 }
 void PreviewOutput::prepareToPlay(int blockSize,double rate)
 {
-    transport.prepareToPlay(blockSize,rate); sampler.prepare(rate); sf2.prepare(rate); rex.prepare(rate); audition.prepare(rate); external.prepare(rate); messages.ensureSize(65536);
+    transport.prepareToPlay(blockSize,rate); sampler.prepare(rate); sf2.prepare(rate); rex.prepare(rate); audition.prepare(rate); external.prepare(rate);
+    tracker.prepare(rate); sampleVoices.prepare(rate);
+    messages.ensureSize(65536);
     midiBuffer.setSize(2,juce::jmax(1,blockSize));
     messages.clear(); collector.drain(messages); messages.clear();
 }
@@ -178,25 +180,43 @@ void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             messages.addEvent(juce::MidiMessage::allSoundOff(channel),0);
     }
     const bool midiEnabled = midi.load();
-    const bool kitEnabled = sf2Mode.load() && midi.load();
-    const bool externalEnabled = externalMode.load() && midi.load();
-    const bool sliceEnabled = rexMode.load() && midi.load();
+    const bool trackerSong = trackerSongMode.load() && tracker.hasModule();
+    const bool trackerMidi = trackerSampleMidi.load() && midiEnabled;
+    const bool discMidi = this->discMidi.load() && midiEnabled;
+    const bool kitEnabled = sf2Mode.load() && midiEnabled;
+    const bool externalEnabled = externalMode.load() && midiEnabled;
+    const bool sliceEnabled = rexMode.load() && midiEnabled;
     const bool auditionEnabled = audition.hasAudio();
     // Chunk both paths: JUCE's resampler can otherwise resize its internal buffer for
     // callbacks larger than prepareToPlay's block size, even though our MIDI scratch fits.
     for (int offset = 0; offset < info.numSamples;)
     {
         const int count = juce::jmin(midiBuffer.getNumSamples(),info.numSamples-offset);
-        transport.getNextAudioBlock({info.buffer,info.startSample+offset,count});
-        if (kitEnabled) sf2.render(midiBuffer,0,count,messages);
-        else if (externalEnabled) external.render(midiBuffer,0,count,messages);
-        // REX mixes whole-loop audition internally, so boost only its MIDI voices there.
-        else if (sliceEnabled) rex.render(midiBuffer,0,count,messages,midiPreviewGain);
-        else if (midiEnabled) sampler.render(midiBuffer,0,count,messages);
-        else midiBuffer.clear();
-        if (! sliceEnabled && midiEnabled) midiBuffer.applyGain(0,count,midiPreviewGain);
+        if (trackerSong)
+        {
+            // The tracker path bypasses the transport, so the destination region is not written
+            // by it. Clear it first: AudioSourcePlayer hands the same buffer back every callback,
+            // and adding onto stale audio would accumulate into a loud glitch.
+            info.buffer->clear(info.startSample + offset, count);
+            // The whole-module renderer owns its own bounded ring; no file or player call happens
+            // on this thread. Ordinary transport and MIDI are silent while the song owns output.
+            tracker.render(midiBuffer,0,count);
+        }
+        else
+        {
+            transport.getNextAudioBlock({info.buffer,info.startSample+offset,count});
+            if (kitEnabled) sf2.render(midiBuffer,0,count,messages);
+            else if (externalEnabled) external.render(midiBuffer,0,count,messages);
+            // REX mixes whole-loop audition internally, so boost only its MIDI voices there.
+            else if (sliceEnabled) rex.render(midiBuffer,0,count,messages,midiPreviewGain);
+            else if (trackerMidi) sampleVoices.render(midiBuffer,0,count,messages);
+            else if (discMidi) sampleVoices.render(midiBuffer,0,count,messages);
+            else if (midiEnabled) sampler.render(midiBuffer,0,count,messages);
+            else midiBuffer.clear();
+            if (! sliceEnabled && midiEnabled) midiBuffer.applyGain(0,count,midiPreviewGain);
+        }
         if (auditionEnabled) audition.render(midiBuffer,0,count);
-        if (midiEnabled || kitEnabled || externalEnabled || sliceEnabled || auditionEnabled)
+        if (trackerSong || midiEnabled || kitEnabled || externalEnabled || sliceEnabled || trackerMidi || discMidi || auditionEnabled)
         {
             for (int ch = 0; ch < info.buffer->getNumChannels(); ++ch)
                 info.buffer->addFrom(ch,info.startSample+offset,midiBuffer,juce::jmin(ch,1),0,count,gain.load());
@@ -208,7 +228,8 @@ void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     if (info.buffer->getNumChannels() > 1)
         lastOutputPeak = juce::jmax(lastOutputPeak.load(),
             info.buffer->getMagnitude(1, info.startSample, info.numSamples));
-    if (! midiEnabled && ! kitEnabled && ! externalEnabled && ! sliceEnabled && ! auditionEnabled) return;
+    if (! midiEnabled && ! kitEnabled && ! externalEnabled && ! sliceEnabled && ! auditionEnabled
+        && ! trackerSong && ! trackerMidi && ! discMidi) return;
     // Smooth safety knee for dense chords; no hard clipping at the hardware output.
     for (int ch = 0; ch < info.buffer->getNumChannels(); ++ch)
         for (int i = info.startSample; i < info.startSample+info.numSamples; ++i)

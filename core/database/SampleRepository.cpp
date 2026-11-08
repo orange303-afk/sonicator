@@ -8,8 +8,8 @@
 #include <variant>
 namespace sonicator {
 namespace {
-constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred";
-constexpr int schemaVersion = 9;
+constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility";
+constexpr int schemaVersion = 10;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -21,6 +21,7 @@ SampleRecord read(const detail::Statement& s)
     r.peakLevel = s.real(14); r.rmsLevel = s.real(15); r.spectralCentroid = s.real(16);
     r.spectralRolloff = s.real(17); r.spectralFlatness = s.real(18); r.missing = s.integer(19) != 0;
     r.starred = s.integer(20) != 0;
+    r.compatibility = assetCompatibilityFromInt((int) s.integer(21));
     return r;
 }
 struct StandardTag { const char* name; uint32_t colour; };
@@ -300,8 +301,12 @@ FilterSql buildFilterSql(const LibraryFilter& filter)
     for (auto id : filter.excludeTags)
         addInt(" AND NOT EXISTS(SELECT 1 FROM sample_tags st WHERE st.sample_id=samples.id AND st.tag_id=?)", id);
     if (filter.starredOnly) sql.where += " AND samples.starred=1";
-    // Metadata-only containers have no decoded peak, so "Hide empty" must not hide them.
-    if (filter.hideEmpty) sql.where += " AND (samples.peak>=0.001 OR samples.version=-1)";
+    // Metadata-only containers have no decoded peak, so "Hide empty" must not hide them. An
+    // unsupported or invalid asset is hidden by the same toggle, but unknown (legacy rows,
+    // transient I/O, missing files) is never treated as a verdict.
+    if (filter.hideEmpty)
+        sql.where += " AND (samples.peak>=0.001 OR samples.version=-1)"
+                     " AND samples.compatibility NOT IN (2,3)";
     if (filter.hideDuplicates)
         sql.where += " AND NOT EXISTS(SELECT 1 FROM duplicates d WHERE d.sample_id=samples.id AND d.is_representative=0)";
     if (filter.duplicateHash.isNotEmpty())
@@ -405,7 +410,8 @@ void SampleRepository::createTables()
             "name TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, error TEXT NOT NULL,"
             "size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
             "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER,"
-            "search_key TEXT NOT NULL DEFAULT '', starred INTEGER NOT NULL DEFAULT 0);"
+            "search_key TEXT NOT NULL DEFAULT '', starred INTEGER NOT NULL DEFAULT 0,"
+            "compatibility INTEGER NOT NULL DEFAULT 0);"
             "CREATE INDEX IF NOT EXISTS samples_hash ON samples(hash);"
             "CREATE INDEX IF NOT EXISTS samples_name_id ON samples(name COLLATE NOCASE, id);"
             "CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY);"
@@ -492,6 +498,9 @@ void SampleRepository::createTables()
             while (info.step()) if (info.text(1) == "starred") hasStarred = true;
         }
         if (! hasStarred) detail::exec(db.handle, "ALTER TABLE samples ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;");
+        // Schema 10: why an asset cannot be opened. Existing rows stay unknown (0) and are never
+        // reanalysed or hidden by a guess.
+        ensureColumn(db.handle, "samples", "compatibility", "INTEGER NOT NULL DEFAULT 0");
         // Schema 7 extends smart storage in place. Existing rows keep their identity, tags, stars,
         // measured features, duplicate groups and overrides; only new columns/tables are added.
         ensureColumn(db.handle, "smart_candidates", "aux_value", "REAL NOT NULL DEFAULT 0");
@@ -580,7 +589,7 @@ void SampleRepository::createTables()
                 insert.integer(2, (int64_t) tag.colour); insert.step();
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=9;");
+        detail::exec(db.handle, "PRAGMA user_version=10;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -593,19 +602,20 @@ int64_t SampleRepository::upsert(const SampleRecord& r)
 {
     std::lock_guard lock(db.mutex);
     detail::Statement s(db.handle,
-        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
+        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred,compatibility)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
         "name=excluded.name,hash=excluded.hash,format=excluded.format,error=excluded.error,size=excluded.size,"
         "modified=excluded.modified,analyzed=excluded.analyzed,duration=excluded.duration,rate=excluded.rate,"
         "bits=excluded.bits,channels=excluded.channels,version=excluded.version,peak=excluded.peak,rms=excluded.rms,"
         "centroid=excluded.centroid,rolloff=excluded.rolloff,flatness=excluded.flatness,missing=excluded.missing,"
-        "search_key=excluded.search_key RETURNING id");
+        "search_key=excluded.search_key,compatibility=excluded.compatibility RETURNING id");
     s.text(1,r.filePath); s.text(2,r.fileName); s.text(3,r.fileHash); s.text(4,r.format); s.text(5,r.error);
     s.integer(6,r.fileSize); s.integer(7,r.dateModified); s.integer(8,r.dateAnalyzed);
     s.real(9,r.duration); s.real(10,r.sampleRate); s.integer(11,r.bitsPerSample); s.integer(12,r.numChannels);
     s.integer(13,r.version); s.real(14,r.peakLevel); s.real(15,r.rmsLevel); s.real(16,r.spectralCentroid);
     s.real(17,r.spectralRolloff); s.real(18,r.spectralFlatness); s.integer(19,r.missing ? 1 : 0);
     s.text(20,searchKey(r.fileName,r.filePath)); s.integer(21,r.starred ? 1 : 0);
+    s.integer(22,(int) r.compatibility);
     if (! s.step()) throw std::runtime_error("Insert did not return a sample ID");
     const auto id = s.integer(0);
     // Reanalysed audio makes the derived smart result stale; candidates, overrides and the last

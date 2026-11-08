@@ -7,6 +7,9 @@
 #include "core/rex/Rex2SlicePlayer.h"
 #include "core/sampler/FileInstrument.h"
 #include "core/sampler/ExternalKitSampler.h"
+#include "core/audio/SampleVoicePlayer.h"
+#include "core/tracker/TrackerDocument.h"
+#include "core/tracker/TrackerSongRenderer.h"
 namespace sonicator {
 // Control methods are message-thread only. transport() also permits offline rendering.
 class AudioEngine
@@ -66,6 +69,31 @@ public:
     // REX2 slices are a MIDI drum map starting at startNote (default 36). Gate stops a slice on
     // NoteOff; one-shot lets it ring out.
     bool previewRex2(const juce::File&, int startNote = 36);
+    // Legacy tracker modules: the whole song and its individual source samples are separate
+    // capabilities of one document. Selecting a sample stops the song but keeps its position.
+    bool isTrackerMode() const { return trackerMode; }
+    bool isTrackerSampleSelected() const { return trackerSampleChosen; }
+    const TrackerDocumentInfo& trackerInfo() const;
+    const std::vector<TrackerSampleSlot>& trackerSlots() const;
+    SampleId selectedTrackerSampleId() const { return trackerSampleIdValue; }
+    SampleAudioPtr trackerSampleAudio() const { return trackerSample; }
+    juce::uint64 trackerSourceGeneration() const { return trackerGenerationValue; }
+    int trackerUnderruns() const { return trackerSong.underruns(); }
+    int trackerSampleActiveVoices() const { return sampleVoices.activeVoices(); }
+    bool selectTrackerSample(SampleId);
+    bool selectTrackerWholeSong();
+    juce::String trackerSongTitle() const { return trackerSong.title(); }
+    juce::String trackerSongFormat() const { return trackerSong.formatName(); }
+    int trackerSongChannels() const { return trackerSong.channels(); }
+    // A decoded source from a disc image. Ordinary Play auditions the whole immutable snapshot;
+    // MIDI plays it chromatically with the same retained-source rules as a tracker sample.
+    bool isDiscMode() const { return discMode; }
+    SampleAudioPtr discSampleAudio() const { return discSample; }
+    juce::uint64 discGeneration() const { return discGenerationValue; }
+    int discActiveVoices() const { return sampleVoices.activeVoices(); }
+    bool setDiscSample(const SampleAudioPtr&, bool looping, int64_t loopStart, int64_t loopEnd,
+                       bool pingPong);
+    void clearDiscSample();
     bool isRex2Mode() const { return rexMode; }
     int rexSliceCount() const { return rexSampler.sliceCount(); }
     int rexStartNote() const { return rexSampler.startNote(); }
@@ -86,11 +114,14 @@ public:
     bool isMidiPreview() const { return output.midi.load(); }
     void setSkipSilence(bool enabled) { skipSilence = enabled; sampler.skipSilence = enabled; }
     bool isSkipSilence() const { return skipSilence; }
-    bool isPlaying() const { return auditionMode() ? sf2Audition.isPlaying() : rexMode ? rexSampler.auditionPlaying() : source.isPlaying(); }
+    bool isPlaying() const { if (trackerMode) return trackerSampleChosen ? sf2Audition.isPlaying() : trackerSong.isPlaying();
+                             return auditionMode() ? sf2Audition.isPlaying() : rexMode ? rexSampler.auditionPlaying() : source.isPlaying(); }
     bool isLooping() const { return looping; }
     float getVolume() const { return source.getGain(); }
-    double position() const { return auditionMode() ? sf2Audition.position() : rexMode ? rexSampler.auditionSeconds() : source.getCurrentPosition(); }
-    double length() const { return auditionMode() ? sf2Audition.length() : rexMode ? rexSampler.lengthSeconds() : source.getLengthInSeconds(); }
+    double position() const { if (trackerMode) return trackerSampleChosen ? sf2Audition.position() : trackerSong.position();
+                              return auditionMode() ? sf2Audition.position() : rexMode ? rexSampler.auditionSeconds() : source.getCurrentPosition(); }
+    double length() const { if (trackerMode) return trackerSampleChosen ? sf2Audition.length() : trackerSong.length();
+                            return auditionMode() ? sf2Audition.length() : rexMode ? rexSampler.lengthSeconds() : source.getLengthInSeconds(); }
     juce::String error() const { return lastError; }
     juce::AudioTransportSource& transport() { return source; }
     juce::AudioDeviceManager& deviceManager() { return devices; }
@@ -128,15 +159,26 @@ private:
     Rex2SlicePlayer rexSampler;
     bool rexMode = false;
     SampleAudition sf2Audition;
-    PreviewOutput output {source,sampler,sf2Sampler,rexSampler,sf2Audition,externalSampler};
+    std::unique_ptr<TrackerDocument> trackerDocument;
+    TrackerSongRenderer trackerSong;
+    SampleVoicePlayer sampleVoices;
+    bool trackerMode = false, trackerSampleChosen = false;
+    SampleId trackerSampleIdValue = invalidSampleId;
+    SampleAudioPtr trackerSample;
+    juce::uint64 trackerGenerationValue = 0;
+    bool discMode = false;
+    SampleAudioPtr discSample;
+    juce::uint64 discGenerationValue = 0;
+    PreviewOutput output {source,sampler,sf2Sampler,rexSampler,sf2Audition,externalSampler,trackerSong,sampleVoices};
     juce::AudioSourcePlayer player;
     void attach();
     void clearContainers();
     bool refreshSoundFontSamples(bool selectFirstPlayable);
     bool previewFileInstrument(const juce::File&);
+    bool previewTracker(const juce::File&);
     bool refreshExternalSamples(bool selectFirstPlayable);
     bool selectExternalSample(SampleId);
-    bool auditionMode() const { return sf2Mode || externalMode; }
+    bool auditionMode() const { return sf2Mode || externalMode || discMode; }
     double deviceSampleRate() const;
 };
 }

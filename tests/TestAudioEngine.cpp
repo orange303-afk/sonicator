@@ -19,7 +19,7 @@ TEST_CASE("Oversized output callbacks chunk the transport as well as MIDI", "[au
         bool isLooping() const override { return false; }
     } probe;
     juce::AudioTransportSource transport; transport.setSource(&probe);
-    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external; PreviewOutput output(transport,sampler,kit,rex,audition,external); output.prepareToPlay(64,44100);
+    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external; TrackerSongRenderer tracker; SampleVoicePlayer voices; PreviewOutput output(transport,sampler,kit,rex,audition,external,tracker,voices); output.prepareToPlay(64,44100);
     transport.start(); juce::AudioBuffer<float> buffer(2,600);
     buffer.setSample(0,0,0.123f); output.getNextAudioBlock({&buffer,16,512});
     REQUIRE(probe.largest <= 64); REQUIRE(probe.calls == 8); REQUIRE(probe.position == 512);
@@ -32,8 +32,8 @@ TEST_CASE("MIDI output mixes ordinary preview instead of silencing it", "[audio]
     juce::AudioFormatManager formats; formats.registerBasicFormats();
     juce::AudioFormatReaderSource reader(formats.createReaderFor(file),true);
     juce::AudioTransportSource transport; transport.setSource(&reader,0,nullptr,44100);
-    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external; REQUIRE(sampler.load(file).isEmpty());
-    PreviewOutput output(transport,sampler,kit,rex,audition,external); output.prepareToPlay(128,44100); output.midi = true;
+    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external; TrackerSongRenderer tracker; SampleVoicePlayer voices; REQUIRE(sampler.load(file).isEmpty());
+    PreviewOutput output(transport,sampler,kit,rex,audition,external,tracker,voices); output.prepareToPlay(128,44100); output.midi = true;
     transport.start(); juce::AudioBuffer<float> buffer(2,512);
     output.getNextAudioBlock({&buffer,0,512});
     REQUIRE(buffer.getMagnitude(0,512) > 0.5f);
@@ -193,6 +193,7 @@ TEST_CASE("MIDI preview gain is 20 percent louder without boosting audition", "[
         INFO("MIDI route " << route);
         juce::AudioTransportSource transport;
         MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external;
+        TrackerSongRenderer tracker; SampleVoicePlayer voices;
         REQUIRE(sampler.load(file).isEmpty());
         Sf2Bank bank; juce::String error;
         REQUIRE(bank.load(bankFile, error)); REQUIRE(kit.load(bank, 0, error));
@@ -205,7 +206,7 @@ TEST_CASE("MIDI preview gain is 20 percent louder without boosting audition", "[
         instrument.sources.push_back(descriptor); instrument.audio.push_back(held);
         ExternalZone zone; zone.sampleIndex = 0; zone.end = audio.frames; instrument.zones.push_back(zone);
         REQUIRE(external.load(instrument, error));
-        PreviewOutput output(transport, sampler, kit, rex, audition, external);
+        PreviewOutput output(transport, sampler, kit, rex, audition, external, tracker, voices);
         output.prepareToPlay(128, 44100);
         output.midi = true; output.sf2Mode = route == 1; output.externalMode = route == 2; output.gain = 0.5f;
         juce::AudioBuffer<float> reference(2, 512), actual(2, 544);
@@ -252,8 +253,9 @@ TEST_CASE("Dense MIDI preview stays within the output safety knee", "[audio][mid
     TestDirectory t;
     MidiSampler sampler; REQUIRE(sampler.load(t.wave()).isEmpty());
     Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external;
+    TrackerSongRenderer tracker; SampleVoicePlayer voices;
     juce::AudioTransportSource transport;
-    PreviewOutput output(transport, sampler, kit, rex, audition, external);
+    PreviewOutput output(transport, sampler, kit, rex, audition, external, tracker, voices);
     output.prepareToPlay(128, 44100); output.midi = true; output.gain = 1.0f;
     for (int i = 0; i < 16; ++i) output.collector.push(juce::MidiMessage::noteOn(1, 60, 1.0f));
     juce::AudioBuffer<float> buffer(2, 1024);
@@ -273,7 +275,8 @@ TEST_CASE("Enabling MIDI preview does not boost ordinary transport", "[audio][mi
     transport.setSource(&reader, 0, nullptr, 44100);
     reference.setSource(&referenceReader, 0, nullptr, 44100);
     MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external;
-    PreviewOutput output(transport, sampler, kit, rex, audition, external);
+    TrackerSongRenderer tracker; SampleVoicePlayer voices;
+    PreviewOutput output(transport, sampler, kit, rex, audition, external, tracker, voices);
     output.prepareToPlay(128, 44100); output.midi = true; output.gain = 0.5f;
     reference.prepareToPlay(128, 44100);
     transport.setGain(0.5f); reference.setGain(0.5f);

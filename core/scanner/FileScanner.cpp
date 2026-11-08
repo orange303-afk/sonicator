@@ -3,7 +3,9 @@
 namespace sonicator {
 bool FileScanner::isMetadataOnlyFormat(const juce::File& f)
 {
-    return f.hasFileExtension("rx2;sf2;exs;nki");
+    // Tracker modules are indexed by identity and header metadata; their PCM is decoded only
+    // when the module is opened, never during a library scan.
+    return f.hasFileExtension("rx2;sf2;exs;nki;mod;xm;s3m;iso;img;bin;cue;mdx");
 }
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {

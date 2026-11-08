@@ -24,6 +24,14 @@ void drawStar(juce::Graphics& g, juce::Rectangle<float> r, bool filled)
     if (filled) g.fillPath(path);
     else g.strokePath(path, juce::PathStrokeType(1.0f));
 }
+void drawProhibitionSign(juce::Graphics& g, juce::Rectangle<float> r)
+{
+    const auto outer = juce::jmin(r.getWidth(), r.getHeight()) * 0.5f - 0.8f;
+    const auto circle = juce::Rectangle<float>(outer * 2.0f, outer * 2.0f).withCentre(r.getCentre());
+    g.drawEllipse(circle, 1.3f);
+    auto bar = circle.reduced(outer * 0.42f);
+    g.drawLine(bar.getX(), bar.getY(), bar.getRight(), bar.getBottom(), 1.3f);
+}
 }
 namespace {
 juce::String formatBpm(double bpm)
@@ -363,6 +371,14 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
     if (col == 8)
     {
         const auto area = juce::Rectangle<float>(0, 0, (float) w, (float) h).withSizeKeepingCentre(14.0f, 14.0f);
+        if (isIncompatible(r.compatibility))
+        {
+            // The same 14x14 cell as the star: a required star keeps its stored value and returns
+            // as soon as the asset becomes compatible or the verdict is reset.
+            g.setColour(juce::Colour(0xffe05a5a));
+            drawProhibitionSign(g, area);
+            return;
+        }
         g.setColour(r.starred ? theme::text : theme::muted.withAlpha(0.55f));
         drawStar(g, area, r.starred);
         return;
@@ -425,7 +441,10 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
         case 3: value = r.duration > 0 ? juce::String(r.duration,2) + " s" : "--"; break;
         case 4: value = r.sampleRate > 0 ? juce::String(r.sampleRate/1000,1) + " kHz" : "--"; break;
         case 5: value = r.numChannels > 0 ? juce::String(r.numChannels) : "--"; break;
-        case 6: value = r.missing ? "Missing" : (r.error.isNotEmpty() ? "Decode error" : "Analyzed"); break;
+        case 6: value = r.missing ? "Missing"
+            : (r.compatibility == AssetCompatibility::unsupported ? "Unsupported"
+            : (r.compatibility == AssetCompatibility::invalid ? "Invalid"
+            : (r.error.isNotEmpty() ? "Decode error" : "Analyzed"))); break;
     }
     g.setColour(col == 1 ? theme::text : theme::muted); g.setFont(juce::FontOptions(13));
     g.drawText(value,10,0,w-16,h,juce::Justification::centredLeft,true);
@@ -437,6 +456,16 @@ void FileListPanel::cellClicked(int row, int, const juce::MouseEvent& event)
     const auto selection = getSelectedSamples();
     const auto* lead = recordAt(row);
     if (lead != nullptr && ! selection.empty()) onContextMenu(selection, *lead, event.getScreenPosition());
+}
+void FileListPanel::cellDoubleClicked(int row,int,const juce::MouseEvent&)
+{
+    if (const auto* record = recordAt(row))
+        if (onOpen) onOpen(*record);
+}
+void FileListPanel::returnKeyPressed(int row)
+{
+    if (const auto* record = recordAt(row))
+        if (onOpen) onOpen(*record);
 }
 void FileListPanel::selectedRowsChanged(int row)
 {

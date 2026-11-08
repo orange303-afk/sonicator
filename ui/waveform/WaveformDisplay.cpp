@@ -180,6 +180,7 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     externalDragTriggered = false;
     selectionDragActive = false;
     pressInsideSelection = false;
+    pressWasPrimary = ! e.mods.isPopupMenu() && ! e.mods.isMiddleButtonDown();
     dragOrigin = e.getPosition();
     const auto total = totalLength();
     if (total <= 0) return;
@@ -210,7 +211,10 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 {
     const auto total = totalLength();
-    if (total > 0 && ! selectionDragActive && ! externalDragTriggered)
+    // JUCE delivers the second mouseUp of a double-click before mouseDoubleClick, with two clicks
+    // recorded. That release must not seek or clear the range mouseDoubleClick is about to make.
+    const bool completesDoubleClick = pressWasPrimary && e.getNumberOfClicks() >= 2;
+    if (total > 0 && ! completesDoubleClick && ! selectionDragActive && ! externalDragTriggered)
     {
         if (onSeek) onSeek(selection::timeAtX(e.position.x, getWidth(), total));
         clearSelection();
@@ -223,5 +227,14 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
     }
     pressInsideSelection = false;
     externalDragTriggered = false;
+}
+void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
+{
+    // The whole displayed source, end exclusive. setSelection publishes only a real change, so a
+    // repeated double-click on an already full range does not restart export preparation.
+    if (! pressWasPrimary) return;
+    const auto total = totalLength();
+    if (! (total > 0) || ! std::isfinite(total)) return;
+    setSelection({ 0.0, total });
 }
 } // namespace sonicator

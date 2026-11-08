@@ -1,4 +1,5 @@
 #pragma once
+#include "AssetCompatibility.h"
 #include <juce_core/juce_core.h>
 namespace sonicator {
 // Version of the measured DSP feature set stored in SampleRecord: duration, rate, bits,
@@ -18,5 +19,6 @@ struct SampleRecord
     double peakLevel = 0, rmsLevel = 0;
     double spectralCentroid = 0, spectralRolloff = 0, spectralFlatness = 0;
     bool missing = false, starred = false;
+    AssetCompatibility compatibility = AssetCompatibility::unknown;
 };
 }
