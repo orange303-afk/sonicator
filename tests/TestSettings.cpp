@@ -168,3 +168,11 @@ TEST_CASE("Favorite folders are global and round-trip through settings", "[setti
     store.file().replaceWithText("{\"favoritesPanelHeight\":-4}");
     REQUIRE(store.load().favoritesPanelHeight == 200);
 }
+
+TEST_CASE("Show ignored persists and defaults to off", "[settings][ignore]")
+{
+    TestDirectory t; SettingsStore store(t.dir.getChildFile("settings.json"));
+    REQUIRE_FALSE(store.load().showIgnored);
+    store.update([](AppSettings& s) { s.showIgnored = true; });
+    REQUIRE(store.load().showIgnored);
+}

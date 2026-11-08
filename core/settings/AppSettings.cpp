@@ -52,6 +52,7 @@ AppSettings SettingsStore::load() const
         return value.isBool() ? (bool) value : fallback;
     };
     settings.midiPreview = readBool("midiPreview", settings.midiPreview);
+    settings.showIgnored = readBool("showIgnored", settings.showIgnored);
     settings.skipSilence = readBool("skipSilence", settings.skipSilence);
     settings.autoPreview = readBool("autoPreview", settings.autoPreview);
     settings.loopPreview = readBool("loopPreview", settings.loopPreview);
@@ -89,6 +90,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("pageSize", settings.pageSize);
     object->setProperty("database", settings.databasePath);
     object->setProperty("hideEmpty", settings.hideEmpty);
+    object->setProperty("showIgnored", settings.showIgnored);
     object->setProperty("midiPreview", settings.midiPreview);
     object->setProperty("skipSilence", settings.skipSilence);
     object->setProperty("autoPreview", settings.autoPreview);

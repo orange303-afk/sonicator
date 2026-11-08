@@ -16,6 +16,7 @@ struct AppSettings
     juce::String lastFolder;           // restored on the next launch when still in the catalog
     juce::String lastSamplePath;       // restored selection without starting preview playback
     bool hideEmpty = true;
+    bool showIgnored = false;          // reveal catalog rows hidden by ignored_paths
     // Preview panel toggles. Persisted so a restart keeps the same audition behaviour.
     bool midiPreview = false;
     bool skipSilence = false;
