@@ -22,6 +22,10 @@ bool IndexingService::startFolders(const juce::StringArray& roots, bool force)
 {
     return beginScan(roots, force, ScanMode::Full, false);
 }
+bool IndexingService::startFoldersNewOnly(const juce::StringArray& roots)
+{
+    return beginScan(roots, false, ScanMode::NewOnly, false);
+}
 bool IndexingService::beginScan(const juce::StringArray& roots, bool force, ScanMode mode,
                                 bool registerNewRoots)
 {

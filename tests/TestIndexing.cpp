@@ -261,3 +261,20 @@ TEST_CASE("startFolders indexes several folders without registering roots", "[in
     REQUIRE(repo.count() == 2);
     REQUIRE(repo.roots().isEmpty());
 }
+
+TEST_CASE("startFoldersNewOnly analyzes only unknown paths in the given folders", "[indexing][split][new-only]")
+{
+    TestDirectory t;
+    t.wave("a/one.wav"); t.wave("a/two.wav");
+    Database db(t.dir.getChildFile("new-only.sqlite")); SampleRepository repo(db); repo.createTables();
+    SampleRecord known; known.filePath = t.dir.getChildFile("a/one.wav").getFullPathName();
+    known.fileName = "one.wav"; known.error = "bad";
+    repo.upsert(known);
+    IndexingService index(repo);
+    REQUIRE(index.startFoldersNewOnly({ t.dir.getChildFile("a").getFullPathName() }));
+    REQUIRE(index.waitUntilFinished(20000));
+    REQUIRE(repo.count() == 2);
+    REQUIRE(repo.findByPath(known.filePath)->error == "bad");
+    REQUIRE(repo.findByPath(t.dir.getChildFile("a/two.wav").getFullPathName())->error.isEmpty());
+    REQUIRE(repo.roots().isEmpty());
+}

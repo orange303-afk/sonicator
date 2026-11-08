@@ -36,6 +36,8 @@ public:
     // Discovers several folders in one run without registering them as roots. Used after Split to
     // index the new parts without a full library rescan.
     bool startFolders(const juce::StringArray& folders, bool force = false);
+    // Same discovery, but analyzes only paths that are not in the catalog yet.
+    bool startFoldersNewOnly(const juce::StringArray& folders);
     void cancel();
     void setPaused(bool);
     IndexingProgress progress() const;

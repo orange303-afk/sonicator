@@ -185,14 +185,16 @@ TEST_CASE("Split defaults persist and clamp to the supported ranges", "[settings
     REQUIRE(loaded.splitMinSilenceMs == 250);
     REQUIRE(loaded.splitMinPartMs == 100);
     REQUIRE(loaded.splitSameFolder);
+    REQUIRE_FALSE(loaded.splitMoveToTrash);
     store.update([](AppSettings& s)
     {
         s.splitThresholdDb = -45.0; s.splitMinSilenceMs = 800;
-        s.splitMinPartMs = 200; s.splitSameFolder = false;
+        s.splitMinPartMs = 200; s.splitSameFolder = false; s.splitMoveToTrash = true;
     });
     loaded = store.load();
     REQUIRE(loaded.splitThresholdDb == -45.0);
     REQUIRE(loaded.splitMinSilenceMs == 800);
     REQUIRE(loaded.splitMinPartMs == 200);
     REQUIRE_FALSE(loaded.splitSameFolder);
+    REQUIRE(loaded.splitMoveToTrash);
 }

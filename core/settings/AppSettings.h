@@ -21,6 +21,7 @@ struct AppSettings
     int splitMinSilenceMs = 250;
     int splitMinPartMs = 100;
     bool splitSameFolder = true;
+    bool splitMoveToTrash = false;
     // Preview panel toggles. Persisted so a restart keeps the same audition behaviour.
     bool midiPreview = false;
     bool skipSilence = false;

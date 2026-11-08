@@ -112,7 +112,7 @@ FileListPanel::FileListPanel()
     h.addColumn("FORMAT",2,66,48,120);
     h.addColumn("LENGTH",3,78,56,140);
     h.addColumn("RATE",4,78,56,140);
-    h.addColumn("CH",5,40,30,70);
+    h.addColumn("CH",5,56,40,80);
     h.addColumn("TAGS",7,130,70,350);
     h.addColumn("DUPLICATES",9,84,64,130);
     h.addColumn("STATUS",6,110,70,350);
@@ -174,7 +174,12 @@ std::vector<SampleRecord> FileListPanel::getSelectedSamples()
 juce::StringArray FileListPanel::dragPaths()
 {
     juce::StringArray candidates;
-    for (const auto& record : getSelectedSamples()) candidates.add(record.filePath);
+    for (const auto& record : getSelectedSamples())
+    {
+        candidates.add(record.filePath);
+        const auto partner = stereoPartners.find(record.id);
+        if (partner != stereoPartners.end()) candidates.addIfNotAlreadyThere(partner->second);
+    }
     return ExternalFileDrag::existingPaths(candidates);
 }
 int FileListPanel::prepareRowDrag(int row, bool addToSelection)
@@ -234,6 +239,7 @@ void FileListPanel::loadVirtualBlock(int row)
     for (auto& [id, tags] : loaded.tags) rowTags[id] = std::move(tags);
     for (auto& [id, count] : loaded.duplicates) duplicateCounts[id] = count;
     for (auto& [id, display] : loaded.smart) smartDisplays[id] = std::move(display);
+    for (auto& [id, partner] : loaded.stereoPairs) stereoPartners[id] = std::move(partner);
     evictVirtualRows(row);
 }
 void FileListPanel::evictVirtualRows(int centreRow)
@@ -252,6 +258,9 @@ void FileListPanel::evictVirtualRows(int centreRow)
     for (auto it = smartDisplays.begin(); it != smartDisplays.end();)
         if (virtualRows.find(it->first) == virtualRows.end()) it = smartDisplays.erase(it);
         else ++it;
+    for (auto it = stereoPartners.begin(); it != stereoPartners.end();)
+        if (virtualRows.find(it->first) == virtualRows.end()) it = stereoPartners.erase(it);
+        else ++it;
 }
 void FileListPanel::setVirtualSamples(std::vector<int64_t> orderedIds, RowLoader loader)
 {
@@ -266,7 +275,7 @@ void FileListPanel::setVirtualSamples(std::vector<int64_t> orderedIds, RowLoader
     virtualIds = std::move(orderedIds);
     virtualRows.clear();
     all.clear(); visible.clear(); search.clear();
-    rowTags.clear(); duplicateCounts.clear(); smartDisplays.clear();
+    rowTags.clear(); duplicateCounts.clear(); smartDisplays.clear(); stereoPartners.clear();
     rowLoader = std::move(loader);
     table.deselectAllRows();
     table.updateContent();
@@ -296,7 +305,7 @@ void FileListPanel::setSamples(std::vector<SampleRecord> records)
     if (leadRow >= 0 && leadRow < getNumRows()) leadId = idAt(leadRow);
     const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
     virtualMode = false; virtualIds.clear(); virtualRows.clear(); rowLoader = nullptr;
-    rowTags.clear(); duplicateCounts.clear(); smartDisplays.clear();
+    rowTags.clear(); duplicateCounts.clear(); smartDisplays.clear(); stereoPartners.clear();
     all = std::move(records); rebuild();
     if (selectedIds.empty()) return;
     int restoredLead = -1;
@@ -322,6 +331,11 @@ void FileListPanel::setDuplicateCounts(std::map<int64_t, int> counts)
 void FileListPanel::setSmartDisplays(std::map<int64_t, SmartDisplay> displays)
 {
     smartDisplays = std::move(displays);
+    table.repaint();
+}
+void FileListPanel::setStereoPairs(std::map<int64_t, juce::String> partnerPaths)
+{
+    stereoPartners = std::move(partnerPaths);
     table.repaint();
 }
 void FileListPanel::setIgnoredPaths(std::vector<IgnoredPath> paths)
@@ -405,6 +419,12 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
     }
     if (col == 9)
     {
+        if (stereoPartners.count(r.id) != 0)
+        {
+            g.setColour(theme::muted); g.setFont(juce::FontOptions(12));
+            g.drawText("L+R", 8, 0, w - 12, h, juce::Justification::centredLeft, true);
+            return;
+        }
         const auto found = duplicateCounts.find(r.id);
         if (found == duplicateCounts.end() || found->second < 2)
         {
@@ -460,7 +480,8 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
         case 2: value = r.format; break;
         case 3: value = r.duration > 0 ? juce::String(r.duration,2) + " s" : "--"; break;
         case 4: value = r.sampleRate > 0 ? juce::String(r.sampleRate/1000,1) + " kHz" : "--"; break;
-        case 5: value = r.numChannels > 0 ? juce::String(r.numChannels) : "--"; break;
+        case 5: value = stereoPartners.count(r.id) != 0 ? "L+R"
+            : (r.numChannels > 0 ? juce::String(r.numChannels) : "--"); break;
         case 6: value = sampleStatusText(r, ignored); break;
     }
     g.setColour(isIncompatible(r.compatibility) || r.error.isNotEmpty()

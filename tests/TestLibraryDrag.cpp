@@ -173,3 +173,20 @@ TEST_CASE("Ignored status is reported below decode problems", "[ui][library][ign
     r.missing = false; r.error = "bad";
     REQUIRE(sampleStatusText(r, true) == "Decode error");
 }
+
+TEST_CASE("A stereo pair row drags both mono files", "[drag][library][stereo-pairs]")
+{
+    TestDirectory t;
+    auto left = t.wave("pair-L.wav");
+    auto right = t.wave("pair-R.wav");
+    SampleRecord record;
+    record.id = 1; record.filePath = left.getFullPathName(); record.fileName = "pair-L.wav";
+    FileListPanel list; list.setBounds(0, 0, 800, 400); list.resized();
+    list.setSamples({ record });
+    list.setStereoPairs({ { record.id, right.getFullPathName() } });
+    list.selectRows({ 0 });
+    const auto paths = list.dragPaths();
+    REQUIRE(paths.size() == 2);
+    REQUIRE(paths.contains(left.getFullPathName()));
+    REQUIRE(paths.contains(right.getFullPathName()));
+}

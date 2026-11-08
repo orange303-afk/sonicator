@@ -10,6 +10,7 @@ struct SplitOptions
     SilenceOptions silence;
     juce::File outputFolder;
     bool sameFolder = true;
+    bool moveToTrash = false;
 };
 enum class SplitFileState { split, noSplit, skipped, failed, cancelled };
 struct SplitFileResult
@@ -32,6 +33,9 @@ inline bool deletionAllowed(const SplitFileResult& result, bool batchCancelled)
 {
     return ! batchCancelled && result.deletable();
 }
+// Existing sidecar files that belong to a source: Ableton's <file>.wav.asd and the common
+// <stem>.asd / <stem>.pk variants. Missing candidates are not returned.
+juce::StringArray splitSidecarPaths(const juce::File& source);
 struct SplitProgress
 {
     bool running = false, cancelled = false;

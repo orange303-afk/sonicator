@@ -1,5 +1,6 @@
 #include "SampleRepository.h"
 #include "SearchSyntax.h"
+#include "core/audio/StereoPair.h"
 #include "core/smart/KeyNames.h"
 #include "core/smart/SmartResolver.h"
 #include "PathRelocation.h"
@@ -49,6 +50,15 @@ std::pair<juce::String,juce::String> folderRange(const juce::String& folder)
     auto prefix = juce::File(folder).getFullPathName();
     if (! prefix.endsWithChar(juce::File::getSeparatorChar())) prefix += juce::File::getSeparatorString();
     return {prefix, prefix.dropLastCharacters(1) + juce::String::charToString(juce::File::getSeparatorChar()+1)};
+}
+// Mono files whose names differ only by an L/R marker in the same folder share this key.
+std::pair<juce::String,int> makePairKey(const SampleRecord& record)
+{
+    if (record.numChannels != 1 || record.sampleRate <= 0) return { {}, 0 };
+    const auto name = parseStereoName(record.fileName);
+    if (name.side == 0 || name.base.isEmpty()) return { {}, 0 };
+    const auto folder = juce::File(record.filePath).getParentDirectory().getFullPathName();
+    return { folder + "\n" + name.base.toLowerCase(), name.side };
 }
 juce::String escapeLike(const juce::String& value)
 {
@@ -179,6 +189,12 @@ struct FilterSql
 void appendIgnore(FilterSql& target, const std::vector<IgnoredPath>& ignored)
 {
     if (! ignored.empty()) target.where += " AND samples.ignored=0";
+}
+// The R half of a valid stereo pair shares the L row in the library.
+void appendStereoVisibility(FilterSql& target)
+{
+    target.where += " AND NOT EXISTS(SELECT 1 FROM stereo_pairs sp"
+                    " WHERE sp.sample_id=samples.id AND sp.is_representative=0)";
 }
 FilterSql buildFilterSql(const LibraryFilter& filter, const std::vector<IgnoredPath>& ignored)
 {
@@ -319,6 +335,7 @@ FilterSql buildFilterSql(const LibraryFilter& filter, const std::vector<IgnoredP
     if (filter.duplicateHash.isNotEmpty())
         addText(" AND samples.hash=?", filter.duplicateHash);
     if (! filter.showIgnored) appendIgnore(sql, ignored);
+    appendStereoVisibility(sql);
     return sql;
 }
 int bindFilter(detail::Statement& statement, const FilterSql& sql)
@@ -453,7 +470,8 @@ void SampleRepository::createTables()
             "size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
             "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER,"
             "search_key TEXT NOT NULL DEFAULT '', starred INTEGER NOT NULL DEFAULT 0,"
-            "compatibility INTEGER NOT NULL DEFAULT 0, ignored INTEGER NOT NULL DEFAULT 0);"
+            "compatibility INTEGER NOT NULL DEFAULT 0, ignored INTEGER NOT NULL DEFAULT 0,"
+            "pair_key TEXT NOT NULL DEFAULT '', pair_side INTEGER NOT NULL DEFAULT 0);"
             "CREATE INDEX IF NOT EXISTS samples_hash ON samples(hash);"
             "CREATE INDEX IF NOT EXISTS samples_name_id ON samples(name COLLATE NOCASE, id);"
             "CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY);"
@@ -530,7 +548,12 @@ void SampleRepository::createTables()
             "key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;"
             "CREATE TABLE IF NOT EXISTS ignored_paths ("
             "path TEXT PRIMARY KEY, is_folder INTEGER NOT NULL DEFAULT 0,"
-            "created_at INTEGER NOT NULL DEFAULT 0);");
+            "created_at INTEGER NOT NULL DEFAULT 0);"
+            "CREATE TABLE IF NOT EXISTS stereo_pairs ("
+            "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE,"
+            "representative_id INTEGER NOT NULL, partner_id INTEGER NOT NULL,"
+            "is_representative INTEGER NOT NULL DEFAULT 0);"
+            "CREATE INDEX IF NOT EXISTS stereo_pairs_rep ON stereo_pairs(representative_id);");
         // Databases created before schema 3 predate the folded search column.
         bool hasSearchKey = false, hasStarred = false;
         {
@@ -549,6 +572,8 @@ void SampleRepository::createTables()
         // Cached visibility derived from ignored_paths. Keeping it on the row makes every query
         // independent of how many paths are ignored; the table stays the source of truth.
         ensureColumn(db.handle, "samples", "ignored", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(db.handle, "samples", "pair_key", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "samples", "pair_side", "INTEGER NOT NULL DEFAULT 0");
         // Schema 7 extends smart storage in place. Existing rows keep their identity, tags, stars,
         // measured features, duplicate groups and overrides; only new columns/tables are added.
         ensureColumn(db.handle, "smart_candidates", "aux_value", "REAL NOT NULL DEFAULT 0");
@@ -650,14 +675,16 @@ int64_t SampleRepository::upsert(const SampleRecord& r)
 {
     std::lock_guard lock(db.mutex);
     const bool ignored = isPathIgnored(r.filePath, ignoredPathsLocked());
+    const auto [pairKey, pairSide] = makePairKey(r);
     detail::Statement s(db.handle,
-        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred,compatibility,ignored)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
+        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred,compatibility,ignored,pair_key,pair_side)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
         "name=excluded.name,hash=excluded.hash,format=excluded.format,error=excluded.error,size=excluded.size,"
         "modified=excluded.modified,analyzed=excluded.analyzed,duration=excluded.duration,rate=excluded.rate,"
         "bits=excluded.bits,channels=excluded.channels,version=excluded.version,peak=excluded.peak,rms=excluded.rms,"
         "centroid=excluded.centroid,rolloff=excluded.rolloff,flatness=excluded.flatness,missing=excluded.missing,"
-        "search_key=excluded.search_key,compatibility=excluded.compatibility,ignored=excluded.ignored RETURNING id");
+        "search_key=excluded.search_key,compatibility=excluded.compatibility,ignored=excluded.ignored,"
+        "pair_key=excluded.pair_key,pair_side=excluded.pair_side RETURNING id");
     s.text(1,r.filePath); s.text(2,r.fileName); s.text(3,r.fileHash); s.text(4,r.format); s.text(5,r.error);
     s.integer(6,r.fileSize); s.integer(7,r.dateModified); s.integer(8,r.dateAnalyzed);
     s.real(9,r.duration); s.real(10,r.sampleRate); s.integer(11,r.bitsPerSample); s.integer(12,r.numChannels);
@@ -665,6 +692,7 @@ int64_t SampleRepository::upsert(const SampleRecord& r)
     s.real(17,r.spectralRolloff); s.real(18,r.spectralFlatness); s.integer(19,r.missing ? 1 : 0);
     s.text(20,searchKey(r.fileName,r.filePath)); s.integer(21,r.starred ? 1 : 0);
     s.integer(22,(int) r.compatibility); s.integer(23, ignored ? 1 : 0);
+    s.text(24, pairKey); s.integer(25, pairSide);
     if (! s.step()) throw std::runtime_error("Insert did not return a sample ID");
     const auto id = s.integer(0);
     // Reanalysed audio makes the derived smart result stale; candidates, overrides and the last
@@ -833,6 +861,7 @@ int SampleRepository::count(bool includeIgnored) const
     std::lock_guard lock(db.mutex);
     FilterSql parts;
     if (! includeIgnored) appendIgnore(parts, ignoredPathsLocked());
+    appendStereoVisibility(parts);
     detail::Statement s(db.handle, ("SELECT COUNT(*) FROM samples" + parts.where).toRawUTF8());
     bindFilter(s, parts);
     return s.step() ? (int) s.integer(0) : 0;
@@ -846,6 +875,7 @@ int SampleRepository::countInFolder(const juce::String& folder) const
     parts.where += " AND samples.path>=? AND samples.path<?";
     parts.params.emplace_back(lower); parts.params.emplace_back(upper);
     appendIgnore(parts, ignoredPathsLocked());
+    appendStereoVisibility(parts);
     detail::Statement s(db.handle, ("SELECT COUNT(*) FROM samples" + parts.where).toRawUTF8());
     bindFilter(s, parts);
     return s.step() ? (int) s.integer(0) : 0;
@@ -859,6 +889,7 @@ std::vector<SampleRecord> SampleRepository::pageInFolder(const juce::String& fol
     parts.where += " AND samples.path>=? AND samples.path<?";
     parts.params.emplace_back(lower); parts.params.emplace_back(upper);
     appendIgnore(parts, ignoredPathsLocked());
+    appendStereoVisibility(parts);
     auto sql = "SELECT " + juce::String(columns) + " FROM samples" + parts.where
         + " ORDER BY name COLLATE NOCASE,id LIMIT ? OFFSET ?";
     detail::Statement s(db.handle,sql.toRawUTF8());
@@ -940,7 +971,8 @@ std::vector<int64_t> SampleRepository::visibleIds(const std::vector<int64_t>& id
         juce::String placeholders;
         for (size_t i = start; i < end; ++i) placeholders += (i == start ? "?" : ",?");
         detail::Statement s(db.handle,
-            ("SELECT id FROM samples WHERE id IN (" + placeholders + ") AND ignored=0").toRawUTF8());
+            ("SELECT id FROM samples WHERE id IN (" + placeholders + ") AND ignored=0"
+             " AND id NOT IN (SELECT sample_id FROM stereo_pairs WHERE is_representative=0)").toRawUTF8());
         int index = 1;
         for (size_t i = start; i < end; ++i) s.integer(index++, ids[i]);
         while (s.step()) visible.insert(s.integer(0));
@@ -948,6 +980,27 @@ std::vector<int64_t> SampleRepository::visibleIds(const std::vector<int64_t>& id
     std::vector<int64_t> out;
     for (auto id : ids)
         if (visible.count(id) != 0) out.push_back(id);
+    return out;
+}
+std::map<int64_t, juce::String> SampleRepository::stereoPairPartners(const std::vector<int64_t>& ids) const
+{
+    std::map<int64_t, juce::String> out;
+    if (ids.empty()) return out;
+    std::lock_guard lock(db.mutex);
+    constexpr size_t chunkSize = 400;
+    for (size_t start = 0; start < ids.size(); start += chunkSize)
+    {
+        const size_t end = std::min(ids.size(), start + chunkSize);
+        juce::String placeholders;
+        for (size_t i = start; i < end; ++i) placeholders += (i == start ? "?" : ",?");
+        detail::Statement s(db.handle,
+            ("SELECT sp.representative_id,s.path FROM stereo_pairs sp"
+             " JOIN samples s ON s.id=sp.partner_id"
+             " WHERE sp.is_representative=1 AND sp.representative_id IN (" + placeholders + ")").toRawUTF8());
+        int index = 1;
+        for (size_t i = start; i < end; ++i) s.integer(index++, ids[i]);
+        while (s.step()) out[s.integer(0)] = s.text(1);
+    }
     return out;
 }
 int SampleRepository::countHash(const juce::String& hash) const
@@ -1345,6 +1398,7 @@ int SampleRepository::countTaggedInFolder(const juce::String& folder) const
     parts.where += " AND samples.path>=? AND samples.path<?";
     parts.params.emplace_back(lower); parts.params.emplace_back(upper);
     appendIgnore(parts, ignoredPathsLocked());
+    appendStereoVisibility(parts);
     detail::Statement s(db.handle,
         ("SELECT COUNT(DISTINCT samples.id) FROM samples JOIN sample_tags st ON st.sample_id=samples.id"
          + parts.where).toRawUTF8());
@@ -1426,6 +1480,7 @@ std::vector<int64_t> SampleRepository::idsInFolder(const juce::String& folder) c
     parts.where += " AND samples.path>=? AND samples.path<?";
     parts.params.emplace_back(lower); parts.params.emplace_back(upper);
     appendIgnore(parts, ignoredPathsLocked());
+    appendStereoVisibility(parts);
     detail::Statement s(db.handle,
         ("SELECT samples.id FROM samples" + parts.where + " ORDER BY samples.id").toRawUTF8());
     bindFilter(s, parts);
@@ -1442,6 +1497,7 @@ int SampleRepository::countWithTagInFolder(const juce::String& folder, int64_t t
     parts.params.emplace_back(lower); parts.params.emplace_back(upper);
     parts.params.emplace_back(tagId);
     appendIgnore(parts, ignoredPathsLocked());
+    appendStereoVisibility(parts);
     detail::Statement s(db.handle,
         ("SELECT COUNT(*) FROM samples JOIN sample_tags st ON st.sample_id=samples.id"
          + parts.where).toRawUTF8());
@@ -1474,15 +1530,68 @@ void SampleRepository::refreshDuplicates()
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
     try
     {
+        {
+            bool pairKeysReady = false;
+            {
+                detail::Statement marker(db.handle,
+                    "SELECT value FROM smart_meta WHERE key='pair_keys_v1'");
+                pairKeysReady = marker.step() && marker.integer(0) != 0;
+            }
+            if (! pairKeysReady)
+            {
+                // Existing catalogs predate pair_key/pair_side. Backfill only mono names that
+                // actually carry an L/R marker, then remember the pass so later refreshes skip it.
+                detail::Statement select(db.handle,
+                    "SELECT id,name,path,channels,rate FROM samples"
+                    " WHERE pair_key='' AND channels=1 AND rate>0 AND ("
+                    " lower(name) LIKE '%-l.%' OR lower(name) LIKE '%-r.%'"
+                    " OR lower(name) LIKE '%_l.%' OR lower(name) LIKE '%_r.%'"
+                    " OR lower(name) LIKE '%.l.%' OR lower(name) LIKE '%.r.%'"
+                    " OR lower(name) LIKE '% l.%' OR lower(name) LIKE '% r.%')");
+                detail::Statement update(db.handle,
+                    "UPDATE samples SET pair_key=?,pair_side=? WHERE id=?");
+                while (select.step())
+                {
+                    SampleRecord probe;
+                    probe.fileName = select.text(1);
+                    probe.filePath = select.text(2);
+                    probe.numChannels = (int) select.integer(3);
+                    probe.sampleRate = select.real(4);
+                    const auto [key, side] = makePairKey(probe);
+                    if (key.isEmpty()) continue;
+                    update.reset(); update.text(1, key); update.integer(2, side);
+                    update.integer(3, select.integer(0)); update.step();
+                }
+                detail::exec(db.handle,
+                    "INSERT OR REPLACE INTO smart_meta(key,value) VALUES('pair_keys_v1',1);");
+            }
+        }
+        detail::exec(db.handle, "DELETE FROM stereo_pairs;");
+        constexpr auto stereoPairSql =
+            "INSERT OR IGNORE INTO stereo_pairs(sample_id,representative_id,partner_id,is_representative) "
+            "SELECT l.id,l.id,r.id,1 FROM samples l JOIN samples r ON r.pair_key=l.pair_key "
+            "WHERE l.pair_key<>'' AND l.pair_side=-1 AND r.pair_side=1"
+            " AND l.channels=1 AND r.channels=1 AND l.rate=r.rate AND l.duration>0"
+            " AND abs(l.duration-r.duration)<0.001 AND l.ignored=0 AND r.ignored=0"
+            " AND l.missing=0 AND r.missing=0 "
+            "UNION ALL "
+            "SELECT r.id,l.id,r.id,0 FROM samples l JOIN samples r ON r.pair_key=l.pair_key "
+            "WHERE l.pair_key<>'' AND l.pair_side=-1 AND r.pair_side=1"
+            " AND l.channels=1 AND r.channels=1 AND l.rate=r.rate AND l.duration>0"
+            " AND abs(l.duration-r.duration)<0.001 AND l.ignored=0 AND r.ignored=0"
+            " AND l.missing=0 AND r.missing=0;";
+        detail::exec(db.handle, stereoPairSql);
         detail::exec(db.handle, "DELETE FROM duplicates;");
         detail::Statement groups(db.handle,
             "SELECT hash FROM samples WHERE hash<>'' AND size>0 AND ignored=0"
+            " AND id NOT IN (SELECT sample_id FROM stereo_pairs WHERE is_representative=0)"
             " GROUP BY hash HAVING COUNT(*)>1");
         std::vector<juce::String> hashes;
         while (groups.step()) hashes.push_back(groups.text(0));
         struct Member { int64_t id = 0; bool starred = false, missing = false; bool failed = false; int pathLength = 0; };
         detail::Statement select(db.handle,
-            "SELECT id,path,starred,missing,error FROM samples WHERE hash=? AND ignored=0");
+            "SELECT id,path,starred,missing,error FROM samples WHERE hash=? AND ignored=0"
+            " AND id NOT IN (SELECT sample_id FROM stereo_pairs WHERE is_representative=0)");
         detail::Statement insert(db.handle,
             "INSERT OR REPLACE INTO duplicates(sample_id,representative_id,group_hash,group_size,is_representative)"
             " VALUES(?,?,?,?,?)");

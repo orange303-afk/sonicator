@@ -65,6 +65,7 @@ AppSettings SettingsStore::load() const
     settings.splitMinPartMs = (int) juce::jlimit(20.0, 2000.0,
         readNumber("splitMinPart", (double) settings.splitMinPartMs));
     settings.splitSameFolder = readBool("splitSameFolder", settings.splitSameFolder);
+    settings.splitMoveToTrash = readBool("splitMoveToTrash", settings.splitMoveToTrash);
     settings.skipSilence = readBool("skipSilence", settings.skipSilence);
     settings.autoPreview = readBool("autoPreview", settings.autoPreview);
     settings.loopPreview = readBool("loopPreview", settings.loopPreview);
@@ -107,6 +108,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("splitMinSilence", settings.splitMinSilenceMs);
     object->setProperty("splitMinPart", settings.splitMinPartMs);
     object->setProperty("splitSameFolder", settings.splitSameFolder);
+    object->setProperty("splitMoveToTrash", settings.splitMoveToTrash);
     object->setProperty("midiPreview", settings.midiPreview);
     object->setProperty("skipSilence", settings.skipSilence);
     object->setProperty("autoPreview", settings.autoPreview);

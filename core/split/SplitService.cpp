@@ -19,8 +19,7 @@ juce::String splitStem(const juce::String& name)
     return out.substring(0, 120);
 }
 juce::File uniquePartFile(const juce::File& folder, const juce::String& stem, int index, int width)
-{
-    const auto padded = juce::String(index).paddedLeft('0', width);
+{    const auto padded = juce::String(index).paddedLeft('0', width);
     const auto available = [](const juce::File& file)
     {
         return ! file.existsAsFile() && ! juce::File(file.getFullPathName() + ".part").existsAsFile();
@@ -35,12 +34,24 @@ juce::File uniquePartFile(const juce::File& folder, const juce::String& stem, in
     return {};
 }
 }
+juce::StringArray splitSidecarPaths(const juce::File& source)
+{
+    juce::StringArray out;
+    const auto parent = source.getParentDirectory();
+    const auto stem = source.getFileNameWithoutExtension();
+    for (const auto& name : { source.getFileName() + ".asd", stem + ".asd", stem + ".pk" })
+    {
+        const auto file = parent.getChildFile(name);
+        if (! file.existsAsFile()) continue;
+        if (! out.contains(file.getFullPathName())) out.add(file.getFullPathName());
+    }
+    return out;
+}
 SplitService::~SplitService()
 {
     cancel();
     waitForThreadToExit(-1);
-}
-bool SplitService::start(const std::vector<juce::File>& sources, const SplitOptions& options)
+}bool SplitService::start(const std::vector<juce::File>& sources, const SplitOptions& options)
 {
     if (isThreadRunning()) return false;
     waitForThreadToExit(-1);

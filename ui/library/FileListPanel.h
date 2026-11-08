@@ -26,6 +26,7 @@ public:
         std::map<int64_t, std::vector<Tag>> tags;
         std::map<int64_t, int> duplicates;
         std::map<int64_t, SmartDisplay> smart;
+        std::map<int64_t, juce::String> stereoPairs;
     };
     using RowLoader = std::function<LoadedRows(const std::vector<int64_t>&)>;
     void setSamples(std::vector<SampleRecord>);
@@ -34,6 +35,7 @@ public:
     void setRowTags(std::map<int64_t, std::vector<Tag>>);
     void setDuplicateCounts(std::map<int64_t, int>);
     void setSmartDisplays(std::map<int64_t, SmartDisplay>);
+    void setStereoPairs(std::map<int64_t, juce::String> partnerPaths);
     void setIgnoredPaths(std::vector<IgnoredPath>);
     void setSearchText(const juce::String&);
     void selectRow(int row) { table.selectRow(row); }
@@ -87,6 +89,7 @@ private:
     std::map<int64_t, std::vector<Tag>> rowTags;
     std::map<int64_t, int> duplicateCounts;
     std::map<int64_t, SmartDisplay> smartDisplays;
+    std::map<int64_t, juce::String> stereoPartners;
     std::vector<IgnoredPath> ignoredPaths;
     juce::String search;
     int sortColumn = 1;

@@ -206,3 +206,17 @@ TEST_CASE("A cancelled batch suppresses deletion of completed files", "[split][s
     REQUIRE(deletionAllowed(complete, false));
     REQUIRE_FALSE(deletionAllowed(complete, true));
 }
+
+TEST_CASE("Sidecar discovery finds Ableton and stem variants", "[split][sidecar]")
+{
+    TestDirectory t;
+    auto source = t.wave("loop.wav");
+    auto able = t.dir.getChildFile("loop.wav.asd"); able.replaceWithText("a");
+    auto asd = t.dir.getChildFile("loop.asd"); asd.replaceWithText("b");
+    auto pk = t.dir.getChildFile("loop.pk"); pk.replaceWithText("c");
+    const auto paths = splitSidecarPaths(source);
+    REQUIRE(paths.size() == 3);
+    REQUIRE(paths.contains(able.getFullPathName()));
+    REQUIRE(paths.contains(asd.getFullPathName()));
+    REQUIRE(paths.contains(pk.getFullPathName()));
+}

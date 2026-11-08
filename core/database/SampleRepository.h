@@ -81,6 +81,8 @@ public:
     std::vector<SampleRecord> recordsByIds(const std::vector<int64_t>&) const;
     // The subset of ids that is not hidden by an ignore entry, preserving input order.
     std::vector<int64_t> visibleIds(const std::vector<int64_t>& ids) const;
+    // Representative id -> partner path for every valid mono L/R stereo pair.
+    std::map<int64_t, juce::String> stereoPairPartners(const std::vector<int64_t>& ids) const;
     int countHash(const juce::String&) const;
     void addRoot(const juce::String&);
     juce::StringArray roots() const;
