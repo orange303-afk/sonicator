@@ -173,7 +173,36 @@ struct FilterSql
     juce::String where = " WHERE 1";
     std::vector<std::variant<juce::String, int64_t>> params;
 };
-FilterSql buildFilterSql(const LibraryFilter& filter)
+// SQL conditions that exclude every row hidden by an ignore entry, for any path column.
+struct IgnoreSql { juce::String where; std::vector<juce::String> params; };
+IgnoreSql buildIgnoreSql(const std::vector<IgnoredPath>& ignored, const juce::String& pathColumn)
+{
+    IgnoreSql sql;
+    for (const auto& entry : ignored)
+    {
+        if (entry.folder)
+        {
+            auto [lower, upper] = folderRange(entry.path);
+            sql.where += " AND NOT (" + pathColumn + ">=? AND " + pathColumn + "<?)";
+            sql.params.push_back(lower);
+            sql.params.push_back(upper);
+        }
+        else
+        {
+            sql.where += " AND " + pathColumn + "<>?";
+            sql.params.push_back(entry.path);
+        }
+    }
+    return sql;
+}
+void appendIgnore(FilterSql& target, const std::vector<IgnoredPath>& ignored,
+                  const juce::String& pathColumn)
+{
+    const auto ignore = buildIgnoreSql(ignored, pathColumn);
+    target.where += ignore.where;
+    for (const auto& param : ignore.params) target.params.emplace_back(param);
+}
+FilterSql buildFilterSql(const LibraryFilter& filter, const std::vector<IgnoredPath>& ignored)
 {
     FilterSql sql;
     auto addText = [&](const juce::String& text, juce::String value)
@@ -311,6 +340,7 @@ FilterSql buildFilterSql(const LibraryFilter& filter)
         sql.where += " AND NOT EXISTS(SELECT 1 FROM duplicates d WHERE d.sample_id=samples.id AND d.is_representative=0)";
     if (filter.duplicateHash.isNotEmpty())
         addText(" AND samples.hash=?", filter.duplicateHash);
+    if (! filter.showIgnored) appendIgnore(sql, ignored, "samples.path");
     return sql;
 }
 int bindFilter(detail::Statement& statement, const FilterSql& sql)
@@ -728,10 +758,13 @@ void SampleRepository::setMissing(const std::vector<int64_t>& ids)
         throw;
     }
 }
-int SampleRepository::count() const
+int SampleRepository::count(bool includeIgnored) const
 {
     std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,"SELECT COUNT(*) FROM samples");
+    FilterSql parts;
+    if (! includeIgnored) appendIgnore(parts, ignoredPathsLocked(), "samples.path");
+    detail::Statement s(db.handle, ("SELECT COUNT(*) FROM samples" + parts.where).toRawUTF8());
+    bindFilter(s, parts);
     return s.step() ? (int) s.integer(0) : 0;
 }
 int SampleRepository::countInFolder(const juce::String& folder) const
@@ -739,8 +772,12 @@ int SampleRepository::countInFolder(const juce::String& folder) const
     if (folder.isEmpty()) return count();
     std::lock_guard lock(db.mutex);
     auto [lower,upper] = folderRange(folder);
-    detail::Statement s(db.handle,"SELECT COUNT(*) FROM samples WHERE path>=? AND path<?");
-    s.text(1,lower); s.text(2,upper);
+    FilterSql parts;
+    parts.where += " AND samples.path>=? AND samples.path<?";
+    parts.params.emplace_back(lower); parts.params.emplace_back(upper);
+    appendIgnore(parts, ignoredPathsLocked(), "samples.path");
+    detail::Statement s(db.handle, ("SELECT COUNT(*) FROM samples" + parts.where).toRawUTF8());
+    bindFilter(s, parts);
     return s.step() ? (int) s.integer(0) : 0;
 }
 std::vector<SampleRecord> SampleRepository::pageInFolder(const juce::String& folder,int limit,int offset) const
@@ -748,9 +785,15 @@ std::vector<SampleRecord> SampleRepository::pageInFolder(const juce::String& fol
     if (folder.isEmpty()) return page(limit,offset);
     std::lock_guard lock(db.mutex);
     auto [lower,upper] = folderRange(folder);
-    auto sql = "SELECT " + juce::String(columns) + " FROM samples WHERE path>=? AND path<? ORDER BY name COLLATE NOCASE,id LIMIT ? OFFSET ?";
+    FilterSql parts;
+    parts.where += " AND samples.path>=? AND samples.path<?";
+    parts.params.emplace_back(lower); parts.params.emplace_back(upper);
+    appendIgnore(parts, ignoredPathsLocked(), "samples.path");
+    auto sql = "SELECT " + juce::String(columns) + " FROM samples" + parts.where
+        + " ORDER BY name COLLATE NOCASE,id LIMIT ? OFFSET ?";
     detail::Statement s(db.handle,sql.toRawUTF8());
-    s.text(1,lower); s.text(2,upper); s.integer(3,juce::jlimit(0,50000,limit)); s.integer(4,juce::jmax(0,offset));
+    const int next = bindFilter(s, parts);
+    s.integer(next, juce::jlimit(0,50000,limit)); s.integer(next + 1, juce::jmax(0,offset));
     std::vector<SampleRecord> records;
     while (s.step()) records.push_back(read(s));
     return records;
@@ -758,7 +801,7 @@ std::vector<SampleRecord> SampleRepository::pageInFolder(const juce::String& fol
 LibraryPage SampleRepository::query(const LibraryFilter& filter, int limit, int offset) const
 {
     std::lock_guard lock(db.mutex);
-    const auto parts = buildFilterSql(filter);
+    const auto parts = buildFilterSql(filter, ignoredPathsLocked());
     LibraryPage result;
     {
         auto sql = "SELECT COUNT(*) FROM samples" + parts.where;
@@ -779,7 +822,7 @@ LibraryPage SampleRepository::query(const LibraryFilter& filter, int limit, int 
 std::vector<int64_t> SampleRepository::queryIds(const LibraryFilter& filter) const
 {
     std::lock_guard lock(db.mutex);
-    const auto parts = buildFilterSql(filter);
+    const auto parts = buildFilterSql(filter, ignoredPathsLocked());
     auto sql = "SELECT samples.id FROM samples" + parts.where
         + " ORDER BY " + orderBy(filter.sort, filter.ascending);
     detail::Statement s(db.handle, sql.toRawUTF8()); bindFilter(s, parts);
@@ -819,8 +862,13 @@ std::vector<SampleRecord> SampleRepository::recordsByIds(const std::vector<int64
 int SampleRepository::countHash(const juce::String& hash) const
 {
     std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,"SELECT COUNT(*) FROM samples WHERE hash=? AND hash<>''"); s.text(1,hash);
-    return s.step() ? (int) s.integer(0) : 0;
+    detail::Statement s(db.handle, "SELECT path FROM samples WHERE hash=? AND hash<>''");
+    s.text(1,hash);
+    const auto ignored = ignoredPathsLocked();
+    int count = 0;
+    while (s.step())
+        if (! isPathIgnored(s.text(0), ignored)) ++count;
+    return count;
 }
 void SampleRepository::addRoot(const juce::String& path)
 {
@@ -1179,10 +1227,14 @@ int SampleRepository::countTaggedInFolder(const juce::String& folder) const
     if (folder.isEmpty()) return 0;
     std::lock_guard lock(db.mutex);
     auto [lower, upper] = folderRange(folder);
+    FilterSql parts;
+    parts.where += " AND samples.path>=? AND samples.path<?";
+    parts.params.emplace_back(lower); parts.params.emplace_back(upper);
+    appendIgnore(parts, ignoredPathsLocked(), "samples.path");
     detail::Statement s(db.handle,
-        "SELECT COUNT(DISTINCT s.id) FROM samples s JOIN sample_tags st ON st.sample_id=s.id"
-        " WHERE s.path>=? AND s.path<?");
-    s.text(1, lower); s.text(2, upper);
+        ("SELECT COUNT(DISTINCT samples.id) FROM samples JOIN sample_tags st ON st.sample_id=samples.id"
+         + parts.where).toRawUTF8());
+    bindFilter(s, parts);
     return s.step() ? (int) s.integer(0) : 0;
 }
 int SampleRepository::countTaggedSamples(const std::vector<int64_t>& sampleIds) const
@@ -1256,8 +1308,13 @@ std::vector<int64_t> SampleRepository::idsInFolder(const juce::String& folder) c
     if (folder.isEmpty()) return out;
     std::lock_guard lock(db.mutex);
     auto [lower, upper] = folderRange(folder);
-    detail::Statement s(db.handle, "SELECT id FROM samples WHERE path>=? AND path<? ORDER BY id");
-    s.text(1, lower); s.text(2, upper);
+    FilterSql parts;
+    parts.where += " AND samples.path>=? AND samples.path<?";
+    parts.params.emplace_back(lower); parts.params.emplace_back(upper);
+    appendIgnore(parts, ignoredPathsLocked(), "samples.path");
+    detail::Statement s(db.handle,
+        ("SELECT samples.id FROM samples" + parts.where + " ORDER BY samples.id").toRawUTF8());
+    bindFilter(s, parts);
     while (s.step()) out.push_back(s.integer(0));
     return out;
 }
@@ -1266,10 +1323,15 @@ int SampleRepository::countWithTagInFolder(const juce::String& folder, int64_t t
     if (folder.isEmpty() || tagId <= 0) return 0;
     std::lock_guard lock(db.mutex);
     auto [lower, upper] = folderRange(folder);
+    FilterSql parts;
+    parts.where += " AND samples.path>=? AND samples.path<? AND st.tag_id=?";
+    parts.params.emplace_back(lower); parts.params.emplace_back(upper);
+    parts.params.emplace_back(tagId);
+    appendIgnore(parts, ignoredPathsLocked(), "samples.path");
     detail::Statement s(db.handle,
-        "SELECT COUNT(*) FROM samples s JOIN sample_tags st ON st.sample_id=s.id"
-        " WHERE s.path>=? AND s.path<? AND st.tag_id=?");
-    s.text(1, lower); s.text(2, upper); s.integer(3, tagId);
+        ("SELECT COUNT(*) FROM samples JOIN sample_tags st ON st.sample_id=samples.id"
+         + parts.where).toRawUTF8());
+    bindFilter(s, parts);
     return s.step() ? (int) s.integer(0) : 0;
 }
 void SampleRepository::setStarred(const std::vector<int64_t>& sampleIds, bool starred)
@@ -1295,6 +1357,7 @@ void SampleRepository::setStarred(const std::vector<int64_t>& sampleIds, bool st
 void SampleRepository::refreshDuplicates()
 {
     std::lock_guard lock(db.mutex);
+    const auto ignored = ignoredPathsLocked();
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
     try
     {
@@ -1314,8 +1377,12 @@ void SampleRepository::refreshDuplicates()
             select.reset(); select.text(1, hash);
             std::vector<Member> members;
             while (select.step())
+            {
+                const auto path = select.text(1);
+                if (isPathIgnored(path, ignored)) continue;
                 members.push_back({ select.integer(0), select.integer(2) != 0, select.integer(3) != 0,
-                                    ! select.text(4).isEmpty(), select.text(1).length() });
+                                    ! select.text(4).isEmpty(), path.length() });
+            }
             if (members.size() < 2) continue;
             const auto better = [](const Member& a, const Member& b)
             {
@@ -1990,15 +2057,19 @@ std::vector<int64_t> SampleRepository::samplesNeedingSmartAnalysis(int64_t after
                                                                    int dspVersion) const
 {
     std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,
+    const auto ignore = buildIgnoreSql(ignoredPathsLocked(), "s.path");
+    const auto sql = juce::String(
         "SELECT s.id FROM samples s LEFT JOIN smart_results r ON r.sample_id=s.id"
         " WHERE s.id>? AND (r.sample_id IS NULL"
         " OR r.pipeline_state IN ('stale','error','not_analyzed')"
         " OR r.extractor_version<>? OR r.resolver_version<>? OR r.dsp_version<>?"
-        " OR r.revision<=0) ORDER BY s.id LIMIT ?");
+        " OR r.revision<=0)") + ignore.where + " ORDER BY s.id LIMIT ?";
+    detail::Statement s(db.handle, sql.toRawUTF8());
     s.integer(1, afterId);
     s.integer(2, extractorVersion); s.integer(3, resolverVersion); s.integer(4, dspVersion);
-    s.integer(5, limit);
+    int next = 5;
+    for (const auto& param : ignore.params) s.text(next++, param);
+    s.integer(next, limit);
     std::vector<int64_t> out;
     while (s.step()) out.push_back(s.integer(0));
     return out;

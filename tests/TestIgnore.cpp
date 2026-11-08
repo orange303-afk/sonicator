@@ -57,3 +57,41 @@ TEST_CASE("Dropping ignored_paths at schema 10 recreates it and keeps rows", "[i
         REQUIRE(repo.isIgnored("/lib/a.wav"));
     }
 }
+
+TEST_CASE("Ignored rows leave queries, counts, folder scopes and duplicate groups", "[ignore][database][query]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("query.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    const auto root = (t.dir.getFullPathName() + "/lib");
+    auto add = [&](const juce::String& path, const juce::String& hash)
+    {
+        SampleRecord r; r.filePath = path; r.fileName = juce::File(path).getFileName();
+        r.fileHash = hash; r.fileSize = 10; r.version = basicFeaturesVersion;
+        return repo.upsert(r);
+    };
+    const auto keep = add(root + "/keep.wav", "same");
+    const auto ignoredFile = add(root + "/hidden/hide.wav", "same");
+    const auto folderFile = add(root + "/skip/deep/gone.wav", "");
+    juce::ignoreUnused(folderFile);
+
+    repo.ignorePath(root + "/hidden/hide.wav", false);
+    repo.ignorePath(root + "/skip", true);
+    repo.refreshDuplicates();
+
+    LibraryFilter f; f.folder = root;
+    REQUIRE(repo.query(f).total == 1);
+    REQUIRE(repo.queryIds(f) == std::vector<int64_t>{ keep });
+    REQUIRE(repo.count() == 1);
+    REQUIRE(repo.count(true) == 3);
+    REQUIRE(repo.countInFolder(root) == 1);
+    REQUIRE(repo.pageInFolder(root).size() == 1);
+    REQUIRE(repo.idsInFolder(root) == std::vector<int64_t>{ keep });
+
+    f.showIgnored = true;
+    REQUIRE(repo.query(f).total == 3);
+    REQUIRE(repo.queryIds(f).size() == 3);
+
+    REQUIRE_FALSE(repo.duplicateInfo(keep).has_value());
+    REQUIRE_FALSE(repo.duplicateInfo(ignoredFile).has_value());
+    REQUIRE(repo.samplesNeedingSmartAnalysis(0, 100) == std::vector<int64_t>{ keep });
+}

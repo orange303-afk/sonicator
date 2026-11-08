@@ -19,6 +19,7 @@ struct LibraryFilter
     std::vector<int64_t> includeTags;
     std::vector<int64_t> excludeTags;
     bool matchAnyTag = false, starredOnly = false, hideDuplicates = false, hideEmpty = false;
+    bool showIgnored = false; // reveal rows hidden by ignored_paths; a view toggle, not a filter
     juce::String duplicateHash; // show every member of this byte-identical group
     LibrarySort sort = LibrarySort::Name;
     bool ascending = true;
