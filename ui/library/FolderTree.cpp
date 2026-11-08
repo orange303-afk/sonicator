@@ -23,12 +23,15 @@ public:
         const bool virtualFolder = owner.virtualFolders.count(path) != 0;
         const bool image = owner.images.count(path) != 0;
         const bool missing = path.isNotEmpty() && ! virtualFolder && ! image && ! juce::File(path).isDirectory();
+        const bool ignored = path.isNotEmpty() && isPathIgnored(path, owner.ignoredEntries);
         g.setColour(owner.failedImages.count(path)
             ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e))
-            : (missing ? theme::muted : theme::text)); g.setFont(13.0f);
-        const auto name = virtualFolder ? owner.virtualFolders.at(path).name
+            : (ignored ? theme::muted : (missing ? theme::muted : theme::text))); g.setFont(13.0f);
+        const auto baseName = virtualFolder ? owner.virtualFolders.at(path).name
             : (image ? "[IMG] " : "") + juce::File(path).getFileName();
-        g.drawText(all ? "All samples" : name, 3,0,w-6,h,juce::Justification::centredLeft,true);
+        const auto name = all ? juce::String("All samples")
+            : baseName + (ignored && owner.showIgnored ? " [ignored]" : juce::String());
+        g.drawText(name, 3,0,w-6,h,juce::Justification::centredLeft,true);
     }
     void itemSelectionChanged(bool selected) override
     {
@@ -112,13 +115,19 @@ void FolderTree::lookAndFeelChanged()
 }
 void FolderTree::refresh(SampleRepository& repo)
 {
-    refresh(repo, repo.roots(), true);
+    refresh(repo, repo.roots(), true, showIgnored);
 }
-void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPaths, bool showAllSamples)
+void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPaths, bool showAllSamples,
+                         bool revealIgnored)
 {
     const juce::ScopedValueSetter<bool> restoreGuard(restoring,true);
+    this->showIgnored = revealIgnored;
+    ignoredEntries = repo.ignoredPaths();
     auto openness = tree.getOpennessState(false);
     tree.setRootItem(nullptr); root.reset(); children.clear(); images.clear(); failedImages.clear(); virtualFolders.clear(); roots = rootPaths;
+    if (showAllSamples)
+        for (int i = roots.size(); --i >= 0;)
+            if (isPathIgnored(roots[i], ignoredEntries)) roots.remove(i);
     tree.setRootItemVisible(showAllSamples);
     std::set<juce::String> visitedFolders;
     int64_t last = 0;
@@ -130,6 +139,7 @@ void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPa
         std::vector<int64_t> imageIds;
         for (const auto& row : rows)
         {
+            if (! revealIgnored && isPathIgnored(row.path, ignoredEntries)) continue;
             auto folder = juce::File(row.path).getParentDirectory();
             if (juce::File(row.path).hasFileExtension("iso;bin;mdx;cue;akai;img"))
             {

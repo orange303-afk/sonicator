@@ -14,7 +14,8 @@ public:
     void refresh(SampleRepository&);
     // Builds a tree for an explicit root list. With showAllSamples=false the container root is
     // hidden and the supplied folders appear as top-level expandable entries.
-    void refresh(SampleRepository&, const juce::StringArray& rootPaths, bool showAllSamples);
+    void refresh(SampleRepository&, const juce::StringArray& rootPaths, bool showAllSamples,
+                 bool showIgnored = false);
     void resized() override;
     void clearSelection();
     // Opens the ancestors and selects a folder path. Returns false when it is not in the tree.
@@ -37,6 +38,8 @@ private:
     std::map<juce::String, VirtualFolder> virtualFolders;
     juce::StringArray roots;
     bool restoring = false;
+    bool showIgnored = false;
+    std::vector<IgnoredPath> ignoredEntries;
     bool selectPath(juce::TreeViewItem& parent, const juce::String& path);
 };
 }

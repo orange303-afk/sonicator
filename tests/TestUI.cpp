@@ -469,3 +469,28 @@ TEST_CASE("Preview can load the restored file without starting playback", "[ui][
     REQUIRE(preview.loadFile(file, false));
     REQUIRE_FALSE(engine.isPlaying());
 }
+
+TEST_CASE("Folder tree hides ignored folders unless Show ignored is on", "[ui][folders][ignore]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("tree-ignore.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    const auto root = t.dir.getChildFile("lib").getFullPathName();
+    auto add = [&](const juce::String& path)
+    {
+        SampleRecord r; r.filePath = path; r.fileName = juce::File(path).getFileName(); repo.upsert(r);
+    };
+    add(root + "/keep/a.wav");
+    add(root + "/hidden/b.wav");
+    repo.ignorePath(root + "/hidden", true);
+    FolderTree tree; tree.setBounds(0, 0, 300, 400); tree.resized();
+    tree.refresh(repo, { root }, true, false);
+    REQUIRE_FALSE(tree.selectPath(root + "/hidden"));
+    tree.refresh(repo, { root }, true, true);
+    REQUIRE(tree.selectPath(root + "/hidden"));
+
+    const auto onlyHidden = t.dir.getChildFile("lib2").getFullPathName();
+    SampleRecord hiddenRoot; hiddenRoot.filePath = onlyHidden + "/x.wav"; hiddenRoot.fileName = "x.wav";
+    repo.upsert(hiddenRoot); repo.ignorePath(onlyHidden, true);
+    tree.refresh(repo, { onlyHidden }, true, false);
+    REQUIRE_FALSE(tree.selectPath(onlyHidden));
+}
