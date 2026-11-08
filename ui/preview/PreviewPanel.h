@@ -20,10 +20,17 @@ public:
     bool autoPreviewEnabled() const { return autoPreview.getToggleState(); }
     bool loopEnabled() const { return loop.getToggleState(); }
     bool rexGateEnabled() const { return rexGate.getToggleState(); }
+    int soundFontSampleCount() const { return (int) instrumentSamples.size(); }
+    SampleId selectedSoundFontSampleId() const { return currentSampleId; }
+    int instrumentSampleCount() const { return (int) instrumentSamples.size(); }
+    SampleId selectedInstrumentSampleId() const { return currentSampleId; }
     void selectRange(double start, double end);
     selection::Range selectedRange() const { return waveform.selection(); }
     void clearSelection() { waveform.clearSelection(); }
     bool isSelectionReady() const;
+    // Applies the last source that really started on the instrument when no selection pins the
+    // waveform. The preview timer calls this; tests call it directly.
+    void refreshMidiFollow();
     juce::File preparedSelection() const { return exporter.state().file; }
     SelectionExporter::State selectionExportState() const { return exporter.state(); }
     bool waitForSelectionPreparation(int timeoutMs);
@@ -44,6 +51,9 @@ private:
     juce::Label filename, time;
     juce::TextButton play { "Play" }, stop { "Stop" };
     juce::ComboBox presetBox;
+    juce::ComboBox sampleBox;
+    std::vector<SampleDescriptor> instrumentSamples;
+    SampleId currentSampleId = invalidSampleId;
     juce::ToggleButton rexGate { "Gate" };
     juce::Label rexInfo;
     juce::ToggleButton loop { "Loop" };
@@ -59,5 +69,8 @@ private:
     void selectionChanged(selection::Range);
     void refreshSelectionStatus();
     void beginExternalDrag();
+    void refreshInstrumentSamples();
+    bool applyInstrumentSample(SampleId, bool manual);
+    juce::String instrumentSampleStem() const;
 };
 } // namespace sonicator

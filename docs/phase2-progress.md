@@ -16,6 +16,17 @@
   **Hide empty** and are restored on launch.
 - REX2 waveform selections render from the decoded PCM and drag out as normal
   24-bit WAV files; ordinary selections keep the existing export path.
+- **SoundFont 2 sample browser (2026-11-08):** SF2 presets keep their selector and
+  gain a list of unique used sample sources. The selected source drives the
+  waveform, audition transport and 16-bit WAV selection export while MIDI keeps
+  the preset mapping. MIDI-follow publishes RT-safe generation/source telemetry;
+  an existing selection pins the waveform and export without stopping MIDI, and
+  Clear/Escape lifts the pin. See `docs/PREVIEW.md`.
+- **EXS24 and NKI XML (2026-11-08):** `.exs` and supported zlib-XML NKI files are indexed
+  metadata-only and use the same sample selector, waveform, audition, MIDI-follow and source
+  export as SF2. External sample paths are resolved relative to the instrument with explicit
+  ambiguity/missing errors. NKI modern file containers are reported as unsupported; KSP, effects,
+  groups and loops are outside the documented subset. No Kontakt compatibility is claimed.
 - Library Type/BPM/Key columns with textual state markers and whole-catalog SQL
   sorting; a bottom selection bar shows the full path, effective smart values and
   measured format/rate/duration. Header columns stretch to fit a narrow pane.

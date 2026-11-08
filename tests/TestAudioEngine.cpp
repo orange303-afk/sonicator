@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include "core/audio/AudioEngine.h"
 #include "core/audio/MidiSampler.h"
+#include "Sf2TestBank.h"
 #include "TestHelpers.h"
 using namespace sonicator;
 TEST_CASE("Oversized output callbacks chunk the transport as well as MIDI", "[audio][auto-preview]")
@@ -18,7 +19,7 @@ TEST_CASE("Oversized output callbacks chunk the transport as well as MIDI", "[au
         bool isLooping() const override { return false; }
     } probe;
     juce::AudioTransportSource transport; transport.setSource(&probe);
-    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; PreviewOutput output(transport,sampler,kit,rex); output.prepareToPlay(64,44100);
+    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external; PreviewOutput output(transport,sampler,kit,rex,audition,external); output.prepareToPlay(64,44100);
     transport.start(); juce::AudioBuffer<float> buffer(2,600);
     buffer.setSample(0,0,0.123f); output.getNextAudioBlock({&buffer,16,512});
     REQUIRE(probe.largest <= 64); REQUIRE(probe.calls == 8); REQUIRE(probe.position == 512);
@@ -31,8 +32,8 @@ TEST_CASE("MIDI output mixes ordinary preview instead of silencing it", "[audio]
     juce::AudioFormatManager formats; formats.registerBasicFormats();
     juce::AudioFormatReaderSource reader(formats.createReaderFor(file),true);
     juce::AudioTransportSource transport; transport.setSource(&reader,0,nullptr,44100);
-    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; REQUIRE(sampler.load(file).isEmpty());
-    PreviewOutput output(transport,sampler,kit,rex); output.prepareToPlay(128,44100); output.midi = true;
+    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external; REQUIRE(sampler.load(file).isEmpty());
+    PreviewOutput output(transport,sampler,kit,rex,audition,external); output.prepareToPlay(128,44100); output.midi = true;
     transport.start(); juce::AudioBuffer<float> buffer(2,512);
     output.getNextAudioBlock({&buffer,0,512});
     REQUIRE(buffer.getMagnitude(0,512) > 0.5f);
@@ -178,4 +179,110 @@ TEST_CASE("Audio preview actually renders, resamples, loops and stops", "[audio]
     REQUIRE_FALSE(engine.loadFile(t.dir.getChildFile("absent.wav")));
     REQUIRE(engine.error().isNotEmpty());
     REQUIRE(engine.length() == 0);
+}
+
+TEST_CASE("MIDI preview gain is 20 percent louder without boosting audition", "[audio][midi-gain]")
+{
+    TestDirectory t;
+    const auto file = t.wave("tone.wav", 220, 1, 44100);
+    const auto bankFile = sf2test::writeBank(t, std::vector<juce::int16>(44100, 8192),
+        { { "tone", 0, 44100, 0, 0, 44100 } },
+        { { "Instrument", { { 60, 60, 0, 127, 0 } } } }, { { "Preset", 0, 0, { { 0 } } } });
+    for (int route = 0; route < 3; ++route)
+    {
+        INFO("MIDI route " << route);
+        juce::AudioTransportSource transport;
+        MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external;
+        REQUIRE(sampler.load(file).isEmpty());
+        Sf2Bank bank; juce::String error;
+        REQUIRE(bank.load(bankFile, error)); REQUIRE(kit.load(bank, 0, error));
+        SampleAudio audio;
+        audio.sampleRate = 44100; audio.channels = 1; audio.frames = 44100; audio.left.assign(44100, 0.1f);
+        const auto held = std::make_shared<const SampleAudio>(audio);
+        FileInstrument instrument;
+        SampleDescriptor descriptor; descriptor.id = 0; descriptor.frameCount = audio.frames;
+        descriptor.sampleRate = audio.sampleRate; descriptor.channels = 1;
+        instrument.sources.push_back(descriptor); instrument.audio.push_back(held);
+        ExternalZone zone; zone.sampleIndex = 0; zone.end = audio.frames; instrument.zones.push_back(zone);
+        REQUIRE(external.load(instrument, error));
+        PreviewOutput output(transport, sampler, kit, rex, audition, external);
+        output.prepareToPlay(128, 44100);
+        output.midi = true; output.sf2Mode = route == 1; output.externalMode = route == 2; output.gain = 0.5f;
+        juce::AudioBuffer<float> reference(2, 512), actual(2, 544);
+        juce::MidiBuffer notes; notes.addEvent(juce::MidiMessage::noteOn(1, 60, 0.5f), 0);
+        if (route == 0) sampler.render(reference, 0, 512, notes);
+        else if (route == 1) kit.render(reference, 0, 512, notes);
+        else external.render(reference, 0, 512, notes);
+        output.prepareToPlay(128, 44100);
+        audition.setAudio(held); audition.play(false);
+        actual.clear(); actual.setSample(0, 0, 0.123f);
+        output.collector.push(juce::MidiMessage::controllerEvent(1, 64, 127));
+        output.collector.push(juce::MidiMessage::noteOn(1, 60, 0.5f));
+        output.getNextAudioBlock({ &actual, 16, 512 });
+        REQUIRE(actual.getSample(0, 0) == 0.123f);
+        for (int i : { 100, 200, 400, 511 })
+            REQUIRE(actual.getSample(0, 16 + i)
+                == Catch::Approx((reference.getSample(0, i) * 1.2f + 0.1f) * 0.5f).margin(0.00001f));
+        output.prepareToPlay(128, 44100);
+        audition.setAudio(held); audition.play(false);
+        output.getNextAudioBlock({ &actual, 16, 512 });
+        REQUIRE(actual.getSample(0, 116) == Catch::Approx(0.05f).margin(0.00001f));
+        output.collector.push(juce::MidiMessage::controllerEvent(1, 64, 127));
+        output.collector.push(juce::MidiMessage::noteOn(1, 60, 0.5f));
+        output.getNextAudioBlock({ &actual, 16, 512 });
+        for (int i = 0; i <= MidiEventQueue::capacity; ++i)
+            output.collector.push(juce::MidiMessage::noteOn(1, 60, 0.5f));
+        output.getNextAudioBlock({ &actual, 16, 512 });
+        REQUIRE(actual.getSample(0, 116) == Catch::Approx(0.05f).margin(0.00001f)); // Panic, not audition.
+        if (route == 0)
+        {
+            // An overflow may have dropped pedal-up. Panic must clear the old sustain state.
+            output.collector.push(juce::MidiMessage::noteOn(1, 60, 0.5f));
+            output.getNextAudioBlock({ &actual, 16, 512 });
+            output.collector.push(juce::MidiMessage::noteOff(1, 60));
+            output.getNextAudioBlock({ &actual, 16, 512 });
+            output.getNextAudioBlock({ &actual, 16, 512 });
+            REQUIRE(sampler.activeVoices() == 0);
+        }
+    }
+}
+
+TEST_CASE("Dense MIDI preview stays within the output safety knee", "[audio][midi-gain]")
+{
+    TestDirectory t;
+    MidiSampler sampler; REQUIRE(sampler.load(t.wave()).isEmpty());
+    Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external;
+    juce::AudioTransportSource transport;
+    PreviewOutput output(transport, sampler, kit, rex, audition, external);
+    output.prepareToPlay(128, 44100); output.midi = true; output.gain = 1.0f;
+    for (int i = 0; i < 16; ++i) output.collector.push(juce::MidiMessage::noteOn(1, 60, 1.0f));
+    juce::AudioBuffer<float> buffer(2, 1024);
+    output.getNextAudioBlock({ &buffer, 0, 1024 });
+    REQUIRE(buffer.getMagnitude(0, 1024) > 0.9f);
+    REQUIRE(buffer.getMagnitude(0, 1024) <= 1.0f);
+}
+
+TEST_CASE("Enabling MIDI preview does not boost ordinary transport", "[audio][midi-gain]")
+{
+    TestDirectory t;
+    const auto file = t.wave();
+    juce::AudioFormatManager formats; formats.registerBasicFormats();
+    juce::AudioFormatReaderSource reader(formats.createReaderFor(file), true);
+    juce::AudioFormatReaderSource referenceReader(formats.createReaderFor(file), true);
+    juce::AudioTransportSource transport, reference;
+    transport.setSource(&reader, 0, nullptr, 44100);
+    reference.setSource(&referenceReader, 0, nullptr, 44100);
+    MidiSampler sampler; Sf2KitSampler kit; Rex2SlicePlayer rex; SampleAudition audition; ExternalKitSampler external;
+    PreviewOutput output(transport, sampler, kit, rex, audition, external);
+    output.prepareToPlay(128, 44100); output.midi = true; output.gain = 0.5f;
+    reference.prepareToPlay(128, 44100);
+    transport.setGain(0.5f); reference.setGain(0.5f);
+    transport.start(); reference.start();
+    juce::AudioBuffer<float> actual(2, 128), expected(2, 128);
+    output.getNextAudioBlock({ &actual, 0, 128 });
+    reference.getNextAudioBlock({ &expected, 0, 128 });
+    for (int i : { 50, 100, 127 })
+        REQUIRE(actual.getSample(0, i) == Catch::Approx(expected.getSample(0, i)).margin(0.00001f));
+    output.releaseResources(); reference.releaseResources();
+    transport.setSource(nullptr); reference.setSource(nullptr);
 }

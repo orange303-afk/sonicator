@@ -229,3 +229,50 @@ Environment unchanged: macOS native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE
 - The first launch of the new build writes a ~150 MB backup beside the database before migrating. To restore it: quit the app, delete the database's `-wal` and `-shm` files, then copy the backup over the database file.
 - A file created between discovery and reconciliation is reported missing until the next scan, then restored automatically.
 - A record that disappears between discovery and reconciliation is confirmed with a single filesystem probe before it is marked missing.
+
+## Sampler source stage (2026-11-08)
+
+Environment unchanged: macOS native arm64, Apple Clang, CMake, JUCE 9.0.5.
+
+- Default suite: **270 cases / 2263 assertions passed** on this machine; CTest runs the same binary.
+- New tags: `[sf2][samples]` descriptor/PCM extraction, `[sf2][audition]` immutable PCM transport,
+  `[sf2][telemetry]` last-trigger seqlock and voice/layer rules, `[sf2][ui]` sample selector, MIDI
+  follow, pinning, Clear/Escape and silent restore, `[sf2][export]` 16-bit source-PCM WAV export.
+- Synthetic SF2 fixtures live in `tests/Sf2TestBank.h`; no external SSD or commercial library is
+  required. The real-library checks in the format plan remain opt-in and are not part of CI.
+- Run `./build/tests/SonicatorTests "[sf2]"` for the sampler increment, then the full suite and
+  `ctest --test-dir build --output-on-failure`.
+
+## External instrument stage (2026-11-08)
+
+- Default suite: **289 cases / 2456 assertions** after the MIDI tails/gain fix; CTest runs the same binary.
+- New tags: `[sampler][exs]` synthetic EXS24 blocks and path fallback, `[sampler][nki]` zlib XML K2/NiSS,
+  `[sampler][external]` file-backed sampler, `[sampler][ui]` sample browser on EXS/NKI,
+  `[sampler][indexing]` metadata-only `.exs`/`.nki` indexing, `[sampler][export]` source bit depth.
+- `TestRealSamplerFormats.cpp` is hidden with `[.real]`: 8 cases / 137 assertions read the
+  Samplephonics EXS24/Kontakt kits, a newer EXS variant, the 96/104/108/136-byte zone variants and
+  a real NiSS drum map from `/Volumes/1TBSSD` read-only. They are not part of the normal run.
+- Synthetic fixtures create EXS24 blocks and zlib-compressed NKI XML in the test temp directory; no
+  commercial library or external SSD is required for CI. The loader uses the system zlib library.
+
+## MIDI tails, polyphony and level (2026-11-08)
+
+- `[midi-tails]` covers a two-second SF2/EXS/NKI release, 128 voices, rejection at capacity without
+  stealing existing voices, AllSoundOff, and the separate short SF2 exclusive-group choke.
+- Two `[.device][midi-tails]` regressions use synthetic banks with the real AudioSourcePlayer
+  lifecycle. They failed when MIDI-follow reset two voices to zero and pass with source-only
+  publication. They hold the existing manager callback lock during deterministic render/selection
+  and require a local audio device; the default suite does not run them.
+- `[midi-gain]` verifies x1.2 MIDI amplitude below the safety knee for ordinary WAV, SF2 and external
+  instruments, unchanged simultaneous audition and transport, buffer offsets/oversized chunking,
+  bounded dense-chord output, routed overflow panic and clearing a dropped sustain pedal-up.
+- `./build/tests/SonicatorTests "[midi-tails],[midi-gain]"`: **9 cases / 85 assertions**, including
+  the two opt-in device regressions. Explicit Catch2 tag filters also select hidden matching tests.
+- `./build/tests/SonicatorTests "[.real][sampler]"`: **8 cases / 137 assertions**, including real
+  IK_KICKS overlap after NoteOff, MIDI-follow, pin/unpin during WAV preparation and explicit Stop.
+- With `SONICATOR_RX2` set to a real file, run `"[.real-rex-gain],[.real-rex-rate],[.real-rex-player]"`:
+  **3 cases / 48 assertions**. REX gain is applied to MIDI slices only; whole-loop audition remains
+  unchanged, and AllSoundOff preserves audition while stopping MIDI voices.
+- Default suite and CTest pass. Existing JUCE non-ASCII string-literal debug assertions still print
+  in preview tests; these are not new test failures. Physical listening/MIDI hardware acceptance,
+  Windows and formal realtime profiling remain unverified by these render tests.

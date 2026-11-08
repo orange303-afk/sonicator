@@ -2,6 +2,8 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "core/sf2/Sf2KitSampler.h"
 #include "core/rex/Rex2SlicePlayer.h"
+#include "SampleAudition.h"
+#include "core/sampler/ExternalKitSampler.h"
 #include <array>
 #include <atomic>
 namespace sonicator {
@@ -55,14 +57,16 @@ private:
 class PreviewOutput final : public juce::AudioSource
 {
 public:
-    PreviewOutput(juce::AudioTransportSource& t,MidiSampler& s,Sf2KitSampler& f,Rex2SlicePlayer& r)
-        : transport(t),sampler(s),sf2(f),rex(r) {}
+    PreviewOutput(juce::AudioTransportSource& t,MidiSampler& s,Sf2KitSampler& f,Rex2SlicePlayer& r,
+                  SampleAudition& a,ExternalKitSampler& e)
+        : transport(t),sampler(s),sf2(f),rex(r),audition(a),external(e) {}
     void prepareToPlay(int,double) override;
     void releaseResources() override { transport.releaseResources(); }
     void getNextAudioBlock(const juce::AudioSourceChannelInfo&) override;
     MidiEventQueue collector;
     std::atomic<bool> midi {false};
     std::atomic<bool> sf2Mode {false};
+    std::atomic<bool> externalMode {false};
     std::atomic<bool> rexMode {false};
     std::atomic<float> gain {0.7f};
     std::atomic<float> lastOutputPeak {0.0f};
@@ -71,6 +75,8 @@ private:
     MidiSampler& sampler;
     Sf2KitSampler& sf2;
     Rex2SlicePlayer& rex;
+    SampleAudition& audition;
+    ExternalKitSampler& external;
     juce::MidiBuffer messages;
     juce::AudioBuffer<float> midiBuffer;
 };

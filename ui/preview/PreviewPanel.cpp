@@ -5,11 +5,11 @@ namespace sonicator {
 PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,const juce::File& exportFolder)
     : engine(audio),waveform(cacheFolder),exporter(exportFolder)
 {
-    for (auto* c : std::array<juce::Component*,15>{&waveform, &filename, &time, &play, &stop, &loop, &volume,
+    for (auto* c : std::array<juce::Component*,16>{&waveform, &filename, &time, &play, &stop, &loop, &volume,
                                                    &midi, &skipSilence, &autoPreview, &clearSelectionButton, &selectionStatus,
-                                                   &presetBox, &rexGate, &rexInfo})
+                                                   &presetBox, &sampleBox, &rexGate, &rexInfo})
         addAndMakeVisible(c);
-    presetBox.setVisible(false); rexGate.setVisible(false); rexInfo.setVisible(false);
+    presetBox.setVisible(false); sampleBox.setVisible(false); rexGate.setVisible(false); rexInfo.setVisible(false);
     rexInfo.setFont(juce::FontOptions(12));
     rexInfo.setColour(juce::Label::textColourId,theme::muted);
     rexInfo.setJustificationType(juce::Justification::centredLeft);
@@ -19,9 +19,20 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
         const int index = presetBox.getSelectedId() - 1;
         if (index < 0) return;
         if (engine.selectSoundFontPreset(index))
+        {
             filename.setText(loadedFile.getFileName() + "  —  " + engine.soundFontPresetName(),juce::dontSendNotification);
+            refreshInstrumentSamples();
+        }
         else
             filename.setText(engine.error(),juce::dontSendNotification);
+    };
+    sampleBox.setComponentID("instrumentSample");
+    sampleBox.setTooltip("Audio source used by the selected preset; ordinary Play and waveform use it, MIDI keeps the preset map");
+    sampleBox.onChange = [this]
+    {
+        const int row = sampleBox.getSelectedId() - 1;
+        if (row < 0 || row >= (int) instrumentSamples.size()) return;
+        applyInstrumentSample(instrumentSamples[(size_t) row].id, true);
     };
     rexGate.setTooltip("Gate stops a REX2 slice on NoteOff; off lets the slice ring out (one-shot)");
     rexGate.onClick = [this]
@@ -90,25 +101,33 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     if (file == loadedFile && file != juce::File() && file.getSize() == loadedSize
         && file.getLastModificationTime().toMilliseconds() == loadedModified) return true;
     bool success = engine.loadFile(file);
+    const bool instrument = success && engine.isSamplerInstrumentMode();
     const bool soundFont = success && engine.isSoundFontMode();
     loadedFile = success ? file : juce::File();
     loadedSize = success ? file.getSize() : 0;
     loadedModified = success ? file.getLastModificationTime().toMilliseconds() : 0;
     const bool rex = success && engine.isRex2Mode();
-    if (soundFont)
+    if (instrument)
     {
         presetBox.clear(juce::dontSendNotification);
-        for (int i = 0; i < engine.soundFontPresetCount(); ++i)
-            presetBox.addItem(engine.soundFontPresetLabel(i), i + 1);
-        presetBox.setSelectedId(engine.soundFontPresetIndex() + 1,juce::dontSendNotification);
-        presetBox.setVisible(true);
+        presetBox.setVisible(soundFont);
+        if (soundFont)
+        {
+            for (int i = 0; i < engine.soundFontPresetCount(); ++i)
+                presetBox.addItem(engine.soundFontPresetLabel(i), i + 1);
+            presetBox.setSelectedId(engine.soundFontPresetIndex() + 1,juce::dontSendNotification);
+        }
         rexGate.setVisible(false);
         rexInfo.setVisible(false);
-        filename.setText(file.getFileName() + "  —  " + engine.soundFontPresetName(),juce::dontSendNotification);
+        filename.setText(file.getFileName() + "  —  " + engine.instrumentName(),juce::dontSendNotification);
+        refreshInstrumentSamples();
     }
     else if (rex)
     {
         presetBox.setVisible(false);
+        sampleBox.setVisible(false);
+        instrumentSamples.clear();
+        currentSampleId = invalidSampleId;
         rexGate.setVisible(true);
         rexInfo.setVisible(true);
         rexGate.setToggleState(engine.rexGateMode(),juce::dontSendNotification);
@@ -121,9 +140,13 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     else
     {
         presetBox.setVisible(false);
+        sampleBox.setVisible(false);
+        instrumentSamples.clear();
+        currentSampleId = invalidSampleId;
         rexGate.setVisible(false);
         rexInfo.setVisible(false);
-        filename.setText(success ? file.getFileName() : engine.error(),juce::dontSendNotification);
+        filename.setText(success ? file.getFileName()
+                                 : file.getFileName() + "  —  " + engine.error(),juce::dontSendNotification);
     }
     if (rex)
     {
@@ -132,11 +155,115 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
         else
             waveform.setFile(juce::File());
     }
-    else
-        waveform.setFile(success && ! soundFont ? file : juce::File());
+    else if (! instrument)
+        waveform.setFile(success ? file : juce::File());
     midi.setToggleState(engine.isMidiPreview(),juce::dontSendNotification);
     if (allowAutoPlay && success && ! soundFont && autoPreview.getToggleState()) engine.play();
     return success;
+}
+void PreviewPanel::refreshInstrumentSamples()
+{
+    instrumentSamples = engine.instrumentSamples();
+    sampleBox.clear(juce::dontSendNotification);
+    int selectedRow = 0;
+    for (int i = 0; i < (int) instrumentSamples.size(); ++i)
+    {
+        const auto& descriptor = instrumentSamples[(size_t) i];
+        juce::String label = juce::String(i + 1) + ". "
+            + (descriptor.name.isNotEmpty() ? descriptor.name : juce::String("Sample"));
+        if (! descriptor.zones.empty())
+        {
+            const auto& zone = descriptor.zones.front();
+            label << "  ·  keys " << zone.keyLow << "–" << zone.keyHigh
+                  << "  ·  vel " << zone.velocityLow << "–" << zone.velocityHigh;
+        }
+        if (! descriptor.isPlayable())
+            label << "  ·  " << (descriptor.error.isNotEmpty() ? descriptor.error : juce::String("unavailable"));
+        sampleBox.addItem(label, i + 1);
+        if (descriptor.id == engine.instrumentSampleId()) selectedRow = i;
+    }
+    sampleBox.setVisible(! instrumentSamples.empty());
+    sampleBox.setSelectedId(selectedRow + 1, juce::dontSendNotification);
+    currentSampleId = engine.instrumentSampleId();
+    if (auto audio = engine.instrumentSampleAudio())
+        waveform.setPeaks(audio->left, audio->sampleRate, {});
+    else
+        waveform.setFile(juce::File());
+    juce::String midiHint, tips;
+    for (const auto& descriptor : instrumentSamples)
+    {
+        if (descriptor.id == currentSampleId && ! descriptor.zones.empty())
+        {
+            int lo = 127, hi = 0;
+            for (const auto& zone : descriptor.zones) { lo = juce::jmin(lo, zone.keyLow); hi = juce::jmax(hi, zone.keyHigh); }
+            midiHint = "  ·  MIDI " + juce::String(lo) + "–" + juce::String(hi);
+        }
+        tips << descriptor.name << "  keys ";
+        for (const auto& zone : descriptor.zones) tips << zone.keyLow << "–" << zone.keyHigh << " ";
+        tips << "\n";
+    }
+    sampleBox.setTooltip(tips.trim());
+    if (loadedFile != juce::File())
+        filename.setText(loadedFile.getFileName() + "  —  " + engine.instrumentName() + midiHint,
+                         juce::dontSendNotification);
+    const auto warnings = engine.instrumentWarnings();
+    if (! waveform.selection().valid())
+    {
+        if (! warnings.isEmpty())
+            selectionStatus.setText(warnings.joinIntoString(" · ").substring(0, 180), juce::dontSendNotification);
+        else if (engine.lastInstrumentMidiNote() < 0)
+            selectionStatus.setText({}, juce::dontSendNotification);
+    }
+}
+bool PreviewPanel::applyInstrumentSample(SampleId id, bool manual)
+{
+    if (! engine.selectInstrumentSample(id))
+    {
+        selectionStatus.setText(engine.error(), juce::dontSendNotification);
+        return false;
+    }
+    currentSampleId = id;
+    for (int i = 0; i < (int) instrumentSamples.size(); ++i)
+        if (instrumentSamples[(size_t) i].id == id)
+        {
+            sampleBox.setSelectedId(i + 1, juce::dontSendNotification);
+            break;
+        }
+    if (auto audio = engine.instrumentSampleAudio())
+        waveform.setPeaks(audio->left, audio->sampleRate, {});
+    else
+        waveform.setFile(juce::File());
+    selectionStatus.setText({}, juce::dontSendNotification);
+    if (manual && autoPreview.getToggleState())
+    {
+        engine.seek(0);
+        engine.play();
+    }
+    return true;
+}
+void PreviewPanel::refreshMidiFollow()
+{
+    if (! engine.isSamplerInstrumentMode() || waveform.selection().valid()) return;
+    const auto trigger = engine.lastInstrumentTrigger();
+    if (! trigger.valid || trigger.generation != engine.instrumentGeneration()
+        || trigger.sourceId == currentSampleId) return;
+    for (const auto& descriptor : instrumentSamples)
+        if (descriptor.id == trigger.sourceId && descriptor.isPlayable())
+        {
+            applyInstrumentSample(descriptor.id, false);
+            return;
+        }
+}
+juce::String PreviewPanel::instrumentSampleStem() const
+{
+    auto stem = loadedFile.getFileNameWithoutExtension();
+    for (const auto& descriptor : instrumentSamples)
+        if (descriptor.id == currentSampleId && descriptor.name.isNotEmpty())
+        {
+            stem << "_" << descriptor.name;
+            break;
+        }
+    return stem;
 }
 void PreviewPanel::applyPersistedSettings(const AppSettings& settings)
 {
@@ -167,7 +294,23 @@ void PreviewPanel::selectionChanged(selection::Range range)
     }
     clearSelectionButton.setVisible(true);
     selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
-    if (engine.isRex2Mode())
+    if (engine.isSamplerInstrumentMode())
+    {
+        // The selected sample is immutable PCM with no AudioFormatReader. Retaining the shared
+        // snapshot keeps the worker safe across bank/preset changes and MIDI-follow updates.
+        if (auto audio = engine.instrumentSampleAudio())
+        {
+            const auto stem = instrumentSampleStem();
+            exporter.prepare(loadedFile, range.start, range.end,
+                [audio, stem](const juce::File&, double start, double end,
+                              const juce::File& folder, CancelCheck cancel)
+                {
+                    return AudioExporter().exportSampleSelection(*audio, stem, start, end, folder, cancel);
+                });
+        }
+        else exporter.cancel();
+    }
+    else if (engine.isRex2Mode())
     {
         // REX2 has no AudioFormatReader: render the selected time range from the PCM that the
         // preview already decoded. The shared pointer keeps the samples alive on the worker.
@@ -262,6 +405,12 @@ bool PreviewPanel::keyPressed(const juce::KeyPress& k)
     if (k.getKeyCode() == juce::KeyPress::rightKey) { engine.seek(engine.position()+1); return true; }
     if (k.getKeyCode() == juce::KeyPress::escapeKey)
     {
+        if (engine.isSamplerInstrumentMode())
+        {
+            // Escape lifts the pin; the MIDI instrument keeps sounding. Clear is the same action.
+            if (waveform.selection().valid()) clearSelection();
+            return true;
+        }
         if (waveform.selection().valid()) clearSelection();
         engine.stop();
         return true;
@@ -270,11 +419,32 @@ bool PreviewPanel::keyPressed(const juce::KeyPress& k)
 }
 void PreviewPanel::timerCallback()
 {
+    refreshMidiFollow();
     updateSelectionPlayback();
     refreshSelectionStatus();
     waveform.setPosition(engine.position());
     if (engine.isRex2Mode()) waveform.setActiveSlices(engine.rexActiveSlices());
     time.setText(juce::String(engine.position(),2) + " / " + juce::String(engine.length(),2) + " s",juce::dontSendNotification);
+    if (! waveform.selection().valid() && engine.isSamplerInstrumentMode())
+    {
+        const int note = engine.lastInstrumentMidiNote();
+        if (note >= 0)
+        {
+            const int layers = engine.lastInstrumentMidiLayers();
+            juce::String range;
+            for (const auto& descriptor : instrumentSamples)
+                if (descriptor.id == currentSampleId && ! descriptor.zones.empty())
+                {
+                    int lo = 127, hi = 0;
+                    for (const auto& zone : descriptor.zones) { lo = juce::jmin(lo, zone.keyLow); hi = juce::jmax(hi, zone.keyHigh); }
+                    range = " (keys " + juce::String(lo) + "–" + juce::String(hi) + ")";
+                }
+            selectionStatus.setText(layers > 0
+                ? "MIDI " + juce::String(note) + "  ·  " + juce::String(layers) + " layer(s) started"
+                : "MIDI " + juce::String(note) + "  ·  no zone" + range,
+                juce::dontSendNotification);
+        }
+    }
     if (rexInfo.isVisible() && engine.isRex2Mode())
     {
         const int first = engine.rexStartNote();
@@ -321,7 +491,14 @@ void PreviewPanel::resized()
     r.removeFromTop(8);
     auto controls = r.removeFromRight(330); r.removeFromRight(16); waveform.setBounds(r);
     auto extra = controls.removeFromTop(26);
-    presetBox.setBounds(extra);
+    if (presetBox.isVisible())
+    {
+        auto presetArea = extra, sampleArea = extra;
+        presetBox.setBounds(presetArea.removeFromLeft(juce::jmax(1, presetArea.getWidth() / 2 - 3)));
+        sampleArea.removeFromLeft(juce::jmax(1, sampleArea.getWidth() / 2 + 3));
+        sampleBox.setBounds(sampleArea);
+    }
+    else sampleBox.setBounds(extra);
     rexGate.setBounds(extra.removeFromLeft(90));
     rexInfo.setBounds(extra);
     auto modes = controls.removeFromTop(28);

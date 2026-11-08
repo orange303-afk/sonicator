@@ -1,5 +1,6 @@
 #include "AssetAnalyzer.h"
 #include "Rex2Metadata.h"
+#include "core/sampler/FileInstrument.h"
 #include <cmath>
 namespace sonicator {
 namespace {
@@ -47,6 +48,16 @@ SampleRecord analyzeMetadataAsset(const juce::File& file, CancelCheck cancel)
     else if (r.format == "SF2")
     {
         if (! isSoundFont(file)) { r.error = "Not a SoundFont 2 bank"; return r; }
+    }
+    else if (r.format == "EXS")
+    {
+        if (! isExs24File(file)) { r.error = "Not a supported EXS24 instrument"; return r; }
+    }
+    else if (r.format == "NKI")
+    {
+        juce::String detail;
+        if (! isNkiFile(file, detail)) { r.error = "Not a recognised NKI instrument"; return r; }
+        if (detail.containsIgnoreCase("unsupported")) r.error = detail;
     }
     else
     {

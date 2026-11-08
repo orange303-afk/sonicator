@@ -1,10 +1,46 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include "core/rex/Rex2Decoder.h"
 #include "core/rex/Rex2SlicePlayer.h"
 #include "core/audio/AudioEngine.h"
 #include <cmath>
 #include <iostream>
 using namespace sonicator;
+TEST_CASE("REX MIDI boost does not boost whole loop audition", "[.real-rex-gain]")
+{
+    const auto path = juce::SystemStats::getEnvironmentVariable("SONICATOR_RX2", {});
+    REQUIRE(path.isNotEmpty());
+    Rex2SlicePlayer rex, reference, auditionReference; juce::String error;
+    REQUIRE(rex.load(juce::File(path), 36, error));
+    REQUIRE(reference.load(juce::File(path), 36, error));
+    REQUIRE(auditionReference.load(juce::File(path), 36, error));
+    juce::AudioTransportSource transport; MidiSampler sampler; Sf2KitSampler kit;
+    SampleAudition audition; ExternalKitSampler external;
+    PreviewOutput output(transport, sampler, kit, rex, audition, external);
+    output.prepareToPlay(128, 44100); output.midi = true; output.rexMode = true; output.gain = 0.5f;
+    reference.prepare(44100); auditionReference.prepare(44100);
+    juce::AudioBuffer<float> midiOnly(2, 4096), auditionOnly(2, 4096), mixed(2, 4096);
+    juce::MidiBuffer midi, empty;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.5f), 0);
+    reference.render(midiOnly, 0, 4096, midi);
+    auditionReference.startAudition(false);
+    auditionReference.render(auditionOnly, 0, 4096, empty);
+    rex.startAudition(false);
+    output.collector.push(juce::MidiMessage::noteOn(1, 36, 0.5f));
+    output.getNextAudioBlock({ &mixed, 0, 4096 });
+    REQUIRE(midiOnly.getMagnitude(0, 4096) > 0.001f);
+    REQUIRE(auditionOnly.getMagnitude(0, 4096) > 0.001f);
+    float maxError = 0;
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < 4096; ++i)
+            maxError = juce::jmax(maxError, std::abs(mixed.getSample(ch, i)
+                - (midiOnly.getSample(ch, i) * 1.2f + auditionOnly.getSample(ch, i)) * 0.5f));
+    REQUIRE(maxError < 0.00001f);
+    output.collector.push(juce::MidiMessage::allSoundOff(1));
+    output.getNextAudioBlock({ &mixed, 0, 128 });
+    REQUIRE(rex.activeVoices() == 0);
+    REQUIRE(rex.auditionPlaying());
+}
 TEST_CASE("REX MIDI voices advance at device rates above the source rate", "[.real-rex-rate]")
 {
     const auto path = juce::SystemStats::getEnvironmentVariable("SONICATOR_RX2", {});
@@ -177,7 +213,7 @@ TEST_CASE("REX2 slices respond to different notes and to NoteOff", "[.real-rex-p
     juce::AudioTransportSource transport; transport.setSource(&silent);
     MidiSampler ordinary; Sf2KitSampler sf2; Rex2SlicePlayer slices;
     REQUIRE(slices.load(file, 36, error));
-    PreviewOutput output(transport, ordinary, sf2, slices);
+    SampleAudition auditionSource; ExternalKitSampler externalSource; PreviewOutput output(transport, ordinary, sf2, slices, auditionSource, externalSource);
     output.prepareToPlay(512, 44100);
     output.midi = true; output.rexMode = true;
     output.collector.push(juce::MidiMessage::noteOn(1, 36, 1.0f));

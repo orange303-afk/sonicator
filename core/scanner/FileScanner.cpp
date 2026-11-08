@@ -3,7 +3,7 @@
 namespace sonicator {
 bool FileScanner::isMetadataOnlyFormat(const juce::File& f)
 {
-    return f.hasFileExtension("rx2;sf2");
+    return f.hasFileExtension("rx2;sf2;exs;nki");
 }
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {

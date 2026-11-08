@@ -1,4 +1,5 @@
 #pragma once
+#include "core/sampler/SamplerTypes.h"
 #include <juce_core/juce_core.h>
 #include <cstdint>
 #include <vector>
@@ -40,6 +41,11 @@ public:
     const std::vector<Sf2Sample>& samples() const { return sampleList; }
     // Interleaved-free mono PCM in the bank's own 16-bit units, indexed by the sample headers.
     const std::vector<juce::int16>& pcm() const { return sampleData; }
+    // Unique audio sources used by the preset's zones, in first-use order. Unused sample headers
+    // of the bank are not listed. Stereo pairs collapse to one descriptor keyed by the left header.
+    std::vector<SampleDescriptor> usedSamples(int presetIndex, juce::String& error) const;
+    // Immutable copy of one descriptor's PCM. Cheap to retain after the bank is reloaded or cleared.
+    SampleAudioPtr sampleAudio(SampleId, juce::String& error) const;
     int firstDrumPreset() const;
     bool isDrumPreset(const Sf2Preset&) const;
     void clear();

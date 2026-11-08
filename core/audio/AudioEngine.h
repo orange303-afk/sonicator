@@ -1,9 +1,12 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "MidiSampler.h"
+#include "SampleAudition.h"
 #include "core/sf2/Sf2Bank.h"
 #include "core/sf2/Sf2KitSampler.h"
 #include "core/rex/Rex2SlicePlayer.h"
+#include "core/sampler/FileInstrument.h"
+#include "core/sampler/ExternalKitSampler.h"
 namespace sonicator {
 // Control methods are message-thread only. transport() also permits offline rendering.
 class AudioEngine
@@ -28,6 +31,38 @@ public:
     int soundFontPresetIndex() const { return sf2Sampler.presetIndex(); }
     juce::String soundFontPresetLabel(int index) const;
     bool selectSoundFontPreset(int index);
+    // Unique audio sources used by the current preset, in deterministic first-use order. The
+    // selected source feeds the waveform, ordinary Play and WAV export; MIDI keeps the preset map.
+    const std::vector<SampleDescriptor>& soundFontSamples() const { return sf2Samples; }
+    std::vector<SampleDescriptor> soundFontSamples(juce::String& error) const;
+    SampleId soundFontSampleId() const { return sf2SampleId; }
+    SampleAudioPtr soundFontSampleAudio() const { return sf2Sample; }
+    bool selectSoundFontSample(SampleId);
+    int soundFontActiveVoices() const { return sf2Sampler.activeVoices(); }
+    juce::uint64 soundFontGeneration() const { return sf2Generation; }
+    TriggerTelemetry::Snapshot lastSoundFontTrigger() const { return sf2Sampler.lastTrigger(); }
+    // Built-in external-file instruments (EXS24 and supported NKI XML) share the sample browser,
+    // audition and export behaviour with SF2. Presets stay SF2-only.
+    bool isExternalInstrumentMode() const { return externalMode; }
+    bool isSamplerInstrumentMode() const { return sf2Mode || externalMode; }
+    const std::vector<SampleDescriptor>& instrumentSamples() const
+    { return sf2Mode ? sf2Samples : externalInstrument.sources; }
+    SampleId instrumentSampleId() const { return sf2Mode ? sf2SampleId : externalSampleId; }
+    SampleAudioPtr instrumentSampleAudio() const { return sf2Mode ? sf2Sample : externalSample; }
+    bool selectInstrumentSample(SampleId id)
+    { return sf2Mode ? selectSoundFontSample(id) : selectExternalSample(id); }
+    juce::uint64 instrumentGeneration() const { return sf2Mode ? sf2Generation : externalGeneration; }
+    TriggerTelemetry::Snapshot lastInstrumentTrigger() const
+    { return sf2Mode ? sf2Sampler.lastTrigger() : externalSampler.lastTrigger(); }
+    int instrumentActiveVoices() const
+    { return sf2Mode ? sf2Sampler.activeVoices() : externalSampler.activeVoices(); }
+    int lastInstrumentMidiNote() const
+    { return sf2Mode ? sf2Sampler.midiMonitorNote() : externalSampler.midiMonitorNote(); }
+    int lastInstrumentMidiLayers() const
+    { return sf2Mode ? sf2Sampler.midiMonitorLayers() : externalSampler.midiMonitorLayers(); }
+    juce::String instrumentName() const
+    { return sf2Mode ? sf2Sampler.presetName() : externalInstrument.name; }
+    juce::StringArray instrumentWarnings() const { return externalInstrument.warnings; }
     // REX2 slices are a MIDI drum map starting at startNote (default 36). Gate stops a slice on
     // NoteOff; one-shot lets it ring out.
     bool previewRex2(const juce::File&, int startNote = 36);
@@ -51,11 +86,11 @@ public:
     bool isMidiPreview() const { return output.midi.load(); }
     void setSkipSilence(bool enabled) { skipSilence = enabled; sampler.skipSilence = enabled; }
     bool isSkipSilence() const { return skipSilence; }
-    bool isPlaying() const { return rexMode ? rexSampler.auditionPlaying() : source.isPlaying(); }
+    bool isPlaying() const { return auditionMode() ? sf2Audition.isPlaying() : rexMode ? rexSampler.auditionPlaying() : source.isPlaying(); }
     bool isLooping() const { return looping; }
     float getVolume() const { return source.getGain(); }
-    double position() const { return rexMode ? rexSampler.auditionSeconds() : source.getCurrentPosition(); }
-    double length() const { return rexMode ? rexSampler.lengthSeconds() : source.getLengthInSeconds(); }
+    double position() const { return auditionMode() ? sf2Audition.position() : rexMode ? rexSampler.auditionSeconds() : source.getCurrentPosition(); }
+    double length() const { return auditionMode() ? sf2Audition.length() : rexMode ? rexSampler.lengthSeconds() : source.getLengthInSeconds(); }
     juce::String error() const { return lastError; }
     juce::AudioTransportSource& transport() { return source; }
     juce::AudioDeviceManager& deviceManager() { return devices; }
@@ -79,13 +114,29 @@ private:
     MidiSampler sampler;
     Sf2KitSampler sf2Sampler;
     Sf2Bank sf2Bank;
+    std::vector<SampleDescriptor> sf2Samples;
+    SampleId sf2SampleId = invalidSampleId;
+    SampleAudioPtr sf2Sample;
     bool sf2Mode = false;
+    juce::uint64 sf2Generation = 0;
+    ExternalKitSampler externalSampler;
+    FileInstrument externalInstrument;
+    SampleId externalSampleId = invalidSampleId;
+    SampleAudioPtr externalSample;
+    bool externalMode = false;
+    juce::uint64 externalGeneration = 0;
     Rex2SlicePlayer rexSampler;
     bool rexMode = false;
-    PreviewOutput output {source,sampler,sf2Sampler,rexSampler};
+    SampleAudition sf2Audition;
+    PreviewOutput output {source,sampler,sf2Sampler,rexSampler,sf2Audition,externalSampler};
     juce::AudioSourcePlayer player;
     void attach();
     void clearContainers();
+    bool refreshSoundFontSamples(bool selectFirstPlayable);
+    bool previewFileInstrument(const juce::File&);
+    bool refreshExternalSamples(bool selectFirstPlayable);
+    bool selectExternalSample(SampleId);
+    bool auditionMode() const { return sf2Mode || externalMode; }
     double deviceSampleRate() const;
 };
 }

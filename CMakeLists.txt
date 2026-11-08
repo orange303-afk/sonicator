@@ -7,25 +7,27 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 include(FetchContent)
+find_package(ZLIB REQUIRED)
 FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
     GIT_TAG 9.0.5 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
 add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/database/Database.cpp core/database/PathRelocation.cpp core/database/SearchSyntax.cpp core/database/SampleRepository.cpp core/settings/AppSettings.cpp
-    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/ContainerValidation.cpp
+    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/SampleAudition.cpp core/audio/ContainerValidation.cpp
     core/export/AudioExporter.cpp core/export/SelectionExporter.cpp core/export/ExternalFileDrag.cpp
     core/indexing/IndexingService.cpp
     core/tagging/TaggingService.cpp core/tagging/AutoTagRules.cpp core/tagging/AutoTagService.cpp
     core/smart/SmartTypes.cpp core/smart/KeyNames.cpp core/smart/SmartResolver.cpp core/smart/NameHeuristics.cpp core/smart/WavMetadata.cpp core/smart/AiffMetadata.cpp core/smart/AbletonAsd.cpp core/smart/Rex2Metadata.cpp core/smart/SmartAnalysisService.cpp core/smart/AssetAnalyzer.cpp
     core/sf2/Sf2Bank.cpp core/sf2/Sf2KitSampler.cpp
+    core/sampler/FileInstrument.cpp core/sampler/ExternalKitSampler.cpp
     core/rex/Rex2Decoder.cpp core/rex/Rex2SlicePlayer.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
 target_link_libraries(SonicatorCore PUBLIC
-    juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography)
+    juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB)
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png)
 add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/tagging/AutoTagDialog.cpp ui/shell/ThemedDialogs.cpp ui/settings/SettingsPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp)
@@ -37,7 +39,7 @@ endif()
 target_link_libraries(SonicatorUI PUBLIC SonicatorCore PRIVATE SonicatorAssets)
 juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
     BUNDLE_ID "com.sonicator.browser" MICROPHONE_PERMISSION_ENABLED FALSE
-    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/icon-tile-1024.png")
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/icon-glossy-chevron-1024.png")
 target_sources(Sonicator PRIVATE app/Main.cpp)
 target_link_libraries(Sonicator PRIVATE SonicatorUI)
 if(APPLE)

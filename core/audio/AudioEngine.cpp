@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include "ContainerValidation.h"
+#include <algorithm>
 #include <cmath>
 namespace sonicator {
 AudioEngine::AudioEngine(bool openDevice) : deviceMode(openDevice)
@@ -59,6 +60,11 @@ bool AudioEngine::loadFile(const juce::File& file)
         if (deviceMode) player.setSource(&output);
         return previewRex2(file);
     }
+    if (extension == ".exs" || extension == ".nki")
+    {
+        if (deviceMode) player.setSource(&output);
+        return previewFileInstrument(file);
+    }
     std::unique_ptr<juce::AudioFormatReader> decoded(formats.createReaderFor(file));
     if (! decoded || decoded->sampleRate <= 0 || decoded->lengthInSamples <= 0)
     {
@@ -77,6 +83,7 @@ bool AudioEngine::loadFile(const juce::File& file)
 }
 void AudioEngine::play()
 {
+    if (auditionMode()) { sf2Audition.play(looping); return; }
     if (rexMode) { rexSampler.startAudition(looping); return; }
     if (! reader) return;
     if (source.hasStreamFinished() || startAtNextPlay)
@@ -97,6 +104,16 @@ void AudioEngine::clearContainers()
     output.sf2Mode = false;
     sf2Sampler.reset();
     sf2Bank.clear();
+    sf2Samples.clear();
+    sf2SampleId = invalidSampleId;
+    sf2Sample.reset();
+    sf2Audition.clear();
+    externalMode = false;
+    output.externalMode = false;
+    externalSampler.reset();
+    externalInstrument = {};
+    externalSampleId = invalidSampleId;
+    externalSample.reset();
     rexMode = false;
     output.rexMode = false;
     rexSampler.reset();
@@ -126,9 +143,126 @@ bool AudioEngine::selectSoundFontPreset(int index)
         sf2Sampler.prepare(deviceSampleRate());
         output.sf2Mode = true;
         lastError.clear();
+        ++sf2Generation;
+        sf2Sampler.setGeneration(sf2Generation);
+        refreshSoundFontSamples(true);
     }
     if (deviceMode) player.setSource(&output);
     return ok;
+}
+std::vector<SampleDescriptor> AudioEngine::soundFontSamples(juce::String& error) const
+{
+    error.clear();
+    if (! sf2Mode) { error = "SoundFont preset is not loaded"; return {}; }
+    return sf2Samples;
+}
+bool AudioEngine::refreshSoundFontSamples(bool selectFirstPlayable)
+{
+    sf2Samples.clear();
+    sf2SampleId = invalidSampleId;
+    sf2Sample.reset();
+    sf2Audition.clear();
+    juce::String error;
+    sf2Samples = sf2Bank.usedSamples(sf2Sampler.presetIndex(), error);
+    if (! error.isEmpty()) { lastError = error; return false; }
+    if (! selectFirstPlayable) return true;
+    const auto first = std::find_if(sf2Samples.begin(), sf2Samples.end(),
+        [] (const SampleDescriptor& descriptor) { return descriptor.isPlayable(); });
+    if (first != sf2Samples.end()) return selectSoundFontSample(first->id);
+    if (! sf2Samples.empty()) lastError = sf2Samples.front().error;
+    else lastError = "SoundFont preset has no usable samples";
+    return false;
+}
+bool AudioEngine::selectSoundFontSample(SampleId id)
+{
+    if (! sf2Mode) { lastError = "SoundFont preset is not loaded"; return false; }
+    const auto found = std::find_if(sf2Samples.begin(), sf2Samples.end(),
+        [id] (const SampleDescriptor& descriptor) { return descriptor.id == id; });
+    if (found == sf2Samples.end()) { lastError = "SoundFont sample is not part of this preset"; return false; }
+    if (! found->isPlayable()) { lastError = found->error; return false; }
+    juce::String error;
+    auto audio = sf2Bank.sampleAudio(id, error);
+    if (audio == nullptr) { lastError = error.isNotEmpty() ? error : "Cannot decode SoundFont sample"; return false; }
+    {
+        // Publish only the audition source. Reattaching PreviewOutput calls prepareToPlay(),
+        // which resets every MIDI voice (including the note that caused MIDI-follow).
+        const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        sf2Audition.setAudio(audio);
+        sf2Audition.prepare(deviceSampleRate());
+    }
+    sf2SampleId = id;
+    sf2Sample = std::move(audio);
+    lastError.clear();
+    return true;
+}
+bool AudioEngine::previewFileInstrument(const juce::File& file)
+{
+    if (deviceMode) player.setSource(nullptr);
+    clearContainers();
+    const auto extension = file.getFileExtension().toLowerCase();
+    const auto format = extension == ".exs" ? FileInstrumentFormat::exs24 : FileInstrumentFormat::nki;
+    juce::String error;
+    if (! loadFileInstrument(file, format, externalInstrument, error))
+    {
+        externalInstrument = {};
+        lastError = error;
+        if (deviceMode) player.setSource(&output);
+        return false;
+    }
+    if (! externalSampler.load(externalInstrument, error))
+    {
+        externalInstrument = {};
+        lastError = error;
+        if (deviceMode) player.setSource(&output);
+        return false;
+    }
+    externalSampler.prepare(deviceSampleRate());
+    externalMode = true;
+    output.externalMode = true;
+    ++externalGeneration;
+    externalSampler.setGeneration(externalGeneration);
+    loadedFile = file;
+    lastError.clear();
+    refreshExternalSamples(true);
+    if (! isMidiPreview()) setMidiPreview(true);
+    if (deviceMode) player.setSource(&output);
+    return true;
+}
+bool AudioEngine::refreshExternalSamples(bool selectFirstPlayable)
+{
+    externalSampleId = invalidSampleId;
+    externalSample.reset();
+    sf2Audition.clear();
+    if (! selectFirstPlayable) return true;
+    const auto first = std::find_if(externalInstrument.sources.begin(), externalInstrument.sources.end(),
+        [] (const SampleDescriptor& descriptor) { return descriptor.isPlayable(); });
+    if (first != externalInstrument.sources.end()) return selectExternalSample(first->id);
+    lastError = externalInstrument.sources.empty() ? "Instrument has no samples"
+                                                   : "Instrument has no usable samples";
+    return false;
+}
+bool AudioEngine::selectExternalSample(SampleId id)
+{
+    if (! externalMode) { lastError = "Instrument is not loaded"; return false; }
+    if (id < 0 || id >= (int) externalInstrument.sources.size())
+    { lastError = "Instrument sample index is out of range"; return false; }
+    const auto& descriptor = externalInstrument.sources[(size_t) id];
+    if (! descriptor.isPlayable())
+    {
+        lastError = descriptor.error.isNotEmpty() ? descriptor.error : "Instrument sample is unavailable";
+        return false;
+    }
+    if (id >= (int) externalInstrument.audio.size() || externalInstrument.audio[(size_t) id] == nullptr)
+    { lastError = "Instrument sample has no decoded audio"; return false; }
+    {
+        const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        sf2Audition.setAudio(externalInstrument.audio[(size_t) id]);
+        sf2Audition.prepare(deviceSampleRate());
+    }
+    externalSampleId = id;
+    externalSample = externalInstrument.audio[(size_t) id];
+    lastError.clear();
+    return true;
 }
 bool AudioEngine::previewRex2(const juce::File& file, int startNote)
 {
@@ -176,30 +310,37 @@ bool AudioEngine::previewSoundFont(const juce::File& file, int presetIndex)
     sf2Sampler.prepare(deviceSampleRate());
     sf2Mode = true;
     output.sf2Mode = true;
+    ++sf2Generation;
+    sf2Sampler.setGeneration(sf2Generation);
     loadedFile = file;
     lastError.clear();
+    refreshSoundFontSamples(true);
     if (! isMidiPreview()) setMidiPreview(true);
     if (deviceMode) player.setSource(&output);
     return true;
 }
 void AudioEngine::pause()
 {
+    if (auditionMode()) { sf2Audition.pause(); return; }
     if (rexMode) { rexSampler.pauseAudition(); return; }
     source.stop();
 }
 void AudioEngine::stop()
 {
+    if (auditionMode()) sf2Audition.stop();
     if (rexMode) rexSampler.stopAudition();
     source.stop(); source.setPosition(0); startAtNextPlay = true;
     if (deviceMode) player.setSource(nullptr);
     sampler.reset();
     sf2Sampler.reset();
+    externalSampler.reset();
     rexSampler.reset();
     if (deviceMode) player.setSource(&output);
 }
 void AudioEngine::seek(double seconds)
 {
     if (! std::isfinite(seconds)) return;
+    if (auditionMode()) { sf2Audition.seek(juce::jlimit(0.0, length(), seconds)); return; }
     if (rexMode) { rexSampler.seekAudition(juce::jlimit(0.0, length(), seconds)); return; }
     source.setPosition(juce::jlimit(0.0, length(), seconds)); startAtNextPlay = false;
 }
@@ -213,6 +354,7 @@ void AudioEngine::setLooping(bool enabled)
     if (looping == enabled) return;
     looping = enabled;
     sampler.loop = enabled;
+    if (auditionMode()) { sf2Audition.setLooping(enabled); return; }
     if (rexMode) { rexSampler.setAuditionLoop(enabled); return; }
     if (! reader) return;
     auto positionBefore = position(); bool resume = isPlaying();
@@ -227,13 +369,14 @@ bool AudioEngine::setMidiPreview(bool enabled)
     source.stop(); startAtNextPlay = true;
     if (deviceMode) player.setSource(nullptr);
     sampler.clear(); lastError.clear();
-    if (enabled && loadedFile != juce::File() && ! sf2Mode && ! rexMode) lastError = sampler.load(loadedFile);
+    if (enabled && loadedFile != juce::File() && ! sf2Mode && ! externalMode && ! rexMode) lastError = sampler.load(loadedFile);
     output.midi = enabled && lastError.isEmpty();
     if (deviceMode)
     {
         if (enabled && ! midiInputsConnected)
         {
-            for (const auto& input : juce::MidiInput::getAvailableDevices()) devices.setMidiInputDeviceEnabled(input.identifier,true);
+            for (const auto& input : juce::MidiInput::getAvailableDevices())
+                devices.setMidiInputDeviceEnabled(input.identifier,true);
             devices.addMidiInputDeviceCallback({},&output.collector); midiInputsConnected = true;
         }
         player.setSource(&output);

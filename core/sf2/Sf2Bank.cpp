@@ -1,4 +1,5 @@
 #include "Sf2Bank.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 namespace sonicator {
@@ -25,6 +26,90 @@ juce::String readName(const juce::uint8* data, size_t maxLength)
     size_t length = 0;
     while (length < maxLength && data[length] != 0) ++length;
     return juce::String::fromUTF8((const char*) data, (int) length).trim();
+}
+struct ResolvedSample
+{
+    int left = -1, right = -1;
+    int64_t start = 0, frames = 0, loopStart = 0, loopEnd = 0;
+    int channels = 0, rate = 0;
+    bool looping = false;
+    juce::String error;
+};
+// Resolves a sample header to one mono/stereo audio source. Stereo pairs are keyed by the left
+// header so a zone that references either side still maps to one descriptor.
+ResolvedSample resolveSample(const std::vector<Sf2Sample>& samples,
+                             const std::vector<juce::int16>& pcm, int index)
+{
+    ResolvedSample resolved;
+    if (index < 0 || index >= (int) samples.size())
+    {
+        resolved.error = "SoundFont sample index is out of range";
+        return resolved;
+    }
+    const auto& sample = samples[(size_t) index];
+    int left = index, right = -1;
+    if (sample.sampleType == 2)
+    {
+        if (sample.sampleLink >= (int) samples.size() || sample.sampleLink == index)
+        {
+            resolved.error = "SoundFont right sample has no valid left link";
+            return resolved;
+        }
+        left = sample.sampleLink;
+        right = index;
+    }
+    else if (sample.sampleType == 4 && sample.sampleLink != 0)
+    {
+        if (sample.sampleLink < 0 || sample.sampleLink >= (int) samples.size()
+            || sample.sampleLink == index)
+        {
+            resolved.error = "SoundFont left sample has an invalid right link";
+            return resolved;
+        }
+        right = sample.sampleLink;
+    }
+    const auto& leftSample = samples[(size_t) left];
+    if (leftSample.start < 0 || leftSample.end <= leftSample.start
+        || leftSample.end > (int64_t) pcm.size())
+    {
+        resolved.error = "SoundFont sample bounds are outside the PCM data";
+        return resolved;
+    }
+    if (leftSample.sampleRate <= 0)
+    {
+        resolved.error = "SoundFont sample has an invalid sample rate";
+        return resolved;
+    }
+    resolved.left = left;
+    resolved.right = right;
+    resolved.start = leftSample.start;
+    resolved.frames = leftSample.end - leftSample.start;
+    resolved.rate = leftSample.sampleRate;
+    resolved.channels = 1;
+    if (right >= 0)
+    {
+        const auto& rightSample = samples[(size_t) right];
+        if (rightSample.start < 0 || rightSample.end <= rightSample.start
+            || rightSample.end > (int64_t) pcm.size()
+            || rightSample.end - rightSample.start != resolved.frames)
+        {
+            resolved.error = "SoundFont stereo pair has mismatched bounds";
+            return resolved;
+        }
+        if (rightSample.sampleRate != leftSample.sampleRate)
+        {
+            resolved.error = "SoundFont stereo pair has mismatched sample rates";
+            return resolved;
+        }
+        resolved.channels = 2;
+    }
+    // The kit sampler clamps loop bounds to the usable frame range; descriptors report the same.
+    resolved.loopStart = juce::jlimit(leftSample.start, leftSample.end, leftSample.loopStart)
+                       - leftSample.start;
+    resolved.loopEnd = juce::jlimit(leftSample.start, leftSample.end, leftSample.loopEnd)
+                     - leftSample.start;
+    resolved.looping = resolved.loopEnd > resolved.loopStart;
+    return resolved;
 }
 } // namespace
 void Sf2Bank::clear()
@@ -244,5 +329,69 @@ bool Sf2Bank::load(const juce::File& file, juce::String& error)
     if (presetList.empty()) { error = "SoundFont has no playable presets"; return false; }
     loaded = true;
     return true;
+}
+std::vector<SampleDescriptor> Sf2Bank::usedSamples(int presetIndex, juce::String& error) const
+{
+    error.clear();
+    std::vector<SampleDescriptor> result;
+    if (! loaded) { error = "SoundFont is not loaded"; return result; }
+    if (presetIndex < 0 || presetIndex >= (int) presetList.size())
+    {
+        error = "SoundFont preset index is out of range";
+        return result;
+    }
+    for (const auto& zone : presetList[(size_t) presetIndex].zones)
+    {
+        if (zone.sampleIndex < 0) continue;
+        const auto resolved = resolveSample(sampleList, sampleData, zone.sampleIndex);
+        const int canonical = resolved.left >= 0 ? resolved.left : zone.sampleIndex;
+        auto found = std::find_if(result.begin(), result.end(),
+            [canonical] (const SampleDescriptor& d) { return d.id == canonical; });
+        if (found == result.end())
+        {
+            SampleDescriptor descriptor;
+            descriptor.id = canonical;
+            if (canonical >= 0 && canonical < (int) sampleList.size())
+                descriptor.name = sampleList[(size_t) canonical].name;
+            descriptor.error = resolved.error;
+            if (resolved.error.isEmpty())
+            {
+                descriptor.sampleRate = resolved.rate;
+                descriptor.channels = resolved.channels;
+                descriptor.frameCount = resolved.frames;
+                descriptor.loopStart = resolved.loopStart;
+                descriptor.loopEnd = resolved.loopEnd;
+                descriptor.looping = resolved.looping;
+            }
+            result.push_back(std::move(descriptor));
+            found = result.end() - 1;
+        }
+        found->zones.push_back({ zone.keyLow, zone.keyHigh, zone.velocityLow, zone.velocityHigh });
+    }
+    return result;
+}
+SampleAudioPtr Sf2Bank::sampleAudio(SampleId id, juce::String& error) const
+{
+    error.clear();
+    if (! loaded) { error = "SoundFont is not loaded"; return {}; }
+    const auto resolved = resolveSample(sampleList, sampleData, id);
+    if (! resolved.error.isEmpty()) { error = resolved.error; return {}; }
+    auto audio = std::make_shared<SampleAudio>();
+    audio->sampleRate = resolved.rate;
+    audio->channels = resolved.channels;
+    audio->bitsPerSample = 16;
+    audio->floatingPoint = false;
+    audio->frames = resolved.frames;
+    audio->left.resize((size_t) resolved.frames);
+    for (int64_t i = 0; i < resolved.frames; ++i)
+        audio->left[(size_t) i] = (float) sampleData[(size_t) (resolved.start + i)] / 32768.0f;
+    if (resolved.channels > 1)
+    {
+        audio->right.resize((size_t) resolved.frames);
+        const int64_t rightStart = sampleList[(size_t) resolved.right].start;
+        for (int64_t i = 0; i < resolved.frames; ++i)
+            audio->right[(size_t) i] = (float) sampleData[(size_t) (rightStart + i)] / 32768.0f;
+    }
+    return audio;
 }
 } // namespace sonicator

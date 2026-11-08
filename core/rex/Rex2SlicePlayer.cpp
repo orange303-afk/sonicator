@@ -141,7 +141,7 @@ void Rex2SlicePlayer::noteOn(int note, float velocity)
     voice.end = slice.start + slice.length;
     voice.ratio = (double) sourceRate / outputRate;
 }
-void Rex2SlicePlayer::renderRange(juce::AudioBuffer<float>& out, int start, int count)
+void Rex2SlicePlayer::renderRange(juce::AudioBuffer<float>& out, int start, int count, float midiGain)
 {
     if (! audioData) return;
     const auto& left = audioData->left;
@@ -180,7 +180,7 @@ void Rex2SlicePlayer::renderRange(juce::AudioBuffer<float>& out, int start, int 
             const float tail = remaining < fadeFrames ? (float) (remaining / fadeFrames) : 1.0f;
             const float l = interpolate(left, voice.position);
             const float r = right.empty() ? l : interpolate(right, voice.position);
-            const float gain = voice.envelope * voice.velocity * tail * 0.25f;
+            const float gain = voice.envelope * voice.velocity * tail * 0.25f * midiGain;
             if (out.getNumChannels() > 0) out.addSample(0, start + i, l * gain);
             if (out.getNumChannels() > 1) out.addSample(1, start + i, r * gain);
             voice.position += voice.ratio;
@@ -194,7 +194,7 @@ void Rex2SlicePlayer::renderRange(juce::AudioBuffer<float>& out, int start, int 
     }
 }
 void Rex2SlicePlayer::render(juce::AudioBuffer<float>& out, int start, int count,
-                             const juce::MidiBuffer& midi)
+                             const juce::MidiBuffer& midi, float midiGain)
 {
     juce::ScopedNoDenormals noDenormals;
     out.clear(start, count);
@@ -202,18 +202,21 @@ void Rex2SlicePlayer::render(juce::AudioBuffer<float>& out, int start, int count
     for (const auto metadata : midi)
     {
         const int frame = juce::jlimit(position, count, metadata.samplePosition);
-        renderRange(out, start + position, frame - position);
+        renderRange(out, start + position, frame - position, midiGain);
         position = frame;
         if (metadata.numBytes <= 3)
         {
             const auto message = metadata.getMessage();
             if (message.isNoteOn()) noteOn(message.getNoteNumber(), message.getFloatVelocity());
             else if (message.isNoteOff()) noteOff(message.getNoteNumber());
-            else if (message.isAllNotesOff()) for (auto& voice : voices) if (voice.active) release(voice);
+            else if (message.isAllNotesOff())
+            {
+                for (auto& voice : voices) if (voice.active) release(voice);
+            }
             else if (message.isAllSoundOff()) for (auto& voice : voices) voice.active = false;
         }
     }
-    renderRange(out, start + position, count - position);
+    renderRange(out, start + position, count - position, midiGain);
     juce::uint64 low = 0, high = 0;
     for (const auto& voice : voices)
         if (voice.active && voice.slice >= 0)

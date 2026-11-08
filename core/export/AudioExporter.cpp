@@ -220,6 +220,82 @@ ExportResult AudioExporter::exportRexSelection(const Rex2Audio& audio, const juc
     }
     return { false, {}, "Cannot allocate a unique export file name" };
 }
+ExportResult AudioExporter::exportSampleSelection(const SampleAudio& audio, const juce::String& stem,
+                                                   double start, double end, const juce::File& folder,
+                                                   CancelCheck cancel) const
+{
+    if (! std::isfinite(start) || ! std::isfinite(end))
+        return { false, {}, "The selection range is not a finite time" };
+    if (audio.sampleRate <= 0 || audio.frames <= 0)
+        return { false, {}, "The sampler source has no decoded audio" };
+    const int channels = audio.channels > 1 && ! audio.right.empty() ? 2 : 1;
+    if ((int64_t) audio.left.size() < audio.frames
+        || (channels > 1 && (int64_t) audio.right.size() < audio.frames))
+        return { false, {}, "The sampler decoded buffer is incomplete" };
+    auto startFrame = (int64_t) std::llround(start * audio.sampleRate);
+    auto endFrame = (int64_t) std::llround(end * audio.sampleRate);
+    startFrame = juce::jlimit<int64_t>(0, audio.frames, startFrame);
+    endFrame = juce::jlimit<int64_t>(0, audio.frames, endFrame);
+    if (endFrame <= startFrame)
+        return { false, {}, "The selection is shorter than one audio frame" };
+    if (cancel && cancel()) return { false, {}, "Export cancelled" };
+    if (! folder.createDirectory())
+        return { false, {}, "Cannot create export folder: " + folder.getFullPathName() };
+    const auto base = sanitizeStem(stem) + "_" + rangeSuffix(start, end) + "_";
+    for (int attempt = 0; attempt < 20; ++attempt)
+    {
+        const auto suffix = juce::Uuid().toString().replace("-", "").substring(0, 6).toLowerCase();
+        const auto destination = folder.getChildFile(base + suffix + ".wav");
+        const auto part = juce::File(destination.getFullPathName() + ".part");
+        if (destination.existsAsFile() || part.existsAsFile()) continue;
+        part.deleteFile();
+        std::unique_ptr<juce::OutputStream> stream(part.createOutputStream());
+        if (stream == nullptr)
+            return { false, {}, "Cannot create export file: " + destination.getFileName() };
+        juce::WavAudioFormat wav;
+        // Preserve the decoded source format policy: 16-bit stays 16-bit, 24/32-bit integer
+        // becomes 24-bit PCM, float becomes 32-bit float.
+        const bool floating = audio.floatingPoint;
+        const int bits = floating ? 32 : (audio.bitsPerSample <= 16 ? 16 : 24);
+        auto options = juce::AudioFormatWriterOptions{}.withSampleRate((double) audio.sampleRate)
+            .withNumChannels(channels).withBitsPerSample(bits)
+            .withSampleFormat(floating ? juce::AudioFormatWriterOptions::SampleFormat::floatingPoint
+                                       : juce::AudioFormatWriterOptions::SampleFormat::integral);
+        auto writer = wav.createWriterFor(stream, options);
+        if (writer == nullptr)
+        {
+            stream.reset();
+            return failure(part, "WAV writer rejected " + juce::String(channels) + " channels at " + juce::String(bits) + " bits");
+        }
+        juce::AudioBuffer<float> buffer(channels,
+            (int) juce::jmin<int64_t>(exportChunkFrames, endFrame - startFrame));
+        auto frame = startFrame;
+        while (frame < endFrame)
+        {
+            if (cancel && cancel()) return failure(part, "Export cancelled");
+            const int count = (int) juce::jmin<int64_t>(exportChunkFrames, endFrame - frame);
+            const float* sourceChannels[2] = { audio.left.data() + frame,
+                                               channels > 1 ? audio.right.data() + frame : nullptr };
+            for (int ch = 0; ch < channels; ++ch)
+                buffer.copyFrom(ch, 0, sourceChannels[ch], count);
+            if (! writer->writeFromFloatArrays(buffer.getArrayOfReadPointers(), channels, count))
+                return failure(part, "Cannot write export audio: " + destination.getFileName());
+            frame += count;
+        }
+        if (! writer->flush())
+            return failure(part, "Cannot finalise export file: " + destination.getFileName());
+        writer.reset();
+        const auto validation = validateWavOutput(part, endFrame - startFrame,
+                                                  (double) audio.sampleRate, channels, bits, floating);
+        if (validation.isNotEmpty()) return failure(part, validation);
+        if (! part.existsAsFile() || part.getSize() <= 0)
+            return failure(part, "Cannot finalise export file: " + destination.getFileName());
+        if (! part.moveFileTo(destination))
+            return failure(part, "Cannot finalise export file: " + destination.getFileName());
+        return { true, destination, {} };
+    }
+    return { false, {}, "Cannot allocate a unique export file name" };
+}
 ExportResult AudioExporter::exportSelection(const juce::File& source, double start, double end,
                                             const juce::File& folder, CancelCheck cancel) const
 {

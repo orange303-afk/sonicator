@@ -18,6 +18,7 @@ float interpolate(const std::vector<float>& pcm, double position)
 bool Sf2KitSampler::load(const Sf2Bank& bank, int presetIndex, juce::String& error)
 {
     reset();
+    telemetry.reset();
     zones.clear(); samples.clear(); pcm.clear(); preset = -1; name.clear();
     if (! bank.isLoaded()) { error = "SoundFont is not loaded"; return false; }
     if (presetIndex < 0 || presetIndex >= (int) bank.presets().size())
@@ -62,12 +63,12 @@ int Sf2KitSampler::activeVoices() const
     for (const auto& voice : voices) if (voice.active) ++count;
     return count;
 }
-void Sf2KitSampler::release(Voice& voice)
+void Sf2KitSampler::release(Voice& voice, double seconds)
 {
-    if (voice.releasing) return;
+    if (voice.releasing && seconds >= 2.0) return;
     voice.releasing = true;
-    const int frames = juce::jmax(1, (int) std::lround(outputRate * 0.020));
-    voice.releaseStep = voice.envelope / (float) frames;
+    const int frames = juce::jmax(1, (int) std::lround(outputRate * seconds));
+    voice.releaseStep = juce::jmax(voice.releaseStep, voice.envelope / (float) frames);
 }
 void Sf2KitSampler::noteOff(int note)
 {
@@ -77,7 +78,10 @@ void Sf2KitSampler::noteOff(int note)
 void Sf2KitSampler::noteOn(int note, float velocity)
 {
     if (velocity <= 0) return;
+    lastNote.store(note, std::memory_order_relaxed);
     const int midiVelocity = juce::jlimit(1, 127, (int) std::lround(velocity * 127.0f));
+    SampleId firstSource = invalidSampleId;
+    int layers = 0;
     for (const auto& zone : zones)
     {
         if (zone.sampleIndex < 0) continue;
@@ -85,13 +89,13 @@ void Sf2KitSampler::noteOn(int note, float velocity)
         if (midiVelocity < zone.velocityLow || midiVelocity > zone.velocityHigh) continue;
         Voice* chosen = nullptr;
         for (auto& voice : voices) if (! voice.active) { chosen = &voice; break; }
-        if (chosen == nullptr) return; // never steal an audible voice
+        if (chosen == nullptr) break; // never steal an audible voice
         // Drums choke their exclusive group. Stop the previous voice immediately but with the
         // short release ramp rather than a hard cut.
         if (zone.exclusiveClass != 0)
             for (auto& voice : voices)
                 if (&voice != chosen && voice.active && voice.exclusive == zone.exclusiveClass)
-                    release(voice);
+                    release(voice, 0.020);
         auto& voice = *chosen;
         voice = {};
         voice.active = true;
@@ -112,7 +116,16 @@ void Sf2KitSampler::noteOn(int note, float velocity)
         voice.envelope = 0;
         voice.releaseStep = 0;
         voice.position = (double) sample.start;
+        if (firstSource == invalidSampleId)
+            firstSource = sample.sampleType == 2 && sample.sampleLink < (int) samples.size()
+                              && sample.sampleLink != zone.sampleIndex
+                        ? sample.sampleLink : zone.sampleIndex;
+        ++layers;
     }
+    // Publish only after at least one voice really started. A NoteOn without a matching zone or
+    // one rejected by the voice limit leaves the previous waveform untouched.
+    lastLayers.store(layers, std::memory_order_relaxed);
+    if (firstSource != invalidSampleId) telemetry.publish(generation, firstSource, layers);
 }
 void Sf2KitSampler::renderRange(juce::AudioBuffer<float>& out, int start, int count)
 {
@@ -173,7 +186,10 @@ void Sf2KitSampler::render(juce::AudioBuffer<float>& out, int start, int count,
             const auto message = metadata.getMessage();
             if (message.isNoteOn()) noteOn(message.getNoteNumber(), message.getFloatVelocity());
             else if (message.isNoteOff()) noteOff(message.getNoteNumber());
-            else if (message.isAllNotesOff()) for (auto& voice : voices) if (voice.active) release(voice);
+            else if (message.isAllNotesOff())
+            {
+                for (auto& voice : voices) if (voice.active) release(voice);
+            }
             else if (message.isAllSoundOff()) for (auto& voice : voices) voice.active = false;
         }
     }

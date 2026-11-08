@@ -1,6 +1,7 @@
 #pragma once
 #include "core/scanner/FileScanner.h"
 #include "core/rex/Rex2Decoder.h"
+#include "core/sampler/SamplerTypes.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 namespace sonicator {
 struct ExportResult
@@ -30,5 +31,11 @@ public:
     ExportResult exportRexSelection(const Rex2Audio& audio, const juce::File& source,
                                     double start, double end, const juce::File& folder,
                                     CancelCheck cancel = {}) const;
+    // Decoded sampler PCM (SF2 and other built-in sources) has no AudioFormatReader. The range is
+    // in seconds relative to this immutable source; sample rate, channels and source values are
+    // preserved and no gain, transpose or normalisation is applied.
+    ExportResult exportSampleSelection(const SampleAudio& audio, const juce::String& stem,
+                                       double start, double end, const juce::File& folder,
+                                       CancelCheck cancel = {}) const;
 };
 } // namespace sonicator

@@ -138,7 +138,7 @@ TEST_CASE("SF2 kit sampler plays the mapped sample at the requested pitch", "[sf
 TEST_CASE("Velocity scales a voice and NoteOff releases it", "[sf2][sampler]")
 {
     TestDirectory t;
-    auto path = writeSineBank(t);
+    auto path = writeSineBank(t, 44100 * 3);
     Sf2Bank bank; juce::String error;
     REQUIRE(bank.load(path, error));
     Sf2KitSampler sampler;
@@ -155,8 +155,11 @@ TEST_CASE("Velocity scales a voice and NoteOff releases it", "[sf2][sampler]")
     off.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0);
     off.addEvent(juce::MidiMessage::noteOff(1, 60), 2048);
     sampler.render(buffer, 0, 4096, off);
-    REQUIRE(sampler.activeVoices() == 0);
+    REQUIRE(sampler.activeVoices() == 1); // NoteOff now leaves a two-second tail.
     REQUIRE(buffer.getMagnitude(0, 4096) > 0.01f);
+    off.clear();
+    for (int i = 0; i < 23; ++i) sampler.render(buffer, 0, 4096, off);
+    REQUIRE(sampler.activeVoices() == 0);
 }
 TEST_CASE("A looping SF2 sample keeps sounding past its end", "[sf2][sampler]")
 {

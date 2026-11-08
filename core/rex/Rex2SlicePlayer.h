@@ -42,7 +42,9 @@ public:
     double auditionSeconds() const { return auditionPosition.load(); }
     double lengthSeconds() const;
     std::vector<int64_t> sliceStarts() const;
-    void render(juce::AudioBuffer<float>&, int start, int count, const juce::MidiBuffer&);
+    // midiGain affects slice voices only, never the internally mixed whole-loop audition.
+    void render(juce::AudioBuffer<float>&, int start, int count, const juce::MidiBuffer&,
+                float midiGain = 1.0f);
     int activeVoices() const;
 private:
     struct Voice
@@ -75,6 +77,6 @@ private:
     void noteOn(int note, float velocity);
     void noteOff(int note);
     void release(Voice&);
-    void renderRange(juce::AudioBuffer<float>&, int start, int count);
+    void renderRange(juce::AudioBuffer<float>&, int start, int count, float midiGain);
 };
 } // namespace sonicator
