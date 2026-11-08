@@ -67,6 +67,8 @@ public:
     bool hasExactIgnore(const juce::String& path) const;
     void ignorePath(const juce::String& path, bool folder);
     void unignorePath(const juce::String& path);
+    // Deletes catalog rows for paths whose files were removed, together with exact ignore entries.
+    void removeByPaths(const juce::StringArray& paths);
     void setMissing(const std::vector<int64_t>& ids);
     int count(bool includeIgnored = false) const;
     int countInFolder(const juce::String& folder) const;

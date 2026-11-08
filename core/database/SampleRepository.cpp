@@ -403,6 +403,30 @@ bool isPathIgnored(const juce::String& path, const std::vector<IgnoredPath>& ent
     }
     return false;
 }
+void SampleRepository::removeByPaths(const juce::StringArray& paths)
+{
+    if (paths.isEmpty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement deleteSample(db.handle, "DELETE FROM samples WHERE path=?");
+        detail::Statement deleteIgnore(db.handle,
+            "DELETE FROM ignored_paths WHERE path=? AND is_folder=0");
+        for (const auto& path : paths)
+        {
+            if (path.isEmpty()) continue;
+            deleteSample.reset(); deleteSample.text(1, path); deleteSample.step();
+            deleteIgnore.reset(); deleteIgnore.text(1, path); deleteIgnore.step();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
 void SampleRepository::createTables()
 {
     std::lock_guard lock(db.mutex);

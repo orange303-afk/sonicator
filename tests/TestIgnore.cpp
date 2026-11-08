@@ -151,3 +151,18 @@ TEST_CASE("Smart verification skips ignored completed results", "[ignore][databa
         REQUIRE(std::find(needing.begin(), needing.end(), hidden) == needing.end());
     }
 }
+
+TEST_CASE("removeByPaths drops rows, tag links and exact ignore entries", "[database][remove]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("remove.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    SampleRecord r; r.filePath = "/lib/gone.wav"; r.fileName = "gone.wav";
+    const auto id = repo.upsert(r);
+    const auto tag = repo.createTag("Kick", 0xff00ff00);
+    repo.setSampleTag(id, tag, true);
+    repo.ignorePath("/lib/gone.wav", false);
+    repo.removeByPaths({ "/lib/gone.wav" });
+    REQUIRE_FALSE(repo.findByPath("/lib/gone.wav").has_value());
+    REQUIRE_FALSE(repo.hasExactIgnore("/lib/gone.wav"));
+    REQUIRE(repo.tagsForSample(id).empty());
+}
