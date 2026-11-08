@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "core/split/SilenceDetector.h"
+#include "core/split/SplitService.h"
 #include "TestHelpers.h"
 using namespace sonicator;
 namespace
@@ -87,4 +88,91 @@ TEST_CASE("Detector stops on cancellation", "[split][detector]")
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
     const auto result = detectSplitParts(*reader, {}, [] { return true; });
     REQUIRE(result.parts.empty());
+}
+
+TEST_CASE("Split service writes named parts, keeps originals and never overwrites", "[split][service]")
+{
+    TestDirectory t;
+    auto source = segments(t.dir.getChildFile("loop.wav"),
+        { { 44100, true }, { 44100, false }, { 44100, true },
+          { 44100, false }, { 44100, true } });
+    t.dir.getChildFile("loop_01.wav").replaceWithText("occupied");
+    SplitService service;
+    SplitOptions options;
+    REQUIRE(service.start({ source }, options));
+    REQUIRE(service.waitUntilFinished(20000));
+    auto results = service.results();
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].state == SplitFileState::split);
+    REQUIRE(results[0].deletable());
+    REQUIRE(results[0].parts.size() == 3);
+    REQUIRE(source.existsAsFile());
+    REQUIRE(t.dir.getChildFile("loop_01.wav").loadFileAsString() == "occupied");
+    REQUIRE(t.dir.getChildFile("loop_01-1.wav").existsAsFile());
+    REQUIRE(t.dir.getChildFile("loop_02.wav").existsAsFile());
+    REQUIRE(t.dir.getChildFile("loop_03.wav").existsAsFile());
+}
+
+TEST_CASE("A bad file does not stop the batch and dropped fragments block deletion", "[split][service]")
+{
+    TestDirectory t;
+    auto good = segments(t.dir.getChildFile("good.wav"),
+        { { 44100, true }, { 44100, false }, { 44100, true } });
+    auto blip = segments(t.dir.getChildFile("blip.wav"),
+        { { 44100, true }, { 22050, false }, { 2205, true },
+          { 22050, false }, { 44100, true } });
+    auto missing = t.dir.getChildFile("missing.wav");
+    SplitService service;
+    REQUIRE(service.start({ good, missing, blip }, SplitOptions{}));
+    REQUIRE(service.waitUntilFinished(20000));
+    auto results = service.results();
+    REQUIRE(results.size() == 3);
+    REQUIRE(results[0].state == SplitFileState::split);
+    REQUIRE(results[0].deletable());
+    REQUIRE(results[1].state == SplitFileState::skipped);
+    REQUIRE_FALSE(results[1].deletable());
+    REQUIRE(results[2].discardedShortParts == 1);
+    REQUIRE_FALSE(results[2].deletable());
+}
+
+TEST_CASE("No-silence sources and unusable output folders are reported, not deleted", "[split][service]")
+{
+    TestDirectory t;
+    auto continuous = segments(t.dir.getChildFile("continuous.wav"), { { 132300, true } });
+    SplitService service;
+    REQUIRE(service.start({ continuous }, SplitOptions{}));
+    REQUIRE(service.waitUntilFinished(20000));
+    auto results = service.results();
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].state == SplitFileState::noSplit);
+    REQUIRE(results[0].parts.empty());
+    REQUIRE(continuous.existsAsFile());
+
+    auto source = segments(t.dir.getChildFile("tone.wav"),
+        { { 44100, true }, { 44100, false }, { 44100, true } });
+    SplitOptions bad; bad.sameFolder = false; bad.outputFolder = t.dir.getChildFile("not-a-folder.wav");
+    bad.outputFolder.replaceWithText("x");
+    SplitService second;
+    REQUIRE(second.start({ source }, bad));
+    REQUIRE(second.waitUntilFinished(20000));
+    results = second.results();
+    REQUIRE(results[0].state == SplitFileState::failed);
+    REQUIRE_FALSE(results[0].deletable());
+    REQUIRE(source.existsAsFile());
+}
+
+TEST_CASE("Only a complete split is deletable", "[split][service]")
+{
+    SplitFileResult r;
+    r.state = SplitFileState::split;
+    r.detectedParts = 2; r.parts = { juce::File("/tmp/a_01.wav"), juce::File("/tmp/a_02.wav") };
+    REQUIRE(r.deletable());
+    r.discardedShortParts = 1;
+    REQUIRE_FALSE(r.deletable());
+    r.discardedShortParts = 0; r.state = SplitFileState::cancelled;
+    REQUIRE_FALSE(r.deletable());
+    r.state = SplitFileState::failed;
+    REQUIRE_FALSE(r.deletable());
+    r.state = SplitFileState::noSplit;
+    REQUIRE_FALSE(r.deletable());
 }
