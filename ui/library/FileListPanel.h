@@ -1,12 +1,16 @@
 #pragma once
 #include "core/database/LibraryQuery.h"
 #include "core/database/SampleRecord.h"
+#include "core/database/SampleRepository.h"
 #include "core/smart/SmartTypes.h"
 #include "core/export/ExternalFileDrag.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <map>
 #include <vector>
 namespace sonicator {
+// Human-readable STATUS cell. Decode problems win over ignore, so a hidden broken file still
+// says why it is broken once shown.
+juce::String sampleStatusText(const SampleRecord&, bool ignored);
 class FileListPanel final : public juce::Component, public juce::TableListBoxModel
 {
 public:
@@ -30,6 +34,7 @@ public:
     void setRowTags(std::map<int64_t, std::vector<Tag>>);
     void setDuplicateCounts(std::map<int64_t, int>);
     void setSmartDisplays(std::map<int64_t, SmartDisplay>);
+    void setIgnoredPaths(std::vector<IgnoredPath>);
     void setSearchText(const juce::String&);
     void selectRow(int row) { table.selectRow(row); }
     void selectRows(const std::vector<int>& rows);
@@ -82,6 +87,7 @@ private:
     std::map<int64_t, std::vector<Tag>> rowTags;
     std::map<int64_t, int> duplicateCounts;
     std::map<int64_t, SmartDisplay> smartDisplays;
+    std::vector<IgnoredPath> ignoredPaths;
     juce::String search;
     int sortColumn = 1;
     bool ascending = true;

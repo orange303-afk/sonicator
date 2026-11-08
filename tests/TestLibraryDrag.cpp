@@ -162,3 +162,14 @@ TEST_CASE("An incompatible asset replaces the star with a prohibition badge", "[
         REQUIRE(png.writeImageToStream(list.createComponentSnapshot(list.getLocalBounds(), true), *stream));
     }
 }
+
+TEST_CASE("Ignored status is reported below decode problems", "[ui][library][ignore]")
+{
+    SampleRecord r; r.filePath = "/lib/a.wav"; r.fileName = "a.wav";
+    REQUIRE(sampleStatusText(r, false) == "Analyzed");
+    REQUIRE(sampleStatusText(r, true) == "Ignored");
+    r.missing = true;
+    REQUIRE(sampleStatusText(r, true) == "Missing");
+    r.missing = false; r.error = "bad";
+    REQUIRE(sampleStatusText(r, true) == "Decode error");
+}

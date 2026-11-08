@@ -4,6 +4,14 @@
 #include <cmath>
 #include <cstdlib>
 namespace sonicator {
+juce::String sampleStatusText(const SampleRecord& r, bool ignored)
+{
+    if (r.missing) return "Missing";
+    if (r.compatibility == AssetCompatibility::unsupported) return "Unsupported";
+    if (r.compatibility == AssetCompatibility::invalid) return "Invalid";
+    if (r.error.isNotEmpty()) return "Decode error";
+    return ignored ? "Ignored" : "Analyzed";
+}
 namespace {
 void drawStar(juce::Graphics& g, juce::Rectangle<float> r, bool filled)
 {
@@ -316,6 +324,11 @@ void FileListPanel::setSmartDisplays(std::map<int64_t, SmartDisplay> displays)
     smartDisplays = std::move(displays);
     table.repaint();
 }
+void FileListPanel::setIgnoredPaths(std::vector<IgnoredPath> paths)
+{
+    ignoredPaths = std::move(paths);
+    table.repaint();
+}
 void FileListPanel::setSearchText(const juce::String& text)
 {
     if (virtualMode) return; // whole-catalog search is executed in SQL by the owner
@@ -361,6 +374,12 @@ void FileListPanel::sortVisible(int column, bool forwards)
 void FileListPanel::paintRowBackground(juce::Graphics& g,int row,int width,int height,bool selected)
 {
     g.fillAll(selected ? theme::selection : (row % 2 ? theme::rowAlternate : theme::table));
+    const auto* record = recordAt(row);
+    if (record != nullptr && isPathIgnored(record->filePath, ignoredPaths))
+    {
+        g.setColour(theme::background.withAlpha(selected ? 0.15f : 0.45f));
+        g.fillAll();
+    }
     g.setColour(theme::line.withAlpha(0.25f)); g.drawHorizontalLine(height-1,0,(float) width);
 }
 void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool)
@@ -368,6 +387,7 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
     const auto* record = recordAt(row);
     if (record == nullptr) return;
     const auto& r = *record;
+    const bool ignored = isPathIgnored(r.filePath, ignoredPaths);
     if (col == 8)
     {
         const auto area = juce::Rectangle<float>(0, 0, (float) w, (float) h).withSizeKeepingCentre(14.0f, 14.0f);
@@ -441,14 +461,11 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
         case 3: value = r.duration > 0 ? juce::String(r.duration,2) + " s" : "--"; break;
         case 4: value = r.sampleRate > 0 ? juce::String(r.sampleRate/1000,1) + " kHz" : "--"; break;
         case 5: value = r.numChannels > 0 ? juce::String(r.numChannels) : "--"; break;
-        case 6: value = r.missing ? "Missing"
-            : (r.compatibility == AssetCompatibility::unsupported ? "Unsupported"
-            : (r.compatibility == AssetCompatibility::invalid ? "Invalid"
-            : (r.error.isNotEmpty() ? "Decode error" : "Analyzed"))); break;
+        case 6: value = sampleStatusText(r, ignored); break;
     }
     g.setColour(isIncompatible(r.compatibility) || r.error.isNotEmpty()
         ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e))
-        : (col == 1 ? theme::text : theme::muted)); g.setFont(juce::FontOptions(13));
+        : (ignored ? theme::muted : (col == 1 ? theme::text : theme::muted))); g.setFont(juce::FontOptions(13));
     g.drawText(value,10,0,w-16,h,juce::Justification::centredLeft,true);
 }
 void FileListPanel::cellClicked(int row, int, const juce::MouseEvent& event)
