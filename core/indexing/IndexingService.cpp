@@ -16,6 +16,10 @@ bool IndexingService::startSubtree(const juce::String& folder, bool force)
     if (folder.isEmpty()) return false;
     juce::StringArray roots;
     roots.add(folder);
+    return startFolders(roots, force);
+}
+bool IndexingService::startFolders(const juce::StringArray& roots, bool force)
+{
     return beginScan(roots, force, ScanMode::Full, false);
 }
 bool IndexingService::beginScan(const juce::StringArray& roots, bool force, ScanMode mode,

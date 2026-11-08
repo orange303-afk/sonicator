@@ -248,3 +248,16 @@ TEST_CASE("An ignored row is not marked missing when its file disappears", "[ind
     REQUIRE(index.start({ t.dir.getFullPathName() })); REQUIRE(index.waitUntilFinished(20000));
     REQUIRE_FALSE(repo.findByPath(gone.getFullPathName())->missing);
 }
+
+TEST_CASE("startFolders indexes several folders without registering roots", "[indexing][split]")
+{
+    TestDirectory t;
+    t.wave("a/one.wav"); t.wave("b/two.wav");
+    Database db(t.dir.getChildFile("folders.sqlite")); SampleRepository repo(db); repo.createTables();
+    IndexingService index(repo);
+    REQUIRE(index.startFolders({ t.dir.getChildFile("a").getFullPathName(),
+                                 t.dir.getChildFile("b").getFullPathName() }));
+    REQUIRE(index.waitUntilFinished(20000));
+    REQUIRE(repo.count() == 2);
+    REQUIRE(repo.roots().isEmpty());
+}

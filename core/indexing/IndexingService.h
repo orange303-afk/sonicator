@@ -33,6 +33,9 @@ public:
     // reconciliation is restricted to that subtree, so an unavailable folder elsewhere is not
     // mistaken for deleted files.
     bool startSubtree(const juce::String& folder, bool force = false);
+    // Discovers several folders in one run without registering them as roots. Used after Split to
+    // index the new parts without a full library rescan.
+    bool startFolders(const juce::StringArray& folders, bool force = false);
     void cancel();
     void setPaused(bool);
     IndexingProgress progress() const;
