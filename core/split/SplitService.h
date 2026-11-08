@@ -27,6 +27,11 @@ struct SplitFileResult
         return state == SplitFileState::split && discardedShortParts == 0;
     }
 };
+// A cancelled batch never offers deletion, even for files that finished before cancellation.
+inline bool deletionAllowed(const SplitFileResult& result, bool batchCancelled)
+{
+    return ! batchCancelled && result.deletable();
+}
 struct SplitProgress
 {
     bool running = false, cancelled = false;

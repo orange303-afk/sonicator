@@ -20,16 +20,16 @@ juce::String splitStem(const juce::String& name)
 }
 juce::File uniquePartFile(const juce::File& folder, const juce::String& stem, int index, int width)
 {
-    const auto base = folder.getChildFile(stem + "_" + juce::String(index).paddedLeft('0', width));
+    const auto padded = juce::String(index).paddedLeft('0', width);
     const auto available = [](const juce::File& file)
     {
         return ! file.existsAsFile() && ! juce::File(file.getFullPathName() + ".part").existsAsFile();
     };
-    auto candidate = base.withFileExtension(".wav");
+    auto candidate = folder.getChildFile(stem + "_" + padded + ".wav");
     if (available(candidate)) return candidate;
     for (int attempt = 1; attempt <= 99; ++attempt)
     {
-        candidate = folder.getChildFile(base.getFileName() + "-" + juce::String(attempt) + ".wav");
+        candidate = folder.getChildFile(stem + "_" + padded + "-" + juce::String(attempt) + ".wav");
         if (available(candidate)) return candidate;
     }
     return {};

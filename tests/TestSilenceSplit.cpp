@@ -176,3 +176,33 @@ TEST_CASE("Only a complete split is deletable", "[split][service]")
     r.state = SplitFileState::noSplit;
     REQUIRE_FALSE(r.deletable());
 }
+
+TEST_CASE("Dotted stems keep the whole stem and repeated batches do not overwrite", "[split][service][naming]")
+{
+    TestDirectory t;
+    auto source = segments(t.dir.getChildFile("loop.v1.wav"),
+        { { 44100, true }, { 44100, false }, { 44100, true } });
+    SplitService first;
+    REQUIRE(first.start({ source }, SplitOptions{}));
+    REQUIRE(first.waitUntilFinished(20000));
+    auto results = first.results();
+    REQUIRE(results[0].parts.size() == 2);
+    REQUIRE(results[0].parts[0].getFileName() == "loop.v1_01.wav");
+    REQUIRE(results[0].parts[1].getFileName() == "loop.v1_02.wav");
+
+    SplitService second;
+    REQUIRE(second.start({ source }, SplitOptions{}));
+    REQUIRE(second.waitUntilFinished(20000));
+    results = second.results();
+    REQUIRE(results[0].parts[0].getFileName() == "loop.v1_01-1.wav");
+    REQUIRE(results[0].parts[1].getFileName() == "loop.v1_02-1.wav");
+}
+
+TEST_CASE("A cancelled batch suppresses deletion of completed files", "[split][service][cancel]")
+{
+    SplitFileResult complete;
+    complete.state = SplitFileState::split;
+    complete.detectedParts = 2;
+    REQUIRE(deletionAllowed(complete, false));
+    REQUIRE_FALSE(deletionAllowed(complete, true));
+}
