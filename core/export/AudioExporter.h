@@ -23,7 +23,8 @@ public:
     static juce::String validateWavOutput(const juce::File&, juce::int64 expectedFrames,
                                           double sampleRate, int channels, int bits, bool floating);
     ExportResult exportRange(const juce::File& source, double start, double end,
-                             const juce::File& destination, CancelCheck cancel = {}) const;
+                             const juce::File& destination, CancelCheck cancel = {},
+                             double fadeSeconds = 0) const;
     ExportResult exportSelection(const juce::File& source, double start, double end,
                                  const juce::File& folder, CancelCheck cancel = {}) const;
     // REX2 has no reader in AudioFormatManager, so a waveform selection is rendered from the

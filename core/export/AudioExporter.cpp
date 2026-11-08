@@ -43,7 +43,8 @@ juce::String AudioExporter::rangeSuffix(double startSeconds, double endSeconds)
     return milliseconds(startSeconds) + "-" + milliseconds(endSeconds);
 }
 ExportResult AudioExporter::exportRange(const juce::File& source, double start, double end,
-                                        const juce::File& destination, CancelCheck cancel) const
+                                        const juce::File& destination, CancelCheck cancel,
+                                        double fadeSeconds) const
 {
     const auto part = juce::File(destination.getFullPathName() + ".part");
     if (! std::isfinite(start) || ! std::isfinite(end))
@@ -95,6 +96,9 @@ ExportResult AudioExporter::exportRange(const juce::File& source, double start, 
                 + juce::String(bits) + " bits");
         }
         juce::AudioBuffer<float> buffer(channels, (int) juce::jmin<juce::int64>(exportChunkFrames, endFrame - startFrame));
+        const auto totalFrames = endFrame - startFrame;
+        const auto fadeFrames = juce::jlimit<juce::int64>(0, totalFrames / 2,
+            (juce::int64) std::llround(fadeSeconds * rate));
         auto frame = startFrame;
         while (frame < endFrame)
         {
@@ -104,6 +108,22 @@ ExportResult AudioExporter::exportRange(const juce::File& source, double start, 
             buffer.setSize(channels, count, false, false, true);
             if (! reader->read(buffer.getArrayOfWritePointers(), channels, frame, count))
                 return failure(part, "Cannot read source audio: " + source.getFileName());
+            if (fadeFrames > 0)
+            {
+                for (int ch = 0; ch < channels; ++ch)
+                {
+                    auto* data = buffer.getWritePointer(ch);
+                    for (int i = 0; i < count; ++i)
+                    {
+                        const auto n = frame - startFrame + i;
+                        float gain = 1.0f;
+                        if (n < fadeFrames) gain = (float) n / (float) fadeFrames;
+                        else if (n >= totalFrames - fadeFrames)
+                            gain = (float) (totalFrames - 1 - n) / (float) fadeFrames;
+                        data[i] *= gain;
+                    }
+                }
+            }
             if (! writer->writeFromFloatArrays(buffer.getArrayOfReadPointers(), channels, count))
                 return failure(part, "Cannot write export audio: " + destination.getFileName());
             frame += count;

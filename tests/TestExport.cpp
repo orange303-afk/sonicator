@@ -347,3 +347,37 @@ TEST_CASE("A per-request exporter renders a REX selection in the background", "[
     REQUIRE(reader->lengthInSamples == 8820);
     REQUIRE(reader->numChannels == 1);
 }
+
+TEST_CASE("Range export applies an optional linear fade at both ends", "[export][fade]")
+{
+    TestDirectory t;
+    auto source = t.dir.getChildFile("steady.wav");
+    source.replaceWithText("");
+    {
+        std::unique_ptr<juce::OutputStream> stream(source.createOutputStream());
+        juce::WavAudioFormat wav;
+        auto writer = wav.createWriterFor(stream, juce::AudioFormatWriterOptions{}
+            .withSampleRate(44100.0).withNumChannels(1).withBitsPerSample(16));
+        juce::AudioBuffer<float> constant(1, 44100);
+        constant.clear();
+        for (int i = 0; i < constant.getNumSamples(); ++i) constant.setSample(0, i, 0.5f);
+        writer->writeFromAudioSampleBuffer(constant, 0, constant.getNumSamples());
+    }
+    auto out = t.dir.getChildFile("faded.wav");
+    AudioExporter exporter;
+    REQUIRE(exporter.exportRange(source, 0.0, 1.0, out, {}, 0.01).success);
+    juce::AudioFormatManager formats; formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(out));
+    REQUIRE(reader != nullptr);
+    juce::AudioBuffer<float> first(1, 1), mid(1, 1), last(1, 1);
+    auto readOne = [&](juce::AudioBuffer<float>& buffer, juce::int64 position)
+    {
+        reader->read(&buffer, 0, 1, position, true, true);
+    };
+    readOne(first, 0);
+    readOne(mid, 22050);
+    readOne(last, reader->lengthInSamples - 1);
+    REQUIRE(std::abs(first.getSample(0, 0)) < 0.01f);
+    REQUIRE(std::abs(last.getSample(0, 0)) < 0.01f);
+    REQUIRE(std::abs(mid.getSample(0, 0)) > 0.45f);
+}
