@@ -307,6 +307,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         menu.addSeparator();
         menu.addItem(4, "Reanalyze all", reanalyze.isEnabled());
         menu.addItem(5, "Smart metadata", smartButton.isEnabled());
+        menu.addSeparator();
+        menu.addItem(6, "Show ignored", true, filter.showIgnored);
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraryMenu),
             [safe = juce::Component::SafePointer<MainComponent>(this)](int result)
             {
@@ -318,6 +320,17 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
                     case 3: safe->scanRoots(false, true); break;
                     case 4: safe->requestScan(true); break;
                     case 5: safe->smartButton.onClick(); break;
+                    case 6:
+                        if (safe->readRepo == nullptr) break;
+                        safe->filter.showIgnored = ! safe->filter.showIgnored;
+                        safe->persistShowIgnored();
+                        safe->pageOffset = 0;
+                        safe->ensureSelectedFolderVisible();
+                        safe->reloadLibrary();
+                        safe->folders.refresh(*safe->readRepo, safe->readRepo->roots(), true,
+                                              safe->filter.showIgnored);
+                        safe->refreshFavorites();
+                        break;
                     default: break;
                 }
             });
@@ -345,6 +358,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     hideEmpty.setComponentID("hideEmpty");
     filter.hideEmpty = appSettings.hideEmpty;
+    filter.showIgnored = appSettings.showIgnored;
     hideEmpty.setToggleState(filter.hideEmpty,juce::dontSendNotification);
     hideEmpty.setTooltip("Hide files quieter than -60 dBFS (peak below 0.001)");
     hideEmpty.onClick = [this]
@@ -410,7 +424,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             && juce::File(appSettings.lastFolder).isDirectory()
             && readRepo->countInFolder(appSettings.lastFolder) > 0)
             selectedFolder = appSettings.lastFolder;
-        folders.refresh(*readRepo);
+        folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored);
         refreshFavorites();
         reloadLibrary();
         if (! selectedFolder.isEmpty()) folders.selectPath(selectedFolder);
@@ -559,6 +573,29 @@ void MainComponent::persistHideEmpty()
     catch (const std::exception& e)
     { status.setText("Cannot save Hide empty: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification); }
 }
+void MainComponent::persistShowIgnored()
+{
+    appSettings.showIgnored = filter.showIgnored;
+    try { settingsStore.update([this](AppSettings& saved) { saved.showIgnored = filter.showIgnored; }); }
+    catch (const std::exception& e)
+    { status.setText("Cannot save Show ignored: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification); }
+}
+bool MainComponent::isFolderVisible(const juce::String& path) const
+{
+    if (readRepo == nullptr) return false;
+    if (filter.showIgnored) return true;
+    try { return ! isPathIgnored(path, readRepo->ignoredPaths()); }
+    catch (...) { return true; }
+}
+void MainComponent::ensureSelectedFolderVisible()
+{
+    if (selectedFolder.isEmpty() || isFolderVisible(selectedFolder)) return;
+    selectedFolder.clear();
+    filter.folder.clear();
+    folders.clearSelection();
+    appSettings.lastFolder.clear();
+    try { settingsStore.update([](AppSettings& saved) { saved.lastFolder.clear(); }); } catch (...) {}
+}
 void MainComponent::setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny)
 {
     filter.includeTags = std::move(include);
@@ -582,7 +619,7 @@ void MainComponent::beginImport(const juce::File& folder)
     if (! indexer || indexer->progress().running) return;
     try
     {
-        writeRepo->addRoot(folder.getFullPathName()); folders.refresh(*readRepo); refreshFavorites();
+        writeRepo->addRoot(folder.getFullPathName()); folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored); refreshFavorites();
         if (indexer->start({folder.getFullPathName()})) { wasRunning = true; reloadLibrary(); }
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
@@ -724,7 +761,7 @@ void MainComponent::showRelocateDialog()
             try { writeRepo->refreshDuplicates(); }
             catch (const std::exception& e) { refreshWarning = juce::String::fromUTF8(e.what()); }
             selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
-            try { folders.refresh(*readRepo); }
+            try { folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored); }
             catch (const std::exception& e)
             {
                 if (refreshWarning.isNotEmpty()) refreshWarning += "  |  ";
@@ -773,7 +810,9 @@ void MainComponent::reloadLibrary()
     if (discBrowser) discBrowser->setHideEmpty(filter.hideEmpty);
     try
     {
-        totalCatalogCount = readRepo->count();
+        ensureSelectedFolderVisible();
+        totalCatalogCount = readRepo->count(filter.showIgnored);
+        library.setIgnoredPaths(readRepo->ignoredPaths());
         filter.folder = selectedFolder;
         int shown = 0;
         if (pageSize == 0)
@@ -1231,7 +1270,7 @@ void MainComponent::saveSessionState()
 void MainComponent::refreshFavorites()
 {
     if (readRepo == nullptr) return;
-    try { favorites.refresh(*readRepo, appSettings.favoriteFolders, false); }
+    try { favorites.refresh(*readRepo, appSettings.favoriteFolders, false, filter.showIgnored); }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
     const bool hasFavorites = ! appSettings.favoriteFolders.isEmpty();
     favoritesLabel.setVisible(hasFavorites);
@@ -1498,6 +1537,10 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
         : (underFavorite ? "Already in favorites" : "Add to favorites");
     menu.addItem(7001, openLabel, available);
     menu.addItem(7006, favoriteLabel, exactFavorite || ! underFavorite);
+    const bool exactIgnore = readRepo->hasExactIgnore(path);
+    const bool inheritedIgnore = ! exactIgnore && readRepo->isIgnored(path);
+    menu.addItem(7007, inheritedIgnore ? "Ignored with parent folder" : "Ignore",
+                 ! inheritedIgnore, exactIgnore);
     menu.addSeparator();
     menu.addItem(7002, "Scan folder", indexer != nullptr && ! indexer->progress().running);
     menu.addItem(7003, "Analyze smart metadata (" + juce::String(catalogued) + ")",
@@ -1515,11 +1558,26 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&folders).withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 })
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
-        [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued](int result)
+        [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued, exactIgnore](int result)
         {
             if (safe == nullptr || result == 0) return;
             try
             {
+                if (result == 7007)
+                {
+                    if (safe->writeRepo == nullptr) return;
+                    if (exactIgnore) safe->writeRepo->unignorePath(folderPath);
+                    else safe->writeRepo->ignorePath(folderPath, true);
+                    safe->writeRepo->refreshDuplicates();
+                    safe->ensureSelectedFolderVisible();
+                    safe->reloadLibrary();
+                    safe->folders.refresh(*safe->readRepo, safe->readRepo->roots(), true,
+                                          safe->filter.showIgnored);
+                    safe->refreshFavorites();
+                    safe->status.setText(exactIgnore ? "Ignoring removed for " + folderPath
+                                                     : "Ignoring " + folderPath,
+                                         juce::dontSendNotification);
+                }
                 if (result >= 7100)
                 {
                     const size_t index = (size_t) (result - 7100);
@@ -1621,7 +1679,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                                           juce::Point<int> screenPosition)
 {
     if (selection.empty() || readRepo == nullptr) return;
-    try { allTags = readRepo->tags(); }
+    std::vector<IgnoredPath> ignoredPaths;
+    try { allTags = readRepo->tags(); ignoredPaths = readRepo->ignoredPaths(); }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
     std::vector<int64_t> ids;
     bool allStarred = true, anyExisting = false;
@@ -1630,6 +1689,13 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         ids.push_back(record.id);
         allStarred = allStarred && record.starred;
         anyExisting = anyExisting || juce::File(record.filePath).existsAsFile();
+    }
+    bool allIgnored = true, anyInherited = false;
+    for (const auto& record : selection)
+    {
+        const bool ignored = isPathIgnored(record.filePath, ignoredPaths);
+        allIgnored = allIgnored && ignored;
+        if (ignored && ! readRepo->hasExactIgnore(record.filePath)) anyInherited = true;
     }
     const auto assignments = readRepo->tagsForSamples(ids);
     std::map<int64_t, bool> allHave;
@@ -1656,6 +1722,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                      tagDotImage(recent[(size_t) i].colour));
     if (! recent.empty()) menu.addSeparator();
     menu.addItem(9000, "Copy", anyExisting);
+    menu.addItem(9009, anyInherited ? "Ignored with folder" : "Ignore",
+                 ! anyInherited, allIgnored);
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
                          allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
@@ -1692,7 +1760,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                            { screenPosition.x, screenPosition.y, 1, 1 })
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
-         files = selection, leadPath = lead.filePath, leadHash = lead.fileHash](int result)
+         files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
+         ignoredPaths, allIgnored, anyInherited](int result)
         {
             if (safe == nullptr || result == 0) return;
             try
@@ -1719,6 +1788,30 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     const bool native = copyFilesToClipboard(selected);
                     safe->status.setText(native ? "Copied " + juce::String(selected.size()) + " file(s)"
                                                 : "Copied " + juce::String(selected.size()) + " path(s)",juce::dontSendNotification);
+                }
+                else if (result == 9009)
+                {
+                    int changed = 0;
+                    if (allIgnored)
+                    {
+                        for (const auto& record : files)
+                            if (safe->readRepo->hasExactIgnore(record.filePath))
+                            { safe->writeRepo->unignorePath(record.filePath); ++changed; }
+                    }
+                    else
+                    {
+                        for (const auto& record : files)
+                            if (! isPathIgnored(record.filePath, ignoredPaths))
+                            { safe->writeRepo->ignorePath(record.filePath, false); ++changed; }
+                    }
+                    safe->writeRepo->refreshDuplicates();
+                    safe->ensureSelectedFolderVisible();
+                    safe->reloadLibrary();
+                    safe->folders.refresh(*safe->readRepo, safe->readRepo->roots(), true,
+                                          safe->filter.showIgnored);
+                    safe->refreshFavorites();
+                    safe->status.setText((allIgnored ? "Stopped ignoring " : "Ignoring ")
+                        + juce::String(changed) + " file(s)", juce::dontSendNotification);
                 }
                 else if (result == 9001)
                 {
@@ -1896,7 +1989,7 @@ void MainComponent::timerCallback()
             try { writeRepo->refreshDuplicates(); }
             catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
         }
-        reloadLibrary(); folders.refresh(*readRepo); refreshFavorites();
+        reloadLibrary(); folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored); refreshFavorites();
         // New or changed audio invalidates its smart result; rebuild metadata in the background.
         if (! p.cancelled && smart && ! smart->progress().running) smart->start();
     }
@@ -2117,7 +2210,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     analysisDetails.setText("Select a sample to inspect its measured audio features.",juce::dontSendNotification);
     selectedTags.setTags({});
     writeRepo->refreshDuplicates();
-    folders.refresh(*readRepo);
+    folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored);
     refreshFavorites();
     reloadLibrary();
     juce::String message = "Catalog: " + dbPath.getFullPathName();

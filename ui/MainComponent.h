@@ -56,6 +56,9 @@ public:
     void recordSearchHistory(const juce::String&);
     void showSearchHistory();
     void persistHideEmpty();
+    void persistShowIgnored();
+    void ensureSelectedFolderVisible();
+    bool isFolderVisible(const juce::String& path) const;
     void persistPreviewSettings();
     // Writes the pending last folder/file immediately. Used by shutdown and session tests.
     void flushSessionState();
