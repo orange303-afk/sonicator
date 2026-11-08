@@ -6,6 +6,7 @@
 #include "ui/library/TagStrip.h"
 #include "ui/settings/SettingsPanel.h"
 #include "ui/tagging/AutoTagDialog.h"
+#include "ui/split/SplitDialog.h"
 #include "ui/settings/RelocateFoldersPanel.h"
 #include "ui/shell/WindowBounds.h"
 #include <set>
@@ -495,4 +496,19 @@ TEST_CASE("Folder tree hides ignored folders unless Show ignored is on", "[ui][f
     REQUIRE_FALSE(tree.selectPath(onlyHidden));
     tree.refresh(repo, { onlyHidden }, true, true);
     REQUIRE(tree.selectPath(onlyHidden));
+}
+
+TEST_CASE("Split dialog exposes the persisted defaults and same-folder mode", "[ui][split]")
+{
+    AppSettings settings;
+    settings.splitThresholdDb = -55.0;
+    settings.splitMinSilenceMs = 400;
+    int accepted = 0;
+    SplitDialog dialog({ juce::File("/tmp/a.wav") }, settings, [&](SplitOptions) { ++accepted; });
+    const auto options = dialog.currentOptions();
+    REQUIRE(options.silence.thresholdDb == -55.0);
+    REQUIRE(options.silence.minSilenceMs == 400.0);
+    REQUIRE(options.sameFolder);
+    REQUIRE(dialog.findChildWithID("splitThreshold") != nullptr);
+    REQUIRE(dialog.findChildWithID("splitSameFolder") != nullptr);
 }
