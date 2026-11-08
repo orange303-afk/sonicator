@@ -16,7 +16,8 @@ public:
     // REX2/SoundFont containers are indexed for search and preview metadata but never sent to
     // the audio DSP analyzer.
     static bool isMetadataOnlyFormat(const juce::File&);
-    static std::vector<AudioFileInfo> scanDirectory(const juce::File&, CancelCheck = {});
+    static std::vector<AudioFileInfo> scanDirectory(const juce::File&, CancelCheck = {},
+        const std::function<bool(const juce::File&)>& shouldSkip = {});
     static juce::String computeFileHash(const juce::File&, CancelCheck = {});
 };
 }

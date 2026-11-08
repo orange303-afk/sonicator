@@ -47,12 +47,14 @@ void IndexingService::setPaused(bool value)
 IndexingProgress IndexingService::progress() const { std::lock_guard lock(stateMutex); return state; }
 std::vector<int64_t> findMissingIds(const std::vector<PathEntry>& rows,
                                     const std::unordered_set<std::string>& discoveredPaths,
-                                    const juce::StringArray& roots)
+                                    const juce::StringArray& roots,
+                                    const std::vector<IgnoredPath>& ignored)
 {
     std::vector<int64_t> missing;
     for (const auto& row : rows)
     {
         if (row.missing) continue;
+        if (isPathIgnored(row.path, ignored)) continue;
         const juce::File file(row.path);
         bool inRoot = false;
         for (const auto& root : roots)
@@ -76,13 +78,19 @@ void IndexingService::run()
     {
         std::vector<AudioFileInfo> files;
         std::unordered_set<std::string> foundPaths;
+        const auto ignored = repo.ignoredPaths();
+        const auto shouldSkip = [ignored](const juce::File& f)
+        { return isPathIgnored(f.getFullPathName(), ignored); };
         for (const auto& folder : folders)
         {
             if (checkpoint()) break;
-            auto found = FileScanner::scanDirectory(juce::File(folder), [this] { return checkpoint(); });
+            auto found = FileScanner::scanDirectory(juce::File(folder), [this] { return checkpoint(); },
+                                                    shouldSkip);
             if (registerRoots) repo.addRoot(folder);
             for (auto& f : found)
-                if (foundPaths.insert(f.file.getFullPathName().toStdString()).second) files.push_back(std::move(f));
+                if (! shouldSkip(f.file)
+                    && foundPaths.insert(f.file.getFullPathName().toStdString()).second)
+                    files.push_back(std::move(f));
         }
         { std::lock_guard lock(stateMutex); state.total = (int) files.size();
           state.message = scanMode == ScanMode::NewOnly ? "Analyzing new files" : "Analyzing"; }
@@ -127,7 +135,7 @@ void IndexingService::run()
                 auto rows = repo.pathsAfterId(lastId, 5000);
                 if (rows.empty()) break;
                 lastId = rows.back().id;
-                const auto missingIds = findMissingIds(rows, foundPaths, folders);
+                const auto missingIds = findMissingIds(rows, foundPaths, folders, ignored);
                 if (! missingIds.empty()) repo.setMissing(missingIds);
             }
             { std::lock_guard lock(stateMutex); state.finalizing = false; }

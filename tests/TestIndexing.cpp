@@ -221,3 +221,30 @@ TEST_CASE("Scanning an unavailable folder does not mark catalogued siblings miss
     REQUIRE_FALSE(repo.findById(id)->missing);
     REQUIRE(repo.roots().size() == 1);
 }
+
+TEST_CASE("Indexing does not discover ignored files or folders", "[indexing][ignore]")
+{
+    TestDirectory t;
+    auto keep = t.wave("keep.wav");
+    t.wave("skip/hide.wav");
+    Database db(t.dir.getChildFile("ignored.sqlite")); SampleRepository repo(db); repo.createTables();
+    repo.ignorePath(t.dir.getChildFile("skip").getFullPathName(), true);
+    IndexingService index(repo);
+    REQUIRE(index.start({ t.dir.getFullPathName() })); REQUIRE(index.waitUntilFinished(20000));
+    REQUIRE(repo.count() == 1);
+    REQUIRE(repo.findByPath(keep.getFullPathName()).has_value());
+    REQUIRE_FALSE(repo.findByPath(t.dir.getChildFile("skip/hide.wav").getFullPathName()).has_value());
+}
+
+TEST_CASE("An ignored row is not marked missing when its file disappears", "[indexing][ignore][missing]")
+{
+    TestDirectory t;
+    auto gone = t.wave("gone.wav");
+    Database db(t.dir.getChildFile("missing-ignore.sqlite")); SampleRepository repo(db); repo.createTables();
+    SampleRecord r; r.filePath = gone.getFullPathName(); r.fileName = "gone.wav"; repo.upsert(r);
+    repo.ignorePath(gone.getFullPathName(), false);
+    REQUIRE(gone.deleteFile());
+    IndexingService index(repo);
+    REQUIRE(index.start({ t.dir.getFullPathName() })); REQUIRE(index.waitUntilFinished(20000));
+    REQUIRE_FALSE(repo.findByPath(gone.getFullPathName())->missing);
+}

@@ -17,7 +17,8 @@ struct IndexingProgress
 // probe runs only for candidates, so an unchanged scan stays allocation-and-index only.
 std::vector<int64_t> findMissingIds(const std::vector<PathEntry>& rows,
                                     const std::unordered_set<std::string>& discoveredPaths,
-                                    const juce::StringArray& roots);
+                                    const juce::StringArray& roots,
+                                    const std::vector<IgnoredPath>& ignored = {});
 enum class ScanMode { Full, NewOnly };
 class IndexingService final : private juce::Thread
 {

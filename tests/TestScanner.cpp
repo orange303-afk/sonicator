@@ -55,3 +55,16 @@ TEST_CASE("Full file hash distinguishes files with identical prefixes and length
     REQUIRE(hash == FileScanner::computeFileHash(a));
     REQUIRE(hash != FileScanner::computeFileHash(b));
 }
+
+TEST_CASE("Scanner skips excluded folders and files", "[scanner][ignore]")
+{
+    TestDirectory t;
+    t.wave("keep.wav"); t.wave("skip/hide.wav"); t.wave("other.wav");
+    const auto skipRoot = t.dir.getChildFile("skip").getFullPathName();
+    auto found = FileScanner::scanDirectory(t.dir, {}, [&](const juce::File& f)
+    {
+        return f.getFullPathName() == skipRoot || f.getFileName() == "other.wav";
+    });
+    REQUIRE(found.size() == 1);
+    REQUIRE(found[0].file.getFileName() == "keep.wav");
+}

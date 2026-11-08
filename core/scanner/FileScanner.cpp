@@ -16,7 +16,8 @@ bool FileScanner::isSupportedFormat(const juce::File& f)
             if (input->readIntBigEndian() == 0x00051607) return false; // AppleDouble, not audio.
     return true;
 }
-std::vector<AudioFileInfo> FileScanner::scanDirectory(const juce::File& dir, CancelCheck cancel)
+std::vector<AudioFileInfo> FileScanner::scanDirectory(const juce::File& dir, CancelCheck cancel,
+                                                      const std::function<bool(const juce::File&)>& shouldSkip)
 {
     if (! dir.isDirectory()) throw std::runtime_error("Library folder is unavailable");
     std::vector<AudioFileInfo> out;
@@ -30,6 +31,7 @@ std::vector<AudioFileInfo> FileScanner::scanDirectory(const juce::File& dir, Can
         {
             if (cancel && cancel()) return out;
             auto f = entry.getFile();
+            if (shouldSkip && shouldSkip(f)) continue;
             if (f.isDirectory()) { if (! f.isSymbolicLink()) pending.push_back(f); }
             else if (isSupportedFormat(f)) out.push_back({f,f.getSize(),f.getLastModificationTime().toMilliseconds()});
         }
