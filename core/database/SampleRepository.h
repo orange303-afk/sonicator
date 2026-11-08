@@ -14,6 +14,14 @@ struct PathEntry
     juce::String path;
     bool missing = false;
 };
+struct IgnoredPath
+{
+    juce::String path;
+    bool folder = false;
+    int64_t createdAt = 0;
+};
+// Lock-free matcher shared by the repository, folder tree, file list and scanner.
+bool isPathIgnored(const juce::String& path, const std::vector<IgnoredPath>& entries);
 struct RootRelocation
 {
     juce::String oldRoot, newRoot;
@@ -52,6 +60,13 @@ public:
     std::optional<SampleRecord> findByPath(const juce::String&) const;
     std::vector<SampleRecord> page(int limit = 10000, int offset = 0) const;
     std::vector<PathEntry> pathsAfterId(int64_t lastId, int limit = 5000) const;
+    std::vector<IgnoredPath> ignoredPaths() const;
+    // True when the exact path or any ancestor folder is ignored.
+    bool isIgnored(const juce::String& path) const;
+    // True only when this exact path has its own ignore entry.
+    bool hasExactIgnore(const juce::String& path) const;
+    void ignorePath(const juce::String& path, bool folder);
+    void unignorePath(const juce::String& path);
     void setMissing(const std::vector<int64_t>& ids);
     int count() const;
     int countInFolder(const juce::String& folder) const;
@@ -159,6 +174,7 @@ public:
     // and refuses to publish into a different catalog.
     juce::String catalogPath() const { return db.file().getFullPathName(); }
 private:
+    std::vector<IgnoredPath> ignoredPathsLocked() const;
     Database& db;
 };
 } // namespace sonicator

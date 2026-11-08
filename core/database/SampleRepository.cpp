@@ -9,7 +9,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility";
-constexpr int schemaVersion = 10;
+constexpr int schemaVersion = 11;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -385,6 +385,16 @@ juce::String SampleRepository::searchKey(const juce::String& name, const juce::S
 {
     return foldForSearch(name) + "\n" + foldForSearch(path);
 }
+bool isPathIgnored(const juce::String& path, const std::vector<IgnoredPath>& entries)
+{
+    const juce::File file(path);
+    for (const auto& entry : entries)
+    {
+        if (file == juce::File(entry.path)) return true;
+        if (entry.folder && file.isAChildOf(juce::File(entry.path))) return true;
+    }
+    return false;
+}
 void SampleRepository::createTables()
 {
     std::lock_guard lock(db.mutex);
@@ -485,7 +495,10 @@ void SampleRepository::createTables()
             "code TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '',"
             "attempts INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;"
             "CREATE TABLE IF NOT EXISTS smart_meta ("
-            "key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;");
+            "key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;"
+            "CREATE TABLE IF NOT EXISTS ignored_paths ("
+            "path TEXT PRIMARY KEY, is_folder INTEGER NOT NULL DEFAULT 0,"
+            "created_at INTEGER NOT NULL DEFAULT 0);");
         // Databases created before schema 3 predate the folded search column.
         bool hasSearchKey = false, hasStarred = false;
         {
@@ -589,7 +602,7 @@ void SampleRepository::createTables()
                 insert.integer(2, (int64_t) tag.colour); insert.step();
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=10;");
+        detail::exec(db.handle, "PRAGMA user_version=11;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -653,6 +666,50 @@ std::vector<PathEntry> SampleRepository::pathsAfterId(int64_t lastId, int limit)
     while (s.step())
         out.push_back({s.integer(0), s.text(1), s.integer(2) != 0});
     return out;
+}
+std::vector<IgnoredPath> SampleRepository::ignoredPathsLocked() const
+{
+    detail::Statement s(db.handle,
+        "SELECT path,is_folder,created_at FROM ignored_paths ORDER BY path");
+    std::vector<IgnoredPath> out;
+    while (s.step())
+        out.push_back({ s.text(0), s.integer(1) != 0, s.integer(2) });
+    return out;
+}
+std::vector<IgnoredPath> SampleRepository::ignoredPaths() const
+{
+    std::lock_guard lock(db.mutex);
+    return ignoredPathsLocked();
+}
+bool SampleRepository::isIgnored(const juce::String& path) const
+{
+    std::lock_guard lock(db.mutex);
+    return isPathIgnored(path, ignoredPathsLocked());
+}
+bool SampleRepository::hasExactIgnore(const juce::String& path) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "SELECT 1 FROM ignored_paths WHERE path=?");
+    s.text(1, path);
+    return s.step();
+}
+void SampleRepository::ignorePath(const juce::String& path, bool folder)
+{
+    if (path.isEmpty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "INSERT OR REPLACE INTO ignored_paths(path,is_folder,created_at) VALUES(?,?,?)");
+    s.text(1, path);
+    s.integer(2, folder ? 1 : 0);
+    s.integer(3, juce::Time::currentTimeMillis());
+    s.step();
+}
+void SampleRepository::unignorePath(const juce::String& path)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "DELETE FROM ignored_paths WHERE path=?");
+    s.text(1, path);
+    s.step();
 }
 void SampleRepository::setMissing(const std::vector<int64_t>& ids)
 {
