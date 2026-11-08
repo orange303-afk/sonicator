@@ -10,6 +10,7 @@
 #include "core/smart/SmartAnalysisService.h"
 #include "core/tagging/TaggingService.h"
 #include "core/tagging/AutoTagService.h"
+#include "core/split/SplitService.h"
 #include "core/settings/AppSettings.h"
 namespace sonicator {
 class FavoritesSplitter final : public juce::Component
@@ -102,6 +103,10 @@ private:
     std::unique_ptr<SmartAnalysisService> smart;
     std::unique_ptr<TaggingService> tagging;
     std::unique_ptr<AutoTagService> autoTag;
+    std::unique_ptr<SplitService> splitter;
+    juce::Component::SafePointer<juce::DialogWindow> splitDialog;
+    juce::StringArray pendingSplitScan;
+    bool splitWasRunning = false;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog, autoTagDialog;
     std::unique_ptr<DiscBrowserPanel> discBrowser;
@@ -157,6 +162,10 @@ private:
     void startAutoTagSelected(const std::vector<int64_t>& sampleIds);
     void startAutoTagFolder(const juce::String& folder);
     void showAutoTagDialog(AutoTagResult result);
+    void startSplit(const std::vector<juce::File>& files);
+    void finishSplit();
+    void requestSplitScan(const juce::StringArray& folders);
+    bool isSplitRunning() const { return splitter != nullptr && splitter->progress().running; }
     void promptTagName(const juce::String& title, const juce::String& initial, std::function<void(juce::String)> onAccept);
     static bool contains(const std::vector<int64_t>& values, int64_t id);
     static void toggle(std::vector<int64_t>& values, int64_t id);

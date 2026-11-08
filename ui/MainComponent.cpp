@@ -1,5 +1,7 @@
 #include "MainComponent.h"
 #include "ui/tagging/AutoTagDialog.h"
+#include "ui/split/SplitDialog.h"
+#include "core/scanner/FileScanner.h"
 #include "BinaryData.h"
 #include "core/database/PathRelocation.h"
 #include "ui/settings/RelocateFoldersPanel.h"
@@ -281,6 +283,11 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     smartButton.onClick = [this]
     {
         if (! smart || ! readRepo) return;
+        if (isSplitRunning())
+        {
+            status.setText("Wait for Split to finish.",juce::dontSendNotification);
+            return;
+        }
         if (indexer && indexer->progress().running)
         {
             status.setText("Wait for the library scan to finish before smart analysis.",juce::dontSendNotification);
@@ -345,7 +352,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     cancel.onClick = [this]
     {
-        if (indexer && indexer->progress().running) indexer->cancel();
+        if (splitter && splitter->progress().running) splitter->cancel();
+        else if (indexer && indexer->progress().running) indexer->cancel();
         else if (smart && smart->progress().running) smart->cancel();
         else if (tagging && tagging->progress().running) tagging->cancel();
         else if (autoTag) autoTag->cancel();
@@ -419,6 +427,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         smart = std::make_unique<SmartAnalysisService>(*writeRepo);
         tagging = std::make_unique<TaggingService>(*writeRepo);
         autoTag = std::make_unique<AutoTagService>(*writeRepo);
+        splitter = std::make_unique<SplitService>();
         restoringSession = true;
         if (! appSettings.lastFolder.isEmpty()
             && juce::File(appSettings.lastFolder).isDirectory()
@@ -616,6 +625,11 @@ void MainComponent::chooseFolder()
 }
 void MainComponent::beginImport(const juce::File& folder)
 {
+    if (isSplitRunning())
+    {
+        status.setText("Wait for Split to finish.", juce::dontSendNotification);
+        return;
+    }
     if (! indexer || indexer->progress().running) return;
     try
     {
@@ -626,6 +640,11 @@ void MainComponent::beginImport(const juce::File& folder)
 }
 void MainComponent::requestScan(bool reanalyzeAll)
 {
+    if (isSplitRunning())
+    {
+        status.setText("Wait for Split to finish.", juce::dontSendNotification);
+        return;
+    }
     if (! indexer || indexer->progress().running || ! readRepo) return;
     juce::StringArray roots;
     try { roots = readRepo->roots(); }
@@ -651,6 +670,11 @@ void MainComponent::requestScan(bool reanalyzeAll)
 }
 void MainComponent::scanRoots(bool force, bool newOnly)
 {
+    if (isSplitRunning())
+    {
+        status.setText("Wait for Split to finish.", juce::dontSendNotification);
+        return;
+    }
     if (! indexer || indexer->progress().running) return;
     try
     {
@@ -1351,6 +1375,11 @@ void MainComponent::showFavoriteContextMenu(const juce::String& path, juce::Poin
 }
 void MainComponent::resetTagsSelected(const std::vector<int64_t>& sampleIds)
 {
+    if (isSplitRunning())
+    {
+        status.setText("Wait for Split to finish.", juce::dontSendNotification);
+        return;
+    }
     if (readRepo == nullptr || sampleIds.empty()) return;
     if (autoTagDialog != nullptr)
     {
@@ -1390,6 +1419,11 @@ void MainComponent::resetTagsSelected(const std::vector<int64_t>& sampleIds)
 }
 void MainComponent::resetTagsFolder(const juce::String& path, int catalogued)
 {
+    if (isSplitRunning())
+    {
+        status.setText("Wait for Split to finish.", juce::dontSendNotification);
+        return;
+    }
     if (readRepo == nullptr || path.isEmpty()) return;
     if (autoTagDialog != nullptr)
     {
@@ -1427,6 +1461,11 @@ void MainComponent::resetTagsFolder(const juce::String& path, int catalogued)
 }
 void MainComponent::startAutoTagSelected(const std::vector<int64_t>& sampleIds)
 {
+    if (isSplitRunning())
+    {
+        status.setText("Wait for Split to finish.", juce::dontSendNotification);
+        return;
+    }
     if (autoTag == nullptr || sampleIds.empty()) return;
     std::vector<int64_t> visible;
     try { visible = readRepo == nullptr ? sampleIds : readRepo->visibleIds(sampleIds); }
@@ -1465,6 +1504,11 @@ void MainComponent::startAutoTagSelected(const std::vector<int64_t>& sampleIds)
 }
 void MainComponent::startAutoTagFolder(const juce::String& folder)
 {
+    if (isSplitRunning())
+    {
+        status.setText("Wait for Split to finish.", juce::dontSendNotification);
+        return;
+    }
     if (autoTag == nullptr || folder.isEmpty()) return;
     if (autoTagDialog != nullptr)
     {
@@ -1513,6 +1557,175 @@ void MainComponent::showAutoTagDialog(AutoTagResult result)
     options.resizable = true;
     autoTagDialog = options.launchAsync();
     if (autoTagDialog != nullptr) autoTagDialog->setLookAndFeel(&look);
+}
+void MainComponent::startSplit(const std::vector<juce::File>& files)
+{
+    if (files.empty()) return;
+    if (splitter == nullptr) return;
+    if (isSplitRunning())
+    {
+        status.setText("Split is already running.", juce::dontSendNotification);
+        return;
+    }
+    if ((indexer && indexer->progress().running) || (smart && smart->progress().running)
+        || (tagging && tagging->progress().running) || (autoTag && autoTag->progress().running))
+    {
+        status.setText("Wait for the background job to finish before splitting.", juce::dontSendNotification);
+        return;
+    }
+    if (splitDialog != nullptr)
+    {
+        splitDialog->toFront(true);
+        return;
+    }
+    auto* dialog = new SplitDialog(files, appSettings,
+        [safe = juce::Component::SafePointer<MainComponent>(this), files](SplitOptions options)
+        {
+            if (safe == nullptr || safe->splitter == nullptr) return;
+            safe->appSettings.splitThresholdDb = options.silence.thresholdDb;
+            safe->appSettings.splitMinSilenceMs = (int) options.silence.minSilenceMs;
+            safe->appSettings.splitMinPartMs = (int) options.silence.minPartMs;
+            safe->appSettings.splitSameFolder = options.sameFolder;
+            try
+            {
+                safe->settingsStore.update([options](AppSettings& saved)
+                {
+                    saved.splitThresholdDb = options.silence.thresholdDb;
+                    saved.splitMinSilenceMs = (int) options.silence.minSilenceMs;
+                    saved.splitMinPartMs = (int) options.silence.minPartMs;
+                    saved.splitSameFolder = options.sameFolder;
+                });
+            }
+            catch (const std::exception& e)
+            {
+                safe->status.setText("Cannot save split settings: " + juce::String::fromUTF8(e.what()),
+                                     juce::dontSendNotification);
+            }
+            if (safe->splitter->start(files, options))
+            {
+                safe->splitWasRunning = true;
+                safe->status.setText("Splitting " + juce::String((int) files.size()) + " file(s)",
+                                     juce::dontSendNotification);
+            }
+            else
+                safe->status.setText("Split could not start.", juce::dontSendNotification);
+        });
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned(dialog);
+    options.dialogTitle = "Split by silence";
+    options.dialogBackgroundColour = theme::background;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = false;
+    options.resizable = false;
+    splitDialog = options.launchAsync();
+    if (splitDialog != nullptr) splitDialog->setLookAndFeel(&look);
+}
+void MainComponent::requestSplitScan(const juce::StringArray& folders)
+{
+    if (folders.isEmpty()) return;
+    if (indexer != nullptr && ! indexer->progress().running && ! isSplitRunning())
+    {
+        if (indexer->startFolders(folders))
+        {
+            wasRunning = true;
+            status.setText("Indexing split parts", juce::dontSendNotification);
+            return;
+        }
+    }
+    pendingSplitScan = folders;
+}
+void MainComponent::finishSplit()
+{
+    if (splitter == nullptr || readRepo == nullptr) return;
+    const auto results = splitter->results();
+    int splitCount = 0, partCount = 0, skippedCount = 0;
+    juce::StringArray folders, problems;
+    std::vector<SplitFileResult> deletable;
+    for (const auto& result : results)
+    {
+        for (const auto& part : result.parts)
+        {
+            const auto folder = part.getParentDirectory().getFullPathName();
+            if (! folders.contains(folder)) folders.add(folder);
+        }
+        if (result.state == SplitFileState::split)
+        {
+            ++splitCount;
+            partCount += (int) result.parts.size();
+            if (result.deletable()) deletable.push_back(result);
+        }
+        else
+        {
+            ++skippedCount;
+            problems.add(result.source.getFileName()
+                + (result.error.isNotEmpty() ? ": " + result.error : juce::String()));
+        }
+    }
+    requestSplitScan(folders);
+    juce::String summary = "Split: " + juce::String(splitCount) + " file(s), "
+        + juce::String(partCount) + " part(s)";
+    if (skippedCount > 0) summary += "  |  skipped " + juce::String(skippedCount);
+    status.setText(summary, juce::dontSendNotification);
+    status.setTooltip(summary);
+    if (deletable.empty()) return;
+
+    juce::String message = "Parts were written successfully for " + juce::String((int) deletable.size())
+        + " file(s).\n\nMove the originals to the Trash? This is not a permanent delete.\n";
+    for (size_t i = 0; i < deletable.size() && i < 12; ++i)
+        message += "\n  " + deletable[i].source.getFileName() + "  ->  "
+            + juce::String((int) deletable[i].parts.size()) + " parts";
+    if (deletable.size() > 12) message += "\n  ... and " + juce::String((int) deletable.size() - 12) + " more";
+    if (! problems.isEmpty())
+        message += "\n\nNot offered (skipped or incomplete):\n  " + problems.joinIntoString("\n  ");
+    dialogs::showAlert(*this, "Split complete", message,
+        { { "Move originals to Trash", 1 }, { "Keep originals", 0 } },
+        [safe = juce::Component::SafePointer<MainComponent>(this), deletable](int choice)
+        {
+            if (safe == nullptr || choice != 1 || safe->writeRepo == nullptr) return;
+            juce::StringArray moved, failed;
+            for (const auto& result : deletable)
+            {
+                const auto source = result.source;
+                if (! source.existsAsFile())
+                {
+                    failed.add(source.getFileName());
+                    continue;
+                }
+                const auto stem = source.getFileNameWithoutExtension();
+                const auto sidecarA = source.getParentDirectory().getChildFile(stem + ".asd");
+                const auto sidecarB = source.getParentDirectory().getChildFile(stem + ".pk");
+                if (! source.moveToTrash())
+                {
+                    failed.add(source.getFileName());
+                    continue;
+                }
+                moved.add(source.getFullPathName());
+                if (sidecarA.existsAsFile()) sidecarA.moveToTrash();
+                if (sidecarB.existsAsFile()) sidecarB.moveToTrash();
+            }
+            if (! moved.isEmpty())
+            {
+                try
+                {
+                    safe->writeRepo->removeByPaths(moved);
+                    safe->writeRepo->refreshDuplicates();
+                    safe->reloadLibrary();
+                    if (safe->readRepo != nullptr)
+                        safe->folders.refresh(*safe->readRepo, safe->readRepo->roots(), true,
+                                              safe->filter.showIgnored);
+                    safe->refreshFavorites();
+                }
+                catch (const std::exception& e)
+                {
+                    safe->status.setText(juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+                    return;
+                }
+            }
+            safe->status.setText("Split complete  |  moved to Trash " + juce::String(moved.size())
+                + (failed.isEmpty() ? juce::String()
+                                    : "  |  could not move " + failed.joinIntoString(", ")),
+                juce::dontSendNotification);
+        }, juce::MessageBoxIconType::QuestionIcon);
 }
 void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamples,
                                           juce::Point<int> screenPosition)
@@ -1707,6 +1920,14 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         allIgnored = allIgnored && ignored;
         if (ignored && ! readRepo->hasExactIgnore(record.filePath)) anyInherited = true;
     }
+    std::vector<juce::File> splitCandidates;
+    for (const auto& record : selection)
+    {
+        const juce::File file(record.filePath);
+        if (! file.existsAsFile() || isPathIgnored(record.filePath, ignoredPaths)) continue;
+        if (! FileScanner::isSupportedFormat(file) || FileScanner::isMetadataOnlyFormat(file)) continue;
+        splitCandidates.push_back(file);
+    }
     const auto assignments = readRepo->tagsForSamples(ids);
     std::map<int64_t, bool> allHave;
     for (const auto& tag : allTags)
@@ -1734,6 +1955,9 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     menu.addItem(9000, "Copy", anyExisting);
     menu.addItem(9009, anyInherited ? "Ignored with folder" : "Ignore",
                  ! anyInherited, allIgnored);
+    menu.addItem(9008, splitCandidates.size() > 1
+        ? "Split by silence (" + juce::String((int) splitCandidates.size()) + ")..."
+        : juce::String("Split by silence..."), ! splitCandidates.empty());
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
                          allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
@@ -1771,7 +1995,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
-         ignoredPaths, allIgnored, anyInherited](int result)
+         ignoredPaths, allIgnored, anyInherited, splitCandidates](int result)
         {
             if (safe == nullptr || result == 0) return;
             try
@@ -1798,6 +2022,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     const bool native = copyFilesToClipboard(selected);
                     safe->status.setText(native ? "Copied " + juce::String(selected.size()) + " file(s)"
                                                 : "Copied " + juce::String(selected.size()) + " path(s)",juce::dontSendNotification);
+                }
+                else if (result == 9008)
+                {
+                    safe->startSplit(splitCandidates);
                 }
                 else if (result == 9009)
                 {
@@ -1919,16 +2147,25 @@ void MainComponent::timerCallback()
     const auto s = smart ? smart->progress() : SmartProgress {};
     const auto tg = tagging ? tagging->progress() : TaggingProgress {};
     const auto at = autoTag ? autoTag->progress() : AutoTagProgress {};
+    const auto sp = splitter ? splitter->progress() : SplitProgress {};
     const bool smartRunning = s.running;
     const bool taggingRunning = tg.running;
     const bool autoTagRunning = at.running;
-    const bool busy = p.running || smartRunning || taggingRunning || autoTagRunning;
-    pause.setEnabled(p.running || smartRunning); cancel.setEnabled(busy);
+    const bool splitRunning = sp.running;
+    const bool busy = p.running || smartRunning || taggingRunning || autoTagRunning || splitRunning;
+    pause.setEnabled(! splitRunning && (p.running || smartRunning)); cancel.setEnabled(busy);
     addFolder.setEnabled(! busy); rescan.setEnabled(! busy);
     reanalyze.setEnabled(! busy); newFiles.setEnabled(! busy);
     smartButton.setEnabled(! busy);
     pause.setButtonText((p.running ? p.paused : s.paused) ? "Resume" : "Pause");
-    if (taggingRunning || taggingWasRunning)
+    if (splitRunning || splitWasRunning)
+    {
+        status.setText("Splitting " + juce::String(sp.processed) + "/" + juce::String(sp.total)
+            + (sp.current.isNotEmpty() ? "  |  " + sp.current : juce::String()),
+            juce::dontSendNotification);
+        status.setTooltip(status.getText());
+    }
+    else if (taggingRunning || taggingWasRunning)
     {
         juce::String stage;
         switch (tg.stage)
@@ -2024,6 +2261,26 @@ void MainComponent::timerCallback()
             status.setText(at.message, juce::dontSendNotification);
     }
     autoTagWasRunning = autoTagRunning;
+    if (splitWasRunning && ! splitRunning) finishSplit();
+    splitWasRunning = splitRunning;
+    if (! pendingSplitScan.isEmpty() && indexer && ! indexer->progress().running
+        && ! (smart && smart->progress().running)
+        && ! (tagging && tagging->progress().running)
+        && ! (autoTag && autoTag->progress().running)
+        && ! isSplitRunning())
+    {
+        const auto folders = pendingSplitScan;
+        pendingSplitScan.clear();
+        if (indexer->startFolders(folders))
+        {
+            wasRunning = true;
+            status.setText("Indexing split parts", juce::dontSendNotification);
+        }
+        else
+        {
+            pendingSplitScan = folders;
+        }
+    }
     const auto now = juce::Time::getMillisecondCounter();
     if (persistSessionState && sessionDirty && now - lastSessionSaveMs >= 500) saveSessionState();
     if (pendingSearch.trim() != filter.text && now - lastSearchChange >= 250)
@@ -2146,6 +2403,11 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
         error = "Stop indexing before switching catalogs.";
         return false;
     }
+    if (isSplitRunning())
+    {
+        error = "Wait for Split to finish before switching catalogs.";
+        return false;
+    }
     if (target.getFullPathName().isEmpty())
     {
         error = "Choose a database file.";
@@ -2192,6 +2454,10 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
         return false;
     }
     if (autoTagDialog != nullptr) { autoTagDialog->exitModalState(0); autoTagDialog = nullptr; }
+    if (splitDialog != nullptr) { splitDialog->exitModalState(0); splitDialog = nullptr; }
+    if (splitter) { splitter->cancel(); splitter->waitUntilFinished(-1); splitter.reset(); }
+    pendingSplitScan.clear();
+    splitWasRunning = false;
     if (autoTag) { autoTag->cancel(); autoTag->waitUntilFinished(-1); autoTag.reset(); }
     if (tagging) { tagging->cancel(); tagging->waitUntilFinished(-1); tagging.reset(); }
     if (smart) { smart->cancel(); smart->waitUntilFinished(-1); smart.reset(); }
@@ -2203,6 +2469,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     smart = std::make_unique<SmartAnalysisService>(*writeRepo);
     tagging = std::make_unique<TaggingService>(*writeRepo);
     autoTag = std::make_unique<AutoTagService>(*writeRepo);
+    splitter = std::make_unique<SplitService>();
     taggingWasRunning = false;
     autoTagPreparing = false;
     autoTagWasRunning = false;
