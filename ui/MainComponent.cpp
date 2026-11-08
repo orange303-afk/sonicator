@@ -14,7 +14,7 @@ namespace sonicator {
 namespace {
 bool isDiscImageFormat(const juce::String& format)
 {
-    return format == "ISO" || format == "AKAI" || format == "CUE" || format == "MDX";
+    return format == "ISO" || format == "AKAI" || format == "CUE" || format == "MDX" || format == "BIN" || format == "IMG";
 }
 }
 namespace {
@@ -138,6 +138,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     analysisDetails.setJustificationType(juce::Justification::topLeft); analysisDetails.setFont(juce::FontOptions(13));
     analysisViewport.setViewedComponent(&analysisDetails,false);
     analysisViewport.setScrollBarsShown(true,false);
+    addChildComponent(preview.containerSourceList());
+    preview.onSourcesChanged = [this] { resized(); };
     stageLabel.setText("SMART METADATA\n\nType, BPM and Key are in the\nlibrary columns. Smart metadata\nanalyzes new or changed files.",juce::dontSendNotification);
     stageLabel.setFont(juce::FontOptions(11)); stageLabel.setColour(juce::Label::textColourId,theme::muted);
     stageLabel.setJustificationType(juce::Justification::topLeft);
@@ -166,6 +168,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     {
         search.clear(); pendingSearch.clear(); filter.text.clear(); pageOffset = 0; reloadLibrary();
     };
+    search.onClear = search.onEscapeKey;
     search.setComponentID("search");
     selectedTags.setComponentID("selectedTags");
     preview.setComponentID("preview");
@@ -225,9 +228,33 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     folders.onFolder = [this](juce::String path)
     {
         favorites.clearSelection();
+        if (juce::File::isAbsolutePath(path) && juce::File(path).hasFileExtension("iso;bin;mdx;cue;akai;img"))
+        {
+            SampleRecord image;
+            image.filePath = path;
+            image.format = juce::File(path).getFileExtension().substring(1).toUpperCase();
+            openDiscImage(image);
+            return;
+        }
+        if (discBrowser) { discBrowser->closeImage(); discBrowser->setVisible(false); }
         selectedFolder = std::move(path); pageOffset = 0;
         sessionSamplePath.clear(); markSessionStateDirty();
         reloadLibrary();
+    };
+    folders.onDiscFolder = [this](const juce::String& image, DiscEntryId directory)
+    {
+        if (! discBrowser || ! discBrowser->canReuseImage(juce::File(image)))
+        {
+            SampleRecord record;
+            record.filePath = image;
+            record.format = juce::File(image).getFileExtension().substring(1).toUpperCase();
+            openDiscImage(record);
+        }
+        if (discBrowser)
+        {
+            discBrowser->setVisible(true);
+            discBrowser->showDirectory(directory);
+        }
     };
     folders.onContextMenu = [this](const juce::String& path, bool allSamples, juce::Point<int> position)
     {
@@ -236,6 +263,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     favorites.onFolder = [this](juce::String path)
     {
         if (path.isEmpty()) return;
+        if (discBrowser) { discBrowser->closeImage(); discBrowser->setVisible(false); }
         folders.clearSelection();
         selectedFolder = std::move(path); pageOffset = 0;
         sessionSamplePath.clear(); markSessionStateDirty();
@@ -248,6 +276,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     addFolder.onClick = [this] { chooseFolder(); };
     rescan.onClick = [this] { requestScan(false); };
     newFiles.onClick = [this] { scanRoots(false, true); };
+    newFiles.setButtonText("Rescan and analyze new files");
     reanalyze.onClick = [this] { requestScan(true); };
     smartButton.onClick = [this]
     {
@@ -262,6 +291,37 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             status.setText("Smart metadata analysis could not start.",juce::dontSendNotification);
     };
     smartButton.setTooltip("Read Type / BPM / Key metadata for missing or changed files in the background");
+    addAndMakeVisible(libraryMenu);
+    libraryMenu.setComponentID("libraryMenu");
+    libraryMenu.setWantsKeyboardFocus(false);
+    libraryMenu.setMouseClickGrabsKeyboardFocus(false);
+    for (auto* c : { &addFolder, &rescan, &newFiles, &reanalyze, &smartButton }) c->setVisible(false);
+    libraryHeading.setVisible(false);
+    libraryMenu.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        menu.setLookAndFeel(&look);
+        menu.addItem(1, "Add folder...", addFolder.isEnabled());
+        menu.addItem(2, "Rescan", rescan.isEnabled());
+        menu.addItem(3, "Rescan and analyze new files", newFiles.isEnabled());
+        menu.addSeparator();
+        menu.addItem(4, "Reanalyze all", reanalyze.isEnabled());
+        menu.addItem(5, "Smart metadata", smartButton.isEnabled());
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraryMenu),
+            [safe = juce::Component::SafePointer<MainComponent>(this)](int result)
+            {
+                if (! safe) return;
+                switch (result)
+                {
+                    case 1: safe->chooseFolder(); break;
+                    case 2: safe->requestScan(false); break;
+                    case 3: safe->scanRoots(false, true); break;
+                    case 4: safe->requestScan(true); break;
+                    case 5: safe->smartButton.onClick(); break;
+                    default: break;
+                }
+            });
+    };
     pause.onClick = [this]
     {
         // Pause and Cancel act on whichever background job is running.
@@ -406,6 +466,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
 }
 MainComponent::~MainComponent()
 {
+    juce::PopupMenu::dismissAllActiveMenus();
     if (persistSessionState) saveSessionState();
     removeKeyListener(&enterKeyListener);
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
@@ -443,6 +504,7 @@ void MainComponent::recordSearchHistory(const juce::String& text)
 void MainComponent::showSearchHistory()
 {
     juce::PopupMenu menu;
+    menu.setLookAndFeel(&look);
     const auto history = appSettings.searchHistory;
     if (history.isEmpty()) return;
     for (int i = 0; i < history.size(); ++i) menu.addItem(i + 1, history[i]);
@@ -708,6 +770,7 @@ bool MainComponent::refreshIfCatalogChanged()
 void MainComponent::reloadLibrary()
 {
     if (! readRepo) return;
+    if (discBrowser) discBrowser->setHideEmpty(filter.hideEmpty);
     try
     {
         totalCatalogCount = readRepo->count();
@@ -930,14 +993,25 @@ void MainComponent::openDiscImage(const SampleRecord& r)
     if (! discBrowser)
     {
         discBrowser = std::make_unique<DiscBrowserPanel>();
+        discBrowser->onSelectionBegin = [this] { engine.stop(); };
+        discBrowser->onImageError = [this](const juce::File& image, const juce::String& error)
+        {
+            folders.setDiscError(image.getFullPathName(), true);
+            status.setText(error, juce::dontSendNotification);
+        };
+        discBrowser->onTreeReady = [this](const juce::File& image, DiscEntryId root, const std::vector<DiscEntry>& entries)
+        {
+            folders.setDiscFolders(image.getFullPathName(), root, entries);
+        };
         discBrowser->onExit = [this]
         {
-            if (discBrowser != nullptr) discBrowser->setVisible(false);
+            if (discBrowser != nullptr) { discBrowser->closeImage(); discBrowser->setVisible(false); }
             library.focusForNavigation();
         };
         discBrowser->onSampleSelected = [this](const juce::File& container, const juce::String& stem,
                                                SampleAudioPtr audio)
         {
+            if (! discBrowser || ! discBrowser->isVisible() || discBrowser->openedImage() != container) return;
             if (! preview.loadDiscSample(container, stem, std::move(audio), false, 0, 0, false, true))
                 status.setText(engine.error(), juce::dontSendNotification);
             else
@@ -946,8 +1020,15 @@ void MainComponent::openDiscImage(const SampleRecord& r)
         addChildComponent(*discBrowser);
     }
     discBrowser->setBounds(library.getBounds());
+    discBrowser->setHideEmpty(filter.hideEmpty);
     discBrowser->setVisible(true);
     discBrowser->toFront(true);
+    if (discBrowser->canReuseImage(juce::File(r.filePath)))
+    {
+        discBrowser->refreshFolderTree();
+        discBrowser->showDirectory({});
+        return;
+    }
     discBrowser->open(juce::File(r.filePath));
 }
 void MainComponent::showTagFilterMenu()
@@ -956,6 +1037,7 @@ void MainComponent::showTagFilterMenu()
     try { allTags = readRepo->tags(); }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
     juce::PopupMenu menu, excludes, manage;
+    menu.setLookAndFeel(&look);
     if (allTags.empty()) menu.addSectionHeader("No tags yet");
     for (int i = 0; i < (int) allTags.size(); ++i)
     {
@@ -1054,6 +1136,7 @@ void MainComponent::showTagFilterMenu()
 void MainComponent::showTagColourMenu(int64_t tagId)
 {
     juce::PopupMenu menu;
+    menu.setLookAndFeel(&look);
     for (int i = 0; i < (int) std::size(tagPalette); ++i) menu.addItem(i+1, tagPalette[i].name);
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&tagFilter),
         [safe = juce::Component::SafePointer<MainComponent>(this), tagId](int result)
@@ -1077,6 +1160,7 @@ void MainComponent::showEditTagsMenu()
     const auto sampleId = selectedSampleId;
     auto assigned = readRepo->tagsForSample(sampleId);
     juce::PopupMenu menu;
+    menu.setLookAndFeel(&look);
     for (int i = 0; i < (int) allTags.size(); ++i)
     {
         bool isAssigned = false;
@@ -1214,9 +1298,11 @@ void MainComponent::showFavoriteContextMenu(const juce::String& path, juce::Poin
     // Only favorite roots get the menu; children are already covered by their root.
     if (path.isEmpty() || ! isFavoriteFolder(path)) return;
     juce::PopupMenu menu;
+    menu.setLookAndFeel(&look);
     menu.addItem(7201, "Remove from favorites");
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
-                           { screenPosition.x, screenPosition.y, 1, 1 }),
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&favorites).withTargetScreenArea(
+                           { screenPosition.x, screenPosition.y, 1, 1 })
+                           .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), path](int result)
         {
             if (safe != nullptr && result == 7201) safe->toggleFavoriteFolder(path);
@@ -1401,6 +1487,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     const juce::String openLabel = "Open folder";
 #endif
     juce::PopupMenu menu, tagMenu;
+    menu.setLookAndFeel(&look);
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagMenu.addItem(7100 + i, allTags[(size_t) i].name, true, false,
                         tagDotImage(allTags[(size_t) i].colour));
@@ -1425,8 +1512,9 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0);
     menu.addItem(7005, "Reset tags...", catalogued > 0 && autoTagIdle && autoTagDialog == nullptr);
     const juce::String folderPath = path;
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
-                           { screenPosition.x, screenPosition.y, 1, 1 }),
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&folders).withTargetScreenArea(
+                           { screenPosition.x, screenPosition.y, 1, 1 })
+                           .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued](int result)
         {
             if (safe == nullptr || result == 0) return;
@@ -1562,6 +1650,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
 
     auto recent = readRepo->recentTags();
     juce::PopupMenu menu, tagsMenu;
+    menu.setLookAndFeel(&look);
     for (int i = 0; i < (int) recent.size(); ++i)
         menu.addItem(20000 + i, recent[(size_t) i].name, true, false,
                      tagDotImage(recent[(size_t) i].colour));
@@ -1599,7 +1688,9 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     const auto duplicate = readRepo->duplicateInfo(lead.id);
     if (duplicate.has_value() && duplicate->groupSize > 1)
         menu.addItem(9004, "Show all " + juce::String(duplicate->groupSize) + " copies");
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ screenPosition.x, screenPosition.y, 1, 1 }),
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&library).withTargetScreenArea(
+                           { screenPosition.x, screenPosition.y, 1, 1 })
+                           .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash](int result)
         {
@@ -2089,13 +2180,7 @@ void MainComponent::resized()
     status.setBounds(footer);
     sidebarBounds = r.removeFromLeft(getWidth() < 1100 ? 190 : 240); analysisBounds = r.removeFromRight(getWidth() < 1100 ? 230 : 270);
     auto sidebar = sidebarBounds.reduced(14,16);
-    libraryHeading.setBounds(sidebar.removeFromTop(30)); sidebar.removeFromTop(12);
-    addFolder.setBounds(sidebar.removeFromTop(36)); sidebar.removeFromTop(10);
-    auto scanRow = sidebar.removeFromTop(32);
-    rescan.setBounds(scanRow.removeFromLeft((scanRow.getWidth() - 6) / 2)); scanRow.removeFromLeft(6);
-    newFiles.setBounds(scanRow); sidebar.removeFromTop(8);
-    reanalyze.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(6);
-    smartButton.setBounds(sidebar.removeFromTop(32)); sidebar.removeFromTop(24);
+    libraryMenu.setBounds(sidebar.removeFromTop(40)); sidebar.removeFromTop(16);
     if (favorites.isVisible() && ! appSettings.favoriteFolders.isEmpty())
     {
         const int maxHeight = juce::jmax(80, sidebar.getHeight() - 24);
@@ -2114,7 +2199,15 @@ void MainComponent::resized()
     tagsLabel.setBounds(analysis.removeFromTop(16)); analysis.removeFromTop(4);
     selectedTags.setBounds(analysis.removeFromTop(selectedTags.getPreferredHeight(analysis.getWidth(), 2)));
     analysis.removeFromTop(8);
-    stageLabel.setBounds(analysis.removeFromBottom(getHeight() < 700 ? 58 : 90));
+    const int metadataHeight = getHeight() < 700 ? 58 : 90;
+    auto& sources = preview.containerSourceList();
+    if (sources.isVisible())
+    {
+        const int sourceHeight = juce::jmin(220, juce::jmax(70, (analysis.getHeight() - metadataHeight) / 2));
+        sources.setBounds(analysis.removeFromBottom(sourceHeight));
+        analysis.removeFromBottom(10);
+    }
+    stageLabel.setBounds(analysis.removeFromBottom(metadataHeight));
     analysisViewport.setBounds(analysis);
     analysisDetails.setBounds(0,0,juce::jmax(1,analysis.getWidth()-14),550);
     auto list = r.reduced(14,14); auto bar = list.removeFromTop(32);

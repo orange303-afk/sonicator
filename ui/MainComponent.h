@@ -81,6 +81,7 @@ private:
     int totalCatalogCount = 0;
     int64_t selectedSampleId = 0;
     SearchField search;
+    juce::TextButton libraryMenu { "LIBRARY" };
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" }, smartButton { "Smart metadata" };
     juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" };
     juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" },

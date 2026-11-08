@@ -2,6 +2,7 @@
 #include "AkaiFilesystem.h"
 #include "RawDiscSource.h"
 #include "SectorLayout.h"
+#include <set>
 namespace sonicator {
 DiscBrowserService::DiscBrowserService(DiscLimits limits) : budget(limits)
 {
@@ -28,11 +29,12 @@ void DiscBrowserService::requestOpen(const juce::File& file, int trackNumber)
     }
     workCondition.notify_one();
 }
-void DiscBrowserService::requestList(DiscEntryId entry)
+void DiscBrowserService::requestList(DiscEntryId entry, bool recursive)
 {
     {
         std::lock_guard lock(mutex);
         pending = { Kind::list, {}, entry, {}, {}, -1, ++generation };
+        pending.recursive = recursive;
         hasPending = true;
     }
     workCondition.notify_one();
@@ -53,6 +55,16 @@ void DiscBrowserService::close()
         ++generation;
         hasPending = false;
         closed = true;
+        completed.clear();
+    }
+    doneCondition.notify_all();
+}
+void DiscBrowserService::cancelPending()
+{
+    {
+        std::lock_guard lock(mutex);
+        ++generation;
+        hasPending = false;
         completed.clear();
     }
     doneCondition.notify_all();
@@ -170,6 +182,44 @@ void DiscBrowserService::handle(const Request& request, Completion& completion)
     }
     if (request.kind == Kind::list)
     {
+        if (request.recursive)
+        {
+            std::vector<std::pair<DiscEntryId, uint32_t>> todo { { request.entry, 0 } };
+            std::set<DiscEntryId> visited;
+            completion.status = DiscStatus::ready;
+            for (size_t i = 0; i < todo.size(); ++i)
+            {
+                if (cancel()) { completion.status = DiscStatus::cancelled; return; }
+                const auto [directory, depth] = todo[i];
+                if (! visited.insert(directory).second) continue;
+                if (depth > budget.maxDirectoryDepth)
+                {
+                    completion.listing.partial = true;
+                    completion.listing.warning = "Directory depth limit reached";
+                    continue;
+                }
+                auto listed = filesystem->list(directory, cancel);
+                if (! listed.ok() || listed.value.partial)
+                {
+                    completion.listing.partial = true;
+                    completion.listing.warning = listed.error.isNotEmpty() ? listed.error : listed.value.warning;
+                }
+                for (auto& entry : listed.value.entries)
+                {
+                    if (completion.listing.entries.size() >= budget.maxDirectoryRecords)
+                    {
+                        completion.listing.partial = true;
+                        completion.listing.warning = "Image entry limit reached";
+                        return;
+                    }
+                    entry.parent = directory;
+                    if (entry.kind != DiscEntryKind::file && entry.capability.isEmpty())
+                        todo.emplace_back(entry.id, depth + 1);
+                    completion.listing.entries.push_back(std::move(entry));
+                }
+            }
+            return;
+        }
         auto listed = filesystem->list(request.entry, cancel);
         completion.listing = std::move(listed.value);
         completion.status = listed.status;

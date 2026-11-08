@@ -12,6 +12,7 @@ struct PendingXmSample
     int64_t lengthBytes = 0, loopStartBytes = 0, loopLengthBytes = 0;
     int type = 0, finetune = 0, relativeNote = 0;
     juce::String name;
+    juce::String displayText;
     int64_t pcmOffset = 0;
 };
 int xmRate(int relativeNote, int finetune)
@@ -48,17 +49,23 @@ bool parseXmInstrument(TrackerBytes& in, int64_t& offset, int version, int index
     in.seek((size_t) offset);
     const int64_t start = offset;
     const auto instrumentSize = in.u32le();
-    auto instrumentName = in.text(22);
+    auto instrumentText = in.text(22, true);
+    auto instrumentName = instrumentText.trim();
     in.u8(); // type
     const int numSamples = in.u16le();
-    if (in.failed || instrumentSize < 33 || numSamples > 256
+    if (in.failed || instrumentSize < 29 || numSamples > 256
         || start + (int64_t) instrumentSize > (int64_t) in.size())
     { error = "XM instrument header is invalid"; return false; }
     if (numSamples == 0)
     {
+        PendingXmSample empty;
+        empty.name = instrumentName;
+        empty.displayText = instrumentText;
+        pending.push_back(std::move(empty)); // keep text-only instrument rows and ASCII art
         offset = start + (int64_t) instrumentSize;
         return true;
     }
+    if (instrumentSize < 33) { error = "XM sampled instrument header is too short"; return false; }
     const auto sampleHeaderSize = in.u32le();
     if (in.failed || sampleHeaderSize < 40 || sampleHeaderSize > 0x100)
     { error = "XM sample header size is invalid"; return false; }
@@ -73,6 +80,7 @@ bool parseXmInstrument(TrackerBytes& in, int64_t& offset, int version, int index
         in.seek((size_t) (start + (int64_t) instrumentSize
                           + (int64_t) s * (int64_t) sampleHeaderSize));
         PendingXmSample sample;
+        sample.displayText = instrumentText;
         sample.lengthBytes = in.u32le();
         sample.loopStartBytes = in.u32le();
         sample.loopLengthBytes = in.u32le();
@@ -159,6 +167,7 @@ bool parseXm(const std::vector<uint8_t>& bytes, TrackerDocumentData& out, juce::
         TrackerSampleSlot slot;
         slot.slot = (int) i;
         slot.name = sample.name;
+        slot.displayText = sample.displayText;
         slot.empty = sample.lengthBytes == 0;
         slot.channels = 1;
         const bool sixteenBit = (sample.type & 0x10) != 0;

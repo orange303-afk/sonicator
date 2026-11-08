@@ -4,6 +4,73 @@
 #include "ui/shell/Theme.h"
 #include <cmath>
 namespace sonicator {
+int PreviewPanel::getNumRows()
+{
+    if (engine.isTrackerMode()) return trackerBox.getNumItems();
+    return ! engine.isSamplerInstrumentMode() || instrumentSamples.empty() ? 0 : sampleBox.getNumItems() + 1;
+}
+void PreviewPanel::paintListBoxItem(int row, juce::Graphics& g, int width, int height, bool selected)
+{
+    if (row < 0 || row >= getNumRows()) return;
+    if (selected) g.fillAll(theme::selection);
+    const bool tracker = engine.isTrackerMode();
+    const auto text = tracker ? trackerBox.getItemText(row)
+        : (row == 0 ? juce::String("Head") : sampleBox.getItemText(row - 1));
+    bool unavailable = ! tracker && row > 0 && row <= (int) instrumentSamples.size()
+        && ! instrumentSamples[(size_t) row - 1].isPlayable();
+    if (tracker && row > 0 && row <= (int) engine.trackerSlots().size())
+    {
+        const auto& slot = engine.trackerSlots()[(size_t) row - 1];
+        unavailable = slot.fmInstrument || slot.error.isNotEmpty();
+    }
+    g.setColour(unavailable ? juce::Colour(0xffe05a5a) : theme::text);
+    g.setFont(juce::FontOptions(tracker ? juce::Font::getDefaultMonospacedFontName() : juce::Font::getDefaultSansSerifFontName(),
+                                12.0f, row == 0 ? juce::Font::bold : juce::Font::plain));
+    g.drawText(text, 8, 0, width - 16, height, juce::Justification::centredLeft, ! tracker);
+}
+void PreviewPanel::selectedRowsChanged(int row)
+{
+    if (syncingSources || row < 0 || row >= getNumRows()) return;
+    if (engine.isTrackerMode())
+    {
+        if (row == 0) applyTrackerWholeSong(true);
+        else applyTrackerSample(trackerBox.getItemId(row) - 2, true);
+    }
+    else if (row == 0)
+    {
+        instrumentHead = true;
+        engine.stop();
+        midi.setToggleState(engine.setMidiPreview(true), juce::dontSendNotification);
+    }
+    else
+    {
+        instrumentHead = false;
+        applyInstrumentSample(instrumentSamples[(size_t) row - 1].id, true);
+    }
+    sourceList.repaint();
+}
+void PreviewPanel::refreshSourceList()
+{
+    const juce::ScopedValueSetter<bool> guard(syncingSources, true);
+    sourceList.updateContent();
+    sourceList.setRowHeight(engine.isTrackerMode() ? 18 : 30);
+    int contentWidth = 0;
+    if (engine.isTrackerMode())
+    {
+        const juce::Font font(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
+        for (const auto& slot : engine.trackerSlots())
+            contentWidth = juce::jmax(contentWidth, juce::GlyphArrangement::getStringWidthInt(font, slot.displayText) + 16);
+    }
+    sourceList.setMinimumContentWidth(contentWidth);
+    const int row = engine.isTrackerMode() ? trackerBox.getSelectedItemIndex()
+        : (instrumentHead ? 0 : sampleBox.getSelectedItemIndex() + 1);
+    if (getNumRows() > 0) sourceList.selectRow(row, true, true);
+    else sourceList.deselectAllRows();
+    sourceList.setVisible(getNumRows() > 0);
+    sampleBox.setVisible(false);
+    trackerBox.setVisible(false);
+    if (onSourcesChanged) onSourcesChanged();
+}
 PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,const juce::File& exportFolder)
     : engine(audio),waveform(cacheFolder),exporter(exportFolder)
 {
@@ -13,6 +80,9 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
         addAndMakeVisible(c);
     presetBox.setVisible(false); sampleBox.setVisible(false); rexGate.setVisible(false); rexInfo.setVisible(false);
     trackerBox.setVisible(false); sampleDragButton.setVisible(false); songProgress.setVisible(false);
+    addChildComponent(sourceList);
+    sourceList.setComponentID("containerSources");
+    sourceList.setRowHeight(30);
     songProgress.setComponentID("songProgress");
     songProgress.onSeek = [this](double seconds) { engine.seek(seconds); };
     rexInfo.setFont(juce::FontOptions(12));
@@ -259,6 +329,8 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
         waveform.setFile(success ? file : juce::File());
     midi.setToggleState(engine.isMidiPreview(),juce::dontSendNotification);
     resized(); // the tracker/sample selectors appear or disappear with the loaded asset
+    instrumentHead = true;
+    refreshSourceList();
     if (allowAutoPlay && success && ! soundFont && autoPreview.getToggleState()) engine.play();
     return success;
 }
@@ -304,6 +376,7 @@ void PreviewPanel::refreshInstrumentSamples()
         tips << "\n";
     }
     sampleBox.setTooltip(tips.trim());
+    refreshSourceList();
     if (loadedFile != juce::File())
         filename.setText(loadedFile.getFileName() + "  —  " + engine.instrumentName() + midiHint,
                          juce::dontSendNotification);
@@ -340,6 +413,8 @@ bool PreviewPanel::applyInstrumentSample(SampleId id, bool manual)
         engine.seek(0);
         engine.play();
     }
+    if (manual) instrumentHead = false;
+    refreshSourceList();
     return true;
 }
 void PreviewPanel::refreshMidiFollow()
@@ -373,16 +448,7 @@ void PreviewPanel::fillTrackerChoices()
     trackerBox.addItem("Whole song", 1);
     for (const auto& slot : engine.trackerSlots())
     {
-        juce::String label = juce::String(slot.slot + 1) + ". "
-            + (slot.name.isNotEmpty() ? slot.name : juce::String("Sample"));
-        if (slot.empty) label << "  ·  empty";
-        else if (slot.fmInstrument) label << "  ·  FM instrument";
-        else
-        {
-            label << "  ·  " << slot.bitsPerSample << "-bit";
-            if (slot.looping) label << "  ·  loop";
-        }
-        if (slot.error.isNotEmpty()) label << "  ·  " << slot.error;
+        const auto label = slot.displayText.isNotEmpty() ? slot.displayText : juce::String(" ");
         trackerBox.addItem(label, slot.slot + 2);
     }
     trackerBox.setSelectedId(engine.isTrackerSampleSelected()
@@ -437,6 +503,7 @@ bool PreviewPanel::applyTrackerSample(SampleId id, bool manual)
         return false;
     }
     trackerBox.setSelectedId((int) id + 2, juce::dontSendNotification);
+    refreshSourceList();
     currentSampleId = id;
     if (auto audio = engine.trackerSampleAudio())
         waveform.setPeaks(audio->left, audio->sampleRate, {});
@@ -464,6 +531,7 @@ void PreviewPanel::applyTrackerWholeSong(bool manual)
 {
     if (! engine.selectTrackerWholeSong()) return;
     trackerBox.setSelectedId(1, juce::dontSendNotification);
+    refreshSourceList();
     waveform.setFile(juce::File());
     waveform.setVisible(false);
     songProgress.setLength(engine.length());
@@ -510,6 +578,7 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
     sampleBox.setVisible(false);
     trackerBox.setVisible(false);
     waveform.setPeaks(discAudioRef->left, discAudioRef->sampleRate, {});
+    refreshSourceList();
     waveform.setVisible(true);
     songProgress.setVisible(false);
     sampleDragButton.setVisible(true);
@@ -829,13 +898,10 @@ void PreviewPanel::resized()
     time.setBounds(top);
     r.removeFromTop(8);
     auto controls = r.removeFromRight(330); r.removeFromRight(16); waveform.setBounds(r); songProgress.setBounds(r);
-    auto extra = controls.removeFromTop(26);
+    auto extra = presetBox.isVisible() || rexGate.isVisible() ? controls.removeFromTop(26) : juce::Rectangle<int>();
     if (presetBox.isVisible())
     {
-        auto presetArea = extra, sampleArea = extra;
-        presetBox.setBounds(presetArea.removeFromLeft(juce::jmax(1, presetArea.getWidth() / 2 - 3)));
-        sampleArea.removeFromLeft(juce::jmax(1, sampleArea.getWidth() / 2 + 3));
-        sampleBox.setBounds(sampleArea);
+        presetBox.setBounds(extra);
     }
     else
     {

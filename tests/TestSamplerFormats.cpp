@@ -321,8 +321,12 @@ TEST_CASE("Preview exposes EXS24 samples, waveform and source export", "[sampler
     REQUIRE(preview.waveformLength() == Catch::Approx(0.1).margin(0.001));
     auto* box = dynamic_cast<juce::ComboBox*>(preview.findChildWithID("instrumentSample"));
     REQUIRE(box != nullptr);
-    REQUIRE(box->isVisible());
-    box->setSelectedId(2, juce::sendNotificationSync);
+    REQUIRE_FALSE(box->isVisible());
+    auto& sources = preview.containerSourceList();
+    REQUIRE(sources.isVisible());
+    REQUIRE(sources.getListBoxModel()->getNumRows() == 3);
+    sources.selectRow(2);
+    sources.getListBoxModel()->selectedRowsChanged(2);
     REQUIRE(preview.selectedInstrumentSampleId() == 1);
     REQUIRE(preview.waveformLength() == Catch::Approx(0.2).margin(0.001));
     preview.selectRange(0.02, 0.06);

@@ -17,6 +17,7 @@ struct TrackerSampleSlot
 {
     int slot = 0;                       // 0-based index in the document, stable for this generation
     juce::String name;
+    juce::String displayText;            // original module text, including ASCII-art spacing
     bool empty = true;                  // slot exists but has no audio source
     bool fmInstrument = false;          // AdLib/OPL instrument: no PCM can be extracted
     TrackerPcmEncoding encoding = TrackerPcmEncoding::signedInt8;
@@ -101,7 +102,7 @@ public:
     }
     // Reads a fixed-size, NUL-padded text field. Non-ASCII bytes are kept as Latin-1 so old
     // DOS/Amiga sample names stay readable instead of disappearing.
-    juce::String text(size_t n);
+    juce::String text(size_t n, bool preserveWhitespace = false);
 private:
     const uint8_t* source;
     size_t length, position = 0;

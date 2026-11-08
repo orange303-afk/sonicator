@@ -9,6 +9,7 @@
 #include "core/tracker/TrackerDocument.h"
 #include "core/tracker/TrackerSongRenderer.h"
 #include "ui/preview/PreviewPanel.h"
+#include "ui/MainComponent.h"
 #include "TestHelpers.h"
 #include <algorithm>
 #include <cmath>
@@ -554,8 +555,11 @@ TEST_CASE("Whole-song selection hides sample export and never shows the first sa
     REQUIRE(preview.loadFile(file, false));
     auto* trackerBox = dynamic_cast<juce::ComboBox*>(preview.findChildWithID("trackerSample"));
     REQUIRE(trackerBox != nullptr);
-    REQUIRE(trackerBox->isVisible());
-    REQUIRE(trackerBox->getWidth() > 0); // layout runs when the selector appears
+    REQUIRE_FALSE(trackerBox->isVisible());
+    auto& sources = preview.containerSourceList();
+    REQUIRE(sources.isVisible());
+    REQUIRE(sources.getListBoxModel()->getNumRows() == 32); // Whole song, 31 slots
+    REQUIRE(sources.getSelectedRow() == 0);
     auto* dragButton = dynamic_cast<juce::Button*>(preview.findChildWithID("dragTrackerSample"));
     REQUIRE(dragButton != nullptr);
     REQUIRE_FALSE(dragButton->isVisible());
@@ -568,7 +572,9 @@ TEST_CASE("Whole-song selection hides sample export and never shows the first sa
     REQUIRE(SongProgress::formatTime(3725.123) == "62:05:123");
     REQUIRE(preview.trackerWholeSongSelected());
     REQUIRE(preview.waveformLength() == Catch::Approx(0.0).margin(1.0e-9)); // no fake overview
-    REQUIRE(preview.selectTrackerSlot(0));
+    sources.selectRow(1);
+    sources.getListBoxModel()->selectedRowsChanged(1);
+    REQUIRE(preview.selectedTrackerSampleId() == 0);
     REQUIRE(dragButton->isVisible());
     REQUIRE_FALSE(progress->isVisible()); // the waveform owns the area for a source sample
     REQUIRE_FALSE(preview.trackerWholeSongSelected());
@@ -579,6 +585,103 @@ TEST_CASE("Whole-song selection hides sample export and never shows the first sa
     REQUIRE(progress->isVisible());
     REQUIRE(progress->length() == Catch::Approx(engine.length()).margin(1.0e-6));
     REQUIRE(preview.waveformLength() == Catch::Approx(0.0).margin(1.0e-9));
+}
+
+TEST_CASE("Container sources are laid out inside Sample Analysis", "[tracker][ui][polish]")
+{
+    TestDirectory t;
+    auto module = makeMod31(true);
+    const std::vector<juce::String> art { "   /---- HELLO ----\\", "   |  tracker art  |", "   \\---------------/" };
+    for (int i = 0; i < (int) art.size(); ++i)
+    {
+        const auto offset = 20 + i * 30;
+        std::fill(module.begin() + offset, module.begin() + offset + 22, 0);
+        std::memcpy(module.data() + offset, art[(size_t) i].toRawUTF8(), (size_t) art[(size_t) i].getNumBytesAsUTF8());
+    }
+    const auto file = write(t, "song.mod", module);
+    const auto catalog = t.dir.getChildFile("catalog.sqlite");
+    {
+        Database db(catalog); SampleRepository repo(db); repo.createTables();
+        repo.addRoot(t.dir.getFullPathName());
+        SampleRecord record; record.filePath = file.getFullPathName(); record.fileName = file.getFileName(); record.format = "MOD";
+        record.version = metadataOnlyVersion;
+        repo.upsert(record);
+    }
+    MainComponent app(catalog, false);
+    app.setSize(1200, 800);
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr);
+    REQUIRE(library->getNumRows() == 1);
+    library->selectedRowsChanged(0);
+    auto* sources = dynamic_cast<juce::ListBox*>(app.findChildWithID("containerSources"));
+    REQUIRE(sources != nullptr);
+    REQUIRE(sources->isVisible());
+    REQUIRE(sources->getWidth() > 100);
+    REQUIRE(sources->getHeight() >= 70);
+    REQUIRE(sources->getListBoxModel()->getNumRows() == 32);
+    REQUIRE(sources->getX() > library->getRight());
+    juce::Label* metadata = nullptr;
+    for (auto* child : app.getChildren())
+        if (auto* label = dynamic_cast<juce::Label*>(child); label && label->getText().startsWith("SMART METADATA")) metadata = label;
+    REQUIRE(metadata != nullptr);
+    REQUIRE(sources->getY() >= metadata->getBottom());
+    const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_TRACKER_SCREENSHOT", {});
+    if (shot.isNotEmpty())
+    {
+        auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
+        REQUIRE(juce::PNGImageFormat().writeImageToStream(app.createComponentSnapshot(app.getLocalBounds()), *stream));
+    }
+}
+
+TEST_CASE("Tracker source rows preserve module text and ASCII-art whitespace", "[tracker][ui][text-polish]")
+{
+    TestDirectory t; auto bytes = makeMod31(true);
+    const juce::String art = "   /---[ HELLO ]---\\  ";
+    std::fill(bytes.begin() + 20, bytes.begin() + 42, 0);
+    std::memcpy(bytes.data() + 20, art.toRawUTF8(), (size_t) art.getNumBytesAsUTF8());
+    AudioEngine engine(false); PreviewPanel preview(engine, t.dir.getChildFile("cache"));
+    REQUIRE(preview.loadFile(write(t, "art.mod", bytes), false));
+    auto* box = dynamic_cast<juce::ComboBox*>(preview.findChildWithID("trackerSample")); REQUIRE(box != nullptr);
+    REQUIRE(box->getItemText(1) == art);
+    REQUIRE(box->getItemText(2).trim().isEmpty()); // blank source-name rows stay blank
+}
+
+TEST_CASE("XM source rows use instrument text including sampleless art instruments", "[tracker][ui][text-polish]")
+{
+    TestDirectory t; auto bytes = makeXm(); bytes[72] = 2;
+    const juce::String caption = "  composed by artist  ";
+    std::memcpy(bytes.data() + 94, caption.toRawUTF8(), 22);
+    Blob empty; empty.u32le(29); empty.ascii("    /--- art ---\\", 22); empty.u8(0); empty.u16le(0);
+    bytes.insert(bytes.end(), empty.v.begin(), empty.v.end());
+    AudioEngine engine(false); PreviewPanel preview(engine, t.dir.getChildFile("cache"));
+    REQUIRE(preview.loadFile(write(t, "art.xm", bytes), false));
+    auto* box = dynamic_cast<juce::ComboBox*>(preview.findChildWithID("trackerSample")); REQUIRE(box != nullptr);
+    REQUIRE(box->getItemText(1) == caption);
+    REQUIRE(box->getNumItems() == 3);
+    REQUIRE(box->getItemText(2) == "    /--- art ---\\");
+}
+
+TEST_CASE("Unsupported tracker instrument slots are drawn in red", "[tracker][ui][polish]")
+{
+    TestDirectory t; auto bytes = makeS3m();
+    bytes[112] = 2; // AdLib melody instrument, not an auditionable PCM source
+    bytes[188] = 'S'; bytes[189] = 'C'; bytes[190] = 'R'; bytes[191] = 'I';
+    const auto file = write(t, "fm.s3m", bytes);
+    AudioEngine engine(false); PreviewPanel preview(engine, t.dir.getChildFile("cache"));
+    REQUIRE(preview.loadFile(file, false));
+    REQUIRE(engine.trackerSlots().front().fmInstrument);
+    juce::Image image(juce::Image::RGB, 240, 30, true);
+    juce::Graphics g(image);
+    preview.containerSourceList().getListBoxModel()->paintListBoxItem(1, g, 240, 30, false);
+    bool red = false;
+    for (int y = 0; y < image.getHeight(); ++y)
+        for (int x = 0; x < image.getWidth(); ++x)
+        {
+            const auto pixel = image.getPixelAt(x, y);
+            if (pixel.getRed() > 100 && pixel.getRed() > pixel.getGreen() * 1.3
+                && pixel.getRed() > pixel.getBlue() * 1.3) red = true;
+        }
+    REQUIRE(red);
 }
 
 TEST_CASE("SampleVoicePlayer keeps a two-second release and refuses a 129th voice",

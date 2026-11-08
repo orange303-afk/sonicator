@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/disc/AkaiFilesystem.h"
 #include "core/disc/RawDiscSource.h"
+#include "ui/disc/DiscBrowserPanel.h"
+#include "ui/MainComponent.h"
 #include "TestHelpers.h"
 #include <catch2/catch_approx.hpp>
 #include <cstring>
@@ -119,6 +121,54 @@ DiscResult<std::unique_ptr<AkaiFilesystem>> openAkai(const juce::File& file)
     return AkaiFilesystem::open(raw.value, {}, {});
 }
 } // namespace
+
+TEST_CASE("Akai browser publishes its zero-ID root and recursive file list", "[disc-akai-fs][ui][polish]")
+{
+    TestDirectory t;
+    const auto file = writeBytes(t, "akai.iso", akaiImage());
+    DiscBrowserPanel browser;
+    bool ready = false;
+    DiscEntryId partition;
+    browser.onTreeReady = [&](const juce::File& image, DiscEntryId root, const std::vector<DiscEntry>& entries)
+    {
+        REQUIRE(image == file);
+        REQUIRE(root.value == 0); // valid Akai root, not an unopened-image sentinel
+        REQUIRE_FALSE(entries.empty());
+        partition = entries.front().id;
+        ready = true;
+    };
+    browser.open(file);
+    for (int i = 0; i < 100 && ! ready; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(ready);
+    REQUIRE(browser.canReuseImage(file));
+    REQUIRE(browser.getNumRows() > 0);
+    const int all = browser.getNumRows();
+    browser.showDirectory(partition);
+    REQUIRE(browser.getNumRows() > 0);
+    REQUIRE(browser.getNumRows() < all);
+    browser.showDirectory({});
+    REQUIRE(browser.getNumRows() == all);
+}
+
+TEST_CASE("Hide empty and unsupported also filters files inside an image", "[disc-akai-fs][ui][selection-filter]")
+{
+    TestDirectory t; const auto image = writeBytes(t, "filter.iso", akaiImage());
+    AppSettings settings; settings.hideEmpty = false;
+    MainComponent app(t.dir.getChildFile("catalog.sqlite"), false, settings, t.dir.getChildFile("settings.json"));
+    auto* folders = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree")); REQUIRE(folders != nullptr);
+    folders->onFolder(image.getFullPathName());
+    auto* browser = dynamic_cast<DiscBrowserPanel*>(app.findChildWithID("discBrowser")); REQUIRE(browser != nullptr);
+    for (int i = 0; i < 100 && browser->getNumRows() == 0; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    const int all = browser->getNumRows(); REQUIRE(all > 0);
+    auto* toggle = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty")); REQUIRE(toggle != nullptr);
+    toggle->setToggleState(true, juce::dontSendNotification); toggle->onClick();
+    REQUIRE(browser->getNumRows() < all);
+    REQUIRE(browser->getNumRows() > 0);
+    toggle->setToggleState(false, juce::dontSendNotification); toggle->onClick();
+    REQUIRE(browser->getNumRows() == all);
+}
 
 TEST_CASE("An Akai image lists partitions, volumes and sample records", "[disc-akai-fs]")
 {

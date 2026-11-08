@@ -12,13 +12,13 @@ juce::String trackerFormatName(TrackerFormat format)
     return {};
 }
 
-juce::String TrackerBytes::text(size_t n)
+juce::String TrackerBytes::text(size_t n, bool preserveWhitespace)
 {
     const auto start = position;
     if (! has(n)) { failed = true; return {}; }
     position += n;
     auto end = n;
-    while (end > 0 && (source[start + end - 1] == 0 || source[start + end - 1] == ' ')) --end;
+    while (end > 0 && source[start + end - 1] == 0) --end;
     juce::String text;
     for (size_t i = 0; i < end; ++i)
     {
@@ -27,7 +27,7 @@ juce::String TrackerBytes::text(size_t n)
         if (c == 0x1A) break;
         text << juce::String::charToString(c < 0x20 ? 0x20 : (juce::juce_wchar) c);
     }
-    return text.trim();
+    return preserveWhitespace ? text : text.trim();
 }
 
 bool readWholeFile(const juce::File& file, int64_t maxBytes, std::vector<uint8_t>& out,

@@ -64,7 +64,8 @@ bool parseS3m(const std::vector<uint8_t>& bytes, TrackerDocumentData& out, juce:
         const int flags = s.u8();
         const auto c2spd = s.u32le();
         s.skip(12); // reserved
-        slot.name = s.text(28);
+        slot.displayText = s.text(28, true);
+        slot.name = slot.displayText.trim();
         const auto magic = s.u32be();
         slot.frames = length;
         slot.sampleRate = c2spd > 0 ? (int) juce::jlimit((uint32_t) 100, (uint32_t) 384000, c2spd) : 8363;

@@ -191,9 +191,14 @@ TEST_CASE("SF2 preview lists samples, auditions silently and exports source PCM"
     REQUIRE(preview.waveformLength() == Catch::Approx(1.0).margin(0.001));
     auto* box = dynamic_cast<juce::ComboBox*>(preview.findChildWithID("instrumentSample"));
     REQUIRE(box != nullptr);
-    REQUIRE(box->isVisible());
+    REQUIRE_FALSE(box->isVisible());
     REQUIRE(box->getNumItems() == 2);
-    box->setSelectedId(2, juce::sendNotificationSync);
+    auto& sources = preview.containerSourceList();
+    REQUIRE(sources.isVisible());
+    REQUIRE(sources.getListBoxModel()->getNumRows() == 3); // Head, Alpha, Beta
+    REQUIRE(sources.getSelectedRow() == 0);
+    sources.selectRow(2);
+    sources.getListBoxModel()->selectedRowsChanged(2);
     REQUIRE(preview.selectedSoundFontSampleId() == 1);
     REQUIRE(engine.soundFontPresetIndex() == 0);
     REQUIRE(engine.isMidiPreview());

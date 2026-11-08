@@ -8,6 +8,50 @@
 #include "TestHelpers.h"
 #include <iostream>
 using namespace sonicator;
+TEST_CASE("Library popup uses the application theme for hover rendering", "[ui][menu-polish]")
+{
+    TestDirectory t; MainComponent app(t.dir.getChildFile("menu.sqlite"), false);
+    auto* library = dynamic_cast<juce::Button*>(app.findChildWithID("libraryMenu")); REQUIRE(library != nullptr);
+    library->onClick();
+    auto* menu = juce::Component::getCurrentlyModalComponent(); REQUIRE(menu != nullptr);
+    CHECK(&menu->getLookAndFeel() == &app.getLookAndFeel());
+    juce::PopupMenu::dismissAllActiveMenus();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+}
+TEST_CASE("Folder context menu stays beside the click instead of jumping above it", "[ui][menu-polish]")
+{
+    TestDirectory t; MainComponent app(t.dir.getChildFile("context.sqlite"), false);
+    auto* folders = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree")); REQUIRE(folders != nullptr);
+    const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay(); REQUIRE(display != nullptr);
+    const auto screen = display->userBounds;
+    const juce::Point<int> click(screen.getX() + screen.getWidth() / 3, screen.getY() + screen.getHeight() * 11 / 20);
+    folders->onContextMenu(t.dir.getFullPathName(), false, click);
+    auto* menu = juce::Component::getCurrentlyModalComponent(); REQUIRE(menu != nullptr);
+    const auto bounds = menu->getScreenBounds();
+    CHECK(std::abs(bounds.getY() - click.y) < 10);
+    CHECK(std::abs(bounds.getX() - click.x) < 30);
+    juce::PopupMenu::dismissAllActiveMenus();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+}
+TEST_CASE("Library actions are compact and search has a working clear control", "[ui][polish]")
+{
+    TestDirectory t; MainComponent app(t.dir.getChildFile("polish.sqlite"), false);
+    auto* menu = dynamic_cast<juce::Button*>(app.findChildWithID("libraryMenu"));
+    REQUIRE(menu != nullptr);
+    REQUIRE(menu->isVisible());
+    REQUIRE(menu->getButtonText() == "LIBRARY");
+    for (auto* child : app.getChildren())
+        if (auto* button = dynamic_cast<juce::Button*>(child))
+            if (button->getButtonText() == "+ Add folder" || button->getButtonText() == "Rescan")
+                REQUIRE_FALSE(button->isVisible());
+    auto* search = dynamic_cast<SearchField*>(app.findChildWithID("search"));
+    REQUIRE(search != nullptr);
+    auto* clear = dynamic_cast<juce::Button*>(search->findChildWithID("clearSearch"));
+    REQUIRE(clear != nullptr);
+    search->setText("pad", false);
+    clear->onClick();
+    REQUIRE(search->getText().isEmpty());
+}
 TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation", "[ui][focus]")
 {
     TestDirectory t; MainComponent app(t.dir.getChildFile("focus.sqlite"),false);
@@ -15,7 +59,7 @@ TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation",
     for (auto* child : app.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    REQUIRE(buttons == 15); // history is invoked by the search field, not a toolbar button
+    REQUIRE(buttons == 16); // includes the compact library menu
 }
 TEST_CASE("Hide empty restores on startup and saves toggles without losing other settings", "[ui][settings][hide-empty]")
 {

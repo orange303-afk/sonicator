@@ -74,7 +74,8 @@ bool readModHeader(const uint8_t* head, size_t headSize, int64_t fileSize, ModHe
     {
         auto& slot = samples[(size_t) i];
         slot.slot = i;
-        slot.name = in.text(22);
+        slot.displayText = in.text(22, true);
+        slot.name = slot.displayText.trim();
         const int lengthWords = in.u16be();
         const int finetuneRaw = in.u8();
         const int volume = in.u8();

@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "core/disc/DiscBrowserService.h"
+#include "ui/disc/DiscBrowserPanel.h"
+#include "ui/MainComponent.h"
 #include "TestHelpers.h"
 #include <cstring>
 #include <vector>
@@ -155,6 +157,165 @@ DiscBrowserService::Completion waitFor(DiscBrowserService& service, DiscBrowserS
     }
 }
 } // namespace
+
+TEST_CASE("Leaving an image cancels its pending sample preview", "[disc-service][ui][polish]")
+{
+    TestDirectory t; const auto image = buildIsoWithWav(t, 44100);
+    MainComponent app(t.dir.getChildFile("catalog.sqlite"), false);
+    auto* folders = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree"));
+    REQUIRE(folders != nullptr);
+    folders->onFolder(image.getFullPathName());
+    auto* browser = dynamic_cast<DiscBrowserPanel*>(app.findChildWithID("discBrowser"));
+    REQUIRE(browser != nullptr);
+    for (int i = 0; i < 100 && browser->getNumRows() == 0; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(browser->getNumRows() == 1);
+    browser->selectedRowsChanged(0); // submit decode, do not dispatch its completion yet
+    folders->onFolder(t.dir.getFullPathName());
+    auto* preview = dynamic_cast<PreviewPanel*>(app.findChildWithID("preview"));
+    REQUIRE(preview != nullptr);
+    REQUIRE(preview->loadFile(t.wave("ordinary.wav"), false));
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(500);
+    REQUIRE(preview->discSampleAudio() == nullptr);
+}
+
+TEST_CASE("A failed image open can be retried after repairing the file", "[disc-service][ui][polish]")
+{
+    TestDirectory t; const auto image = buildIsoWithWav(t, 4410);
+    juce::MemoryBlock valid; REQUIRE(image.loadFileAsData(valid));
+    REQUIRE(image.replaceWithText("broken image"));
+    MainComponent app(t.dir.getChildFile("catalog.sqlite"), false);
+    auto* folders = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree"));
+    REQUIRE(folders != nullptr);
+    folders->onFolder(image.getFullPathName());
+    auto* browser = dynamic_cast<DiscBrowserPanel*>(app.findChildWithID("discBrowser"));
+    REQUIRE(browser != nullptr);
+    auto* status = dynamic_cast<juce::Label*>(browser->findChildWithID("discStatus"));
+    REQUIRE(status != nullptr);
+    for (int i = 0; i < 100 && status->getText().startsWith("Opening"); ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE_FALSE(status->getText().startsWith("Opening"));
+    REQUIRE(image.replaceWithData(valid.getData(), valid.getSize()));
+    folders->onFolder(image.getFullPathName());
+    for (int i = 0; i < 100 && browser->getNumRows() == 0; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(browser->getNumRows() == 1);
+}
+
+TEST_CASE("Changing image sample stops old playback before the new decode completes", "[disc-service][ui][selection-filter]")
+{
+    TestDirectory t;
+    const auto left = writeConstantWav(t, "left.wav", 0.25f, 44100 * 4);
+    const auto right = t.dir.getChildFile("right.wav"); REQUIRE(right.replaceWithText("not audio"));
+    const auto image = isoWithPair(t, left, right);
+    AppSettings settings; settings.hideEmpty = false;
+    MainComponent app(t.dir.getChildFile("catalog.sqlite"), false, settings, t.dir.getChildFile("settings.json"));
+    auto* folders = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree")); REQUIRE(folders != nullptr);
+    folders->onFolder(image.getFullPathName());
+    auto* browser = dynamic_cast<DiscBrowserPanel*>(app.findChildWithID("discBrowser")); REQUIRE(browser != nullptr);
+    for (int i = 0; i < 100 && browser->getNumRows() == 0; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(browser->getNumRows() == 2);
+    auto* preview = dynamic_cast<PreviewPanel*>(app.findChildWithID("preview")); REQUIRE(preview != nullptr);
+    browser->selectedRowsChanged(0);
+    for (int i = 0; i < 100 && ! preview->discSampleAudio(); ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(preview->discSampleAudio() != nullptr);
+    auto* stop = [&]() -> juce::Button* {
+        for (auto* child : preview->getChildren())
+            if (auto* button = dynamic_cast<juce::Button*>(child); button && button->getButtonText() == "Stop") return button;
+        return nullptr;
+    }();
+    REQUIRE(stop != nullptr);
+    // The transport label is driven by engine.isPlaying(), not by the selection label.
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(60);
+    auto* play = [&]() -> juce::Button* {
+        for (auto* child : preview->getChildren())
+            if (auto* button = dynamic_cast<juce::Button*>(child); button && button->getButtonText() == "Pause") return button;
+        return nullptr;
+    }();
+    REQUIRE(play != nullptr);
+    browser->selectedRowsChanged(1);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    REQUIRE(play->getButtonText() == "Play");
+    // A failed decode becomes hidden immediately; disabling the filter restores the row.
+    auto* toggle = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty")); REQUIRE(toggle != nullptr);
+    toggle->setToggleState(true, juce::dontSendNotification); toggle->onClick();
+    REQUIRE(browser->getNumRows() == 1);
+    toggle->setToggleState(false, juce::dontSendNotification); toggle->onClick();
+    REQUIRE(browser->getNumRows() == 2);
+    toggle->setToggleState(true, juce::dontSendNotification); toggle->onClick();
+    folders->onFolder(t.dir.getFullPathName());
+    folders->onFolder(image.getFullPathName()); // fresh parse: the bad file has not been tried yet
+    for (int i = 0; i < 100 && browser->getNumRows() == 0; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(browser->getNumRows() == 2);
+    browser->selectRow(1);
+    for (int i = 0; i < 100 && browser->getNumRows() == 2; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(browser->getNumRows() == 1); // decode failure updates the enabled filter immediately
+}
+
+TEST_CASE("Image open and close stop the previous preview immediately", "[disc-service][ui][selection-filter]")
+{
+    TestDirectory t; DiscBrowserPanel browser; int stops = 0;
+    browser.onSelectionBegin = [&] { ++stops; };
+    browser.open(t.dir.getChildFile("broken.iso"));
+    REQUIRE(stops == 1); // even an open that will fail cannot leave the old voice playing
+    browser.closeImage();
+    REQUIRE(stops == 2);
+}
+
+TEST_CASE("Recursive image listing includes nested files with stable parent identities", "[disc-service][polish]")
+{
+    TestDirectory t;
+    auto image = isoWithWavBytes(t.wave(), "TONE.WAV");
+    image.resize(image.size() + 2048, 0);
+    const auto nestedBlock = (uint32_t) (image.size() / 2048 - 1);
+    // Put the existing WAV in a subdirectory instead of the root.
+    std::fill(image.begin() + 19 * 2048, image.begin() + 20 * 2048, 0);
+    auto at = appendRecord(image, 19 * 2048, {0}, 19, 2048, 2);
+    at = appendRecord(image, at, {1}, 19, 2048, 2);
+    at = appendRecord(image, at, {'S','U','B'}, nestedBlock, 2048, 2);
+    appendRecord(image, at, {'R','O','O','T','.','W','A','V'}, 20, (uint32_t) t.wave().getSize(), 0);
+    at = appendRecord(image, nestedBlock * 2048, {0}, nestedBlock, 2048, 2);
+    at = appendRecord(image, at, {1}, 19, 2048, 2);
+    appendRecord(image, at, {'T','O','N','E','.','W','A','V'}, 20, (uint32_t) t.wave().getSize(), 0);
+    putLe32(image, 16 * 2048 + 80, (uint32_t) (image.size() / 2048));
+    putBe32(image, 16 * 2048 + 84, (uint32_t) (image.size() / 2048));
+    auto file = t.dir.getChildFile("nested.iso");
+    REQUIRE(file.replaceWithData(image.data(), image.size()));
+    DiscBrowserService service;
+    service.requestOpen(file);
+    auto opened = waitFor(service, DiscBrowserService::Kind::open);
+    REQUIRE(opened.status == DiscStatus::ready);
+    service.requestList(opened.root, true);
+    auto tree = waitFor(service, DiscBrowserService::Kind::list);
+    REQUIRE(tree.status == DiscStatus::ready);
+    REQUIRE(tree.listing.entries.size() == 3);
+    REQUIRE(tree.listing.entries[0].displayName == "SUB");
+    REQUIRE(tree.listing.entries[2].displayName == "TONE.WAV");
+    REQUIRE(tree.listing.entries[2].parent == tree.listing.entries[0].id);
+
+    DiscBrowserPanel panel;
+    bool ready = false, decoded = false;
+    DiscEntryId sub;
+    panel.onTreeReady = [&](const juce::File&, DiscEntryId, const std::vector<DiscEntry>& entries)
+    { ready = true; sub = entries.front().id; };
+    panel.onSampleSelected = [&](const juce::File&, const juce::String& name, SampleAudioPtr audio)
+    { decoded = audio != nullptr && name == "TONE.WAV"; };
+    panel.open(file);
+    for (int i = 0; i < 100 && ! ready; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(ready);
+    REQUIRE(panel.getNumRows() == 2); // root and nested WAV, no directory rows
+    panel.showDirectory(sub);
+    REQUIRE(panel.getNumRows() == 1);
+    panel.selectRow(0);
+    for (int i = 0; i < 100 && ! decoded; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(decoded);
+}
 
 TEST_CASE("The disc service opens, lists and decodes off the message thread", "[disc-service]")
 {
@@ -315,4 +476,16 @@ TEST_CASE("Multiple CUE data tracks are listed and one is selected explicitly", 
     REQUIRE(listed.status == DiscStatus::ready);
     REQUIRE(listed.listing.entries.size() == 1);
     REQUIRE(listed.listing.entries[0].displayName == "B.WAV");
+    DiscBrowserPanel browser;
+    browser.open(cue);
+    for (int i = 0; i < 100 && browser.getNumRows() != 2; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(browser.getNumRows() == 2);
+    browser.selectRow(0); // selecting a track is not a request to decode a sample
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    REQUIRE(browser.getNumRows() == 2);
+    browser.returnKeyPressed(1);
+    for (int i = 0; i < 100 && browser.getNumRows() != 1; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(browser.getNumRows() == 1);
 }

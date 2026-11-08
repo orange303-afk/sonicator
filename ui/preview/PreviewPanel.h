@@ -49,7 +49,7 @@ public:
 private:
     bool dragStarted = false;
 };
-class PreviewPanel final : public juce::Component, private juce::Timer
+class PreviewPanel final : public juce::Component, private juce::Timer, private juce::ListBoxModel
 {
 public:
     PreviewPanel(AudioEngine&, const juce::File& cacheFolder,
@@ -97,6 +97,8 @@ public:
     void updateSelectionPlayback();
     double waveformLength() const { return waveform.totalLength(); }
     std::function<void()> onAction;
+    juce::ListBox& containerSourceList() { return sourceList; }
+    std::function<void()> onSourcesChanged;
     // Called after a user changes one of the persisted preview toggles.
     std::function<void()> onSettingsChanged;
     void resized() override;
@@ -114,6 +116,12 @@ private:
     StepComboBox presetBox;
     StepComboBox sampleBox;
     StepComboBox trackerBox;
+    juce::ListBox sourceList { "Container sources", this };
+    bool instrumentHead = true, syncingSources = false;
+    int getNumRows() override;
+    void paintListBoxItem(int, juce::Graphics&, int, int, bool) override;
+    void selectedRowsChanged(int) override;
+    void refreshSourceList();
     SampleDragButton sampleDragButton;
     std::vector<SampleDescriptor> instrumentSamples;
     SampleId currentSampleId = invalidSampleId;

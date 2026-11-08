@@ -446,7 +446,9 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
             : (r.compatibility == AssetCompatibility::invalid ? "Invalid"
             : (r.error.isNotEmpty() ? "Decode error" : "Analyzed"))); break;
     }
-    g.setColour(col == 1 ? theme::text : theme::muted); g.setFont(juce::FontOptions(13));
+    g.setColour(isIncompatible(r.compatibility) || r.error.isNotEmpty()
+        ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e))
+        : (col == 1 ? theme::text : theme::muted)); g.setFont(juce::FontOptions(13));
     g.drawText(value,10,0,w-16,h,juce::Justification::centredLeft,true);
 }
 void FileListPanel::cellClicked(int row, int, const juce::MouseEvent& event)

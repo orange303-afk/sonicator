@@ -140,7 +140,7 @@ public:
                     g.setColour(theme::hover.withAlpha(down ? 0.9f : 0.65f));
                     g.fillRoundedRectangle(area, 4.0f);
                 }
-                const auto glyph = area.reduced(3.0f);
+                const auto glyph = juce::Rectangle<float>(10.0f, 10.0f).withCentre(getLocalBounds().toFloat().getCentre());
                 g.setColour(down ? theme::text : theme::muted);
                 g.drawLine(glyph.getX(), glyph.getY(), glyph.getRight(), glyph.getBottom(), 1.35f);
                 g.drawLine(glyph.getRight(), glyph.getY(), glyph.getX(), glyph.getBottom(), 1.35f);

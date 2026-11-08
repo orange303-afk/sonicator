@@ -32,9 +32,11 @@ public:
     ~DiscBrowserService();
     // trackNumber selects a data track from a multi-track cue; -1 picks the only data track.
     void requestOpen(const juce::File&, int trackNumber = -1);
-    void requestList(DiscEntryId);
+    void requestList(DiscEntryId, bool recursive = false);
     void requestDecode(DiscEntryId, const juce::String& displayNameForHint, DiscEntryId partner = {});
     void close();
+    // Invalidates pending work without closing the currently opened filesystem.
+    void cancelPending();
     bool poll(Completion&);
 private:
     struct Request
@@ -45,6 +47,7 @@ private:
         juce::String hint;
         int trackNumber = -1;
         juce::uint64 generation = 0;
+        bool recursive = false;
     };
     DiscLimits budget;
     std::mutex mutex;
