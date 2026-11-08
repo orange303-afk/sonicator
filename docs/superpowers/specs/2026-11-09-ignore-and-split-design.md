@@ -70,6 +70,10 @@ CREATE TABLE IF NOT EXISTS ignored_paths (
   is harmless and preserves independent unignore).
 - `createTables` moves `user_version` from 10 to 11 and creates the table in the same upgrade
   transaction; the existing pre-upgrade backup remains the recovery point.
+- `samples.ignored` caches the derived visibility for query performance. `ignorePath` and
+  `unignorePath` update it in the same transaction as the table, and every query filters on it
+  instead of expanding one SQL condition per ignored path. This keeps large multi-selections well
+  inside SQLite's expression and variable limits.
 
 ### Repository API
 
