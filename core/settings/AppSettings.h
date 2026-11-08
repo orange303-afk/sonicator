@@ -17,6 +17,10 @@ struct AppSettings
     juce::String lastSamplePath;       // restored selection without starting preview playback
     bool hideEmpty = true;
     bool showIgnored = false;          // reveal catalog rows hidden by ignored_paths
+    double splitThresholdDb = -60.0;
+    int splitMinSilenceMs = 250;
+    int splitMinPartMs = 100;
+    bool splitSameFolder = true;
     // Preview panel toggles. Persisted so a restart keeps the same audition behaviour.
     bool midiPreview = false;
     bool skipSilence = false;

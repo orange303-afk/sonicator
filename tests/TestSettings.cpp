@@ -176,3 +176,23 @@ TEST_CASE("Show ignored persists and defaults to off", "[settings][ignore]")
     store.update([](AppSettings& s) { s.showIgnored = true; });
     REQUIRE(store.load().showIgnored);
 }
+
+TEST_CASE("Split defaults persist and clamp to the supported ranges", "[settings][split]")
+{
+    TestDirectory t; SettingsStore store(t.dir.getChildFile("settings.json"));
+    auto loaded = store.load();
+    REQUIRE(loaded.splitThresholdDb == -60.0);
+    REQUIRE(loaded.splitMinSilenceMs == 250);
+    REQUIRE(loaded.splitMinPartMs == 100);
+    REQUIRE(loaded.splitSameFolder);
+    store.update([](AppSettings& s)
+    {
+        s.splitThresholdDb = -45.0; s.splitMinSilenceMs = 800;
+        s.splitMinPartMs = 200; s.splitSameFolder = false;
+    });
+    loaded = store.load();
+    REQUIRE(loaded.splitThresholdDb == -45.0);
+    REQUIRE(loaded.splitMinSilenceMs == 800);
+    REQUIRE(loaded.splitMinPartMs == 200);
+    REQUIRE_FALSE(loaded.splitSameFolder);
+}

@@ -53,6 +53,18 @@ AppSettings SettingsStore::load() const
     };
     settings.midiPreview = readBool("midiPreview", settings.midiPreview);
     settings.showIgnored = readBool("showIgnored", settings.showIgnored);
+    auto readNumber = [object](const char* key, double fallback)
+    {
+        const auto value = object->getProperty(key);
+        return (value.isDouble() || value.isInt() || value.isInt64()) ? (double) value : fallback;
+    };
+    settings.splitThresholdDb = juce::jlimit(-80.0, -20.0,
+        readNumber("splitThreshold", settings.splitThresholdDb));
+    settings.splitMinSilenceMs = (int) juce::jlimit(50.0, 2000.0,
+        readNumber("splitMinSilence", (double) settings.splitMinSilenceMs));
+    settings.splitMinPartMs = (int) juce::jlimit(20.0, 2000.0,
+        readNumber("splitMinPart", (double) settings.splitMinPartMs));
+    settings.splitSameFolder = readBool("splitSameFolder", settings.splitSameFolder);
     settings.skipSilence = readBool("skipSilence", settings.skipSilence);
     settings.autoPreview = readBool("autoPreview", settings.autoPreview);
     settings.loopPreview = readBool("loopPreview", settings.loopPreview);
@@ -91,6 +103,10 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("database", settings.databasePath);
     object->setProperty("hideEmpty", settings.hideEmpty);
     object->setProperty("showIgnored", settings.showIgnored);
+    object->setProperty("splitThreshold", settings.splitThresholdDb);
+    object->setProperty("splitMinSilence", settings.splitMinSilenceMs);
+    object->setProperty("splitMinPart", settings.splitMinPartMs);
+    object->setProperty("splitSameFolder", settings.splitSameFolder);
     object->setProperty("midiPreview", settings.midiPreview);
     object->setProperty("skipSilence", settings.skipSilence);
     object->setProperty("autoPreview", settings.autoPreview);
