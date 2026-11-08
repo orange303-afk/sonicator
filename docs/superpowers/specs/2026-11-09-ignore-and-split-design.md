@@ -365,3 +365,18 @@ A themed `DialogWindow` content component, following `AutoTagDialog` / `Settings
   the prompt is accepted. Windows remains a separate acceptance check.
 - **Regression:** existing indexing, export, tagging, AutoTag, preview and folder-tree tests stay
   green.
+
+## Revision 2026-11-09 — dialog-driven split and stereo pairs
+
+- `Move originals to Trash` is now a persisted checkbox in the Split dialog. On a complete run the
+  originals are moved automatically; there is no second confirmation window.
+- The Split dialog stays open while the job runs: inputs are disabled, a progress bar shows the
+  file count, percentage and estimated time, `Split` is hidden and `Cancel` stays. When the job
+  stops, Split and Cancel are replaced by `OK`.
+- `OK` (or closing the window after completion) starts a new-files-only scan of the output folders.
+  Nothing is indexed before that decision.
+- Sidecar discovery covers Ableton's `<file>.wav.asd` in addition to `<stem>.asd` and `<stem>.pk`.
+- Mono files whose names differ only by an L/R marker in the same folder, with the same sample
+  rate and duration, are one library row: the L name, `CH = L+R`, `DUPLICATES = L+R`. Dragging the
+  row exports both files. Ignoring either half breaks the pair. Byte-identical pairs never hide
+  the visible L row behind `Hide duplicates`.
