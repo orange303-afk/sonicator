@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/database/PathRelocation.h"
+#include "core/database/SampleRepository.h"
+#include "TestHelpers.h"
 using namespace sonicator::pathrelocation;
+using namespace sonicator;
 
 TEST_CASE("Path relocation is separator-aware in both directions", "[relocation][paths]")
 {
@@ -25,4 +28,21 @@ TEST_CASE("Path relocation is separator-aware in both directions", "[relocation]
     REQUIRE(trimTrailingSeparators("/Users/me/Drums/") == "/Users/me/Drums");
     REQUIRE(trimTrailingSeparators("C:\\") == "C:");
     REQUIRE(trimTrailingSeparators("/") == "/");
+}
+
+TEST_CASE("Root relocation moves ignore entries with the catalog", "[relocate][ignore]")
+{
+    TestDirectory t;
+    const auto oldRoot = t.dir.getChildFile("old");
+    const auto newRoot = t.dir.getChildFile("new");
+    oldRoot.createDirectory(); newRoot.createDirectory();
+    const auto hidden = oldRoot.getChildFile("Drums/kick.wav").getFullPathName();
+    Database db(t.dir.getChildFile("relocate.sqlite")); SampleRepository repo(db); repo.createTables();
+    SampleRecord r; r.filePath = hidden; r.fileName = "kick.wav"; repo.upsert(r);
+    repo.ignorePath(oldRoot.getChildFile("Drums").getFullPathName(), true);
+    REQUIRE(repo.relocateRoots({ { oldRoot.getFullPathName(), newRoot.getFullPathName() } }).movedFiles == 1);
+    const auto moved = newRoot.getChildFile("Drums/kick.wav").getFullPathName();
+    REQUIRE(repo.findByPath(moved).has_value());
+    REQUIRE(repo.isIgnored(moved));
+    REQUIRE_FALSE(repo.isIgnored(hidden));
 }

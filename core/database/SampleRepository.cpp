@@ -955,6 +955,33 @@ RelocationResult SampleRepository::relocateRoots(const std::vector<RootRelocatio
             }
             lastId = batch.back().id;
         }
+        // Ignore entries are absolute paths too. Move them with their root so a hidden folder
+        // stays hidden after the catalog is relocated.
+        std::vector<IgnoredPath> ignoredRows;
+        {
+            detail::Statement read(db.handle, "SELECT path,is_folder,created_at FROM ignored_paths");
+            while (read.step())
+                ignoredRows.push_back({ read.text(0), read.integer(1) != 0, read.integer(2) });
+        }
+        detail::Statement deleteIgnore(db.handle, "DELETE FROM ignored_paths WHERE path=?");
+        detail::Statement insertIgnore(db.handle,
+            "INSERT OR IGNORE INTO ignored_paths(path,is_folder,created_at) VALUES(?,?,?)");
+        for (const auto& entry : ignoredRows)
+        {
+            const RootRelocation* best = nullptr;
+            for (const auto& relocation : relocations)
+                if (pathrelocation::isUnder(entry.path, relocation.oldRoot)
+                    && (best == nullptr || relocation.oldRoot.length() > best->oldRoot.length()))
+                    best = &relocation;
+            if (best == nullptr) continue;
+            const auto newPath = pathrelocation::remap(entry.path, best->oldRoot, best->newRoot);
+            if (newPath == entry.path) continue;
+            deleteIgnore.reset(); deleteIgnore.text(1, entry.path); deleteIgnore.step();
+            insertIgnore.reset(); insertIgnore.text(1, newPath);
+            insertIgnore.integer(2, entry.folder ? 1 : 0);
+            insertIgnore.integer(3, entry.createdAt);
+            insertIgnore.step();
+        }
         detail::Statement deleteRoot(db.handle, "DELETE FROM roots WHERE path=?");
         detail::Statement insertRoot(db.handle, "INSERT OR IGNORE INTO roots(path) VALUES(?)");
         for (const auto& relocation : relocations)
