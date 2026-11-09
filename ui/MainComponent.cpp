@@ -1111,7 +1111,18 @@ void MainComponent::updateSelectionStatus(const SampleRecord& r)
         auto field = [&d](int column)
         {
             juce::String value;
-            if (column == 10)
+            if (column == 13)
+            {
+                value = d.structure.isNotEmpty()
+                            ? d.structure
+                            : (d.pipelineState == SmartPipelineState::NotAnalyzed ? "--" : "?");
+                if (d.structureOverride == OverrideState::Value) value += " (manual)";
+                else if (d.structureOverride == OverrideState::Unknown) value = "manual: unknown";
+                else if (d.structureOverride == OverrideState::NotApplicable) value = "manual: n/a";
+                if (d.structureState == SmartState::Conflicting) value += " (conflict)";
+                else if (d.structureState == SmartState::Ambiguous) value += " (ambiguous)";
+            }
+            else if (column == 10)
             {
                 value = d.type.isNotEmpty() ? d.type : (d.pipelineState == SmartPipelineState::NotAnalyzed ? "--" : "?");
                 if (d.typeOverride == OverrideState::Value) value += " (manual)";
@@ -1145,7 +1156,8 @@ void MainComponent::updateSelectionStatus(const SampleRecord& r)
             if (d.pipelineState == SmartPipelineState::Error) value += " (error)";
             return value;
         };
-        text += "   |   Type: " + field(10) + "   BPM: " + field(11) + "   Key: " + field(12);
+        text += "   |   Type: " + field(10) + "   Structure: " + field(13)
+              + "   BPM: " + field(11) + "   Key: " + field(12);
         if (const auto tags = readRepo->tagsForSample(r.id); ! tags.empty())
         {
             juce::StringArray names;

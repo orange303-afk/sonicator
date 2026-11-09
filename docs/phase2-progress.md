@@ -67,11 +67,13 @@
 
 ## Next development slice
 
-The tagging stage is complete for this slice. The next plan continues with the
+The tagging stage is complete for this slice. The rhythm DSP slice landed: bounded,
+offline structure (loop / one-shot / undetermined) and BPM with explicit ambiguity,
+stored through the existing candidate pipeline. The next plan continues with the
 inspector (provenance, alternatives, conflicts), global metadata filters and the
-user override editing UI. Then implement and evaluate DSP BPM and pitch/key
-fallback on appropriate material. Do not equate sampler root with key. Do not
-rehash/recompute basic features to add smart results.
+user override editing UI, then DSP pitch/key fallback on appropriate material. Do
+not equate sampler root with key. Do not rehash/recompute basic features to add
+smart results.
 
 ## Verification and constraints
 

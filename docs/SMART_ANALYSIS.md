@@ -2,14 +2,15 @@
 
 This document describes the smart-analysis pipeline as implemented after the Phase 2
 metadata spike. It covers storage, provenance, invalidation, the background job, the
-library Type/BPM/Key columns and the bottom selection bar. The inspector, global
-metadata filters and DSP are not part of this slice.
+library Type/BPM/Key columns and the bottom selection bar. The rhythm DSP pass is
+described under [Rhythm DSP](#rhythm-dsp); pitch/key DSP, the inspector and global
+metadata filters are later slices.
 
 ## What runs
 
 `SmartAnalysisService` is a background thread owned by `MainComponent`. It reads
-metadata only — never PCM for this stage — and never touches measured Phase 1
-features (`basicFeaturesVersion` stays 1).
+metadata first, then decodes a bounded audio prefix for the rhythm DSP pass. It never
+touches measured Phase 1 features (`basicFeaturesVersion` stays 1).
 
 Two modes:
 
@@ -57,9 +58,11 @@ Each candidate stores:
 - candidate status (`valid`, `default`, `invalid`, `unsupported`);
 - a limitation note where the value is not the musical truth.
 
-No numeric confidence is stored. Agreement is computed by the resolver from
-independent source groups (name, container metadata, sidecar, DSP). Two rows from the
-same exporter are one group, not two confirmations.
+Agreement is computed by the resolver from independent source groups (name, container
+metadata, sidecar, DSP). Two rows from the same exporter are one group, not two
+confirmations. DSP candidates also carry a documented heuristic confidence score
+(0–1) in their aux value. It is a quality score, not a probability, and it is shown
+next to the resolved BPM rather than used as evidence in the resolution itself.
 
 ## Versions
 
@@ -67,7 +70,7 @@ same exporter are one group, not two confirmations.
 |---|---|
 | `smartExtractorsVersion` | a metadata parser or its interpretation changes |
 | `smartResolverVersion` | selection rules change; stored candidates can be re-resolved without reading audio |
-| `smartDspVersion` | the DSP stage changes (0 until it lands) |
+| `smartDspVersion` | the DSP stage changes (currently 1: rhythm structure and BPM) |
 
 Results store all three. A mismatch makes the sample a candidate for the next
 incremental pass. It does not re-hash audio or recompute basic features.
@@ -92,6 +95,11 @@ visible underneath, including when it is stale.
 
 - BPM 20–400; values within 1 BPM agree; wider differences conflict.
 - A ≈2× ratio (60 vs 120) is `ambiguous` (half/double-time), not a conflict.
+- A DSP pass with competing grids stores the tempo as an `invalid` candidate: the
+  resolved BPM becomes `ambiguous`, never an invented single number. A valid
+  metadata BPM still wins over it by source priority.
+- DSP structure (`loop` / `one-shot`) is a normal text candidate. A name or container
+  value with stronger priority wins, and disagreement is reported as `ambiguous`.
 - Variable tempo does not resolve to a single BPM.
 - Enharmonic keys (`C#` / `Db`) are not a conflict.
 - Relative major/minor (`C major` / `A minor`) is `ambiguous`, not equal values.
@@ -107,9 +115,14 @@ visible underneath, including when it is stale.
 - Audio is not parsed for embedded metadata beyond the implemented containers
   (WAV, AIFF, ASD sidecar, REX2). Other formats record `unsupported` for the
   container extractor and still get name candidates.
-- DSP BPM/pitch/key, Type taxonomy, the inspector and global metadata filters are
-  later slices. `docs/superpowers/plans/2026-11-07-smart-catalog-foundation.md` tracks
-  the foundation; the columns use its stored results.
+- The rhythm DSP reads at most the first 60 seconds; a longer file keeps the
+  limitation note and is never presented as a whole-file verdict.
+- Rhythm thresholds were tuned on synthetic patterns. Real one-shots, sparse
+  syncopation and dense textures can still be `undetermined`; that is the intended
+  answer when the evidence is insufficient, not a failure to be papered over.
+- Pitch/key DSP, Type taxonomy, the inspector and global metadata filters are later
+  slices. `docs/superpowers/plans/2026-11-07-smart-catalog-foundation.md` tracks the
+  foundation; the columns use its stored results.
 
 ## Library columns and selection bar
 
@@ -129,5 +142,43 @@ underneath. Cell markers are textual, never colour-only:
 
 Sorting by these headers runs in SQL over the whole catalog, with unknown values last
 in both directions and a stable id tie-break. The bottom bar shows the selected
-file's full path (also as its tooltip), effective Type/BPM/Key with their state,
-tags, format, rate, channels, bit depth, duration, star and any missing/error note.
+file's full path (also as its tooltip), effective Type/Structure/BPM/Key with their
+state, tags, format, rate, channels, bit depth, duration, star and any missing/error
+note. Structure is shown in the selection bar only; the library keeps its three
+metadata columns.
+
+## Rhythm DSP
+
+`core/dsp/RhythmAnalyzer` is a pure function over decoded audio plus a bounded file
+reader. `core/smart/RhythmCandidates` maps its result to smart candidates. Nothing
+runs on the audio thread, and the pass uses no network, model weights or cache files.
+
+1. Frames of about 11.6 ms (`44100 / 512`, adapted to the file rate). Per channel
+   spectra are averaged as powers, so anti-phase stereo is not cancelled.
+2. Log spectral flux, detrended by a local mean, normalised with the 95th percentile
+   and a floor of 35% of the maximum (a sparse loop must not be silenced).
+3. Onsets: local maxima above an adaptive threshold, thinned by strength with a 60 ms
+   minimum separation.
+4. Candidate periods: autocorrelation peaks between 40 and 240 BPM, each refined
+   against a comb grid with fractional spacing and a phase search. Half and double
+   candidates are evaluated explicitly instead of being assumed.
+5. Ranking uses mean onset strength on the grid times the share of onset strength the
+   grid explains, so a half-tempo grid that lands on every other hit is not a rival.
+6. Structure:
+   - `RhythmicLoop` when at least four onsets, at least 3.5 beats of context, ≥45%
+     weighted grid coverage, ≥35% filled grid positions and grid strength ≥0.30;
+   - `OneShot` when there are at most three onsets, at most four active seconds and
+     peak/active-RMS ≥3 (a pad or texture stays below that);
+   - `Undetermined` otherwise, including short rhythmic fragments.
+
+Tempo is `Determined` only for a loop with grid strength ≥0.40 and no competing grid
+within 80% of the winner's quality (or an unrelated grid within 92%). Otherwise it is
+`Ambiguous`, and the smart layer stores an invalid candidate with the primary value
+and its alternatives. The BPM confidence is `0.55 × grid strength + 0.45 × coverage`,
+reduced by 30% when ambiguous. Both scores are heuristics, not probabilities.
+
+A hit with a reverb tail, a two-hit stab and a sparse syncopated phrase deliberately
+stay away from "loop + tempo" unless the grid evidence is there. The unit tests in
+`tests/TestRhythmAnalyzer.cpp` pin silence, sustained tones, one-shots, accented bars,
+eighth-note hats, anti-phase stereo, leading silence, quiet material, several sample
+rates, short files, white noise and WAV reading.

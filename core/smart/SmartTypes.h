@@ -16,10 +16,10 @@ std::optional<SmartField> smartFieldFromKey(const juce::String&);
 //   and extraction records carry their own version, so provenance survives a re-run.
 // - resolver: bump when selection rules change; results can then be recomputed from the stored
 //   candidates without reading any audio again.
-// - DSP: bump when the DSP stage changes; zero until that slice lands.
+// - DSP: bump when the DSP stage changes (1 = rhythm structure and BPM).
 inline constexpr int smartExtractorsVersion = 2;
 inline constexpr int smartResolverVersion = 2;
-inline constexpr int smartDspVersion = 0;
+inline constexpr int smartDspVersion = 1;
 
 // Invalid means "the field was present but its value is not usable"; Unsupported means the
 // container/version is not handled. Both stay visible for provenance, but never resolve a value.
@@ -103,13 +103,15 @@ struct SmartExtraction
 // this is the resolved value with the manual override applied.
 struct SmartDisplay
 {
-    juce::String type, key;
+    juce::String type, structure, key;
     double bpm = 0;
     bool hasBpm = false;
     SmartState typeState = SmartState::Unknown;
+    SmartState structureState = SmartState::Unknown;
     SmartState bpmState = SmartState::Unknown;
     SmartState keyState = SmartState::Unknown;
     OverrideState typeOverride = OverrideState::None;
+    OverrideState structureOverride = OverrideState::None;
     OverrideState bpmOverride = OverrideState::None;
     OverrideState keyOverride = OverrideState::None;
     SmartPipelineState pipelineState = SmartPipelineState::NotAnalyzed;

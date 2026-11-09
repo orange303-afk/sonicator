@@ -2508,7 +2508,8 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
             placeholders += "?";
         }
         detail::Statement results(db.handle,
-            ("SELECT sample_id,type,type_state,bpm,has_bpm,bpm_state,key_tonic,key_mode,key_state,"
+            ("SELECT sample_id,type,type_state,structure,structure_state,bpm,has_bpm,bpm_state,"
+             "key_tonic,key_mode,key_state,"
              "pipeline_state FROM smart_results WHERE sample_id IN (" + placeholders + ")").toRawUTF8());
         for (size_t i = start; i < end; ++i) results.integer((int) (i - start + 1), sampleIds[i]);
         while (results.step())
@@ -2517,14 +2518,16 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
             const auto id = results.integer(0);
             d.type = results.text(1);
             d.typeState = smartStateFromKey(results.text(2)).value_or(SmartState::Unknown);
-            d.bpm = results.real(3);
-            d.hasBpm = results.integer(4) != 0;
-            d.bpmState = smartStateFromKey(results.text(5)).value_or(SmartState::Unknown);
-            const int tonic = (int) results.integer(6);
-            const auto mode = results.text(7);
-            d.keyState = smartStateFromKey(results.text(8)).value_or(SmartState::Unknown);
+            d.structure = results.text(3);
+            d.structureState = smartStateFromKey(results.text(4)).value_or(SmartState::Unknown);
+            d.bpm = results.real(5);
+            d.hasBpm = results.integer(6) != 0;
+            d.bpmState = smartStateFromKey(results.text(7)).value_or(SmartState::Unknown);
+            const int tonic = (int) results.integer(8);
+            const auto mode = results.text(9);
+            d.keyState = smartStateFromKey(results.text(10)).value_or(SmartState::Unknown);
             d.key = keyDisplayName(tonic, mode);
-            d.pipelineState = smartPipelineStateFromKey(results.text(9))
+            d.pipelineState = smartPipelineStateFromKey(results.text(11))
                                   .value_or(SmartPipelineState::NotAnalyzed);
             // A pre-v7 row can carry values without a pipeline state. It is not "never analyzed":
             // show the values with the stale marker until a pass rewrites them.
@@ -2536,7 +2539,7 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
         detail::Statement overrides(db.handle,
             ("SELECT sample_id,field,cleared,not_applicable,text_value,numeric_value"
              " FROM smart_overrides WHERE sample_id IN (" + placeholders + ")"
-             " AND field IN ('type','bpm','key')").toRawUTF8());
+             " AND field IN ('type','structure','bpm','key')").toRawUTF8());
         for (size_t i = start; i < end; ++i) overrides.integer((int) (i - start + 1), sampleIds[i]);
         while (overrides.step())
         {
@@ -2552,6 +2555,12 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
                 d.typeOverride = state;
                 if (state == OverrideState::Value) d.type = overrides.text(4);
                 else d.type.clear();
+            }
+            else if (field == "structure")
+            {
+                d.structureOverride = state;
+                if (state == OverrideState::Value) d.structure = overrides.text(4);
+                else d.structure.clear();
             }
             else if (field == "bpm")
             {

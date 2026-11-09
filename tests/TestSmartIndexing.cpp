@@ -3,6 +3,8 @@
 #include "core/smart/SmartAnalysisService.h"
 #include "core/smart/SmartResolver.h"
 #include "TestHelpers.h"
+#include <juce_audio_formats/juce_audio_formats.h>
+#include <cmath>
 using namespace sonicator;
 namespace {
 struct Bytes
@@ -188,4 +190,79 @@ TEST_CASE("Folder analysis of an empty subtree completes with no work", "[smart]
     REQUIRE(smart.waitUntilFinished(10000));
     REQUIRE(smart.progress().processed == 0);
     REQUIRE(smart.progress().stage == SmartStage::Complete);
+}
+
+namespace {
+juce::File writeClickLoop(TestDirectory& t, const juce::String& name, double bpm, double seconds)
+{
+    juce::AudioBuffer<float> audio(1, (int) std::llround(seconds * 44100.0));
+    audio.clear();
+    const double interval = 60.0 / bpm;
+    for (double time = 0.05; time < seconds; time += interval)
+    {
+        const int start = (int) std::llround(time * 44100.0);
+        for (int i = 0; i < 1058 && start + i < audio.getNumSamples(); ++i)
+        {
+            const double x = (double) i / 44100.0;
+            audio.addSample(0, start + i,
+                            (float) (0.8 * std::exp(-x / 0.03)
+                                     * std::sin(2.0 * juce::MathConstants<double>::pi * 1200.0 * x)));
+        }
+    }
+    const auto file = t.dir.getChildFile(name);
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::FileOutputStream> stream(file.createOutputStream());
+    if (stream == nullptr) return file;
+    auto* writer = wav.createWriterFor(stream.get(), 44100.0, 1, 16, {}, 0);
+    if (writer == nullptr) return file;
+    stream.release();
+    writer->writeFromAudioSampleBuffer(audio, 0, audio.getNumSamples());
+    delete writer;
+    return file;
+}
+} // namespace
+
+TEST_CASE("A rhythmic WAV gets DSP structure and tempo through the smart pipeline",
+          "[smart][service][dsp]")
+{
+    TestDirectory t;
+    auto wav = writeClickLoop(t, "drum_pattern.wav", 120.0, 4.0);
+    REQUIRE(wav.getSize() > 0);
+    auto candidates = SmartAnalysisService::collectCandidates(recordFor(wav));
+    auto result = resolveSmart(candidates);
+    REQUIRE(result.structureSource == "dsp");
+    REQUIRE(result.structure == "loop");
+    REQUIRE(result.structureState == SmartState::Resolved);
+    REQUIRE(result.hasBpm);
+    REQUIRE(result.bpm == Catch::Approx(120.0).epsilon(0.02));
+    REQUIRE(result.bpmSource == "dsp");
+    REQUIRE(result.bpmState == SmartState::Resolved);
+    REQUIRE(result.explanation.contains("confidence"));
+}
+TEST_CASE("A one-shot WAV gets a structure but no DSP tempo", "[smart][service][dsp]")
+{
+    TestDirectory t;
+    auto wav = t.dir.getChildFile("kick_hit.wav");
+    juce::AudioBuffer<float> audio(1, 2 * 44100);
+    audio.clear();
+    for (int i = 0; i < 2205; ++i)
+    {
+        const double x = (double) i / 44100.0;
+        audio.setSample(0, 4410 + i,
+                        (float) (0.8 * std::exp(-x / 0.03)
+                                 * std::sin(2.0 * juce::MathConstants<double>::pi * 900.0 * x)));
+    }
+    juce::WavAudioFormat wavFormat;
+    std::unique_ptr<juce::FileOutputStream> out(wav.createOutputStream());
+    REQUIRE(out != nullptr);
+    auto* writer = wavFormat.createWriterFor(out.get(), 44100.0, 1, 16, {}, 0);
+    REQUIRE(writer != nullptr);
+    out.release();
+    REQUIRE(writer->writeFromAudioSampleBuffer(audio, 0, audio.getNumSamples()));
+    delete writer;
+    auto result = resolveSmart(SmartAnalysisService::collectCandidates(recordFor(wav)));
+    REQUIRE(result.structureSource == "dsp");
+    REQUIRE(result.structure == "one-shot");
+    REQUIRE_FALSE(result.hasBpm);
+    REQUIRE(result.bpmState == SmartState::Unknown);
 }

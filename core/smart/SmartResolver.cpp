@@ -95,6 +95,28 @@ void resolveBpm(const std::vector<SmartCandidate>& all, SmartResult& out)
     });
     if (list.empty())
     {
+        // A DSP pass that found competing grids stores them as Invalid candidates. That is not the
+        // same as "never analysed": the tempo is ambiguous, and the evidence stays visible.
+        std::vector<SmartCandidate> ambiguous;
+        for (const auto& c : all)
+            if (c.field == SmartField::Bpm && c.source == "dsp"
+                && c.status == CandidateStatus::Invalid
+                && std::isfinite(c.numericValue) && c.numericValue > 0)
+                ambiguous.push_back(c);
+        if (! ambiguous.empty())
+        {
+            out.bpm = 0;
+            out.hasBpm = false;
+            out.bpmState = SmartState::Ambiguous;
+            out.bpmSource = "dsp";
+            juce::StringArray parts;
+            for (const auto& c : ambiguous) parts.add(formatNumber(c.numericValue));
+            out.explanation += (out.explanation.isEmpty() ? "" : " ")
+                + juce::String("bpm: ambiguous onset grid (") + parts.joinIntoString(" / ") + ")"
+                + (ambiguous.front().limitation.isNotEmpty()
+                       ? " (" + ambiguous.front().limitation + ")" : "");
+            return;
+        }
         out.bpmState = SmartState::Unknown;
         return;
     }
@@ -130,8 +152,14 @@ void resolveBpm(const std::vector<SmartCandidate>& all, SmartResult& out)
     }
     if (out.bpmState == SmartState::Resolved && halfDouble)
         out.bpmState = SmartState::Ambiguous;
+    // DSP confidence is a documented heuristic score, so it is shown as a number with that
+    // meaning rather than hidden inside the candidate.
+    const juce::String confidence = chosen.source == "dsp" && chosen.auxValue > 0.0
+                                        && chosen.auxValue <= 1.0
+                                      ? ", confidence " + juce::String(chosen.auxValue, 2)
+                                      : juce::String();
     out.explanation += (out.explanation.isEmpty() ? "" : " ") + juce::String("bpm: ")
-        + describe(list)
+        + describe(list) + confidence
         + (out.bpmState == SmartState::Resolved ? agreementNote(agreeing)
           : out.bpmState == SmartState::Ambiguous ? " (half/double-time ambiguity)"
                                                  : " (conflict: sources disagree)");

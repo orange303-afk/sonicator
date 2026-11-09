@@ -160,3 +160,42 @@ TEST_CASE("A tonic without a mode never gains an invented mode", "[smart][resolv
     REQUIRE(result.keyTonic == 9);
     REQUIRE(result.keyMode.isEmpty());
 }
+
+TEST_CASE("An ambiguous DSP tempo stays ambiguous instead of becoming a number", "[smart][resolver][dsp]")
+{
+    SmartCandidate dsp;
+    dsp.field = SmartField::Bpm; dsp.source = "dsp";
+    dsp.numericValue = 128.0; dsp.auxValue = 0.4; dsp.status = CandidateStatus::Invalid;
+    dsp.limitation = "tempo estimated from audio; alternatives: 64.0, 256.0";
+    auto result = resolveSmart({ dsp });
+    REQUIRE_FALSE(result.hasBpm);
+    REQUIRE(result.bpmState == SmartState::Ambiguous);
+    REQUIRE(result.explanation.contains("ambiguous onset grid"));
+}
+TEST_CASE("A DSP tempo carries its heuristic confidence", "[smart][resolver][dsp]")
+{
+    auto dsp = candidate(SmartField::Bpm, "dsp", {}, 128.0);
+    dsp.auxValue = 0.72;
+    auto result = resolveSmart({ dsp });
+    REQUIRE(result.hasBpm);
+    REQUIRE(result.bpm == Catch::Approx(128.0));
+    REQUIRE(result.bpmState == SmartState::Resolved);
+    REQUIRE(result.explanation.contains("confidence 0.72"));
+}
+TEST_CASE("DSP structure competes with name structure honestly", "[smart][resolver][dsp]")
+{
+    auto result = resolveSmart({ candidate(SmartField::Structure, "dsp", "loop"),
+                                 candidate(SmartField::Structure, "filename", "one-shot") });
+    REQUIRE(result.structure == "one-shot"); // the name has the stronger source priority
+    REQUIRE(result.structureState == SmartState::Ambiguous);
+}
+TEST_CASE("An ambiguous DSP tempo yields to a valid metadata tempo", "[smart][resolver][dsp]")
+{
+    SmartCandidate dsp;
+    dsp.field = SmartField::Bpm; dsp.source = "dsp";
+    dsp.numericValue = 100.0; dsp.status = CandidateStatus::Invalid;
+    auto result = resolveSmart({ candidate(SmartField::Bpm, "wav_acid", {}, 128.0), dsp });
+    REQUIRE(result.hasBpm);
+    REQUIRE(result.bpm == Catch::Approx(128.0));
+    REQUIRE(result.bpmState == SmartState::Resolved);
+}

@@ -3,6 +3,7 @@
 #include "AiffMetadata.h"
 #include "NameHeuristics.h"
 #include "Rex2Metadata.h"
+#include "RhythmCandidates.h"
 #include "SmartResolver.h"
 #include "WavMetadata.h"
 #include <algorithm>
@@ -303,6 +304,41 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
         extraction.extractorVersion = smartExtractorsVersion;
         extraction.status = "absent";
         extraction.updatedAt = juce::Time::currentTimeMillis();
+        out.extractions.push_back(std::move(extraction));
+    }
+    // Audio-only fallback. It runs after metadata, never replaces it at this stage: the resolver
+    // decides by source priority. A file that cannot be decoded is recorded as unsupported so the
+    // next pass does not retry it as if it had failed.
+    {
+        SmartExtraction extraction;
+        extraction.source = "dsp";
+        extraction.extractorVersion = smartDspVersion;
+        extraction.updatedAt = juce::Time::currentTimeMillis();
+        try
+        {
+            auto rhythm = extractRhythmCandidates(record);
+            append(out.candidates, std::move(rhythm.candidates));
+            if (rhythm.status == "error")
+            {
+                extraction.status = "error";
+                extraction.error = rhythm.error;
+                if (out.error.isEmpty()) out.error = rhythm.error;
+            }
+            else if (rhythm.status == "unsupported") extraction.status = "unsupported";
+            else extraction.status = "ok";
+        }
+        catch (const std::exception& e)
+        {
+            extraction.status = "error";
+            extraction.error = juce::String::fromUTF8(e.what());
+            if (out.error.isEmpty()) out.error = extraction.error;
+        }
+        catch (...)
+        {
+            extraction.status = "error";
+            extraction.error = "unknown DSP failure";
+            if (out.error.isEmpty()) out.error = extraction.error;
+        }
         out.extractions.push_back(std::move(extraction));
     }
     return out;
