@@ -41,6 +41,7 @@ ExtractDialog::ExtractDialog(std::vector<juce::File> inputSources, const AppSett
     progressLabel.setVisible(false);
     resultLabel.setVisible(false);
     details.setComponentID("extractDetails");
+    details.setEnabled(false);
     details.setVisible(false);
     problems.setComponentID("extractProblems");
     problems.setReadOnly(true);
@@ -188,8 +189,9 @@ void ExtractDialog::updateButtons()
     progressBar.setVisible(running || finished);
     progressLabel.setVisible(running || finished);
     resultLabel.setVisible(finished);
-    details.setVisible(finished);
-    problems.setVisible(finished && details.getToggleState());
+    const bool hasDetails = details.isEnabled();
+    details.setVisible(finished && hasDetails);
+    problems.setVisible(finished && hasDetails && details.getToggleState());
     resized();
 }
 void ExtractDialog::enterRunningState()
@@ -234,8 +236,6 @@ void ExtractDialog::showFinished(const juce::String& summary, const juce::String
     problems.setText(detailsText, false);
     details.setToggleState(false, juce::dontSendNotification);
     details.setEnabled(detailsText.isNotEmpty());
-    details.setVisible(detailsText.isNotEmpty());
-    problems.setVisible(false);
     updateButtons();
 }
 void ExtractDialog::closeDialog()

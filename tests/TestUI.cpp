@@ -603,3 +603,14 @@ TEST_CASE("Extract dialog swaps Extract and Cancel for OK and reveals details", 
     REQUIRE(problemsText != nullptr);
     REQUIRE(problemsText->getText().contains("cannot read"));
 }
+
+TEST_CASE("Extract dialog hides the details control when no problem was reported", "[ui][extract]")
+{
+    ExtractDialog dialog({ juce::File("/tmp/bank.sf2") }, AppSettings{},
+                         [](ExtractOptions) -> bool { return true; });
+    dialog.enterRunningState();
+    dialog.showFinished("Extracted 0 samples", {}, 1.0);
+    auto* details = dialog.findChildWithID("extractDetails");
+    REQUIRE(details != nullptr);
+    REQUIRE_FALSE(details->isVisible());
+}
