@@ -38,5 +38,13 @@ public:
     ExportResult exportSampleSelection(const SampleAudio& audio, const juce::String& stem,
                                        double start, double end, const juce::File& folder,
                                        CancelCheck cancel = {}) const;
+    // True when every channel holds only zeros. Used to keep silent embedded samples out of a
+    // batch export; the test is exact, so very quiet but non-zero audio still counts as audio.
+    static bool isEntirelySilent(const SampleAudio&);
+    // Writes one whole decoded embedded sample to an exact path. No start/end range and no naming
+    // policy: the caller owns the file name. With `normalize`, the peak of both channels is
+    // scaled together to -0.1 dBFS. Never overwrites an existing destination.
+    ExportResult exportSampleFile(const SampleAudio& audio, const juce::File& destination,
+                                  bool normalize, CancelCheck cancel = {}) const;
 };
 } // namespace sonicator

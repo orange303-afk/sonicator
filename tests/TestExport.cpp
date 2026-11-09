@@ -381,3 +381,79 @@ TEST_CASE("Range export applies an optional linear fade at both ends", "[export]
     REQUIRE(std::abs(last.getSample(0, 0)) < 0.01f);
     REQUIRE(std::abs(mid.getSample(0, 0)) > 0.45f);
 }
+
+TEST_CASE("Silence detection sees every channel and keeps tiny non-zero audio", "[export][extract]")
+{
+    SampleAudio mono;
+    mono.sampleRate = 44100; mono.channels = 1; mono.frames = 4;
+    mono.left = { 0.0f, 0.0f, 0.0f, 0.0f };
+    REQUIRE(AudioExporter::isEntirelySilent(mono));
+    mono.left[2] = 1.0e-7f;
+    REQUIRE_FALSE(AudioExporter::isEntirelySilent(mono));
+
+    SampleAudio stereo;
+    stereo.sampleRate = 44100; stereo.channels = 2; stereo.frames = 3;
+    stereo.left = { 0.25f, 0.0f, 0.0f };
+    stereo.right = { 0.0f, 0.0f, 0.0f };
+    REQUIRE_FALSE(AudioExporter::isEntirelySilent(stereo));
+    stereo.left.assign(3, 0.0f);
+    REQUIRE(AudioExporter::isEntirelySilent(stereo));
+}
+
+TEST_CASE("Embedded sample export writes WAV with and without peak normalisation", "[export][extract]")
+{
+    TestDirectory t;
+    SampleAudio audio;
+    audio.sampleRate = 44100; audio.channels = 2; audio.bitsPerSample = 16;
+    audio.frames = 4;
+    audio.left = { 0.1f, -0.2f, 0.05f, 0.0f };
+    audio.right = { 0.2f, -0.4f, 0.1f, 0.0f };
+    AudioExporter exporter;
+    const auto plain = t.dir.getChildFile("export/sample.wav");
+    auto result = exporter.exportSampleFile(audio, plain, false);
+    REQUIRE(result.success); REQUIRE(result.file == plain); REQUIRE(result.error.isEmpty());
+    REQUIRE(result.file.getParentDirectory().isDirectory());
+    auto reader = readerFor(plain);
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->numChannels == 2);
+    REQUIRE(reader->bitsPerSample == 16);
+    REQUIRE(reader->lengthInSamples == 4);
+    juce::AudioBuffer<float> actual(2, 4);
+    REQUIRE(reader->read(&actual, 0, 4, 0, true, true));
+    REQUIRE(actual.getSample(0, 1) == Catch::Approx(-0.2f).margin(1.0 / 32768.0));
+    REQUIRE(actual.getSample(1, 1) == Catch::Approx(-0.4f).margin(1.0 / 32768.0));
+
+    const auto normalised = t.dir.getChildFile("export/normalised.wav");
+    result = exporter.exportSampleFile(audio, normalised, true);
+    REQUIRE(result.success);
+    auto normReader = readerFor(normalised);
+    REQUIRE(normReader != nullptr);
+    juce::AudioBuffer<float> norm(2, 4);
+    REQUIRE(normReader->read(&norm, 0, 4, 0, true, true));
+    const float target = std::pow(10.0f, -0.1f / 20.0f);
+    REQUIRE(norm.getMagnitude(0, 4) == Catch::Approx(target).margin(1.5f / 32768.0f));
+    REQUIRE(norm.getSample(0, 1) == Catch::Approx(-0.5f * target).margin(1.5f / 32768.0f));
+    REQUIRE(norm.getSample(1, 1) == Catch::Approx(-1.0f * target).margin(1.5f / 32768.0f));
+}
+
+TEST_CASE("Embedded sample export never overwrites and cancels without a partial file", "[export][extract]")
+{
+    TestDirectory t;
+    SampleAudio audio;
+    audio.sampleRate = 44100; audio.channels = 1; audio.frames = 3;
+    audio.left = { 0.1f, 0.2f, 0.3f };
+    AudioExporter exporter;
+    const auto destination = t.dir.getChildFile("sample.wav");
+    destination.replaceWithText("occupied");
+    auto result = exporter.exportSampleFile(audio, destination, false);
+    REQUIRE_FALSE(result.success);
+    REQUIRE(destination.loadFileAsString() == "occupied");
+    REQUIRE_FALSE(juce::File(destination.getFullPathName() + ".part").existsAsFile());
+
+    const auto cancelled = t.dir.getChildFile("cancelled.wav");
+    result = exporter.exportSampleFile(audio, cancelled, false, [] { return true; });
+    REQUIRE_FALSE(result.success);
+    REQUIRE(result.error.containsIgnoreCase("cancel"));
+    REQUIRE_FALSE(cancelled.existsAsFile());
+    REQUIRE_FALSE(juce::File(cancelled.getFullPathName() + ".part").existsAsFile());
+}

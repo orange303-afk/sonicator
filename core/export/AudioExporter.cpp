@@ -332,4 +332,82 @@ ExportResult AudioExporter::exportSelection(const juce::File& source, double sta
     }
     return { false, {}, "Cannot allocate a unique export file name" };
 }
+bool AudioExporter::isEntirelySilent(const SampleAudio& audio)
+{
+    if (audio.frames <= 0 || (int64_t) audio.left.size() < audio.frames) return false;
+    for (int64_t i = 0; i < audio.frames; ++i)
+        if (audio.left[(size_t) i] != 0.0f) return false;
+    if (audio.channels > 1)
+    {
+        if ((int64_t) audio.right.size() < audio.frames) return false;
+        for (int64_t i = 0; i < audio.frames; ++i)
+            if (audio.right[(size_t) i] != 0.0f) return false;
+    }
+    return true;
+}
+ExportResult AudioExporter::exportSampleFile(const SampleAudio& audio, const juce::File& destination,
+                                             bool normalize, CancelCheck cancel) const
+{
+    const auto part = juce::File(destination.getFullPathName() + ".part");
+    if (audio.sampleRate <= 0 || audio.frames <= 0)
+        return failure(part, "The sampler source has no decoded audio");
+    const int channels = audio.channels > 1 && ! audio.right.empty() ? 2 : 1;
+    if ((int64_t) audio.left.size() < audio.frames
+        || (channels > 1 && (int64_t) audio.right.size() < audio.frames))
+        return failure(part, "The sampler decoded buffer is incomplete");
+    if (destination.existsAsFile()) return failure(part, "Export file already exists: " + destination.getFileName());
+    if (! destination.getParentDirectory().createDirectory())
+        return failure(part, "Cannot create export folder: " + destination.getParentDirectory().getFullPathName());
+    if (cancel && cancel()) return failure(part, "Export cancelled");
+    float peak = 0.0f;
+    if (normalize)
+    {
+        for (int64_t i = 0; i < audio.frames; ++i)
+        {
+            peak = juce::jmax(peak, std::abs(audio.left[(size_t) i]));
+            if (channels > 1) peak = juce::jmax(peak, std::abs(audio.right[(size_t) i]));
+        }
+    }
+    // -0.1 dBFS leaves headroom below full scale without changing the relative channel balance.
+    const float gain = normalize && peak > 0.0f ? std::pow(10.0f, -0.1f / 20.0f) / peak : 1.0f;
+    part.deleteFile();
+    std::unique_ptr<juce::OutputStream> stream(part.createOutputStream());
+    if (stream == nullptr) return failure(part, "Cannot create export file: " + destination.getFileName());
+    juce::WavAudioFormat wav;
+    const bool floating = audio.floatingPoint;
+    const int bits = floating ? 32 : (audio.bitsPerSample <= 16 ? 16 : 24);
+    auto options = juce::AudioFormatWriterOptions{}.withSampleRate((double) audio.sampleRate)
+        .withNumChannels(channels).withBitsPerSample(bits)
+        .withSampleFormat(floating ? juce::AudioFormatWriterOptions::SampleFormat::floatingPoint
+                                   : juce::AudioFormatWriterOptions::SampleFormat::integral);
+    auto writer = wav.createWriterFor(stream, options);
+    if (writer == nullptr)
+    {
+        stream.reset();
+        return failure(part, "WAV writer rejected " + juce::String(channels) + " channels at "
+            + juce::String(bits) + " bits");
+    }
+    juce::AudioBuffer<float> buffer(channels,
+        (int) juce::jmin<int64_t>(exportChunkFrames, audio.frames));
+    int64_t frame = 0;
+    while (frame < audio.frames)
+    {
+        if (cancel && cancel()) return failure(part, "Export cancelled");
+        const int count = (int) juce::jmin<int64_t>(exportChunkFrames, audio.frames - frame);
+        buffer.copyFrom(0, 0, audio.left.data() + frame, count, gain);
+        if (channels > 1) buffer.copyFrom(1, 0, audio.right.data() + frame, count, gain);
+        if (! writer->writeFromFloatArrays(buffer.getArrayOfReadPointers(), channels, count))
+            return failure(part, "Cannot write export audio: " + destination.getFileName());
+        frame += count;
+    }
+    if (! writer->flush())
+        return failure(part, "Cannot finalise export file: " + destination.getFileName());
+    writer.reset();
+    const auto validation = validateWavOutput(part, audio.frames, (double) audio.sampleRate,
+                                              channels, bits, floating);
+    if (validation.isNotEmpty()) return failure(part, validation);
+    if (! part.moveFileTo(destination))
+        return failure(part, "Cannot finalise export file: " + destination.getFileName());
+    return { true, destination, {} };
+}
 } // namespace sonicator
