@@ -1,4 +1,5 @@
 #include "AcousticClassifierService.h"
+#include "GenreContextExtractor.h"
 #include "SmartAnalysisService.h"
 #include "AbletonAsd.h"
 #include "AiffMetadata.h"
@@ -34,6 +35,20 @@ juce::String extractionSourceForCandidate(const juce::String& source, const juce
     if (source == "info" || source == "id3" || source == "metadata") return container;
     if (source == "dsp" || source == "dsp_acoustic" || source == "ml_classifier") return "dsp";
     return "other";
+}
+bool hasContainerTypeMetadata(const std::vector<SmartCandidate>& candidates)
+{
+    for (const auto& c : candidates)
+    {
+        if (c.field == SmartField::Type && c.status == CandidateStatus::Valid)
+        {
+            if (c.source.startsWith("wav_") || c.source.startsWith("aiff_")
+                || c.source == "info" || c.source == "id3" || c.source.startsWith("asd_")
+                || c.source.startsWith("rx2_"))
+                return true;
+        }
+    }
+    return false;
 }
 // Every candidate carries the file it came from and that file's fingerprint at read time, so the
 // inspector can explain provenance and the job can tell whether the value is still current.
@@ -309,6 +324,22 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record, Cancel
         extraction.updatedAt = juce::Time::currentTimeMillis();
         out.extractions.push_back(std::move(extraction));
     }
+    const auto genreResult = GenreContextExtractor::extract(file, out.candidates);
+    if (genreResult.confidence >= 0.80 && (genreResult.subgenre.isNotEmpty() || genreResult.genre.isNotEmpty()))
+    {
+        SmartCandidate c;
+        c.field = SmartField::Type;
+        c.source = genreResult.source;
+        c.textValue = genreResult.subgenre.isNotEmpty() ? genreResult.subgenre : genreResult.genre;
+        c.detail = genreResult.genre;
+        c.numericValue = genreResult.confidence;
+        c.status = CandidateStatus::Valid;
+        c.extractorId = genreResult.source == "path" ? "name" : (genreResult.source == "metadata" ? "container" : genreResult.source);
+        c.extractorVersion = smartExtractorsVersion;
+        c.rawValue = c.textValue;
+        c.limitation = "genre context inferred from path or metadata";
+        out.candidates.push_back(std::move(c));
+    }
     // One bounded decode feeds both DSP analyses. The rhythm pass still runs only when metadata
     // lacks a tempo (or structure is needed for the pitch gate); the tonal pass applies its own
     // per-field gates. A file that cannot be decoded is recorded as unsupported so the next pass
@@ -336,7 +367,8 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record, Cancel
         // confirmed as a one-shot; publishing a pitch would be a guess.
         const bool needPitch = pitchEligible
                                && (structureOneShot || (metadataStructure.isEmpty() && needRhythm));
-        if (! needRhythm && ! needKey && ! needPitch)
+        const bool needAcoustic = ! hasContainerTypeMetadata(out.candidates) && metadataType.isEmpty();
+        if (! needRhythm && ! needKey && ! needPitch && ! needAcoustic)
         {
             // Metadata already answers every field the DSP could add. Record that the pass was
             // considered and skipped, rather than pretending it ran.

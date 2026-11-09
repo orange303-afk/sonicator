@@ -13,7 +13,13 @@ public:
     static std::vector<SmartCandidate> analyzeAudioAndContext(
         const juce::File& file,
         const SampleRecord& record,
-        const std::vector<SmartCandidate>& existingCandidates = {},
+        CancelCheck cancel = {}
+    );
+
+    static std::vector<SmartCandidate> analyzeAudioAndContext(
+        const juce::File& file,
+        const SampleRecord& record,
+        const std::vector<SmartCandidate>& existingCandidates,
         CancelCheck cancel = {}
     );
 

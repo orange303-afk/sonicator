@@ -94,12 +94,33 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
         }
     }
 
-    if (auto genreCand = extractGenreCandidate(file, existingCandidates))
+    bool hasGenre = false;
+    for (const auto& c : existingCandidates)
     {
-        candidates.push_back(std::move(*genreCand));
+        if (c.field == SmartField::Type && (c.source == "path" || c.source == "id3" || c.source == "metadata"))
+        {
+            hasGenre = true;
+            break;
+        }
+    }
+
+    if (! hasGenre)
+    {
+        if (auto genreCand = extractGenreCandidate(file, existingCandidates))
+        {
+            candidates.push_back(std::move(*genreCand));
+        }
     }
 
     return candidates;
+}
+
+std::vector<SmartCandidate> AcousticClassifierService::analyzeAudioAndContext(
+    const juce::File& file,
+    const SampleRecord& record,
+    CancelCheck cancel)
+{
+    return analyzeAudioAndContext(file, record, {}, std::move(cancel));
 }
 
 std::vector<SmartCandidate> AcousticClassifierService::analyzeAudioAndContext(
