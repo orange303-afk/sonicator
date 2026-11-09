@@ -15,6 +15,11 @@ struct EmbeddedSampleEntry
 // external audio (EXS24, NKI) are deliberately excluded: nothing can be extracted without
 // collecting files from elsewhere.
 bool isEmbeddedSampleSource(const juce::File&);
+bool isTrackerModuleSource(const juce::File&);
+// Pitch ratio (2^((firstNote - C4)/12)) of the first pattern note that triggers each sample.
+// Modules whose samples are never triggered, and every SF2 bank, report 1.0. libxmp note 61 is C-4, the
+// rate the tracker readers publish in SampleAudio::sampleRate.
+SampleAudioPtr resampleForPlayback(const SampleAudio&, double ratio);
 // Filters a selection down to the files the extract action can read: existing tracker modules and
 // SoundFont banks. The library also treats those formats as metadata-only for scanning, so this
 // decision must be independent of that split-candidate filter.
@@ -34,12 +39,15 @@ public:
     // zero-length SF2 ranges). Reported as "empty" by the extract batch.
     int emptyCount() const { return empties; }
     SampleAudioPtr read(int index, juce::String& error) const;
+    // 1.0 when the sample is never triggered or the source is an SF2 bank.
+    double playbackRatio(int index) const;
 private:
     enum class Kind { none, tracker, sf2 };
     Kind kind = Kind::none;
     std::unique_ptr<class TrackerDocument> tracker;
     std::unique_ptr<class Sf2Bank> bank;
     std::vector<EmbeddedSampleEntry> listed;
+    std::vector<int> firstNotes;
     int empties = 0;
 };
 } // namespace sonicator

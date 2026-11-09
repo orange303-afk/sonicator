@@ -10,6 +10,9 @@ struct ExtractOptions
     juce::File outputFolder; // used only when sameFolder is false
     bool sameFolder = true;
     bool normalize = false;
+    // Module samples are resampled to the first note that triggers them in the song, so a
+    // one-shot sounds as it does in the tracker. SF2 samples are never affected.
+    bool tuneToSong = true;
 };
 enum class ExtractFileState { extracted, failed, cancelled };
 struct ExtractFileResult

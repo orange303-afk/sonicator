@@ -105,6 +105,39 @@ juce::File writeBank(TestDirectory& t, int sampleCount, int badRateIndex = -1)
     path.replaceWithData(file.v.data(), file.v.size());
     return path;
 }
+
+juce::File writeModWithNotes(TestDirectory& t)
+{
+    Blob b;
+    b.ascii("Note MOD", 20);
+    const int lengths[31] = { 32, 32 };
+    const char* names[31] = { "low", "high" };
+    for (int i = 0; i < 31; ++i)
+    {
+        b.ascii(names[i], 22);
+        b.u16be(lengths[i]); b.u8(0); b.u8(64); b.u16be(0); b.u16be(1);
+    }
+    b.u8(1); b.u8(0);
+    for (int i = 0; i < 128; ++i) b.u8(0);
+    b.ascii("M.K.", 4);
+    std::vector<juce::uint8> pattern(4 * 64 * 4, 0);
+    pattern[0] = 0x01; pattern[1] = 0xAC; pattern[2] = 0x10; pattern[3] = 0x00;
+    pattern[4] = 0x00; pattern[5] = 0x6B; pattern[6] = 0x20; pattern[7] = 0x00;
+    b.v.insert(b.v.end(), pattern.begin(), pattern.end());
+    for (int i = 0; i < 64; ++i) b.u8((int8_t) (i * 2 - 64));
+    for (int i = 0; i < 64; ++i) b.u8((int8_t) (i * 2 - 64));
+    auto file = t.dir.getChildFile("notes.mod");
+    file.replaceWithData(b.v.data(), b.v.size());
+    return file;
+}
+juce::int64 wavFrames(const juce::File& file)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
+    return reader != nullptr ? reader->lengthInSamples : -1;
+}
+
 std::vector<juce::File> wavsIn(const juce::File& folder)
 {
     std::vector<juce::File> out;
@@ -386,4 +419,32 @@ TEST_CASE("A hostile sample name stays inside the destination folder", "[extract
     REQUIRE_FALSE(name.containsChar(':'));
     REQUIRE_FALSE(name.containsChar('*'));
     REQUIRE_FALSE(name.containsChar('?'));
+}
+
+TEST_CASE("Extract tunes module samples to their first note", "[extract][song][service]")
+{
+    TestDirectory t;
+    auto module = writeModWithNotes(t);
+    ExtractOptions tuned;
+    tuned.sameFolder = true;
+    tuned.tuneToSong = true;
+    ExtractService service;
+    REQUIRE(service.start({ module }, tuned));
+    REQUIRE(service.waitUntilFinished(20000));
+    const auto files = wavsIn(t.dir.getChildFile("notes samples"));
+    REQUIRE(files.size() == 2);
+    REQUIRE(wavFrames(files[0]) == 64);
+    REQUIRE(wavFrames(files[1]) == 16);
+
+    ExtractOptions raw;
+    raw.sameFolder = false;
+    raw.outputFolder = t.dir.getChildFile("raw");
+    raw.tuneToSong = false;
+    ExtractService plain;
+    REQUIRE(plain.start({ module }, raw));
+    REQUIRE(plain.waitUntilFinished(20000));
+    const auto rawFiles = wavsIn(t.dir.getChildFile("raw/notes samples"));
+    REQUIRE(rawFiles.size() == 2);
+    REQUIRE(wavFrames(rawFiles[0]) == 64);
+    REQUIRE(wavFrames(rawFiles[1]) == 64);
 }

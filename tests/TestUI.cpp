@@ -548,6 +548,7 @@ TEST_CASE("Extract dialog exposes the persisted defaults", "[ui][extract]")
     AppSettings settings;
     settings.extractSameFolder = false;
     settings.extractNormalize = true;
+    settings.extractTuneToSong = false;
     settings.extractOutputFolder = "/tmp/out";
     int accepted = 0;
     ExtractDialog dialog({ juce::File("/tmp/bank.sf2") }, settings,
@@ -555,11 +556,13 @@ TEST_CASE("Extract dialog exposes the persisted defaults", "[ui][extract]")
     const auto options = dialog.currentOptions();
     REQUIRE_FALSE(options.sameFolder);
     REQUIRE(options.normalize);
+    REQUIRE_FALSE(options.tuneToSong);
     REQUIRE(options.outputFolder == juce::File("/tmp/out"));
     REQUIRE(dialog.findChildWithID("extractFolder") != nullptr);
     REQUIRE(dialog.findChildWithID("extractBrowse") != nullptr);
     REQUIRE(dialog.findChildWithID("extractSameFolder") != nullptr);
     REQUIRE(dialog.findChildWithID("extractNormalize") != nullptr);
+    REQUIRE(dialog.findChildWithID("extractTuneToSong") != nullptr);
     REQUIRE(dialog.findChildWithID("extractAccept") != nullptr);
     REQUIRE(dialog.findChildWithID("extractCancel") != nullptr);
     REQUIRE(dialog.findChildWithID("extractOk") != nullptr);
@@ -613,4 +616,23 @@ TEST_CASE("Extract dialog hides the details control when no problem was reported
     auto* details = dialog.findChildWithID("extractDetails");
     REQUIRE(details != nullptr);
     REQUIRE_FALSE(details->isVisible());
+}
+
+TEST_CASE("Extract tuning is only offered when a module is selected", "[ui][extract]")
+{
+    ExtractDialog bank({ juce::File("/tmp/bank.sf2") }, AppSettings{},
+                       [](ExtractOptions) -> bool { return true; });
+    auto* tune = dynamic_cast<juce::ToggleButton*>(bank.findChildWithID("extractTuneToSong"));
+    REQUIRE(tune != nullptr);
+    REQUIRE_FALSE(tune->isEnabled());
+    REQUIRE_FALSE(bank.currentOptions().tuneToSong);
+
+    ExtractDialog modules({ juce::File("/tmp/song.mod") }, AppSettings{},
+                          [](ExtractOptions) -> bool { return true; });
+    auto* enabled = dynamic_cast<juce::ToggleButton*>(
+        modules.findChildWithID("extractTuneToSong"));
+    REQUIRE(enabled != nullptr);
+    REQUIRE(enabled->isEnabled());
+    REQUIRE(enabled->getToggleState());
+    REQUIRE(modules.currentOptions().tuneToSong);
 }

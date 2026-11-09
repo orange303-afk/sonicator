@@ -1,4 +1,5 @@
 #include "ExtractDialog.h"
+#include "core/extract/EmbeddedSamples.h"
 #include "ui/shell/Theme.h"
 #include <cmath>
 namespace sonicator {
@@ -15,7 +16,7 @@ ExtractDialog::ExtractDialog(std::vector<juce::File> inputSources, const AppSett
                              std::function<bool(ExtractOptions)> onAccept)
     : sources(std::move(inputSources)), acceptCallback(std::move(onAccept))
 {
-    setSize(560, 460);
+    setSize(560, 500);
     title.setText("Extract samples from " + juce::String((int) sources.size()) + " file(s)",
                   juce::dontSendNotification);
     title.setFont(juce::FontOptions(15.0f, juce::Font::bold));
@@ -23,6 +24,13 @@ ExtractDialog::ExtractDialog(std::vector<juce::File> inputSources, const AppSett
     sameFolder.setToggleState(settings.extractSameFolder, juce::dontSendNotification);
     normalize.setComponentID("extractNormalize");
     normalize.setToggleState(settings.extractNormalize, juce::dontSendNotification);
+    tuneToSong.setComponentID("extractTuneToSong");
+    tuneToSong.setToggleState(settings.extractTuneToSong, juce::dontSendNotification);
+    for (const auto& source : sources)
+        hasModules = hasModules || isTrackerModuleSource(source);
+    tuneToSong.setEnabled(hasModules);
+    tuneToSong.setTooltip("Module samples are resampled to the first note that triggers them "
+                          "in the song. SoundFont samples are never changed.");
     folder.setComponentID("extractFolder");
     folder.setMultiLine(false);
     folder.setText(settings.extractOutputFolder.isNotEmpty()
@@ -114,6 +122,7 @@ ExtractDialog::ExtractDialog(std::vector<juce::File> inputSources, const AppSett
     addAndMakeVisible(title);
     addAndMakeVisible(sameFolder);
     addAndMakeVisible(normalize);
+    addAndMakeVisible(tuneToSong);
     addAndMakeVisible(folder);
     addAndMakeVisible(browse);
     addAndMakeVisible(error);
@@ -139,6 +148,8 @@ void ExtractDialog::resized()
     sameFolder.setBounds(area.removeFromTop(24));
     area.removeFromTop(4);
     normalize.setBounds(area.removeFromTop(24));
+    area.removeFromTop(4);
+    tuneToSong.setBounds(area.removeFromTop(24));
     area.removeFromTop(8);
     auto folderRow = area.removeFromTop(26);
     browse.setBounds(folderRow.removeFromRight(96));
@@ -170,6 +181,7 @@ ExtractOptions ExtractDialog::currentOptions() const
     ExtractOptions options;
     options.sameFolder = sameFolder.getToggleState();
     options.normalize = normalize.getToggleState();
+    options.tuneToSong = hasModules && tuneToSong.getToggleState();
     options.outputFolder = options.sameFolder ? juce::File()
                                               : juce::File(folder.getText().trim());
     return options;
@@ -178,6 +190,7 @@ void ExtractDialog::setInputsEnabled(bool enabled)
 {
     sameFolder.setEnabled(enabled);
     normalize.setEnabled(enabled);
+    tuneToSong.setEnabled(enabled && hasModules);
     folder.setEnabled(enabled && ! sameFolder.getToggleState());
     browse.setEnabled(enabled && ! sameFolder.getToggleState());
 }

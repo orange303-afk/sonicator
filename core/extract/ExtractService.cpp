@@ -2,6 +2,7 @@
 #include "EmbeddedSamples.h"
 #include "core/export/AudioExporter.h"
 #include <algorithm>
+#include <cmath>
 namespace sonicator {
 namespace {
 bool isForbiddenFilenameChar(juce::juce_wchar c)
@@ -245,6 +246,16 @@ void ExtractService::run()
                 publishFraction((int) index, ordinal, entryCount);
                 continue;
             }
+            auto audible = audio;
+            if (options.tuneToSong)
+            {
+                const double ratio = set.playbackRatio(entry.index);
+                if (std::abs(ratio - 1.0) > 1e-9)
+                {
+                    const auto tuned = resampleForPlayback(*audio, ratio);
+                    if (tuned != nullptr) audible = tuned;
+                }
+            }
             const auto destination = uniqueSampleFile(folder, ordinal, entry.name);
             if (destination == juce::File())
             {
@@ -258,7 +269,7 @@ void ExtractService::run()
                 publishFraction((int) index, ordinal, entryCount);
                 continue;
             }
-            const auto exported = exporter.exportSampleFile(*audio, destination, options.normalize,
+            const auto exported = exporter.exportSampleFile(*audible, destination, options.normalize,
                 [this] { return cancelled.load(); });
             if (! exported.success)
             {

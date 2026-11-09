@@ -29,6 +29,7 @@ private:
     juce::Label title, error, progressLabel, resultLabel;
     juce::ToggleButton sameFolder { "Save next to each original file" };
     juce::ToggleButton normalize { "Normalize each sample to -0.1 dBFS" };
+    juce::ToggleButton tuneToSong { "As heard in song (first note)" };
     juce::ToggleButton details { "Show details" };
     juce::TextEditor folder, problems;
     juce::TextButton browse { "Browse..." }, accept { "Extract" }, cancel { "Cancel" }, ok { "OK" };
@@ -36,7 +37,7 @@ private:
     juce::ProgressBar progressBar { progressValue };
     std::unique_ptr<juce::FileChooser> chooser;
     std::function<bool(ExtractOptions)> acceptCallback;
-    bool running = false, finished = false;
+    bool running = false, finished = false, hasModules = false;
     void setInputsEnabled(bool);
     void updateButtons();
     void closeDialog();

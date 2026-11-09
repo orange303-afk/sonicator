@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/extract/EmbeddedSamples.h"
+#include <catch2/catch_approx.hpp>
 #include "TestHelpers.h"
 #include <cmath>
 using namespace sonicator;
@@ -133,6 +134,33 @@ juce::File writeMod(TestDirectory& t)
     file.replaceWithData(b.v.data(), b.v.size());
     return file;
 }
+
+juce::File writeModWithNotes(TestDirectory& t)
+{
+    Blob b;
+    b.ascii("Note MOD", 20);
+    const int lengths[31] = { 32, 32 };
+    const char* names[31] = { "low", "high" };
+    for (int i = 0; i < 31; ++i)
+    {
+        b.ascii(names[i], 22);
+        b.u16be(lengths[i]); b.u8(0); b.u8(64); b.u16be(0); b.u16be(1);
+    }
+    b.u8(1); b.u8(0);
+    for (int i = 0; i < 128; ++i) b.u8(0);
+    b.ascii("M.K.", 4);
+    std::vector<juce::uint8> pattern(4 * 64 * 4, 0);
+    // Row 0, channel 0: sample 1 at C-4 (period 428).
+    pattern[0] = 0x01; pattern[1] = 0xAC; pattern[2] = 0x10; pattern[3] = 0x00;
+    // Row 0, channel 1: sample 2 at C-6 (period 107).
+    pattern[4] = 0x00; pattern[5] = 0x6B; pattern[6] = 0x20; pattern[7] = 0x00;
+    b.v.insert(b.v.end(), pattern.begin(), pattern.end());
+    for (int i = 0; i < 64; ++i) b.u8((int8_t) (i * 2 - 64));
+    for (int i = 0; i < 64; ++i) b.u8((int8_t) (i * 2 - 64));
+    auto file = t.dir.getChildFile("notes.mod");
+    file.replaceWithData(b.v.data(), b.v.size());
+    return file;
+}
 } // namespace
 
 TEST_CASE("Embedded listing reports every SF2 sample, including unused ones", "[extract][sf2]")
@@ -216,3 +244,38 @@ TEST_CASE("Extract candidates include embedded sources and exclude ordinary audi
     REQUIRE(candidates[0] == module);
     REQUIRE(candidates[1] == bank);
 }
+
+
+TEST_CASE("Module samples report the first note they are played at", "[extract][song]")
+{
+    TestDirectory t;
+    auto path = writeModWithNotes(t);
+    EmbeddedSampleSet set;
+    juce::String error;
+    REQUIRE(set.open(path, error));
+    REQUIRE(set.entries().size() == 2);
+    REQUIRE(set.playbackRatio(set.entries()[0].index) == Catch::Approx(1.0).margin(0.01));
+    REQUIRE(set.playbackRatio(set.entries()[1].index) == Catch::Approx(4.0).margin(0.08));
+    REQUIRE(set.playbackRatio(999) == 1.0);
+}
+
+TEST_CASE("Resampling scales frame count and keeps the waveform shape", "[extract][song]")
+{
+    SampleAudio audio;
+    audio.sampleRate = 8000; audio.channels = 1; audio.frames = 100;
+    audio.left.resize(100);
+    for (int i = 0; i < 100; ++i) audio.left[(size_t) i] = (float) i / 100.0f;
+    const auto faster = resampleForPlayback(audio, 2.0);
+    REQUIRE(faster != nullptr);
+    REQUIRE(faster->frames == 50);
+    REQUIRE(faster->left[0] == Catch::Approx(0.0f).margin(0.001f));
+    REQUIRE(faster->left[10] == Catch::Approx(0.2f).margin(0.01f));
+    const auto slower = resampleForPlayback(audio, 0.5);
+    REQUIRE(slower != nullptr);
+    REQUIRE(slower->frames == 200);
+    REQUIRE(slower->left[100] == Catch::Approx(0.5f).margin(0.01f));
+    const auto unchanged = resampleForPlayback(audio, 1.0);
+    REQUIRE(unchanged != nullptr);
+    REQUIRE(unchanged->frames == 100);
+}
+

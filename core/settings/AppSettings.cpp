@@ -68,6 +68,7 @@ AppSettings SettingsStore::load() const
     settings.splitMoveToTrash = readBool("splitMoveToTrash", settings.splitMoveToTrash);
     settings.extractSameFolder = readBool("extractSameFolder", settings.extractSameFolder);
     settings.extractNormalize = readBool("extractNormalize", settings.extractNormalize);
+    settings.extractTuneToSong = readBool("extractTuneToSong", settings.extractTuneToSong);
     settings.extractOutputFolder = object->getProperty("extractOutputFolder").toString();
     settings.skipSilence = readBool("skipSilence", settings.skipSilence);
     settings.autoPreview = readBool("autoPreview", settings.autoPreview);
@@ -114,6 +115,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("splitMoveToTrash", settings.splitMoveToTrash);
     object->setProperty("extractSameFolder", settings.extractSameFolder);
     object->setProperty("extractNormalize", settings.extractNormalize);
+    object->setProperty("extractTuneToSong", settings.extractTuneToSong);
     object->setProperty("extractOutputFolder", settings.extractOutputFolder);
     object->setProperty("midiPreview", settings.midiPreview);
     object->setProperty("skipSilence", settings.skipSilence);

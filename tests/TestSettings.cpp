@@ -205,14 +205,17 @@ TEST_CASE("Extract defaults persist", "[settings][extract]")
     auto loaded = store.load();
     REQUIRE(loaded.extractSameFolder);
     REQUIRE_FALSE(loaded.extractNormalize);
+    REQUIRE(loaded.extractTuneToSong);
     REQUIRE(loaded.extractOutputFolder.isEmpty());
     store.update([](AppSettings& s)
     {
         s.extractSameFolder = false; s.extractNormalize = true;
+        s.extractTuneToSong = false;
         s.extractOutputFolder = "/tmp/extract-out";
     });
     loaded = store.load();
     REQUIRE_FALSE(loaded.extractSameFolder);
     REQUIRE(loaded.extractNormalize);
+    REQUIRE_FALSE(loaded.extractTuneToSong);
     REQUIRE(loaded.extractOutputFolder == "/tmp/extract-out");
 }

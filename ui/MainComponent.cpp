@@ -1740,6 +1740,7 @@ void MainComponent::startExtract(const std::vector<juce::File>& files)
             if (safe == nullptr || safe->extractor == nullptr) return false;
             safe->appSettings.extractSameFolder = options.sameFolder;
             safe->appSettings.extractNormalize = options.normalize;
+            safe->appSettings.extractTuneToSong = options.tuneToSong;
             if (! options.sameFolder && options.outputFolder.isDirectory())
                 safe->appSettings.extractOutputFolder = options.outputFolder.getFullPathName();
             try
@@ -1748,6 +1749,7 @@ void MainComponent::startExtract(const std::vector<juce::File>& files)
                 {
                     saved.extractSameFolder = options.sameFolder;
                     saved.extractNormalize = options.normalize;
+                    saved.extractTuneToSong = options.tuneToSong;
                     if (! options.sameFolder && options.outputFolder.isDirectory())
                         saved.extractOutputFolder = options.outputFolder.getFullPathName();
                 });
