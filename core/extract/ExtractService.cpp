@@ -63,6 +63,9 @@ juce::String extractSampleFileName(int ordinal, const juce::String& name)
     stem = stem.trim();
     while (stem.contains("  ")) stem = stem.replace("  ", " ");
     stem = stem.trimCharactersAtEnd(" .");
+    // XM/MOD sample names are often file names; do not turn "Uhhuhu.wav" into "Uhhuhu.wav.wav".
+    if (stem.endsWithIgnoreCase(".wav"))
+        stem = stem.dropLastCharacters(4).trimCharactersAtEnd(" .");
     if (stem.isEmpty()) stem = "Sample";
     stem = stem.substring(0, 80);
     return juce::String(ordinal).paddedLeft('0', 3) + " " + stem + ".wav";

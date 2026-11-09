@@ -253,6 +253,9 @@ TEST_CASE("Extract file names are numbered, sanitised and keep non-ASCII text", 
     REQUIRE(unsafe.startsWith("003 "));
     REQUIRE(unsafe.endsWith(".wav"));
     REQUIRE(extractSampleFileName(1, "") == "001 Sample.wav");
+    REQUIRE(extractSampleFileName(1, "Uhhuhu.wav") == "001 Uhhuhu.wav");
+    REQUIRE(extractSampleFileName(2, "kick.WAV") == "002 kick.wav");
+    REQUIRE(extractSampleFileName(3, " .wav ") == "003 Sample.wav");
 }
 
 TEST_CASE("Extract keeps a non-ASCII source name in the sample folder", "[extract][service]")
