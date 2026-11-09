@@ -1,6 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/reason/ReasonPatch.h"
 #include "TestHelpers.h"
+#include "core/scanner/FileScanner.h"
+#include "core/smart/AssetAnalyzer.h"
+#include "core/indexing/IndexingService.h"
+#include "core/settings/AppSettings.h"
 using namespace sonicator;
 namespace {
 using Bytes = std::vector<unsigned char>;
@@ -72,4 +76,37 @@ TEST_CASE("Reason XML provides deviceProduct and ReFill is recognised without de
     f=t.dir.getChildFile("bank.rfl"); f.replaceWithText("Propellerheads ReFill File\x1a" "opaque");
     r=readReasonPatch(f); REQUIRE(r.error.isEmpty()); REQUIRE(r.message=="Reason ReFill: закрытый формат, содержимое недоступно");
     f.replaceWithText("not a refill"); REQUIRE(readReasonPatch(f).error.isNotEmpty());
+}
+TEST_CASE("Reason scanning indexes metadata and local audio but excludes only pack demos", "[reason]")
+{
+    TestDirectory t;
+    const auto patch=cmb(t,{}); const auto wav=t.wave("Pack/_samples/loop.wav");
+    t.wave("Pack/_audio previews/demo.wav"); t.wave("Pack/Audio Previews/demo.wav");
+    t.wave("ordinary/Audio Previews/keep.wav");
+    const auto xml=t.dir.getChildFile("p.repatch"); xml.replaceWithText("<JukeboxPatch deviceProduct=\"Europa\"/>");
+    const auto rfl=t.dir.getChildFile("p.rfl"); rfl.replaceWithText("Propellerheads ReFill File\x1a");
+    for (const auto& f:{patch,xml,rfl}) REQUIRE(FileScanner::isMetadataOnlyFormat(f));
+    REQUIRE(FileScanner::scanDirectory(t.dir).size()==5);
+    Database db(t.dir.getChildFile("catalog.sqlite")); SampleRepository repo(db); repo.createTables();
+    IndexingService indexer(repo); REQUIRE(indexer.start({t.dir.getFullPathName()})); REQUIRE(indexer.waitUntilFinished(20000));
+    REQUIRE(repo.count()==5);
+    for (const auto& f:{patch,xml,rfl})
+    {
+        auto r=repo.findByPath(f.getFullPathName()); REQUIRE(r.has_value());
+        REQUIRE(r->version==metadataOnlyVersion); REQUIRE(r->duration==0); REQUIRE(r->sampleRate==0);
+        REQUIRE(r->compatibility==AssetCompatibility::supported); // supported metadata, not a playable archive
+    }
+    LibraryFilter filter; filter.hideEmpty=true; REQUIRE(repo.query(filter,100,0).total==5);
+    REQUIRE(repo.findByPath(wav.getFullPathName())->error.isEmpty());
+}
+TEST_CASE("Reason Packs registration persists once and respects removal", "[reason]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("catalog.sqlite")); SampleRepository repo(db); repo.createTables();
+    SettingsStore settings(t.dir.getChildFile("prefs.json")); const auto root=t.dir.getChildFile("Packs");
+    REQUIRE_FALSE(registerReasonPacks(repo,settings,root)); root.createDirectory();
+    REQUIRE(registerReasonPacks(repo,settings,root)); REQUIRE(repo.roots().contains(root.getFullPathName()));
+    settings.update([](AppSettings& s){s.theme=ThemeMode::Dark;});
+    // Another empty catalog models removal or switching catalogs: never resurrect the root.
+    Database other(t.dir.getChildFile("other.sqlite")); SampleRepository empty(other); empty.createTables();
+    REQUIRE_FALSE(registerReasonPacks(empty,settings,root)); REQUIRE(empty.roots().isEmpty());
 }

@@ -5,6 +5,7 @@
 #include "core/disc/DiscImageProbe.h"
 #include "core/disc/CueSheet.h"
 #include "core/sampler/FileInstrument.h"
+#include "core/reason/ReasonPatch.h"
 #include <cmath>
 namespace sonicator {
 namespace {
@@ -39,7 +40,18 @@ SampleRecord analyzeMetadataAsset(const juce::File& file, CancelCheck cancel)
     r.dateModified = file.getLastModificationTime().toMilliseconds();
     r.dateAnalyzed = juce::Time::currentTimeMillis();
     r.version = metadataOnlyVersion;
-    if (isLegacyTrackerExtension(file))
+    if (file.hasFileExtension("cmb;repatch;rfl"))
+    {
+        const auto patch=readReasonPatch(file, false);
+        if (patch.error.isNotEmpty())
+        { r.error=patch.error; r.compatibility=AssetCompatibility::invalid; return r; }
+        if (r.format=="RFL")
+        {
+            r.compatibility=AssetCompatibility::supported; // recognised metadata card; not audio support
+            return r; // No archive-body reads or full-file hashing for multi-gigabyte ReFills.
+        }
+    }
+    else if (isLegacyTrackerExtension(file))
     {
         const auto probe = probeLegacyTracker(file);
         if (! probe.recognised)

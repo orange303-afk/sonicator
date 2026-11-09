@@ -1,11 +1,12 @@
 #include "FileScanner.h"
+#include "core/reason/ReasonPatch.h"
 #include <stdexcept>
 namespace sonicator {
 bool FileScanner::isMetadataOnlyFormat(const juce::File& f)
 {
     // Tracker modules are indexed by identity and header metadata; their PCM is decoded only
     // when the module is opened, never during a library scan.
-    return f.hasFileExtension("rx2;sf2;exs;nki;mod;xm;s3m;iso;img;bin;cue;mdx");
+    return f.hasFileExtension("rx2;sf2;exs;nki;mod;xm;s3m;iso;img;bin;cue;mdx;cmb;repatch;rfl");
 }
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {
@@ -21,6 +22,7 @@ std::vector<AudioFileInfo> FileScanner::scanDirectory(const juce::File& dir, Can
 {
     if (! dir.isDirectory()) throw std::runtime_error("Library folder is unavailable");
     std::vector<AudioFileInfo> out;
+    if (isReasonPackPreview(dir)) return out;
     std::vector<juce::File> pending { dir };
     while (! pending.empty())
     {
@@ -32,7 +34,7 @@ std::vector<AudioFileInfo> FileScanner::scanDirectory(const juce::File& dir, Can
             if (cancel && cancel()) return out;
             auto f = entry.getFile();
             if (shouldSkip && shouldSkip(f)) continue;
-            if (f.isDirectory()) { if (! f.isSymbolicLink()) pending.push_back(f); }
+            if (f.isDirectory()) { if (! f.isSymbolicLink() && !isReasonPackPreview(f)) pending.push_back(f); }
             else if (isSupportedFormat(f)) out.push_back({f,f.getSize(),f.getLastModificationTime().toMilliseconds()});
         }
     }

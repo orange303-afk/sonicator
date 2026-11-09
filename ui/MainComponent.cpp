@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "core/reason/ReasonPatch.h"
 #include "ui/tagging/AutoTagDialog.h"
 #include "ui/split/SplitDialog.h"
 #include "ui/extract/ExtractDialog.h"
@@ -444,6 +445,15 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         writeRepo->refreshDuplicates();
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         indexer = std::make_unique<IndexingService>(*writeRepo);
+        // Only a real application startup may register the user's system Packs folder.
+        if (persistSessionState)
+        {
+            const auto packs=juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+                .getChildFile("Library/Application Support/Propellerhead Software/Packs");
+            if (registerReasonPacks(*writeRepo,settingsStore,packs)
+                && indexer->start({packs.getFullPathName()})) wasRunning=true;
+            appSettings.reasonPacksAdded=settingsStore.load().reasonPacksAdded;
+        }
         smart = std::make_unique<SmartAnalysisService>(*writeRepo);
         tagging = std::make_unique<TaggingService>(*writeRepo);
         autoTag = std::make_unique<AutoTagService>(*writeRepo);

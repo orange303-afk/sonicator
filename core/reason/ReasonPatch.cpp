@@ -1,8 +1,20 @@
 #include "ReasonPatch.h"
+#include "core/database/SampleRepository.h"
+#include "core/settings/AppSettings.h"
 #include <algorithm>
 #include <map>
 #include <set>
 namespace sonicator {
+bool registerReasonPacks(SampleRepository& repo, const SettingsStore& settings, const juce::File& root)
+{
+    if (settings.load().reasonPacksAdded || !root.isDirectory()) return false;
+    const auto roots=repo.roots();
+    const bool covered=std::any_of(roots.begin(),roots.end(),[&](const auto& r)
+    { return root==juce::File(r) || root.isAChildOf(juce::File(r)); });
+    if (!covered) repo.addRoot(root.getFullPathName());
+    settings.update([](AppSettings& s){s.reasonPacksAdded=true;});
+    return !covered;
+}
 namespace {
 juce::String operator""_utf8(const char* text, size_t length) { return juce::String::fromUTF8(text, (int)length); }
 constexpr int64_t metadataLimit = 4 * 1024 * 1024;
@@ -79,6 +91,21 @@ void resolve(ReasonPatch& result,const juce::File& patch)
         else ref.message=matches.empty() ? "Сэмпл не найден в паке"_utf8 : "Неоднозначное имя сэмпла в паке"_utf8;
     }
 }
+}
+bool isReasonPackPreview(const juce::File& file)
+{
+    auto folder=file;
+    for (int depth=0;depth<32;++depth)
+    {
+        if (previewFolder(folder))
+        {
+            const auto root=packRoot(folder.getChildFile("placeholder"));
+            return root!=folder && (root.getChildFile("_samples").isDirectory()
+                || root.getParentDirectory().getFileName()=="Packs");
+        }
+        const auto parent=folder.getParentDirectory(); if (parent==folder) break; folder=parent;
+    }
+    return false;
 }
 ReasonPatch readReasonPatch(const juce::File& file, bool resolveSamples)
 {

@@ -53,6 +53,7 @@ AppSettings SettingsStore::load() const
     };
     settings.midiPreview = readBool("midiPreview", settings.midiPreview);
     settings.showIgnored = readBool("showIgnored", settings.showIgnored);
+    settings.reasonPacksAdded = readBool("reasonPacksAdded", settings.reasonPacksAdded);
     auto readNumber = [object](const char* key, double fallback)
     {
         const auto value = object->getProperty(key);
@@ -108,6 +109,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("database", settings.databasePath);
     object->setProperty("hideEmpty", settings.hideEmpty);
     object->setProperty("showIgnored", settings.showIgnored);
+    object->setProperty("reasonPacksAdded", settings.reasonPacksAdded);
     object->setProperty("splitThreshold", settings.splitThresholdDb);
     object->setProperty("splitMinSilence", settings.splitMinSilenceMs);
     object->setProperty("splitMinPart", settings.splitMinPartMs);

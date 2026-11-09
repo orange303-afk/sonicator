@@ -17,6 +17,7 @@ struct AppSettings
     juce::String lastSamplePath;       // restored selection without starting preview playback
     bool hideEmpty = true;
     bool showIgnored = false;          // reveal catalog rows hidden by ignored_paths
+    bool reasonPacksAdded = false;     // global one-time registration, not reset on root removal
     double splitThresholdDb = -60.0;
     int splitMinSilenceMs = 250;
     int splitMinPartMs = 100;

@@ -15,4 +15,8 @@ struct ReasonPatch
     std::vector<ReasonReference> references;
 };
 ReasonPatch readReasonPatch(const juce::File&, bool resolveSamples = true);
+class SampleRepository;
+class SettingsStore;
+bool registerReasonPacks(SampleRepository&, const SettingsStore&, const juce::File& root);
+bool isReasonPackPreview(const juce::File&);
 }
