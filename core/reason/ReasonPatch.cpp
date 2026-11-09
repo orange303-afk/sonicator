@@ -87,7 +87,7 @@ void resolve(ReasonPatch& result,const juce::File& patch)
         if (ref.refill.isNotEmpty()) continue;
         const auto& matches=files[ref.name.toLowerCase()];
         if (limited) ref.message="Превышен лимит поиска сэмплов в паке"_utf8;
-        else if (matches.size()==1) ref.file=matches.front();
+        else if (matches.size()==1) { ref.file=matches.front(); ref.message.clear(); }
         else ref.message=matches.empty() ? "Сэмпл не найден в паке"_utf8 : "Неоднозначное имя сэмпла в паке"_utf8;
     }
 }
@@ -128,9 +128,11 @@ ReasonPatch readReasonPatch(const juce::File& file, bool resolveSamples)
         // No DTD/external entity access for untrusted patches.
         if (text.containsIgnoreCase("<!DOCTYPE") || text.containsIgnoreCase("<!ENTITY")) return fail("Reason XML: DTD не поддерживается");
         juce::XmlDocument document(text); auto xml=document.getDocumentElement();
-        if (!xml || !xml->hasTagName("JukeboxPatch") || xml->getStringAttribute("deviceProduct").isEmpty())
+        if (!xml || !xml->hasTagName("JukeboxPatch"))
             return fail("Некорректный Reason repatch XML: нужен deviceProduct");
-        result.devices.add(xml->getStringAttribute("deviceProduct"));
+        const auto product=xml->getStringAttribute("deviceProduct",xml->getStringAttribute("deviceProductID"));
+        if (product.isEmpty()) return fail("Некорректный Reason repatch XML: нужен deviceProduct");
+        result.devices.add(product);
         result.message="Reason device patch: только метаданные, без аудио"_utf8; return result;
     }
     unsigned char header[12] {};

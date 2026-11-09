@@ -4,6 +4,18 @@
 #include <algorithm>
 #include <cmath>
 namespace sonicator {
+bool AudioEngine::selectReasonReference(int index)
+{
+    if (!reasonMode || index<0 || index>=(int)reasonMetadata.references.size()) return false;
+    auto metadata=reasonMetadata;
+    const auto ref=metadata.references[(size_t)index];
+    // Reuse ordinary WAV/AIFF/RX2 playback, keeping the metadata document separate.
+    // An unavailable reference also unloads the previous source: Play must not replay it.
+    const bool ok=loadFile(ref.isLocal() ? ref.file : juce::File());
+    reasonMode=true; reasonMetadata=std::move(metadata); reasonReference=index;
+    if (!ref.isLocal()) lastError=ref.message;
+    return ok;
+}
 AudioEngine::AudioEngine(bool openDevice) : deviceMode(openDevice)
 {
     formats.registerBasicFormats();
@@ -48,6 +60,15 @@ bool AudioEngine::loadFile(const juce::File& file)
     clearContainers();
     loadedFile = juce::File(); audibleStart = -1; startAtNextPlay = true;
     source.setSource(nullptr); reader.reset();
+    if (file.hasFileExtension("cmb;repatch;rfl"))
+    {
+        reasonMetadata=readReasonPatch(file);
+        lastError=reasonMetadata.error;
+        reasonMode=lastError.isEmpty();
+        output.midi=false;
+        if (deviceMode) player.setSource(&output);
+        return reasonMode;
+    }
     lastError = validateContainer(file);
     if (lastError.isNotEmpty()) { if (deviceMode) player.setSource(&output); return false; }
     const auto extension = file.getFileExtension().toLowerCase();
@@ -120,6 +141,9 @@ void AudioEngine::play()
 }
 void AudioEngine::clearContainers()
 {
+    reasonMode=false;
+    reasonMetadata={};
+    reasonReference=-1;
     sf2Mode = false;
     output.sf2Mode = false;
     sf2Sampler.reset();

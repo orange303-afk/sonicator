@@ -6,6 +6,7 @@
 namespace sonicator {
 int PreviewPanel::getNumRows()
 {
+    if (engine.isReasonMode()) return (int)engine.reasonPatch().references.size();
     if (engine.isTrackerMode()) return trackerBox.getNumItems();
     return ! engine.isSamplerInstrumentMode() || instrumentSamples.empty() ? 0 : sampleBox.getNumItems() + 1;
 }
@@ -13,6 +14,14 @@ void PreviewPanel::paintListBoxItem(int row, juce::Graphics& g, int width, int h
 {
     if (row < 0 || row >= getNumRows()) return;
     if (selected) g.fillAll(theme::selection);
+    if (engine.isReasonMode())
+    {
+        const auto& ref=engine.reasonPatch().references[(size_t)row];
+        g.setColour(ref.isLocal() ? theme::text : theme::muted);
+        g.setFont(juce::FontOptions(12));
+        g.drawText(ref.name + (ref.isLocal() ? "" : "  ·  "+ref.message),8,0,width-16,height,juce::Justification::centredLeft);
+        return;
+    }
     const bool tracker = engine.isTrackerMode();
     const auto text = tracker ? trackerBox.getItemText(row)
         : (row == 0 ? juce::String("Head") : sampleBox.getItemText(row - 1));
@@ -31,6 +40,7 @@ void PreviewPanel::paintListBoxItem(int row, juce::Graphics& g, int width, int h
 void PreviewPanel::selectedRowsChanged(int row)
 {
     if (syncingSources || row < 0 || row >= getNumRows()) return;
+    if (engine.isReasonMode()) { applyReasonReference(row,true); return; }
     if (engine.isTrackerMode())
     {
         if (row == 0) applyTrackerWholeSong(true);
@@ -62,9 +72,10 @@ void PreviewPanel::refreshSourceList()
             contentWidth = juce::jmax(contentWidth, juce::GlyphArrangement::getStringWidthInt(font, slot.displayText) + 16);
     }
     sourceList.setMinimumContentWidth(contentWidth);
-    const int row = engine.isTrackerMode() ? trackerBox.getSelectedItemIndex()
+    const int row = engine.isReasonMode() ? engine.selectedReasonReference()
+        : engine.isTrackerMode() ? trackerBox.getSelectedItemIndex()
         : (instrumentHead ? 0 : sampleBox.getSelectedItemIndex() + 1);
-    if (getNumRows() > 0) sourceList.selectRow(row, true, true);
+    if (getNumRows() > 0 && row>=0) sourceList.selectRow(row, true, true);
     else sourceList.deselectAllRows();
     sourceList.setVisible(getNumRows() > 0);
     sampleBox.setVisible(false);
@@ -81,6 +92,11 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     presetBox.setVisible(false); sampleBox.setVisible(false); rexGate.setVisible(false); rexInfo.setVisible(false);
     trackerBox.setVisible(false); sampleDragButton.setVisible(false); songProgress.setVisible(false);
     addChildComponent(sourceList);
+    addChildComponent(reasonInfo);
+    reasonInfo.setComponentID("reasonInfo");
+    reasonInfo.setFont(juce::FontOptions(12));
+    reasonInfo.setJustificationType(juce::Justification::topLeft);
+    reasonInfo.setColour(juce::Label::textColourId,theme::text);
     sourceList.setComponentID("containerSources");
     sourceList.setRowHeight(30);
     songProgress.setComponentID("songProgress");
@@ -222,7 +238,7 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     if (file == loadedFile && file != juce::File() && file.getSize() == loadedSize
         && file.getLastModificationTime().toMilliseconds() == loadedModified) return true;
     // A physical L/R pair becomes one stereo source for playback, MIDI and WAV export.
-    auto pair = loadStereoPair(file);
+    auto pair = file.hasFileExtension("cmb;repatch;rfl") ? StereoPairResult() : loadStereoPair(file);
     if (pair.paired && pair.ok)
     {
         const auto name = parseStereoName(file.getFileName());
@@ -245,6 +261,10 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     loadedModified = success ? file.getLastModificationTime().toMilliseconds() : 0;
     const bool rex = success && engine.isRex2Mode();
     const bool tracker = success && engine.isTrackerMode();
+    const bool reason = success && engine.isReasonMode();
+    reasonInfo.setVisible(reason);
+    midi.setEnabled(!reason);
+    play.setEnabled(success && !reason);
     if (tracker)
     {
         presetBox.setVisible(false);
@@ -318,7 +338,18 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
         filename.setText(success ? file.getFileName()
                                  : file.getFileName() + "  —  " + engine.error(),juce::dontSendNotification);
     }
-    if (rex)
+    if (reason)
+    {
+        const auto& patch=engine.reasonPatch();
+        filename.setText(file.getFileName()+"  —  "+patch.name,juce::dontSendNotification);
+        const auto text=patch.message + (patch.devices.isEmpty() ? "" : "\n"+patch.devices.joinIntoString(" · "));
+        reasonInfo.setText(text,juce::dontSendNotification);
+        reasonInfo.setTooltip(text);
+        waveform.setFile(juce::File());
+        waveform.setVisible(false);
+        selectionStatus.setText({},juce::dontSendNotification);
+    }
+    else if (rex)
     {
         if (auto audio = engine.rexAudio())
             waveform.setPeaks(audio->left, audio->sampleRate, engine.rexSliceStarts());
@@ -331,8 +362,29 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     resized(); // the tracker/sample selectors appear or disappear with the loaded asset
     instrumentHead = true;
     refreshSourceList();
-    if (allowAutoPlay && success && ! soundFont && autoPreview.getToggleState()) engine.play();
+    if (allowAutoPlay && success && ! soundFont && !reason && autoPreview.getToggleState()) engine.play();
     return success;
+}
+bool PreviewPanel::applyReasonReference(int index, bool autoPlay)
+{
+    const bool ok=engine.selectReasonReference(index);
+    waveform.setFile(juce::File());
+    if (ok)
+    {
+        if (engine.isRex2Mode())
+        {
+            if (auto audio=engine.rexAudio()) waveform.setPeaks(audio->left,audio->sampleRate,engine.rexSliceStarts());
+        }
+        else waveform.setFile(engine.reasonPatch().references[(size_t)index].file);
+    }
+    waveform.setVisible(ok);
+    selectionStatus.setText(ok ? juce::String() : engine.error(),juce::dontSendNotification);
+    midi.setEnabled(ok);
+    midi.setToggleState(engine.isMidiPreview(),juce::dontSendNotification);
+    play.setEnabled(ok);
+    if (ok && autoPlay && autoPreview.getToggleState()) engine.play();
+    refreshSourceList(); resized();
+    return ok;
 }
 void PreviewPanel::refreshInstrumentSamples()
 {
@@ -568,6 +620,9 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
         return false;
     }
     discAudioRef = std::move(audio);
+    reasonInfo.setVisible(false);
+    play.setEnabled(true);
+    midi.setEnabled(true);
     discStem = stem;
     loadedFile = container;
     currentSampleId = invalidSampleId;
@@ -596,6 +651,14 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
 
 void PreviewPanel::clearDiscSource()
 {
+    if (engine.isReasonMode())
+    {
+        engine.loadFile(juce::File()); // unload the locally auditioned Reason source too
+        loadedFile=juce::File(); loadedSize=0; loadedModified=0;
+        reasonInfo.setVisible(false);
+        refreshSourceList();
+        midi.setEnabled(true);
+    }
     engine.clearDiscSample();
     discAudioRef.reset();
     discStem.clear();
@@ -720,6 +783,8 @@ void PreviewPanel::selectionChanged(selection::Range range)
         }
         else exporter.prepare(loadedFile, range.start, range.end);
     }
+    else if (engine.isReasonMode() && engine.selectedReasonReference()>=0)
+        exporter.prepare(engine.reasonPatch().references[(size_t)engine.selectedReasonReference()].file,range.start,range.end);
     else exporter.prepare(loadedFile,range.start,range.end);
     applyTransportLooping();
     refreshSelectionStatus();
@@ -879,6 +944,7 @@ void PreviewPanel::timerCallback()
 void PreviewPanel::lookAndFeelChanged()
 {
     time.setColour(juce::Label::textColourId,theme::muted);
+    reasonInfo.setColour(juce::Label::textColourId,theme::text);
     selectionStatus.setColour(juce::Label::textColourId,theme::muted);
     repaint();
 }
@@ -898,6 +964,11 @@ void PreviewPanel::resized()
     time.setBounds(top);
     r.removeFromTop(8);
     auto controls = r.removeFromRight(330); r.removeFromRight(16); waveform.setBounds(r); songProgress.setBounds(r);
+    if (reasonInfo.isVisible())
+    {
+        reasonInfo.setBounds(r.removeFromTop(waveform.isVisible() ? 48 : r.getHeight()));
+        waveform.setBounds(r);
+    }
     auto extra = presetBox.isVisible() || rexGate.isVisible() ? controls.removeFromTop(26) : juce::Rectangle<int>();
     if (presetBox.isVisible())
     {

@@ -10,6 +10,7 @@
 #include "core/audio/SampleVoicePlayer.h"
 #include "core/tracker/TrackerDocument.h"
 #include "core/tracker/TrackerSongRenderer.h"
+#include "core/reason/ReasonPatch.h"
 namespace sonicator {
 // Control methods are message-thread only. transport() also permits offline rendering.
 class AudioEngine
@@ -18,6 +19,10 @@ public:
     explicit AudioEngine(bool openDevice = true);
     ~AudioEngine();
     bool loadFile(const juce::File&);
+    bool isReasonMode() const { return reasonMode; }
+    const ReasonPatch& reasonPatch() const { return reasonMetadata; }
+    int selectedReasonReference() const { return reasonReference; }
+    bool selectReasonReference(int);
     void play();
     void pause();
     void stop();
@@ -131,6 +136,9 @@ public:
     void renderPreviewBlock(juce::AudioBuffer<float>&, int numSamples);
     MidiEventQueue& midiCollector() { return output.collector; }
 private:
+    ReasonPatch reasonMetadata;
+    bool reasonMode = false;
+    int reasonReference = -1;
     bool deviceMode, looping = false;
     bool skipSilence = false, startAtNextPlay = true, midiInputsConnected = false;
     double audibleStart = -1;

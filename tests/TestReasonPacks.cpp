@@ -1,10 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
+#include <iostream>
+#include <set>
 #include "core/reason/ReasonPatch.h"
 #include "TestHelpers.h"
 #include "core/scanner/FileScanner.h"
 #include "core/smart/AssetAnalyzer.h"
 #include "core/indexing/IndexingService.h"
 #include "core/settings/AppSettings.h"
+#include "ui/preview/PreviewPanel.h"
+#include "core/extract/EmbeddedSamples.h"
 using namespace sonicator;
 namespace {
 using Bytes = std::vector<unsigned char>;
@@ -53,6 +57,7 @@ TEST_CASE("Reason CMB reads bounded metadata and deduplicates external reference
     REQUIRE(result.error.isEmpty()); REQUIRE(result.name=="Test Combinator");
     REQUIRE(result.devices.contains("Dr. Octo Rex")); REQUIRE(result.references.size()==3);
     REQUIRE(result.references[0].file==local); REQUIRE(result.references[0].isLocal());
+    REQUIRE(result.references[0].message.isEmpty());
     REQUIRE(result.references[1].refill=="Drum Supply.rfl");
     REQUIRE(result.references[1].message.contains(juce::String::fromUTF8("нужен ReFill")));
     REQUIRE_FALSE(result.references[2].isLocal()); REQUIRE(result.references[2].message.isNotEmpty());
@@ -66,6 +71,8 @@ TEST_CASE("Reason CMB refuses ambiguous missing truncated and oversized metadata
     juce::MemoryBlock bytes; f.loadFileAsData(bytes); bytes.setSize(bytes.getSize()-3);
     f.replaceWithData(bytes.getData(),bytes.getSize()); REQUIRE(readReasonPatch(f).error.isNotEmpty());
     f.replaceWithText("FORMxxxxPTCHREFE"); REQUIRE(readReasonPatch(f).error.isNotEmpty());
+    const auto oversized=container("FORM","PTCH",chunk("DESC",Bytes(4*1024*1024+1,0)));
+    f.replaceWithData(oversized.data(),oversized.size()); REQUIRE(readReasonPatch(f).error.isNotEmpty());
 }
 TEST_CASE("Reason XML provides deviceProduct and ReFill is recognised without decoding", "[reason]")
 {
@@ -73,6 +80,8 @@ TEST_CASE("Reason XML provides deviceProduct and ReFill is recognised without de
     f.replaceWithText("<JukeboxPatch version=\"2.0\" deviceProduct=\"se.propellerheads.Europa\"/>");
     auto r=readReasonPatch(f); REQUIRE(r.error.isEmpty()); REQUIRE(r.devices.contains("se.propellerheads.Europa"));
     REQUIRE(r.references.empty()); f.replaceWithText("<broken"); REQUIRE(readReasonPatch(f).error.isNotEmpty());
+    f.replaceWithText("<JukeboxPatch deviceProductID=\"se.propellerheads.Algoritm\"/>");
+    r=readReasonPatch(f); REQUIRE(r.error.isEmpty()); REQUIRE(r.devices.contains("se.propellerheads.Algoritm"));
     f=t.dir.getChildFile("bank.rfl"); f.replaceWithText("Propellerheads ReFill File\x1a" "opaque");
     r=readReasonPatch(f); REQUIRE(r.error.isEmpty()); REQUIRE(r.message=="Reason ReFill: закрытый формат, содержимое недоступно");
     f.replaceWithText("not a refill"); REQUIRE(readReasonPatch(f).error.isNotEmpty());
@@ -109,4 +118,77 @@ TEST_CASE("Reason Packs registration persists once and respects removal", "[reas
     // Another empty catalog models removal or switching catalogs: never resurrect the root.
     Database other(t.dir.getChildFile("other.sqlite")); SampleRepository empty(other); empty.createTables();
     REQUIRE_FALSE(registerReasonPacks(empty,settings,root)); REQUIRE(empty.roots().isEmpty());
+}
+TEST_CASE("Reason preview shows devices and references and auditions only selected local audio", "[reason][ui]")
+{
+    TestDirectory t; auto wav=t.wave("Pack/_samples/loop.wav");
+    Bytes refs=reference("loop.wav"); append(refs,reference("kick.wav","Drum Supply.rfl"));
+    auto f=cmb(t,refs); AudioEngine engine(false); PreviewPanel panel(engine,t.dir.getChildFile("cache"));
+    REQUIRE(panel.loadFile(f)); REQUIRE(engine.isReasonMode()); REQUIRE_FALSE(engine.isPlaying());
+    REQUIRE_FALSE(engine.isSamplerInstrumentMode()); REQUIRE(engine.length()==0);
+    auto* card=dynamic_cast<juce::Label*>(panel.findChildWithID("reasonInfo")); REQUIRE(card!=nullptr);
+    REQUIRE(card->getText().contains("Dr. Octo Rex"));
+    auto& list=panel.containerSourceList(); REQUIRE(list.getListBoxModel()->getNumRows()==2);
+    list.selectRow(0); REQUIRE(engine.selectedReasonReference()==0); REQUIRE(engine.length()>0);
+    REQUIRE(engine.isPlaying()); REQUIRE(panel.waveformLength()>0);
+    list.selectRow(1); REQUIRE_FALSE(engine.isPlaying()); REQUIRE(engine.length()==0);
+    REQUIRE(engine.error().contains("Drum Supply.rfl")); REQUIRE(panel.waveformLength()==0);
+    REQUIRE_FALSE(engine.selectReasonReference(100));
+    REQUIRE(panel.loadFile(wav,false)); REQUIRE_FALSE(engine.isReasonMode()); REQUIRE(list.getListBoxModel()->getNumRows()==0);
+    REQUIRE_FALSE(isEmbeddedSampleSource(f));
+    REQUIRE(panel.loadFile(f,false)); list.selectRow(0); REQUIRE(engine.isPlaying());
+    panel.clearDiscSource(); REQUIRE_FALSE(engine.isReasonMode()); REQUIRE_FALSE(engine.isPlaying());
+    REQUIRE_FALSE(card->isVisible()); REQUIRE(list.getListBoxModel()->getNumRows()==0);
+    REQUIRE(panel.loadFile(f,false)); REQUIRE(engine.isReasonMode());
+}
+TEST_CASE("Reason metadata cards have no audio and reset when loading a disc source", "[reason][ui]")
+{
+    TestDirectory t; AudioEngine engine(false); PreviewPanel panel(engine,t.dir.getChildFile("cache"));
+    auto f=t.dir.getChildFile("p.rfl"); f.replaceWithText("Propellerheads ReFill File\x1a");
+    REQUIRE(panel.loadFile(f)); REQUIRE(engine.length()==0); REQUIRE_FALSE(engine.isPlaying());
+    auto* card=dynamic_cast<juce::Label*>(panel.findChildWithID("reasonInfo")); REQUIRE(card!=nullptr);
+    REQUIRE(card->isVisible()); REQUIRE(card->getText().contains(juce::String::fromUTF8("закрытый формат")));
+    auto audio=std::make_shared<SampleAudio>(); audio->frames=441; audio->sampleRate=44100;
+    audio->left.resize(441,0.1f); audio->right=audio->left;
+    REQUIRE(panel.loadDiscSample(t.dir.getChildFile("d.iso"),"Disc sample",audio,false,0,0,false,false));
+    REQUIRE_FALSE(card->isVisible());
+    auto* play=dynamic_cast<juce::TextButton*>(panel.findChildWithID("play"));
+    // Play must not remain disabled after the metadata-only card.
+    for (auto* child:panel.getChildren()) if (auto* button=dynamic_cast<juce::TextButton*>(child))
+        if (button->getButtonText()=="Play") play=button;
+    REQUIRE(play!=nullptr); REQUIRE(play->isEnabled());
+}
+TEST_CASE("Installed Reason Packs metadata and sources can be opened read-only", "[reason][real]")
+{
+    const auto root=juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+        .getChildFile("Library/Application Support/Propellerhead Software/Packs");
+    if (!root.isDirectory()) SKIP("Reason Packs not installed");
+    const auto files=FileScanner::scanDirectory(root);
+    int patches=0, local=0, refill=0, audio=0;
+    std::set<juce::String> playedFormats;
+    for (const auto& item:files)
+    {
+        REQUIRE_FALSE(item.file.getFullPathName().containsIgnoreCase("/Audio Previews/"));
+        REQUIRE_FALSE(item.file.getFullPathName().containsIgnoreCase("/_audio previews/"));
+        if (item.file.hasFileExtension("wav;aif;aiff;rx2"))
+        {
+            ++audio;
+            if (playedFormats.insert(item.file.getFileExtension()).second)
+            {
+                AudioEngine engine(false); INFO(item.file.getFullPathName());
+                REQUIRE(engine.loadFile(item.file)); REQUIRE(engine.length()>0);
+            }
+        }
+        if (!item.file.hasFileExtension("cmb;repatch")) continue;
+        auto patch=readReasonPatch(item.file); INFO(item.file.getFullPathName()); INFO(patch.error);
+        REQUIRE(patch.error.isEmpty()); REQUIRE(patch.name.isNotEmpty());
+        if (item.file.hasFileExtension("cmb")) ++patches;
+        for (const auto& ref:patch.references)
+        {
+            if (ref.isLocal()) { ++local; REQUIRE(ref.file.isAChildOf(root)); }
+            if (ref.refill.isNotEmpty()) ++refill;
+        }
+    }
+    std::cout << "Installed Reason Packs: CMB="<<patches<<" audio="<<audio<<" local references="<<local<<" ReFill references="<<refill<<"\n";
+    REQUIRE(patches>0); REQUIRE(audio>0); REQUIRE(local>0); REQUIRE(refill>0);
 }

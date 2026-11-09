@@ -112,6 +112,8 @@ private:
     WaveformDisplay waveform;
     SongProgress songProgress;
     juce::Label filename, time;
+    juce::Label reasonInfo;
+    bool applyReasonReference(int, bool autoPlay);
     juce::TextButton play { "Play" }, stop { "Stop" };
     StepComboBox presetBox;
     StepComboBox sampleBox;
