@@ -5,7 +5,7 @@
 - [x] Исключение CMB/RFL из сканирования и очистка существующих записей каталога.
 - [x] Remove папки из библиотеки для любого узла боковой панели без изменения файлов.
 - [x] Однократное добавление `~/Music/Ableton/Factory Packs`, общий поиск доступного содержимого.
-- [ ] Полный ctest, graphify, ff merge/push и перезапуск приложения.
+- [x] Полный ctest, graphify, ff merge/push и перезапуск приложения.
 
 Спецификация: договорённость в сессии 2026-11-09.
 Ableton: 20 паков, 13 236 файлов. Доступно: 1 461 OGG-превью, 1 223 WAV/AIFF (PCM/fl32),
@@ -51,6 +51,7 @@ Final: fixed удаление скрыто для не-папочных узло
 Final fixes: targeted ctest `[ableton],[remove],[reason]` — 22 test cases, 4413 assertions passed;
 полный ctest passed (36.76 s).
 Final: minor отложены — синхронный refreshDuplicates в UI после Remove, полный скан форматов при каждом старте, частичный успех при ошибке записи settings, очистка refreshDuplicates/кэша ignored при image-узлах, отсутствие теста каскада smart/duplicates и отдельного теста UI-пункта меню.
+Final integration: ff merge feature/ableton-previews-library-cleanup → main (6b8bb19), graphify update выполнен, ctest на main passed (33.14 s), push выполнен. Приложение перезапущено из build/Sonicator_artefacts/Debug/SONICATOR.app; после старта 339 608 строк, 30 старых protected-AIF error-строк удалено миграцией, CMB/RFL 0, Ableton 2 684 без ошибок.
 Runtime acceptance: каталог 339 638 строк; CMB/RFL 0; Ableton Factory Packs зарегистрирован
 автоматически, проиндексировано 2 684 файла без ошибок (1 461 OGG-превью, 1 223 WAV/AIFF/AIF),
 protected able не попали; 1 461 превью имеет длительность/частоту. Root виден в боковой панели,
