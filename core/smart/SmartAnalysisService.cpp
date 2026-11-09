@@ -346,6 +346,9 @@ bool SmartAnalysisService::processSample(int64_t sampleId, const juce::String& c
 {
     auto record = repo.findById(sampleId);
     if (! record) return false;
+    // Disc contents have no real path to read; decoding them is a preview action, not a library
+    // analysis, and their metadata stays metadata-only.
+    if (record->isDiscEntry()) return false;
     {
         std::lock_guard lock(stateMutex);
         state.stage = SmartStage::Extracting;

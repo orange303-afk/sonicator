@@ -80,6 +80,12 @@ On macOS, `~/Music/Ableton/Factory Packs` is registered once when present. The g
 
 Ableton factory AIFC samples compressed with the closed `able` codec (marked "Ableton Content") are skipped: only Live can decode them, so they are not catalogued and produce no error rows. Catalogs created by an earlier build have those error rows purged once on open; the files themselves stay untouched. Omni-present `.asd` sidecars, Live presets (`.adg`, `.adv`, `.alc`, `.als`) and Max devices (`.amxd`) are not indexed in this stage; the previews are the only audio representation of those presets.
 
+## Disc images
+
+ISO/IMG/BIN/CUE images with an ISO-9660 filesystem or a raw Akai volume are indexed while a scan walks their folder. Only entries this build can open are catalogued: WAV/AIFF/FLAC/MP3/OGG files inside ISO, and Akai sample records. Programs, unsupported records and text files stay in the disc browser but do not clutter the library. A `.bin` that has a sibling `.cue` is represented by the cue, so its contents are indexed once. MDX remains unsupported.
+
+Each playable entry becomes a metadata-only catalog row whose synthetic path is `<image>::<internal path>`; name and internal folder are searched like any other sample. Selecting such a row decodes it through the existing bounded disc reader and loads the ordinary preview transport, waveform and loop. **Enter** or a double-click opens the image browser on that entry's folder. Nothing is extracted to disk, no PCM is decoded during indexing, and duration/rate stay empty until a row is selected. Tags, stars and search work normally. Removing a folder deletes its disc rows and index state; **Ignore** on the image hides its contents. Images are re-walked when their size or modification time changes; unchanged images are skipped. Deleting an image prunes its rows on the next full scan. Drag from the waveform exports a temporary WAV; disc rows themselves do not become OS file paths.
+
 ## Modules
 
 ```text
@@ -92,6 +98,7 @@ core/tracker/                MOD/XM/S3M document parsing, source PCM and whole-s
 core/legacy/                 content-based tracker recognition
 core/reason/                 bounded patch metadata, local references and one-time Packs registration
 core/ableton/                Ableton preview naming, protected-sample probe and one-time Packs registration
+core/disc/                   read-only image probing, filesystems, decoding and content indexing
 core/export/                 selection WAV export, background preparation, external file drag
 core/indexing/               background import, pause/cancel, incremental updates
 core/settings/               persisted application settings
@@ -149,6 +156,7 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - Duplicate grouping compares full file bytes only (SHA-256 + size); different containers or metadata with identical decoded audio are not grouped. The `DUPLICATES` column shows the group size and **Show all copies** reveals it; no file is deleted or moved. **Hide empty** uses the measured peak only: files at or above -60 dBFS stay visible, quieter files are hidden.
 - With **All**, changing the filter or sort runs one ID query over the whole catalog (measured ~35 ms for 300k rows by name and ~130 ms with a text filter in Debug); rows themselves are loaded in 400-row blocks (~2 ms) and cached around the viewport. The list is never materialized as 300k full records.
 - A saved catalog that is missing or is not a SONICATOR catalog falls back to the default location at startup; the fallback is written to the log.
+- Disc contents are metadata-only rows: indexing never decodes PCM, so length/rate/peak stay empty until a sample is selected. Only playable audio entries are catalogued; a changed image is rebuilt, and paths that survive keep tags and stars.
 - OGG Vorbis is indexed as ordinary audio. Ableton factory AIFC samples with the closed `able` codec are skipped by design; they can only be decoded inside Live. Ableton preset/device files are not indexed yet.
 - **Remove from library...** deletes catalog rows only; it never deletes, moves or renames source files.
 - A catalog moved between computers needs **Relocate folders...** once per machine. It rewrites stored paths and does not copy audio. Folder structure inside each root must be preserved; a 200-path existence sample warns about a wrong choice, and the automatic `.relocate-<timestamp>.sqlite` backup is the recovery point.

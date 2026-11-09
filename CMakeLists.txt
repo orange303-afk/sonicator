@@ -56,6 +56,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/disc/DiscBrowserService.cpp
     core/disc/CueSheet.cpp
     core/disc/AkaiSampleReader.cpp
+    core/disc/DiscContentIndexer.cpp
     core/rex/Rex2Decoder.cpp core/rex/Rex2SlicePlayer.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC

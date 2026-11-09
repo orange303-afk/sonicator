@@ -11,7 +11,8 @@ struct IndexingProgress
 {
     bool running = false, paused = false, cancelled = false, finalizing = false;
     int total = 0, processed = 0, analyzed = 0, skipped = 0, failed = 0, duplicates = 0;
-    juce::String current, message;
+    int discImages = 0, discSkipped = 0, discFailed = 0, discEntries = 0;
+    juce::String current, message, discMessage;
 };
 // Rows under the scanned roots that are not in the discovery set and not on disk. The filesystem
 // probe runs only for candidates, so an unchanged scan stays allocation-and-index only.

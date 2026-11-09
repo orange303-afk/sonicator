@@ -22,12 +22,17 @@ public:
             && imageSize == file.getSize() && imageModified == file.getLastModificationTime().toMilliseconds();
     }
     void showDirectory(DiscEntryId);
+    // Opens or reuses the image, navigates to the entry's folder and selects it. Selection
+    // decodes through the normal preview path. Works while the panel is hidden.
+    void previewEntry(const juce::File&, DiscEntryId parent, DiscEntryId entry, const juce::String& name);
     void setHideEmpty(bool);
     // Called before decoding (including unsupported rows), so the old voice cannot linger.
     std::function<void()> onSelectionBegin;
     void refreshFolderTree() { if (onTreeReady && imageReady) onTreeReady(image, imageRoot, imageEntries); }
     std::function<void(const juce::File&, DiscEntryId, const std::vector<DiscEntry>&)> onTreeReady;
     std::function<void(const juce::File&, const juce::String&)> onImageError;
+    // Any browser error, including a hidden entry preview that never becomes visible.
+    std::function<void(const juce::String&)> onError;
     void resized() override;
     bool keyPressed(const juce::KeyPress&) override;
     int getNumRows() override;
@@ -63,6 +68,9 @@ private:
     SampleAudioPtr lastSelectedAudio;
     bool busy = false, imageReady = false; // Akai's valid filesystem root has ID zero.
     bool hideEmpty = false, updatingSelection = false;
+    bool revealPending = false;
+    DiscEntryId revealParent, revealEntry;
+    juce::String revealName;
     juce::ListBox list { "Disc entries", this };
     juce::TextButton backButton { "Back" }, exitButton { "Close" };
     juce::Label pathLabel, statusLabel;

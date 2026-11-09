@@ -142,6 +142,7 @@ private:
     void updateTagControls();
     void selectSample(const SampleRecord&);
     void openDiscImage(const SampleRecord&);
+    void ensureDiscBrowser();
     bool openSelectedDiscIfAny();
     struct EnterKeyListener final : public juce::KeyListener
     {

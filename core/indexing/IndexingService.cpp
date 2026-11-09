@@ -1,4 +1,5 @@
 #include "IndexingService.h"
+#include "core/disc/DiscContentIndexer.h"
 #include "core/smart/AssetAnalyzer.h"
 #include <unordered_set>
 namespace sonicator {
@@ -62,6 +63,7 @@ std::vector<int64_t> findMissingIds(const std::vector<PathEntry>& rows,
     for (const auto& row : rows)
     {
         if (row.missing) continue;
+        if (row.containerPath.isNotEmpty()) continue; // synthetic path, not a file on disk
         if (isPathIgnored(row.path, ignored)) continue;
         const juce::File file(row.path);
         bool inRoot = false;
@@ -85,6 +87,7 @@ void IndexingService::run()
     try
     {
         std::vector<AudioFileInfo> files;
+        std::vector<juce::File> discImages;
         std::unordered_set<std::string> foundPaths;
         const auto ignored = repo.ignoredPaths();
         const auto shouldSkip = [ignored](const juce::File& f)
@@ -98,7 +101,10 @@ void IndexingService::run()
             for (auto& f : found)
                 if (! shouldSkip(f.file)
                     && foundPaths.insert(f.file.getFullPathName().toStdString()).second)
+                {
+                    if (isDiscContentCandidate(f.file)) discImages.push_back(f.file);
                     files.push_back(std::move(f));
+                }
         }
         { std::lock_guard lock(stateMutex); state.total = (int) files.size();
           state.message = scanMode == ScanMode::NewOnly ? "Analyzing new files" : "Analyzing"; }
@@ -131,6 +137,23 @@ void IndexingService::run()
             if (result.error.isEmpty()) ++state.analyzed; else ++state.failed;
             if (duplicate) ++state.duplicates;
         }
+        if (! cancelled && ! discImages.empty())
+        {
+            { std::lock_guard lock(stateMutex); state.message = "Indexing disc contents"; }
+            const auto summary = indexDiscContents(repo, discImages, [this] { return checkpoint(); },
+                [this](int current, int total, const juce::String& name)
+                {
+                    std::lock_guard lock(stateMutex);
+                    state.message = "Indexing disc contents " + juce::String(current) + "/"
+                        + juce::String(total) + ": " + name;
+                });
+            { std::lock_guard lock(stateMutex);
+              state.discImages = summary.imagesIndexed;
+              state.discSkipped = summary.imagesSkipped;
+              state.discFailed = summary.imagesFailed;
+              state.discEntries = summary.entries;
+              if (summary.lastError.isNotEmpty()) state.discMessage = summary.lastError; }
+        }
         if (! cancelled && scanMode != ScanMode::NewOnly)
         {
             // Paths under a scanned root that discovery did not return are checked against the disk
@@ -147,6 +170,7 @@ void IndexingService::run()
                 if (! missingIds.empty()) repo.setMissing(missingIds);
             }
             { std::lock_guard lock(stateMutex); state.finalizing = false; }
+            repo.pruneDiscContents();
         }
         if (! cancelled)
         {

@@ -139,6 +139,7 @@ void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPa
         std::vector<int64_t> imageIds;
         for (const auto& row : rows)
         {
+            if (row.containerPath.isNotEmpty()) continue; // disc contents stay inside the image node
             if (! revealIgnored && isPathIgnored(row.path, ignoredEntries)) continue;
             auto folder = juce::File(row.path).getParentDirectory();
             if (juce::File(row.path).hasFileExtension("iso;bin;mdx;cue;akai;img"))

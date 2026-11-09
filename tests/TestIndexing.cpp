@@ -91,7 +91,8 @@ TEST_CASE("A record absent from discovery is only marked missing when the file i
         { 1, present.getFullPathName(), false },
         { 2, present.getParentDirectory().getChildFile("gone.wav").getFullPathName(), false },
         { 3, present.getFullPathName(), true },
-        { 4, "/elsewhere/outside.wav", false }
+        { 4, "/elsewhere/outside.wav", false },
+        { 5, "/Library/image.iso::/KICK.WAV", false, "/Library/image.iso" }
     };
     REQUIRE(findMissingIds(rows, discovered, roots) == std::vector<int64_t>{ 2 });
 }

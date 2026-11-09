@@ -20,5 +20,9 @@ struct SampleRecord
     double spectralCentroid = 0, spectralRolloff = 0, spectralFlatness = 0;
     bool missing = false, starred = false;
     AssetCompatibility compatibility = AssetCompatibility::unknown;
+    // A sample inside a disc image. The path is synthetic (<image>::<internal path>); the source
+    // file itself is never extracted. Ordinary files leave these empty.
+    juce::String containerPath, discEntry, discParent, discPartner, discPath;
+    bool isDiscEntry() const { return containerPath.isNotEmpty(); }
 };
 }

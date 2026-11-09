@@ -506,7 +506,14 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
                     sessionSamplePath = record->filePath;
                     updateSelectionStatus(*record);
                     updateSelectedTags();
-                    if (isDiscImageFormat(record->format))
+                    if (record->isDiscEntry())
+                    {
+                        preview.clearDiscSource();
+                        status.setText("Inside " + juce::File(record->containerPath).getFileName()
+                            + "  ·  " + record->discPath + ". Press Enter to open the image.",
+                            juce::dontSendNotification);
+                    }
+                    else if (isDiscImageFormat(record->format))
                     {
                         preview.clearDiscSource();
                         status.setText("Double-click the image or press Enter to browse its contents",
@@ -1139,6 +1146,10 @@ void MainComponent::selectSample(const SampleRecord& r)
         + "Centroid   " + juce::String(r.spectralCentroid,0) + " Hz\n\n"
         + "Rolloff      " + juce::String(r.spectralRolloff,0) + " Hz\n\n"
         + "Flatness   " + juce::String(r.spectralFlatness,4);
+    if (r.isDiscEntry())
+        details += "\n\nInside image  " + juce::File(r.containerPath).getFileName()
+            + "\nEntry         " + r.discPath
+            + "\n\nDecoded on demand; the image is never extracted.";
     if (r.missing) details += "\n\nFile is missing";
     if (r.error.isNotEmpty()) details += "\n\n" + r.error;
     if (readRepo != nullptr)
@@ -1156,6 +1167,17 @@ void MainComponent::selectSample(const SampleRecord& r)
     analysisDetails.setTooltip(r.filePath);
     updateSelectionStatus(r);
     updateSelectedTags();
+    if (r.isDiscEntry())
+    {
+        ensureDiscBrowser();
+        DiscEntryId parent, entry;
+        parent.value = (uint64_t) r.discParent.getLargeIntValue();
+        entry.value = (uint64_t) r.discEntry.getLargeIntValue();
+        status.setText("Loading " + r.fileName + " from "
+            + juce::File(r.containerPath).getFileName() + "...", juce::dontSendNotification);
+        discBrowser->previewEntry(juce::File(r.containerPath), parent, entry, r.fileName);
+        return;
+    }
     if (isDiscImageFormat(r.format))
     {
         // A metadata-only image never leaves the previous source audible under a new label.
@@ -1176,7 +1198,8 @@ bool MainComponent::openSelectedDiscIfAny()
 {
     if (discBrowser != nullptr && discBrowser->isVisible()) return false;
     const auto selected = library.getSelectedSamples();
-    if (selected.empty() || ! isDiscImageFormat(selected[0].format)) return false;
+    if (selected.empty()) return false;
+    if (! selected[0].isDiscEntry() && ! isDiscImageFormat(selected[0].format)) return false;
     openDiscImage(selected[0]);
     return true;
 }
@@ -1189,43 +1212,62 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
     return preview.keyPressed(key);
 }
 
+void MainComponent::ensureDiscBrowser()
+{
+    if (discBrowser) return;
+    discBrowser = std::make_unique<DiscBrowserPanel>();
+    discBrowser->onSelectionBegin = [this] { engine.stop(); };
+    discBrowser->onImageError = [this](const juce::File& image, const juce::String& error)
+    {
+        folders.setDiscError(image.getFullPathName(), true);
+        status.setText(error, juce::dontSendNotification);
+    };
+    discBrowser->onTreeReady = [this](const juce::File& image, DiscEntryId root, const std::vector<DiscEntry>& entries)
+    {
+        folders.setDiscFolders(image.getFullPathName(), root, entries);
+    };
+    discBrowser->onError = [this](const juce::String& message)
+    {
+        status.setText(message, juce::dontSendNotification);
+    };
+    discBrowser->onExit = [this]
+    {
+        if (discBrowser != nullptr) { discBrowser->closeImage(); discBrowser->setVisible(false); }
+        library.focusForNavigation();
+    };
+    discBrowser->onSampleSelected = [this](const juce::File& container, const juce::String& stem,
+                                           SampleAudioPtr audio)
+    {
+        if (! discBrowser || discBrowser->openedImage() != container) return;
+        if (! preview.loadDiscSample(container, stem, std::move(audio), false, 0, 0, false, true))
+            status.setText(engine.error(), juce::dontSendNotification);
+        else
+            status.setText("Inside " + container.getFileName() + "  ·  " + stem, juce::dontSendNotification);
+    };
+    addChildComponent(*discBrowser);
+}
 void MainComponent::openDiscImage(const SampleRecord& r)
 {
+    if (r.isDiscEntry())
+    {
+        DiscEntryId parent, entry;
+        parent.value = (uint64_t) r.discParent.getLargeIntValue();
+        entry.value = (uint64_t) r.discEntry.getLargeIntValue();
+        ensureDiscBrowser();
+        discBrowser->setBounds(library.getBounds());
+        discBrowser->setHideEmpty(filter.hideEmpty);
+        discBrowser->setVisible(true);
+        discBrowser->toFront(true);
+        discBrowser->previewEntry(juce::File(r.containerPath), parent, entry, r.fileName);
+        return;
+    }
     if (! isDiscImageFormat(r.format)) return;
     if (isIncompatible(r.compatibility))
     {
         status.setText(r.error.isNotEmpty() ? r.error : "This image is not supported", juce::dontSendNotification);
         return;
     }
-    if (! discBrowser)
-    {
-        discBrowser = std::make_unique<DiscBrowserPanel>();
-        discBrowser->onSelectionBegin = [this] { engine.stop(); };
-        discBrowser->onImageError = [this](const juce::File& image, const juce::String& error)
-        {
-            folders.setDiscError(image.getFullPathName(), true);
-            status.setText(error, juce::dontSendNotification);
-        };
-        discBrowser->onTreeReady = [this](const juce::File& image, DiscEntryId root, const std::vector<DiscEntry>& entries)
-        {
-            folders.setDiscFolders(image.getFullPathName(), root, entries);
-        };
-        discBrowser->onExit = [this]
-        {
-            if (discBrowser != nullptr) { discBrowser->closeImage(); discBrowser->setVisible(false); }
-            library.focusForNavigation();
-        };
-        discBrowser->onSampleSelected = [this](const juce::File& container, const juce::String& stem,
-                                               SampleAudioPtr audio)
-        {
-            if (! discBrowser || ! discBrowser->isVisible() || discBrowser->openedImage() != container) return;
-            if (! preview.loadDiscSample(container, stem, std::move(audio), false, 0, 0, false, true))
-                status.setText(engine.error(), juce::dontSendNotification);
-            else
-                status.setText("Browsing " + container.getFileName(), juce::dontSendNotification);
-        };
-        addChildComponent(*discBrowser);
-    }
+    ensureDiscBrowser();
     discBrowser->setBounds(library.getBounds());
     discBrowser->setHideEmpty(filter.hideEmpty);
     discBrowser->setVisible(true);

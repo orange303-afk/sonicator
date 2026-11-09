@@ -10,8 +10,8 @@
 #include <variant>
 namespace sonicator {
 namespace {
-constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility";
-constexpr int schemaVersion = 11;
+constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
+constexpr int schemaVersion = 12;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -24,6 +24,8 @@ SampleRecord read(const detail::Statement& s)
     r.spectralRolloff = s.real(17); r.spectralFlatness = s.real(18); r.missing = s.integer(19) != 0;
     r.starred = s.integer(20) != 0;
     r.compatibility = assetCompatibilityFromInt((int) s.integer(21));
+    r.containerPath = s.text(22); r.discEntry = s.text(23); r.discParent = s.text(24);
+    r.discPartner = s.text(25); r.discPath = s.text(26);
     return r;
 }
 struct StandardTag { const char* name; uint32_t colour; };
@@ -54,6 +56,7 @@ std::pair<juce::String,juce::String> folderRange(const juce::String& folder)
 // Mono files whose names differ only by an L/R marker in the same folder share this key.
 std::pair<juce::String,int> makePairKey(const SampleRecord& record)
 {
+    if (record.containerPath.isNotEmpty()) return { {}, 0 }; // disc listings already merge pairs
     if (record.numChannels != 1 || record.sampleRate <= 0) return { {}, 0 };
     const auto name = parseStereoName(record.fileName);
     if (name.side == 0 || name.base.isEmpty()) return { {}, 0 };
@@ -428,12 +431,16 @@ void SampleRepository::removeByPaths(const juce::StringArray& paths)
     try
     {
         detail::Statement deleteSample(db.handle, "DELETE FROM samples WHERE path=?");
+        detail::Statement deleteContents(db.handle, "DELETE FROM samples WHERE container_path=?");
+        detail::Statement deleteState(db.handle, "DELETE FROM disc_index WHERE image_path=?");
         detail::Statement deleteIgnore(db.handle,
             "DELETE FROM ignored_paths WHERE path=? AND is_folder=0");
         for (const auto& path : paths)
         {
             if (path.isEmpty()) continue;
             deleteSample.reset(); deleteSample.text(1, path); deleteSample.step();
+            deleteContents.reset(); deleteContents.text(1, path); deleteContents.step();
+            deleteState.reset(); deleteState.text(1, path); deleteState.step();
             deleteIgnore.reset(); deleteIgnore.text(1, path); deleteIgnore.step();
         }
         detail::exec(db.handle, "COMMIT;");
@@ -471,7 +478,10 @@ void SampleRepository::createTables()
             "channels INTEGER, version INTEGER, peak REAL, rms REAL, centroid REAL, rolloff REAL, flatness REAL, missing INTEGER,"
             "search_key TEXT NOT NULL DEFAULT '', starred INTEGER NOT NULL DEFAULT 0,"
             "compatibility INTEGER NOT NULL DEFAULT 0, ignored INTEGER NOT NULL DEFAULT 0,"
-            "pair_key TEXT NOT NULL DEFAULT '', pair_side INTEGER NOT NULL DEFAULT 0);"
+            "pair_key TEXT NOT NULL DEFAULT '', pair_side INTEGER NOT NULL DEFAULT 0,"
+            "container_path TEXT NOT NULL DEFAULT '', disc_entry TEXT NOT NULL DEFAULT '',"
+            "disc_parent TEXT NOT NULL DEFAULT '', disc_partner TEXT NOT NULL DEFAULT '',"
+            "disc_path TEXT NOT NULL DEFAULT '');"
             "CREATE INDEX IF NOT EXISTS samples_hash ON samples(hash);"
             "CREATE INDEX IF NOT EXISTS samples_name_id ON samples(name COLLATE NOCASE, id);"
             "CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY);"
@@ -549,6 +559,10 @@ void SampleRepository::createTables()
             "CREATE TABLE IF NOT EXISTS ignored_paths ("
             "path TEXT PRIMARY KEY, is_folder INTEGER NOT NULL DEFAULT 0,"
             "created_at INTEGER NOT NULL DEFAULT 0);"
+            "CREATE TABLE IF NOT EXISTS disc_index ("
+            "image_path TEXT PRIMARY KEY, image_size INTEGER NOT NULL DEFAULT 0,"
+            "image_modified INTEGER NOT NULL DEFAULT 0, entry_count INTEGER NOT NULL DEFAULT 0,"
+            "indexed_at INTEGER NOT NULL DEFAULT 0);"
             "CREATE TABLE IF NOT EXISTS stereo_pairs ("
             "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE,"
             "representative_id INTEGER NOT NULL, partner_id INTEGER NOT NULL,"
@@ -574,6 +588,17 @@ void SampleRepository::createTables()
         ensureColumn(db.handle, "samples", "ignored", "INTEGER NOT NULL DEFAULT 0");
         ensureColumn(db.handle, "samples", "pair_key", "TEXT NOT NULL DEFAULT ''");
         ensureColumn(db.handle, "samples", "pair_side", "INTEGER NOT NULL DEFAULT 0");
+        // Schema 12: samples that live inside a disc image. Ordinary rows keep empty values.
+        ensureColumn(db.handle, "samples", "container_path", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "samples", "disc_entry", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "samples", "disc_parent", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "samples", "disc_partner", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "samples", "disc_path", "TEXT NOT NULL DEFAULT ''");
+        detail::exec(db.handle,
+            "CREATE TABLE IF NOT EXISTS disc_index ("
+            "image_path TEXT PRIMARY KEY, image_size INTEGER NOT NULL DEFAULT 0,"
+            "image_modified INTEGER NOT NULL DEFAULT 0, entry_count INTEGER NOT NULL DEFAULT 0,"
+            "indexed_at INTEGER NOT NULL DEFAULT 0);");
         // Schema 7 extends smart storage in place. Existing rows keep their identity, tags, stars,
         // measured features, duplicate groups and overrides; only new columns/tables are added.
         ensureColumn(db.handle, "smart_candidates", "aux_value", "REAL NOT NULL DEFAULT 0");
@@ -662,7 +687,7 @@ void SampleRepository::createTables()
                 insert.integer(2, (int64_t) tag.colour); insert.step();
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=11;");
+        detail::exec(db.handle, "PRAGMA user_version=12;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -671,20 +696,24 @@ void SampleRepository::createTables()
         throw;
     }
 }
-int64_t SampleRepository::upsert(const SampleRecord& r)
+int64_t SampleRepository::upsertLocked(const SampleRecord& r,
+                                       const std::vector<IgnoredPath>* cachedIgnores)
 {
-    std::lock_guard lock(db.mutex);
-    const bool ignored = isPathIgnored(r.filePath, ignoredPathsLocked());
+    const auto entries = cachedIgnores != nullptr ? *cachedIgnores : ignoredPathsLocked();
+    const bool ignored = isPathIgnored(r.filePath, entries)
+        || (r.containerPath.isNotEmpty() && isPathIgnored(r.containerPath, entries));
     const auto [pairKey, pairSide] = makePairKey(r);
     detail::Statement s(db.handle,
-        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred,compatibility,ignored,pair_key,pair_side)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
+        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred,compatibility,ignored,pair_key,pair_side,container_path,disc_entry,disc_parent,disc_partner,disc_path)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
         "name=excluded.name,hash=excluded.hash,format=excluded.format,error=excluded.error,size=excluded.size,"
         "modified=excluded.modified,analyzed=excluded.analyzed,duration=excluded.duration,rate=excluded.rate,"
         "bits=excluded.bits,channels=excluded.channels,version=excluded.version,peak=excluded.peak,rms=excluded.rms,"
         "centroid=excluded.centroid,rolloff=excluded.rolloff,flatness=excluded.flatness,missing=excluded.missing,"
         "search_key=excluded.search_key,compatibility=excluded.compatibility,ignored=excluded.ignored,"
-        "pair_key=excluded.pair_key,pair_side=excluded.pair_side RETURNING id");
+        "pair_key=excluded.pair_key,pair_side=excluded.pair_side,container_path=excluded.container_path,"
+        "disc_entry=excluded.disc_entry,disc_parent=excluded.disc_parent,"
+        "disc_partner=excluded.disc_partner,disc_path=excluded.disc_path RETURNING id");
     s.text(1,r.filePath); s.text(2,r.fileName); s.text(3,r.fileHash); s.text(4,r.format); s.text(5,r.error);
     s.integer(6,r.fileSize); s.integer(7,r.dateModified); s.integer(8,r.dateAnalyzed);
     s.real(9,r.duration); s.real(10,r.sampleRate); s.integer(11,r.bitsPerSample); s.integer(12,r.numChannels);
@@ -693,16 +722,26 @@ int64_t SampleRepository::upsert(const SampleRecord& r)
     s.text(20,searchKey(r.fileName,r.filePath)); s.integer(21,r.starred ? 1 : 0);
     s.integer(22,(int) r.compatibility); s.integer(23, ignored ? 1 : 0);
     s.text(24, pairKey); s.integer(25, pairSide);
+    s.text(26, r.containerPath); s.text(27, r.discEntry); s.text(28, r.discParent);
+    s.text(29, r.discPartner); s.text(30, r.discPath);
     if (! s.step()) throw std::runtime_error("Insert did not return a sample ID");
     const auto id = s.integer(0);
     // Reanalysed audio makes the derived smart result stale; candidates, overrides and the last
     // completed values are kept and the next smart run rebuilds them. The row is not deleted, so
     // the UI can still show the previous value as stale instead of pretending it was never known.
-    detail::Statement invalidate(db.handle,
-        "UPDATE smart_results SET pipeline_state='stale', updated_at=? WHERE sample_id=?");
-    invalidate.integer(1, juce::Time::currentTimeMillis());
-    invalidate.integer(2, id); invalidate.step();
+    if (r.containerPath.isEmpty())
+    {
+        detail::Statement invalidate(db.handle,
+            "UPDATE smart_results SET pipeline_state='stale', updated_at=? WHERE sample_id=?");
+        invalidate.integer(1, juce::Time::currentTimeMillis());
+        invalidate.integer(2, id); invalidate.step();
+    }
     return id;
+}
+int64_t SampleRepository::upsert(const SampleRecord& r)
+{
+    std::lock_guard lock(db.mutex);
+    return upsertLocked(r);
 }
 std::optional<SampleRecord> SampleRepository::findByPath(const juce::String& path) const
 {
@@ -724,11 +763,12 @@ std::vector<SampleRecord> SampleRepository::page(int limit, int offset) const
 std::vector<PathEntry> SampleRepository::pathsAfterId(int64_t lastId, int limit) const
 {
     std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,"SELECT id,path,missing FROM samples WHERE id>? ORDER BY id LIMIT ?");
+    detail::Statement s(db.handle,
+        "SELECT id,path,missing,container_path FROM samples WHERE id>? ORDER BY id LIMIT ?");
     s.integer(1,juce::jmax<int64_t>(0,lastId)); s.integer(2,juce::jlimit(0,50000,limit));
     std::vector<PathEntry> out;
     while (s.step())
-        out.push_back({s.integer(0), s.text(1), s.integer(2) != 0});
+        out.push_back({s.integer(0), s.text(1), s.integer(2) != 0, s.text(3)});
     return out;
 }
 std::vector<IgnoredPath> SampleRepository::ignoredPathsLocked() const
@@ -778,8 +818,9 @@ void SampleRepository::ignorePath(const juce::String& path, bool folder)
         }
         else
         {
-            detail::Statement u(db.handle, "UPDATE samples SET ignored=1 WHERE path=?");
-            u.text(1, path); u.step();
+            // Ignoring a disc image hides the samples it contains as well.
+            detail::Statement u(db.handle, "UPDATE samples SET ignored=1 WHERE path=? OR container_path=?");
+            u.text(1, path); u.text(2, path); u.step();
         }
         detail::exec(db.handle, "COMMIT;");
     }
@@ -810,20 +851,23 @@ void SampleRepository::unignorePathLocked(const juce::String& path)
     {
         auto [lower, upper] = folderRange(path);
         select = std::make_unique<detail::Statement>(db.handle,
-            "SELECT id,path FROM samples WHERE path>=? AND path<?");
+            "SELECT id,path,container_path FROM samples WHERE path>=? AND path<?");
         select->text(1, lower); select->text(2, upper);
     }
     else
     {
         select = std::make_unique<detail::Statement>(db.handle,
-            "SELECT id,path FROM samples WHERE path=?");
-        select->text(1, path);
+            "SELECT id,path,container_path FROM samples WHERE path=? OR container_path=?");
+        select->text(1, path); select->text(2, path);
     }
     detail::Statement update(db.handle, "UPDATE samples SET ignored=? WHERE id=?");
     while (select->step())
     {
         update.reset();
-        update.integer(1, isPathIgnored(select->text(1), entries) ? 1 : 0);
+        const auto container = select->text(2);
+        const bool ignored = isPathIgnored(select->text(1), entries)
+            || (container.isNotEmpty() && isPathIgnored(container, entries));
+        update.integer(1, ignored ? 1 : 0);
         update.integer(2, select->integer(0));
         update.step();
     }
@@ -1094,6 +1138,13 @@ FolderRemoval SampleRepository::removeFolder(const juce::String& folder)
             remove.text(3, lower); remove.text(4, upper); remove.step();
         }
         {
+            // Removing a folder also forgets the disc state of its images; adding the folder
+            // again must re-index their contents even when the image bytes did not change.
+            detail::Statement remove(db.handle,
+                "DELETE FROM disc_index WHERE image_path>=? AND image_path<?");
+            remove.text(1, lower); remove.text(2, upper); remove.step();
+        }
+        {
             // A removed folder stays out of every later scan, including a parent root or another
             // root that contains it. Explicitly adding it again clears this entry.
             detail::Statement ignore(db.handle,
@@ -1126,6 +1177,104 @@ int SampleRepository::removeSamplesWithFormats(const juce::StringArray& formats)
         for (int i = 0; i < cleaned.size(); ++i) remove.text(i + 1, cleaned[i]);
         remove.step();
         const int removed = sqlite3_changes(db.handle);
+        detail::exec(db.handle, "COMMIT;");
+        return removed;
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+std::vector<juce::String> SampleRepository::discPathsLocked(const juce::String& imagePath) const
+{
+    std::vector<juce::String> out;
+    detail::Statement s(db.handle, "SELECT path FROM samples WHERE container_path=? ORDER BY path");
+    s.text(1, imagePath);
+    while (s.step()) out.push_back(s.text(0));
+    return out;
+}
+std::optional<DiscIndexState> SampleRepository::discIndexState(const juce::String& imagePath) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT image_size,image_modified,entry_count FROM disc_index WHERE image_path=?");
+    s.text(1, imagePath);
+    if (! s.step()) return std::nullopt;
+    return DiscIndexState{ s.integer(0), s.integer(1), s.integer(2) };
+}
+void SampleRepository::replaceDiscContents(const juce::String& imagePath, int64_t imageSize,
+                                           int64_t imageModified, const std::vector<SampleRecord>& rows)
+{
+    if (imagePath.isEmpty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        const auto existing = discPathsLocked(imagePath);
+        std::set<juce::String> wanted;
+        for (const auto& row : rows) wanted.insert(row.filePath);
+        detail::Statement remove(db.handle, "DELETE FROM samples WHERE path=?");
+        for (const auto& path : existing)
+            if (wanted.find(path) == wanted.end())
+            { remove.reset(); remove.text(1, path); remove.step(); }
+        const auto ignoredEntries = ignoredPathsLocked();
+        for (const auto& row : rows) upsertLocked(row, &ignoredEntries);
+        detail::Statement state(db.handle,
+            "INSERT INTO disc_index(image_path,image_size,image_modified,entry_count,indexed_at)"
+            " VALUES(?,?,?,?,?) ON CONFLICT(image_path) DO UPDATE SET"
+            " image_size=excluded.image_size,image_modified=excluded.image_modified,"
+            " entry_count=excluded.entry_count,indexed_at=excluded.indexed_at");
+        state.text(1, imagePath); state.integer(2, imageSize); state.integer(3, imageModified);
+        state.integer(4, (int64_t) rows.size()); state.integer(5, juce::Time::currentTimeMillis());
+        state.step();
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+void SampleRepository::deleteDiscContents(const juce::String& imagePath)
+{
+    if (imagePath.isEmpty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement remove(db.handle, "DELETE FROM samples WHERE container_path=?");
+        remove.text(1, imagePath); remove.step();
+        detail::Statement state(db.handle, "DELETE FROM disc_index WHERE image_path=?");
+        state.text(1, imagePath); state.step();
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+void SampleRepository::invalidateDiscState(const juce::String& imagePath)
+{
+    if (imagePath.isEmpty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::Statement remove(db.handle, "DELETE FROM disc_index WHERE image_path=?");
+    remove.text(1, imagePath); remove.step();
+}
+int SampleRepository::pruneDiscContents()
+{
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::exec(db.handle,
+            "DELETE FROM samples WHERE container_path<>'' AND NOT EXISTS("
+            "SELECT 1 FROM samples image WHERE image.path=samples.container_path AND image.missing=0)");
+        const int removed = sqlite3_changes(db.handle);
+        detail::exec(db.handle,
+            "DELETE FROM disc_index WHERE NOT EXISTS("
+            "SELECT 1 FROM samples image WHERE image.path=disc_index.image_path AND image.missing=0)");
         detail::exec(db.handle, "COMMIT;");
         return removed;
     }
@@ -1168,9 +1317,11 @@ RelocationResult SampleRepository::relocateRoots(const std::vector<RootRelocatio
     detail::exec(db.handle, "BEGIN IMMEDIATE");
     try
     {
-        struct Row { int64_t id = 0; juce::String name, path; };
-        detail::Statement rows(db.handle, "SELECT id,name,path FROM samples WHERE id>? ORDER BY id LIMIT 2000");
-        detail::Statement update(db.handle, "UPDATE OR IGNORE samples SET path=?, search_key=? WHERE id=?");
+        struct Row { int64_t id = 0; juce::String name, path, containerPath; };
+        detail::Statement rows(db.handle,
+            "SELECT id,name,path,container_path FROM samples WHERE id>? ORDER BY id LIMIT 2000");
+        detail::Statement update(db.handle,
+            "UPDATE OR IGNORE samples SET path=?, search_key=?, container_path=? WHERE id=?");
         detail::Statement target(db.handle, "SELECT id FROM samples WHERE path=?");
         detail::Statement mergeTags(db.handle,
             "INSERT OR IGNORE INTO sample_tags(sample_id,tag_id) SELECT ?,tag_id FROM sample_tags WHERE sample_id=?");
@@ -1182,7 +1333,8 @@ RelocationResult SampleRepository::relocateRoots(const std::vector<RootRelocatio
         {
             rows.reset(); rows.integer(1, lastId);
             std::vector<Row> batch;
-            while (rows.step()) batch.push_back({ rows.integer(0), rows.text(1), rows.text(2) });
+            while (rows.step())
+                batch.push_back({ rows.integer(0), rows.text(1), rows.text(2), rows.text(3) });
             if (batch.empty()) break;
             for (const auto& row : batch)
             {
@@ -1194,8 +1346,13 @@ RelocationResult SampleRepository::relocateRoots(const std::vector<RootRelocatio
                 if (best == nullptr) continue;
                 const auto newPath = pathrelocation::remap(row.path, best->oldRoot, best->newRoot);
                 if (newPath == row.path) continue;
+                const auto newContainer = ! row.containerPath.isEmpty()
+                        && pathrelocation::isUnder(row.containerPath, best->oldRoot)
+                    ? pathrelocation::remap(row.containerPath, best->oldRoot, best->newRoot)
+                    : row.containerPath;
                 update.reset(); update.text(1, newPath);
-                update.text(2, searchKey(row.name, newPath)); update.integer(3, row.id); update.step();
+                update.text(2, searchKey(row.name, newPath)); update.text(3, newContainer);
+                update.integer(4, row.id); update.step();
                 if (sqlite3_changes(db.handle) == 0)
                 {
                     // The target path already exists: keep that row and move the user's tags and
@@ -1214,6 +1371,35 @@ RelocationResult SampleRepository::relocateRoots(const std::vector<RootRelocatio
                 }
             }
             lastId = batch.back().id;
+        }
+        {
+            // Image state keys are absolute paths too; move them with their root so an unchanged
+            // image is not walked again after relocation.
+            std::vector<std::pair<juce::String, juce::String>> states;
+            {
+                detail::Statement read(db.handle, "SELECT image_path FROM disc_index");
+                while (read.step())
+                {
+                    const auto oldImage = read.text(0);
+                    const RootRelocation* best = nullptr;
+                    for (const auto& relocation : relocations)
+                        if (pathrelocation::isUnder(oldImage, relocation.oldRoot)
+                            && (best == nullptr || relocation.oldRoot.length() > best->oldRoot.length()))
+                            best = &relocation;
+                    if (best == nullptr) continue;
+                    const auto newImage = pathrelocation::remap(oldImage, best->oldRoot, best->newRoot);
+                    if (newImage != oldImage) states.emplace_back(newImage, oldImage);
+                }
+            }
+            detail::Statement move(db.handle,
+                "INSERT OR REPLACE INTO disc_index(image_path,image_size,image_modified,entry_count,indexed_at)"
+                " SELECT ?,image_size,image_modified,entry_count,indexed_at FROM disc_index WHERE image_path=?");
+            detail::Statement remove(db.handle, "DELETE FROM disc_index WHERE image_path=?");
+            for (const auto& [newImage, oldImage] : states)
+            {
+                move.reset(); move.text(1, newImage); move.text(2, oldImage); move.step();
+                remove.reset(); remove.text(1, oldImage); remove.step();
+            }
         }
         // Ignore entries are absolute paths too. Move them with their root so a hidden folder
         // stays hidden after the catalog is relocated.
@@ -2400,7 +2586,7 @@ std::vector<int64_t> SampleRepository::samplesNeedingSmartAnalysis(int64_t after
     const auto visibility = ignored.empty() ? juce::String() : juce::String(" AND s.ignored=0");
     const auto sql = juce::String(
         "SELECT s.id FROM samples s LEFT JOIN smart_results r ON r.sample_id=s.id"
-        " WHERE s.id>? AND (r.sample_id IS NULL"
+        " WHERE s.id>? AND s.container_path='' AND (r.sample_id IS NULL"
         " OR r.pipeline_state IN ('stale','error','not_analyzed')"
         " OR r.extractor_version<>? OR r.resolver_version<>? OR r.dsp_version<>?"
         " OR r.revision<=0)") + visibility + " ORDER BY s.id LIMIT ?";
@@ -2419,7 +2605,7 @@ std::vector<int64_t> SampleRepository::samplesWithSmartResultAfterId(int64_t aft
     const auto visibility = ignored.empty() ? juce::String() : juce::String(" AND s.ignored=0");
     const auto sql = juce::String(
         "SELECT r.sample_id FROM smart_results r JOIN samples s ON s.id=r.sample_id"
-        " WHERE r.sample_id>? AND r.pipeline_state='complete'") + visibility
+        " WHERE r.sample_id>? AND s.container_path='' AND r.pipeline_state='complete'") + visibility
         + " ORDER BY r.sample_id LIMIT ?";
     detail::Statement s(db.handle, sql.toRawUTF8());
     s.integer(1, afterId);

@@ -164,7 +164,9 @@ void DiscBrowserPanel::activate(int row)
 void DiscBrowserPanel::showError(const juce::String& message)
 {
     busy = false;
+    revealPending = false;
     if (! imageReady && onImageError) onImageError(image, message);
+    if (onError) onError(message);
     statusLabel.setText(message, juce::dontSendNotification);
 }
 void DiscBrowserPanel::back()
@@ -206,6 +208,27 @@ void DiscBrowserPanel::showDirectory(DiscEntryId directory)
     pathLabel.setText(parts.joinIntoString(" / "), juce::dontSendNotification);
     refreshEntries();
     busy = false;
+}
+void DiscBrowserPanel::previewEntry(const juce::File& file, DiscEntryId parent, DiscEntryId entry,
+                                    const juce::String& name)
+{
+    if (! file.existsAsFile()) { showError("The disc image is not available"); return; }
+    revealParent = parent; revealEntry = entry; revealName = name;
+    revealPending = ! canReuseImage(file);
+    if (! revealPending)
+    {
+        showDirectory(parent);
+        for (int row = 0; row < (int) entries.size(); ++row)
+            if (entries[(size_t) row].id == entry)
+            {
+                list.deselectAllRows();
+                list.selectRow(row);
+                return;
+            }
+        statusLabel.setText(revealName + " is no longer in this image", juce::dontSendNotification);
+        return;
+    }
+    open(file);
 }
 void DiscBrowserPanel::setHideEmpty(bool hide)
 {
@@ -302,13 +325,32 @@ void DiscBrowserPanel::applyCompletion(const DiscBrowserService::Completion& com
         lastSelectedAudio.reset();
         list.updateContent();
         list.repaint();
-        list.grabKeyboardFocus();
+        if (isShowing()) list.grabKeyboardFocus(); // a hidden panel only prepares a preview
         busy = false;
         statusLabel.setText(completion.listing.partial
             ? (completion.listing.warning.isNotEmpty() ? completion.listing.warning : "Partial listing")
             : juce::String(entries.size()) + " entries", juce::dontSendNotification);
         if (completion.status != DiscStatus::ready)
             statusLabel.setText(completion.error, juce::dontSendNotification);
+        if (revealPending)
+        {
+            const auto parent = revealParent;
+            const auto entry = revealEntry;
+            const auto name = revealName;
+            revealPending = false;
+            showDirectory(parent);
+            bool selected = false;
+            for (int row = 0; row < (int) entries.size(); ++row)
+                if (entries[(size_t) row].id == entry)
+                {
+                    list.deselectAllRows();
+                    list.selectRow(row);
+                    selected = true;
+                    break;
+                }
+            if (! selected)
+                statusLabel.setText(name + " is no longer in this image", juce::dontSendNotification);
+        }
         return;
     }
     if (pendingDecodeName.isEmpty() || completion.entry != pendingEntry) return;

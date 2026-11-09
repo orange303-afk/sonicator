@@ -13,6 +13,11 @@ struct PathEntry
     int64_t id = 0;
     juce::String path;
     bool missing = false;
+    juce::String containerPath;
+};
+struct DiscIndexState
+{
+    int64_t imageSize = 0, imageModified = 0, entryCount = 0;
 };
 struct IgnoredPath
 {
@@ -96,6 +101,18 @@ public:
     std::map<int64_t, juce::String> stereoPairPartners(const std::vector<int64_t>& ids) const;
     int countHash(const juce::String&) const;
     void addRoot(const juce::String&);
+    // Disc-image contents. Rows are ordinary catalog rows with container_path set and a synthetic
+    // path; this API keeps them isolated from real-file bookkeeping and stores the image state so
+    // an unchanged image is not walked again.
+    std::optional<DiscIndexState> discIndexState(const juce::String& imagePath) const;
+    void replaceDiscContents(const juce::String& imagePath, int64_t imageSize, int64_t imageModified,
+                             const std::vector<SampleRecord>& rows);
+    void deleteDiscContents(const juce::String& imagePath);
+    // Forget that this image was fully walked (used after a partial listing) so a later scan
+    // retries it while keeping the rows already found.
+    void invalidateDiscState(const juce::String& imagePath);
+    // Drops contents of images that are gone, ignored or no longer catalogued. Returns row count.
+    int pruneDiscContents();
     // Deletes every catalog row below a folder. A registered root also loses its root entry; any
     // other folder gets an exact ignore entry so a parent rescan does not restore it. Files on
     // disk are never touched.
@@ -200,6 +217,8 @@ private:
     std::vector<IgnoredPath> ignoredPathsLocked() const;
     // Caller holds db.mutex and an open transaction.
     void unignorePathLocked(const juce::String& path);
+    int64_t upsertLocked(const SampleRecord&, const std::vector<IgnoredPath>* ignoredEntries = nullptr);
+    std::vector<juce::String> discPathsLocked(const juce::String& imagePath) const;
     Database& db;
 };
 } // namespace sonicator
