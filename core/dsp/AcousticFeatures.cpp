@@ -33,22 +33,25 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
     if (peak < 1e-5f)
         return AcousticDescriptors{};
 
-    // Downmixed mono representation and overall buffer RMS
-    std::vector<float> mono(static_cast<size_t>(numSamples), 0.0f);
+    // Channel RMS & overall buffer RMS
+    std::vector<const float*> chPointers(static_cast<size_t>(numChannels));
+    std::vector<double> chEnergySum(static_cast<size_t>(numChannels), 0.0);
     double totalEnergySum = 0.0;
     for (int ch = 0; ch < numChannels; ++ch)
     {
         const float* data = buffer.getReadPointer(ch);
+        chPointers[static_cast<size_t>(ch)] = data;
+        double chSum = 0.0;
         for (int i = 0; i < numSamples; ++i)
         {
-            mono[static_cast<size_t>(i)] += data[i];
-            totalEnergySum += static_cast<double>(data[i]) * static_cast<double>(data[i]);
+            double v = static_cast<double>(data[i]);
+            chSum += v * v;
         }
+        chEnergySum[static_cast<size_t>(ch)] = chSum;
+        totalEnergySum += chSum;
     }
-    const float invChannels = 1.0f / static_cast<float>(numChannels);
-    for (int i = 0; i < numSamples; ++i)
-        mono[static_cast<size_t>(i)] *= invChannels;
 
+    const float invChannels = 1.0f / static_cast<float>(numChannels);
     const double totalSampleCount = static_cast<double>(numChannels) * static_cast<double>(numSamples);
     const double bufferRms = (totalSampleCount > 0.0) ? std::sqrt(totalEnergySum / totalSampleCount) : 0.0;
     const double totalDuration = static_cast<double>(numSamples) / sampleRate;
@@ -57,17 +60,24 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
     desc.crestFactor = (bufferRms > 1e-9) ? (static_cast<double>(peak) / bufferRms) : 0.0;
 
     // Temporal Centroid: sum(t_i * energy_i) / (sum(energy_i) * totalDuration)
-    double monoEnergySum = 0.0;
+    // Multi-channel energy computed as average sum-of-squares across channels to prevent anti-phase cancellation
+    double totalTimeEnergySum = 0.0;
     double weightedTimeEnergy = 0.0;
     for (int i = 0; i < numSamples; ++i)
     {
-        double e = static_cast<double>(mono[static_cast<size_t>(i)]) * static_cast<double>(mono[static_cast<size_t>(i)]);
+        double sampleEnergy = 0.0;
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            double v = static_cast<double>(chPointers[static_cast<size_t>(ch)][i]);
+            sampleEnergy += v * v;
+        }
+        sampleEnergy *= invChannels;
         double t = static_cast<double>(i) / sampleRate;
-        monoEnergySum += e;
-        weightedTimeEnergy += t * e;
+        totalTimeEnergySum += sampleEnergy;
+        weightedTimeEnergy += t * sampleEnergy;
     }
-    if (monoEnergySum > 1e-12 && totalDuration > 0.0)
-        desc.temporalCentroid = juce::jlimit(0.0, 1.0, weightedTimeEnergy / (monoEnergySum * totalDuration));
+    if (totalTimeEnergySum > 1e-12 && totalDuration > 0.0)
+        desc.temporalCentroid = juce::jlimit(0.0, 1.0, weightedTimeEnergy / (totalTimeEnergySum * totalDuration));
     else
         desc.temporalCentroid = 0.0;
 
@@ -82,27 +92,33 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
     if (numSamples <= frameSize)
     {
         double sumSq = 0.0;
-        for (int i = 0; i < numSamples; ++i)
+        for (int ch = 0; ch < numChannels; ++ch)
         {
-            double v = mono[static_cast<size_t>(i)];
-            sumSq += v * v;
+            const float* p = chPointers[static_cast<size_t>(ch)];
+            for (int i = 0; i < numSamples; ++i)
+            {
+                double v = p[i];
+                sumSq += v * v;
+            }
         }
-        frameRms.push_back(std::sqrt(sumSq / numSamples));
+        frameRms.push_back(std::sqrt(sumSq / (static_cast<double>(numSamples) * numChannels)));
         frameTime.push_back(totalDuration * 0.5);
     }
     else
     {
-        const float* monoData = mono.data();
         for (int start = 0; start + frameSize <= numSamples; start += hopSize)
         {
-            const float* p = monoData + start;
-            float sumSq = 0.0f;
-            for (int i = 0; i < frameSize; ++i)
+            double sumSq = 0.0;
+            for (int ch = 0; ch < numChannels; ++ch)
             {
-                float v = p[i];
-                sumSq += v * v;
+                const float* p = chPointers[static_cast<size_t>(ch)] + start;
+                for (int i = 0; i < frameSize; ++i)
+                {
+                    double v = p[i];
+                    sumSq += v * v;
+                }
             }
-            frameRms.push_back(std::sqrt(static_cast<double>(sumSq) / frameSize));
+            frameRms.push_back(std::sqrt(sumSq / (static_cast<double>(frameSize) * numChannels)));
             frameTime.push_back((static_cast<double>(start) + frameSize * 0.5) / sampleRate);
         }
     }
@@ -349,18 +365,34 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
         }
         else
         {
+            // For YIN / pitch clarity, use channel 0 or the channel with higher RMS
+            int bestCh = 0;
+            if (numChannels > 1)
+            {
+                double bestEnergy = chEnergySum[0];
+                for (int ch = 1; ch < numChannels; ++ch)
+                {
+                    if (chEnergySum[static_cast<size_t>(ch)] > bestEnergy)
+                    {
+                        bestEnergy = chEnergySum[static_cast<size_t>(ch)];
+                        bestCh = ch;
+                    }
+                }
+            }
+
             const int dsFactor = (sampleRate > 24000.0) ? 2 : 1;
             const double effSampleRate = sampleRate / dsFactor;
             const int effNumSamples = numSamples / dsFactor;
 
-            std::vector<float> dsMono;
+            const float* chSource = chPointers[static_cast<size_t>(bestCh)];
+            std::vector<float> dsSignal;
             if (dsFactor > 1)
             {
-                dsMono.resize(static_cast<size_t>(effNumSamples));
+                dsSignal.resize(static_cast<size_t>(effNumSamples));
                 for (int i = 0; i < effNumSamples; ++i)
-                    dsMono[static_cast<size_t>(i)] = mono[static_cast<size_t>(i * dsFactor)];
+                    dsSignal[static_cast<size_t>(i)] = chSource[static_cast<size_t>(i * dsFactor)];
             }
-            const float* monoData = (dsFactor > 1) ? dsMono.data() : mono.data();
+            const float* signalData = (dsFactor > 1) ? dsSignal.data() : chSource;
 
             int tauMax = std::max(10, static_cast<int>(effSampleRate / 40.0));
             int tauMin = std::max(2, static_cast<int>(effSampleRate / 2500.0));
@@ -377,13 +409,13 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
                 int W = std::min(targetW, effNumSamples - tauMax);
 
                 int peakSample = 0;
-                float peakMonoVal = 0.0f;
+                float peakSignalVal = 0.0f;
                 for (int i = 0; i < effNumSamples; ++i)
                 {
-                    float absVal = std::abs(monoData[i]);
-                    if (absVal > peakMonoVal)
+                    float absVal = std::abs(signalData[i]);
+                    if (absVal > peakSignalVal)
                     {
-                        peakMonoVal = absVal;
+                        peakSignalVal = absVal;
                         peakSample = i;
                     }
                 }
@@ -392,7 +424,7 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
                 if (start + W + tauMax > effNumSamples)
                     start = std::max(0, effNumSamples - W - tauMax);
 
-                const float* pA = monoData + start;
+                const float* pA = signalData + start;
                 std::vector<double> d(static_cast<size_t>(tauMax + 1), 0.0);
                 for (int tau = 1; tau <= tauMax; ++tau)
                 {

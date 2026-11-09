@@ -667,6 +667,8 @@ TEST_CASE("Acoustic classification end-to-end pipeline integration", "[acceptanc
         resolved.extractorVersion = smartExtractorsVersion;
         resolved.resolverVersion = smartResolverVersion;
         REQUIRE(resolved.type == "Kick");
+        REQUIRE(resolved.typeState == SmartState::Resolved);
+        REQUIRE(resolved.explanation.contains("genre context"));
 
         // 5. AutoTagRules proposes Kick tag with AutoTagRule::SmartType
         AutoTagInput in;

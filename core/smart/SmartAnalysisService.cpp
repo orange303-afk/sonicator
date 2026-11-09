@@ -42,9 +42,9 @@ bool hasContainerTypeMetadata(const std::vector<SmartCandidate>& candidates)
     {
         if (c.field == SmartField::Type && c.status == CandidateStatus::Valid)
         {
-            if (c.source.startsWith("wav_") || c.source.startsWith("aiff_")
-                || c.source == "info" || c.source == "id3" || c.source.startsWith("asd_")
-                || c.source.startsWith("rx2_"))
+            if (c.source == "wav_inst" || c.source == "wav_smpl"
+                || c.source == "aiff_basc"
+                || c.source == "rx2_recy" || c.source == "rx2_glob")
                 return true;
         }
     }
@@ -350,7 +350,9 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record, Cancel
         extraction.extractorVersion = smartDspVersion;
         extraction.updatedAt = juce::Time::currentTimeMillis();
         const auto metadataResolved = resolveSmart(out.candidates);
-        const auto metadataType = metadataResolved.typeState == SmartState::Resolved
+        const auto metadataType = (metadataResolved.typeState == SmartState::Resolved
+                                   && metadataResolved.typeSource.isNotEmpty()
+                                   && metadataResolved.typeSource != "path")
                                       ? metadataResolved.type : juce::String();
         const auto metadataStructure = metadataResolved.structureState == SmartState::Resolved
                                            ? metadataResolved.structure : juce::String();

@@ -70,6 +70,19 @@ TEST_CASE("Case 4: Disagreement where high-confidence acoustic overrides filenam
     REQUIRE(res.explanation.contains("interpretations differ"));
 }
 
+TEST_CASE("SmartResolver: Genre candidate (source=path) does not conflict with instrument type", "[smart][resolver][acoustic][genre]")
+{
+    auto ac = makeCandidate(SmartField::Type, "dsp_acoustic", "Kick");
+    auto genre = makeCandidate(SmartField::Type, "path", "Trap");
+    auto res = resolveSmart({ ac, genre });
+    REQUIRE(res.type == "Kick");
+    REQUIRE(res.typeState == SmartState::Resolved);
+    REQUIRE(res.typeSource == "dsp_acoustic");
+    REQUIRE(res.explanation.contains("path=Trap"));
+    REQUIRE(res.explanation.contains("genre context"));
+    REQUIRE_FALSE(res.explanation.contains("interpretations differ"));
+}
+
 TEST_CASE("Case 5: AutoTagRules evaluates resolved smart type Kick from dsp_acoustic", "[autotag][rules][acoustic]")
 {
     // Case 5: AutoTagRules::evaluate on input with no filename tokens and resolved smart type Kick from dsp_acoustic:

@@ -245,4 +245,10 @@ TEST_CASE("AcousticFeatures preserves stereo anti-phase energy and 96kHz sample 
     for (double e : desc.subBandEnergy)
         sumEnergy += e;
     REQUIRE(sumEnergy == Catch::Approx(1.0).margin(1e-4));
+
+    // Anti-phase stereo should not cancel out temporal centroid, envelope, or pitch clarity
+    REQUIRE(desc.pitchClarity > 0.80);
+    REQUIRE(desc.temporalCentroid > 0.40);
+    REQUIRE(desc.temporalCentroid < 0.60);
+    REQUIRE(desc.crestFactor > 0.0);
 }

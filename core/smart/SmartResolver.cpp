@@ -73,8 +73,33 @@ void resolveText(const std::vector<SmartCandidate>& all,
         state = SmartState::Unknown;
         return;
     }
+
+    std::vector<SmartCandidate> primaryList;
+    std::vector<SmartCandidate> genreCandidates;
+
+    if (field == SmartField::Type)
+    {
+        std::vector<SmartCandidate> instrumentCandidates;
+        for (const auto& c : list)
+        {
+            if (c.source == "path")
+                genreCandidates.push_back(c);
+            else
+                instrumentCandidates.push_back(c);
+        }
+
+        if (! instrumentCandidates.empty())
+            primaryList = std::move(instrumentCandidates);
+        else
+            primaryList = list;
+    }
+    else
+    {
+        primaryList = list;
+    }
+
     std::set<juce::String> distinct;
-    for (const auto& c : list)
+    for (const auto& c : primaryList)
     {
         auto normalized = c.textValue.trim().toLowerCase();
         if (field == SmartField::Type)
@@ -85,11 +110,18 @@ void resolveText(const std::vector<SmartCandidate>& all,
         }
         distinct.insert(normalized);
     }
-    value = list.front().textValue;
-    source = list.front().source;
+    value = primaryList.front().textValue;
+    source = primaryList.front().source;
     state = distinct.size() == 1 ? SmartState::Resolved : SmartState::Ambiguous;
-    explanation = label + ": " + describe(list)
-                + (distinct.size() > 1 ? " (interpretations differ)" : agreementNote(list));
+
+    juce::String note = label + ": " + describe(primaryList)
+                      + (distinct.size() > 1 ? " (interpretations differ)" : agreementNote(primaryList));
+    if (! genreCandidates.empty() && primaryList.size() != list.size())
+    {
+        note += " (genre context: " + describe(genreCandidates) + ")";
+    }
+
+    explanation += (explanation.isEmpty() ? "" : " ") + note;
 }
 bool isHalfDouble(double a, double b)
 {
