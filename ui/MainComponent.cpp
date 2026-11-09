@@ -242,7 +242,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     addAndMakeVisible(folders); rootsLabel.setVisible(false);
     folders.setComponentID("folderTree");
+    folders.setFolderAliases(appSettings.folderAliases);
     addAndMakeVisible(favoritesLabel); addAndMakeVisible(favorites); addAndMakeVisible(favoritesSplitter);
+    favorites.setFolderAliases(appSettings.folderAliases);
     favoritesLabel.setText("FAVORITES",juce::dontSendNotification);
     favoritesLabel.setFont(juce::FontOptions(11)); favoritesLabel.setColour(juce::Label::textColourId,theme::muted);
     favoritesLabel.setComponentID("favoritesLabel"); favorites.setComponentID("favoritesTree");
@@ -330,7 +332,11 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             status.setText("Wait for the library scan to finish before smart analysis.",juce::dontSendNotification);
             return;
         }
-        if (smart->progress().running) return;
+        if (smart->progress().running)
+        {
+            status.setText("Smart metadata analysis is already running.", juce::dontSendNotification);
+            return;
+        }
         if (! smart->start())
             status.setText("Smart metadata analysis could not start.",juce::dontSendNotification);
     };
@@ -345,12 +351,14 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     {
         juce::PopupMenu menu;
         menu.setLookAndFeel(&look);
-        menu.addItem(1, "Add folder...", addFolder.isEnabled());
-        menu.addItem(2, "Rescan", rescan.isEnabled());
-        menu.addItem(3, "Rescan and analyze new files", newFiles.isEnabled());
+        // Keep every item clickable even while a background job runs. The actions report what to
+        // wait for instead of leaving the whole menu grey and apparently broken.
+        menu.addItem(1, "Add folder...");
+        menu.addItem(2, "Rescan");
+        menu.addItem(3, "Rescan and analyze new files");
         menu.addSeparator();
-        menu.addItem(4, "Reanalyze all", reanalyze.isEnabled());
-        menu.addItem(5, "Smart metadata", smartButton.isEnabled());
+        menu.addItem(4, "Reanalyze all");
+        menu.addItem(5, "Smart metadata");
         menu.addSeparator();
         menu.addItem(6, "Show ignored", true, filter.showIgnored);
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraryMenu),
@@ -707,7 +715,13 @@ void MainComponent::beginImport(const juce::File& folder)
         status.setText("Wait for Split to finish.", juce::dontSendNotification);
         return;
     }
-    if (! indexer || indexer->progress().running) return;
+    if (indexer == nullptr) return;
+    if (indexer->progress().running)
+    {
+        status.setText("Wait for the library scan to finish before adding a folder.",
+                       juce::dontSendNotification);
+        return;
+    }
     try
     {
         // Adding a folder is an explicit request: a previous Remove or Ignore of this folder or
@@ -746,6 +760,23 @@ bool MainComponent::removeFolderFromLibrary(const juce::String& path)
         {
             settingsStore.update([&favorites](AppSettings& saved) { saved.favoriteFolders = favorites; });
             appSettings.favoriteFolders = favorites;
+        }
+        auto aliases = appSettings.folderAliases;
+        bool aliasesChanged = false;
+        const auto aliasKeys = aliases.getAllKeys();
+        for (int i = aliases.size(); --i >= 0;)
+        {
+            const auto aliasPath = canonicalFolderPath(aliasKeys[i]);
+            if (aliasPath != target && ! juce::File(aliasPath).isAChildOf(juce::File(target))) continue;
+            aliases.remove(i);
+            aliasesChanged = true;
+        }
+        if (aliasesChanged)
+        {
+            settingsStore.update([&aliases](AppSettings& saved) { saved.folderAliases = aliases; });
+            appSettings.folderAliases = aliases;
+            folders.setFolderAliases(aliases);
+            this->favorites.setFolderAliases(aliases);
         }
         if (! selectedFolder.isEmpty()
             && (canonicalFolderPath(selectedFolder) == target
@@ -794,7 +825,13 @@ void MainComponent::requestScan(bool reanalyzeAll)
         status.setText("Wait for Split to finish.", juce::dontSendNotification);
         return;
     }
-    if (! indexer || indexer->progress().running || ! readRepo) return;
+    if (! indexer || ! readRepo) return;
+    if (indexer->progress().running)
+    {
+        status.setText("Wait for the library scan to finish before starting another scan.",
+                       juce::dontSendNotification);
+        return;
+    }
     juce::StringArray roots;
     try { roots = readRepo->roots(); }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); return; }
@@ -824,7 +861,13 @@ void MainComponent::scanRoots(bool force, bool newOnly)
         status.setText("Wait for Split to finish.", juce::dontSendNotification);
         return;
     }
-    if (! indexer || indexer->progress().running) return;
+    if (! indexer) return;
+    if (indexer->progress().running)
+    {
+        status.setText("Wait for the library scan to finish before starting another scan.",
+                       juce::dontSendNotification);
+        return;
+    }
     try
     {
         auto roots = readRepo->roots();
@@ -1135,6 +1178,23 @@ void MainComponent::updateSelectedTags()
 }
 void MainComponent::selectSample(const SampleRecord& r)
 {
+    const int selectedRows = library.getSelectedRowCount();
+    if (selectedRows > 1)
+    {
+        // A batch is a library operation, not an audition: no single waveform or sound should
+        // look as if it belonged to the whole selection.
+        selectedSampleId = 0;
+        sessionSamplePath.clear();
+        markSessionStateDirty();
+        preview.clearSource();
+        updateSelectedTags();
+        analysisDetails.setText("Multiple samples selected. Select one sample to inspect its "
+                                "measured audio features.", juce::dontSendNotification);
+        selectionStatus.setText(juce::String(selectedRows) + " samples selected",
+                                juce::dontSendNotification);
+        selectionStatus.setTooltip({});
+        return;
+    }
     selectedSampleId = r.id;
     sessionSamplePath = r.filePath;
     markSessionStateDirty();
@@ -1188,6 +1248,20 @@ void MainComponent::selectSample(const SampleRecord& r)
         return;
     }
     if (! preview.loadFile(juce::File(r.filePath))) status.setText(engine.error(),juce::dontSendNotification);
+}
+void MainComponent::clearSampleSelection()
+{
+    library.selectRows({});
+    selectedSampleId = 0;
+    sessionSamplePath.clear();
+    markSessionStateDirty();
+    preview.clearSource();
+    updateSelectedTags();
+    analysisDetails.setText("Select a sample to inspect its measured audio features.",
+                            juce::dontSendNotification);
+    analysisDetails.setTooltip({});
+    selectionStatus.setText("No sample selected", juce::dontSendNotification);
+    selectionStatus.setTooltip({});
 }
 
 bool MainComponent::EnterKeyListener::keyPressed(const juce::KeyPress& key, juce::Component*)
@@ -1561,12 +1635,47 @@ void MainComponent::showFavoriteContextMenu(const juce::String& path, juce::Poin
     juce::PopupMenu menu;
     menu.setLookAndFeel(&look);
     menu.addItem(7201, "Remove from favorites");
+    menu.addItem(7202, "Rename folder...");
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&favorites).withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 })
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), path](int result)
         {
-            if (safe != nullptr && result == 7201) safe->toggleFavoriteFolder(path);
+            if (safe == nullptr) return;
+            if (result == 7201) safe->toggleFavoriteFolder(path);
+            else if (result == 7202) safe->promptRenameFolder(path);
+        });
+}
+void MainComponent::promptRenameFolder(const juce::String& path)
+{
+    if (readRepo == nullptr) return;
+    const auto canonical = canonicalFolderPath(path);
+    if (canonical.isEmpty()) return;
+    const auto current = appSettings.folderAliases.getValue(
+        canonical, juce::File(canonical).getFileName());
+    dialogs::showPrompt(*this, "Rename folder", "Display name:", current,
+        [safe = juce::Component::SafePointer<MainComponent>(this), canonical](const juce::String& value)
+        {
+            if (safe == nullptr) return;
+            const auto name = value.trim();
+            const auto original = juce::File(canonical).getFileName();
+            auto aliases = safe->appSettings.folderAliases;
+            if (name.isEmpty() || name == original) aliases.remove(juce::StringRef(canonical));
+            else aliases.set(canonical, name);
+            try
+            {
+                safe->settingsStore.update([aliases](AppSettings& saved) { saved.folderAliases = aliases; });
+                safe->appSettings.folderAliases = aliases;
+                safe->folders.setFolderAliases(aliases);
+                safe->favorites.setFolderAliases(aliases);
+                safe->status.setText("Folder shown as \"" + (name.isEmpty() ? original : name) + "\"",
+                                     juce::dontSendNotification);
+            }
+            catch (const std::exception& e)
+            {
+                safe->status.setText("Could not save the folder name: "
+                    + juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+            }
         });
 }
 void MainComponent::resetTagsSelected(const std::vector<int64_t>& sampleIds)
@@ -1801,6 +1910,9 @@ void MainComponent::startSplit(const std::vector<juce::File>& files)
             if (! safe->splitter->start(files, options)) return false;
             safe->splitStartMs = juce::Time::getMillisecondCounter();
             safe->splitWasRunning = true;
+            // The batch replaces the source selection; leaving its row selected would keep the
+            // old waveform visible and the preview audible under the progress report.
+            safe->clearSampleSelection();
             safe->status.setText("Splitting " + juce::String((int) files.size()) + " file(s)",
                                  juce::dontSendNotification);
             return true;
@@ -2148,6 +2260,9 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     const bool inheritedIgnore = ! exactIgnore && readRepo->isIgnored(path);
     menu.addItem(7007, inheritedIgnore ? "Ignored with parent folder" : "Ignore",
                  ! inheritedIgnore, exactIgnore);
+    // Only a registered root gets a display name; subfolders keep the real folder name.
+    const bool isRoot = readRepo->roots().contains(path);
+    if (isRoot) menu.addItem(7011, "Rename folder...");
     menu.addSeparator();
     const bool splitBusy = isSplitRunning();
     menu.addItem(7002, "Scan folder", indexer != nullptr && ! indexer->progress().running && ! splitBusy);
@@ -2176,14 +2291,19 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
         [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued, exactIgnore](int result)
         {
             if (safe == nullptr || result == 0) return;
-            if (safe->isSplitRunning() && result != 7001 && result != 7006 && result != 7007)
+            if (safe->isSplitRunning() && result != 7001 && result != 7006 && result != 7007
+                && result != 7011)
             {
                 safe->status.setText("Wait for Split to finish.", juce::dontSendNotification);
                 return;
             }
             try
             {
-                if (result == 7007)
+                if (result == 7011)
+                {
+                    safe->promptRenameFolder(folderPath);
+                }
+                else if (result == 7007)
                 {
                     if (safe->writeRepo == nullptr) return;
                     if (exactIgnore) safe->writeRepo->unignorePath(folderPath);

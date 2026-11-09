@@ -64,6 +64,9 @@ public:
                         bool looping, int64_t loopStart, int64_t loopEnd, bool pingPong,
                         bool allowAutoPlay = true);
     void clearDiscSource();
+    // Stops playback and returns the panel to the empty state. Used when the library selection
+    // is cleared or holds more than one sample, so no stale waveform or audio remains.
+    void clearSource();
     SampleAudioPtr discSampleAudio() const { return discAudioRef; }
     // Restores preview toggles and their engine state. Does not notify onSettingsChanged.
     void applyPersistedSettings(const AppSettings&);

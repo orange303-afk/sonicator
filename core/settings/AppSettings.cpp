@@ -89,6 +89,16 @@ AppSettings SettingsStore::load() const
             const auto text = entry.toString().trim();
             if (text.isNotEmpty()) settings.favoriteFolders.addIfNotAlreadyThere(text);
         }
+    // A path cannot be a JSON object key (it contains slashes), so aliases are [path, name] pairs.
+    if (const auto* aliases = object->getProperty("folderAliases").getArray())
+        for (const auto& entry : *aliases)
+        {
+            const auto* pair = entry.getArray();
+            if (pair == nullptr || pair->size() < 2) continue;
+            const auto path = (*pair)[0].toString().trim();
+            const auto name = (*pair)[1].toString().trim();
+            if (path.isNotEmpty() && name.isNotEmpty()) settings.folderAliases.set(path, name);
+        }
     const int favoritesHeight = (int) object->getProperty("favoritesPanelHeight");
     if (favoritesHeight >= 60 && favoritesHeight <= 2000)
         settings.favoritesPanelHeight = favoritesHeight;
@@ -134,6 +144,18 @@ void SettingsStore::save(const AppSettings& settings) const
     for (const auto& folder : settings.favoriteFolders)
         if (folder.trim().isNotEmpty()) favorites.add(folder);
     object->setProperty("favoriteFolders", favorites);
+    juce::Array<juce::var> aliases;
+    const auto aliasKeys = settings.folderAliases.getAllKeys();
+    for (int i = 0; i < settings.folderAliases.size(); ++i)
+    {
+        const auto name = settings.folderAliases.getAllValues()[i].trim();
+        if (aliasKeys[i].trim().isEmpty() || name.isEmpty()) continue;
+        juce::Array<juce::var> pair;
+        pair.add(aliasKeys[i]);
+        pair.add(name);
+        aliases.add(pair);
+    }
+    object->setProperty("folderAliases", aliases);
     object->setProperty("favoritesPanelHeight", settings.favoritesPanelHeight);
     object->setProperty("lastFolder", settings.lastFolder);
     object->setProperty("lastSamplePath", settings.lastSamplePath);

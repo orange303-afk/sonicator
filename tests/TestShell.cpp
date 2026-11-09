@@ -487,6 +487,41 @@ TEST_CASE("Hide empty filters fully silent files", "[ui][empty]")
     REQUIRE(library->getNumRows() == 2);
     REQUIRE_FALSE(hide->getToggleState());
 }
+TEST_CASE("Selecting several rows clears the single-sample preview and stops audio", "[ui][selection][preview]")
+{
+    TestDirectory t;
+    auto a = t.wave("a.wav", 440.0);
+    auto b = t.wave("b.wav", 660.0);
+    auto dbPath = t.dir.getChildFile("multi-preview.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        for (const auto& file : { a, b })
+        {
+            auto r = BasicAnalyzer().analyzeAndHash(file); REQUIRE(r.error.isEmpty()); repo.upsert(r);
+        }
+        repo.addRoot(t.dir.getFullPathName());
+    }
+    MainComponent app(dbPath,false);
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    auto* preview = dynamic_cast<PreviewPanel*>(app.findChildWithID("preview"));
+    REQUIRE(library != nullptr); REQUIRE(preview != nullptr);
+    WaveformDisplay* waveform = nullptr;
+    for (auto* child : preview->getChildren())
+        if (auto* candidate = dynamic_cast<WaveformDisplay*>(child)) waveform = candidate;
+    REQUIRE(waveform != nullptr);
+    library->selectRows({ 0 });
+    REQUIRE(waveform->isVisible());
+    library->selectRows({ 0, 1 });
+    REQUIRE(library->getSelectedRowCount() == 2);
+    REQUIRE_FALSE(waveform->isVisible());
+    auto* status = dynamic_cast<juce::Label*>(app.findChildWithID("selectionStatus"));
+    REQUIRE(status != nullptr);
+    REQUIRE(status->getText() == "2 samples selected");
+    library->selectRows({ 1 });
+    REQUIRE(library->getSelectedRowCount() == 1);
+    REQUIRE(waveform->isVisible());
+}
+
 TEST_CASE("Page size options page or virtualize the library", "[ui][paging]")
 {
     TestDirectory t; auto dbPath = t.dir.getChildFile("paging.sqlite");

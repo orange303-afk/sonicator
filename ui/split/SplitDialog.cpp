@@ -59,7 +59,7 @@ SplitDialog::SplitDialog(std::vector<juce::File> inputSources, const AppSettings
     progressLabel.setColour(juce::Label::textColourId, theme::muted);
     progressBar.setPercentageDisplay(false);
     progressBar.setColour(juce::ProgressBar::backgroundColourId, theme::table);
-    progressBar.setColour(juce::ProgressBar::foregroundColourId, theme::selection);
+    progressBar.setColour(juce::ProgressBar::foregroundColourId, theme::accent);
     progressBar.setVisible(false);
     progressLabel.setVisible(false);
     resultLabel.setVisible(false);

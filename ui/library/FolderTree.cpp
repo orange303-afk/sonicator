@@ -27,8 +27,14 @@ public:
         g.setColour(owner.failedImages.count(path)
             ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e))
             : (ignored ? theme::muted : (missing ? theme::muted : theme::text))); g.setFont(13.0f);
-        const auto baseName = virtualFolder ? owner.virtualFolders.at(path).name
+        auto baseName = virtualFolder ? owner.virtualFolders.at(path).name
             : (image ? "[IMG] " : "") + juce::File(path).getFileName();
+        // Only a registered root can be renamed from the library tree; subfolders keep the real name.
+        if (! all && ! image && ! virtualFolder && owner.roots.contains(path))
+        {
+            const auto alias = owner.aliases.getValue(path, {});
+            if (alias.isNotEmpty()) baseName = alias;
+        }
         const auto name = all ? juce::String("All samples")
             : baseName + (ignored && owner.showIgnored ? " [ignored]" : juce::String());
         g.drawText(name, 3,0,w-6,h,juce::Justification::centredLeft,true);
@@ -48,7 +54,10 @@ public:
         if (owner.virtualFolders.count(path)) return;
         if (! all && path.isEmpty()) return;
         if (! isSelected()) setSelected(true, true);
-        owner.onContextMenu(all ? juce::String() : path, all, e.getScreenPosition());
+        // TreeView adjusts the event position to be item-relative but keeps the tree as the event
+        // component, which would make getScreenPosition() too high by the item's own offset. The
+        // unadjusted mouse-down position is still in tree coordinates and gives the real cursor.
+        owner.onContextMenu(all ? juce::String() : path, all, e.getMouseDownScreenPosition());
     }
     void itemOpennessChanged(bool open) override
     {
@@ -202,6 +211,11 @@ void FolderTree::setDiscFolders(const juce::String& image, DiscEntryId rootId, c
 void FolderTree::setDiscError(const juce::String& image, bool failed)
 {
     if (failed) failedImages.insert(image); else failedImages.erase(image);
+    tree.repaint();
+}
+void FolderTree::setFolderAliases(const juce::StringPairArray& names)
+{
+    aliases = names;
     tree.repaint();
 }
 }

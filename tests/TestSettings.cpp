@@ -169,6 +169,31 @@ TEST_CASE("Favorite folders are global and round-trip through settings", "[setti
     REQUIRE(store.load().favoritesPanelHeight == 200);
 }
 
+TEST_CASE("Folder display names round-trip without touching the real path", "[settings][folder-alias]")
+{
+    TestDirectory t;
+    SettingsStore store(t.dir.getChildFile("aliases.json"));
+    REQUIRE(store.load().folderAliases.size() == 0);
+    store.update([](AppSettings& saved)
+    {
+        saved.folderAliases.set("/lib/Drums and Percussion", "Drums");
+        saved.folderAliases.set("/lib/Bass", "Low end");
+    });
+    auto loaded = store.load();
+    REQUIRE(loaded.folderAliases.size() == 2);
+    REQUIRE(loaded.folderAliases.getValue("/lib/Drums and Percussion", {}) == "Drums");
+    REQUIRE(loaded.folderAliases.getValue("/lib/Bass", {}) == "Low end");
+    // An unrelated settings writer must keep the alias table.
+    store.update([](AppSettings& saved) { saved.hideEmpty = false; });
+    loaded = store.load();
+    REQUIRE(loaded.folderAliases.size() == 2);
+    REQUIRE_FALSE(loaded.hideEmpty);
+    store.update([](AppSettings& saved) { saved.folderAliases.remove(juce::StringRef("/lib/Bass")); });
+    loaded = store.load();
+    REQUIRE(loaded.folderAliases.size() == 1);
+    REQUIRE(loaded.folderAliases.getValue("/lib/Drums and Percussion", {}) == "Drums");
+}
+
 TEST_CASE("Show ignored persists and defaults to off", "[settings][ignore]")
 {
     TestDirectory t; SettingsStore store(t.dir.getChildFile("settings.json"));

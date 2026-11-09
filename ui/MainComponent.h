@@ -164,6 +164,8 @@ private:
     void showSampleContextMenu(const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> screenPosition);
     void showFolderContextMenu(const juce::String& path, bool allSamples, juce::Point<int> screenPosition);
     void showFavoriteContextMenu(const juce::String& path, juce::Point<int> screenPosition);
+    void promptRenameFolder(const juce::String& path);
+    void clearSampleSelection();
     void refreshFavorites();
     void toggleFavoriteFolder(const juce::String& path);
     bool isFavoriteFolder(const juce::String& path) const;

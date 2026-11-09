@@ -43,7 +43,7 @@ ExtractDialog::ExtractDialog(std::vector<juce::File> inputSources, const AppSett
     progressLabel.setJustificationType(juce::Justification::topLeft);
     progressBar.setPercentageDisplay(false);
     progressBar.setColour(juce::ProgressBar::backgroundColourId, theme::table);
-    progressBar.setColour(juce::ProgressBar::foregroundColourId, theme::selection);
+    progressBar.setColour(juce::ProgressBar::foregroundColourId, theme::accent);
     progressBar.setComponentID("extractProgress");
     progressBar.setVisible(false);
     progressLabel.setVisible(false);

@@ -670,6 +670,34 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
     return true;
 }
 
+void PreviewPanel::clearSource()
+{
+    engine.stop();
+    engine.loadFile(juce::File());
+    engine.clearDiscSample();
+    discAudioRef.reset();
+    discStem.clear();
+    exporter.cancel();
+    loadedFile = juce::File(); loadedSize = 0; loadedModified = 0;
+    instrumentSamples.clear();
+    currentSampleId = invalidSampleId;
+    waveform.setFile(juce::File());
+    waveform.setVisible(false);
+    songProgress.setVisible(false);
+    sampleDragButton.setVisible(false);
+    sampleDragButton.setButtonText("Drag sample");
+    presetBox.setVisible(false);
+    sampleBox.setVisible(false);
+    trackerBox.setVisible(false);
+    rexGate.setVisible(false);
+    rexInfo.setVisible(false);
+    reasonInfo.setVisible(false);
+    abletonInfo.setVisible(false);
+    clearSelectionButton.setVisible(false);
+    filename.setText("No sample selected", juce::dontSendNotification);
+    selectionStatus.setText({}, juce::dontSendNotification);
+    resized();
+}
 void PreviewPanel::clearDiscSource()
 {
     if (engine.isReasonMode())

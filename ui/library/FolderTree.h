@@ -23,6 +23,8 @@ public:
     void lookAndFeelChanged() override;
     void setDiscFolders(const juce::String& image, DiscEntryId rootId, const std::vector<DiscEntry>&);
     void setDiscError(const juce::String& image, bool failed);
+    // Display-only names for registered roots, keyed by the real folder path.
+    void setFolderAliases(const juce::StringPairArray&);
     std::function<void(const juce::String&, DiscEntryId)> onDiscFolder;
     std::function<void(juce::String)> onFolder;
     // Right-click on a folder. An empty path with allSamples means the virtual All samples node.
@@ -37,6 +39,7 @@ private:
     struct VirtualFolder { juce::String image, name; DiscEntryId id; };
     std::map<juce::String, VirtualFolder> virtualFolders;
     juce::StringArray roots;
+    juce::StringPairArray aliases;
     bool restoring = false;
     bool showIgnored = false;
     std::vector<IgnoredPath> ignoredEntries;

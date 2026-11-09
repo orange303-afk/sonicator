@@ -43,6 +43,7 @@ public:
     // Selects an id without invoking the row-selection action, used when restoring the session.
     bool selectSampleById(int64_t sampleId);
     std::vector<SampleRecord> getSelectedSamples();
+    int getSelectedRowCount() const { return table.getSelectedRows().size(); }
     juce::StringArray dragPaths();
     int prepareRowDrag(int row, bool addToSelection = false);
     void setExternalDragHandler(ExternalFileDrag::DragFunction handler) { externalDrag = std::move(handler); }

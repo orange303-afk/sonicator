@@ -68,6 +68,10 @@ public:
         setColour(juce::Slider::thumbColourId,theme::text);
         setColour(juce::Slider::trackColourId,theme::muted);
         setColour(juce::Slider::backgroundColourId,theme::line);
+        setColour(juce::Slider::textBoxTextColourId,theme::text);
+        setColour(juce::Slider::textBoxBackgroundColourId,theme::panel);
+        setColour(juce::Slider::textBoxOutlineColourId,theme::line);
+        setColour(juce::Slider::textBoxHighlightColourId,theme::accent.withAlpha(0.25f));
         setColour(juce::ToggleButton::textColourId,theme::text);
         setColour(juce::ToggleButton::tickColourId,theme::text);
         setColour(juce::ToggleButton::tickDisabledColourId,theme::line);
@@ -94,6 +98,16 @@ public:
         setColour(juce::AlertWindow::backgroundColourId,theme::panel);
         setColour(juce::AlertWindow::textColourId,theme::text);
         setColour(juce::AlertWindow::outlineColourId,theme::line);
+        setColour(juce::GroupComponent::outlineColourId,theme::line);
+        setColour(juce::GroupComponent::textColourId,theme::muted);
+        setColour(juce::TabbedComponent::backgroundColourId,theme::panel);
+        setColour(juce::TabbedComponent::outlineColourId,theme::line);
+        setColour(juce::TabbedButtonBar::tabOutlineColourId,theme::line);
+        setColour(juce::TabbedButtonBar::frontOutlineColourId,theme::line);
+        setColour(juce::TabbedButtonBar::tabTextColourId,theme::muted);
+        setColour(juce::TabbedButtonBar::frontTextColourId,theme::text);
+        setColour(juce::ProgressBar::backgroundColourId,theme::table);
+        setColour(juce::ProgressBar::foregroundColourId,theme::accent);
         setColour(juce::ScrollBar::thumbColourId,theme::raised);
         setColour(juce::ScrollBar::trackColourId,theme::background);
         setColour(juce::HyperlinkButton::textColourId,theme::accent);
@@ -134,16 +148,15 @@ public:
             const auto area = getLocalBounds().toFloat().reduced(6.0f);
             if (buttonType == juce::DocumentWindow::closeButton)
             {
-                // A plain cross, with only a subtle hover surface; no coloured traffic-light disc.
-                if (highlighted || down)
-                {
-                    g.setColour(theme::hover.withAlpha(down ? 0.9f : 0.65f));
-                    g.fillRoundedRectangle(area, 4.0f);
-                }
-                const auto glyph = juce::Rectangle<float>(10.0f, 10.0f).withCentre(getLocalBounds().toFloat().getCentre());
-                g.setColour(down ? theme::text : theme::muted);
-                g.drawLine(glyph.getX(), glyph.getY(), glyph.getRight(), glyph.getBottom(), 1.35f);
-                g.drawLine(glyph.getRight(), glyph.getY(), glyph.getX(), glyph.getBottom(), 1.35f);
+                // The same raised rounded button and multiplication-sign glyph as the search
+                // field's clear control, so every in-app close cross looks identical.
+                const auto buttonArea = getLocalBounds().toFloat().reduced(1.0f);
+                g.setColour(down ? theme::selection : (highlighted ? theme::hover : theme::raised));
+                g.fillRoundedRectangle(buttonArea, 7.0f);
+                g.setColour(theme::text);
+                g.setFont(juce::Font(juce::FontOptions(13.0f)));
+                g.drawText(juce::String::charToString(0x00d7), getLocalBounds(),
+                           juce::Justification::centred, false);
             }
             else
             {

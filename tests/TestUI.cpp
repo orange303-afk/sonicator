@@ -10,6 +10,7 @@
 #include "ui/extract/ExtractDialog.h"
 #include "ui/settings/RelocateFoldersPanel.h"
 #include "ui/shell/WindowBounds.h"
+#include "ui/shell/Theme.h"
 #include <set>
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
@@ -499,6 +500,24 @@ TEST_CASE("Folder tree hides ignored folders unless Show ignored is on", "[ui][f
     REQUIRE(tree.selectPath(onlyHidden));
 }
 
+TEST_CASE("Clearing the preview stops playback and hides the waveform", "[ui][preview][batch]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"));
+    REQUIRE(preview.loadFile(t.wave()));
+    REQUIRE(engine.isPlaying());
+    WaveformDisplay* waveform = nullptr;
+    for (auto* child : preview.getChildren())
+        if (auto* candidate = dynamic_cast<WaveformDisplay*>(child)) waveform = candidate;
+    REQUIRE(waveform != nullptr);
+    REQUIRE(waveform->isVisible());
+    preview.clearSource();
+    REQUIRE_FALSE(engine.isPlaying());
+    REQUIRE_FALSE(waveform->isVisible());
+    REQUIRE(engine.length() == 0.0);
+}
+
 TEST_CASE("Split dialog exposes the persisted defaults and same-folder mode", "[ui][split]")
 {
     AppSettings settings;
@@ -529,6 +548,7 @@ TEST_CASE("Split dialog swaps Split and Cancel for OK after the job", "[ui][spli
     auto* progress = dialog.findChildWithID("splitProgress");
     REQUIRE(split != nullptr); REQUIRE(cancel != nullptr); REQUIRE(ok != nullptr);
     REQUIRE(progress != nullptr);
+    REQUIRE(progress->findColour(juce::ProgressBar::foregroundColourId) == theme::accent);
     REQUIRE(split->isVisible());
     REQUIRE_FALSE(ok->isVisible());
     dialog.enterRunningState();
@@ -582,6 +602,7 @@ TEST_CASE("Extract dialog swaps Extract and Cancel for OK and reveals details", 
     auto* problems = dialog.findChildWithID("extractProblems");
     REQUIRE(accept != nullptr); REQUIRE(cancel != nullptr); REQUIRE(ok != nullptr);
     REQUIRE(progress != nullptr); REQUIRE(details != nullptr); REQUIRE(problems != nullptr);
+    REQUIRE(progress->findColour(juce::ProgressBar::foregroundColourId) == theme::accent);
     REQUIRE(accept->isVisible());
     REQUIRE_FALSE(ok->isVisible());
     dialog.enterRunningState();

@@ -12,6 +12,9 @@ struct AppSettings
     juce::String databasePath; // empty means the default catalog location
     juce::StringArray searchHistory; // most recent first, at most 10 entries
     juce::StringArray favoriteFolders; // global across catalogs, in display order
+    // Display names for registered root folders. Only the tree label changes; the folder on disk
+    // and every indexed path keep their real name.
+    juce::StringPairArray folderAliases;
     int favoritesPanelHeight = 200;    // user-dragged divider position
     juce::String lastFolder;           // restored on the next launch when still in the catalog
     juce::String lastSamplePath;       // restored selection without starting preview playback
