@@ -1,3 +1,4 @@
+#include "AcousticClassifierService.h"
 #include "SmartAnalysisService.h"
 #include "AbletonAsd.h"
 #include "AiffMetadata.h"
@@ -25,13 +26,13 @@ juce::String fingerprintOf(const SmartInput& input)
 }
 juce::String extractionSourceForCandidate(const juce::String& source, const juce::String& container)
 {
-    if (source == "filename" || source == "folder") return "name";
+    if (source == "filename" || source == "folder" || source == "path") return "name";
     if (source.startsWith("wav_")) return "wav";
     if (source.startsWith("aiff_")) return "aiff";
     if (source.startsWith("rx2_")) return "rx2";
     if (source.startsWith("asd_")) return "asd";
-    if (source == "info" || source == "id3") return container;
-    if (source == "dsp") return "dsp";
+    if (source == "info" || source == "id3" || source == "metadata") return container;
+    if (source == "dsp" || source == "dsp_acoustic" || source == "ml_classifier") return "dsp";
     return "other";
 }
 // Every candidate carries the file it came from and that file's fingerprint at read time, so the
@@ -365,6 +366,15 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record, Cancel
 
         bool anyRan = false, anyError = false;
         juce::String dspError;
+
+        auto acousticCandidates = AcousticClassifierService::analyzeBuffer(
+            audio.buffer, audio.sampleRate, file, out.candidates);
+        if (! acousticCandidates.empty())
+        {
+            anyRan = true;
+            append(out.candidates, std::move(acousticCandidates));
+        }
+
         if (needRhythm)
         {
             auto rhythm = rhythmCandidatesFrom(

@@ -51,7 +51,7 @@ struct SmartCandidate
 {
     SmartField field = SmartField::Type;
     juce::String source;      // filename, folder, wav_smpl, wav_inst, wav_acid, info, id3,
-                              // aiff_basc, asd_warp, rx2_glob, dsp
+                              // aiff_basc, asd_warp, rx2_glob, dsp, dsp_acoustic, ml_classifier, path
     juce::String detail;      // raw field name or original value, kept for explanation
     juce::String textValue;   // Type/Structure/Key value, e.g. "C# minor"
     double numericValue = 0;  // BPM, MIDI pitch or MIDI root note
