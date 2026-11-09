@@ -5,7 +5,9 @@
 #include "Rex2Metadata.h"
 #include "RhythmCandidates.h"
 #include "SmartResolver.h"
+#include "TonalCandidates.h"
 #include "WavMetadata.h"
+#include "core/dsp/AnalysisAudio.h"
 #include <algorithm>
 namespace sonicator {
 namespace {
@@ -306,48 +308,93 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
         extraction.updatedAt = juce::Time::currentTimeMillis();
         out.extractions.push_back(std::move(extraction));
     }
-    // Audio-only fallback. It runs after metadata and only when metadata did not answer the BPM
-    // question; the resolver still decides by source priority once it has run. A file that cannot
-    // be decoded is recorded as unsupported so the next pass does not retry it as if it failed.
+    // One bounded decode feeds both DSP analyses. The rhythm pass still runs only when metadata
+    // lacks a tempo (or structure is needed for the pitch gate); the tonal pass applies its own
+    // per-field gates. A file that cannot be decoded is recorded as unsupported so the next pass
+    // does not retry it as if it failed.
     {
         SmartExtraction extraction;
         extraction.source = "dsp";
         extraction.extractorVersion = smartDspVersion;
         extraction.updatedAt = juce::Time::currentTimeMillis();
-        if (! needsRhythmAnalysis(out.candidates))
+        const auto metadataResolved = resolveSmart(out.candidates);
+        const auto metadataType = metadataResolved.typeState == SmartState::Resolved
+                                      ? metadataResolved.type : juce::String();
+        const auto metadataStructure = metadataResolved.structureState == SmartState::Resolved
+                                           ? metadataResolved.structure : juce::String();
+        const auto structureKey = metadataStructure.trim().toLowerCase().replace("_", "-");
+        const bool structureOneShot = structureKey == "one-shot" || structureKey == "oneshot";
+        const bool needRhythm = needsRhythmAnalysis(out.candidates);
+        const bool needKey = ! hasValidKeyMetadata(out.candidates) && ! typeIsDrum(metadataType);
+        const bool pitchEligible = ! hasValidPitchOrRootMetadata(out.candidates)
+                                   && typeAllowsPitch(metadataType);
+        // If the structure is unknown and the rhythm pass is not going to run, the file cannot be
+        // confirmed as a one-shot; publishing a pitch would be a guess.
+        const bool needPitch = pitchEligible
+                               && (structureOneShot || (metadataStructure.isEmpty() && needRhythm));
+        if (! needRhythm && ! needKey && ! needPitch)
         {
-            // Metadata already has a usable tempo. Record that the pass was considered and
-            // skipped, rather than pretending it ran.
+            // Metadata already answers every field the DSP could add. Record that the pass was
+            // considered and skipped, rather than pretending it ran.
             extraction.status = "skipped";
+            out.extractions.push_back(std::move(extraction));
+            return out;
         }
-        else
+        const auto extension = file.getFileExtension().trimCharactersAtStart(".");
+        if (record.isDiscEntry() || ! hasDecodableAudioExtension(extension))
         {
-            try
-            {
-                auto rhythm = extractRhythmCandidates(record);
-                append(out.candidates, std::move(rhythm.candidates));
-                if (rhythm.status == "error")
-                {
-                    extraction.status = "error";
-                    extraction.error = rhythm.error;
-                    if (out.error.isEmpty()) out.error = rhythm.error;
-                }
-                else if (rhythm.status == "unsupported") extraction.status = "unsupported";
-                else extraction.status = "ok";
-            }
-            catch (const std::exception& e)
-            {
-                extraction.status = "error";
-                extraction.error = juce::String::fromUTF8(e.what());
-                if (out.error.isEmpty()) out.error = extraction.error;
-            }
-            catch (...)
-            {
-                extraction.status = "error";
-                extraction.error = "unknown DSP failure";
-                if (out.error.isEmpty()) out.error = extraction.error;
-            }
+            extraction.status = "unsupported";
+            out.extractions.push_back(std::move(extraction));
+            return out;
         }
+        const auto audio = readAnalysisAudio(file);
+        if (! audio.ok())
+        {
+            extraction.status = audio.error.startsWith("unsupported")
+                                    || audio.error.startsWith("empty") ? "unsupported" : "error";
+            extraction.error = audio.error;
+            if (extraction.status == "error" && out.error.isEmpty()) out.error = audio.error;
+            out.extractions.push_back(std::move(extraction));
+            return out;
+        }
+
+        bool anyRan = false, anyError = false;
+        juce::String dspError;
+        if (needRhythm)
+        {
+            auto rhythm = rhythmCandidatesFrom(RhythmAnalyzer::analyze(audio.buffer, audio.sampleRate));
+            append(out.candidates, std::move(rhythm.candidates));
+            if (rhythm.status == "error")
+            {
+                anyError = true;
+                dspError = rhythm.error;
+            }
+            else if (rhythm.status == "ok") anyRan = true;
+        }
+        // Resolve the structure and type again: the rhythm candidates may have settled them.
+        const auto resolved = resolveSmart(out.candidates);
+        const auto gatingType = resolved.typeState == SmartState::Resolved
+                                    ? resolved.type : juce::String();
+        const auto gatingStructure = resolved.structureState == SmartState::Resolved
+                                         ? resolved.structure : juce::String();
+        if (needKey || needPitch)
+        {
+            auto tonal = extractTonalCandidates(audio, out.candidates, gatingStructure, gatingType);
+            append(out.candidates, std::move(tonal.candidates));
+            if (tonal.status == "error")
+            {
+                anyError = true;
+                if (dspError.isEmpty()) dspError = tonal.error;
+            }
+            else if (tonal.status == "ok") anyRan = true;
+        }
+        if (anyError)
+        {
+            extraction.status = "error";
+            extraction.error = dspError;
+            if (out.error.isEmpty()) out.error = dspError;
+        }
+        else extraction.status = anyRan ? "ok" : "unsupported";
         out.extractions.push_back(std::move(extraction));
     }
     return out;

@@ -18,14 +18,9 @@ bool hasDecodableAudioExtension(const juce::String& extensionWithoutDot)
         || extension == "ogg" || extension == "oga" || extension == "m4a"
         || extension == "aac" || extension == "caf" || extension == "w64";
 }
-RhythmExtraction extractRhythmCandidates(const SampleRecord& record, const RhythmOptions& options)
+RhythmExtraction rhythmCandidatesFrom(const RhythmAnalysis& analysis)
 {
     RhythmExtraction out;
-    // Disc contents have no real path to decode; they are a preview action, not library analysis.
-    if (record.isDiscEntry()) { out.status = "unsupported"; return out; }
-    const auto extension = juce::File(record.filePath).getFileExtension().trimCharactersAtStart(".");
-    if (! hasDecodableAudioExtension(extension)) { out.status = "unsupported"; return out; }
-    const auto analysis = RhythmAnalyzer::analyzeFile(juce::File(record.filePath), options);
     if (analysis.error.isNotEmpty())
     {
         out.status = analysis.error.startsWith("unsupported") ? "unsupported" : "error";

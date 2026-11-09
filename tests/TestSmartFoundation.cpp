@@ -472,3 +472,88 @@ TEST_CASE("A key display keeps a tonic without an invented mode", "[smart][colum
     REQUIRE(keyDisplayName(9, "") == "A");
     REQUIRE(keyDisplayName(9, "unknown") == "A");
 }
+
+namespace {
+const SmartExtraction* findExtraction(const SmartCollection& collection, const juce::String& source)
+{
+    for (const auto& extraction : collection.extractions)
+        if (extraction.source == source) return &extraction;
+    return nullptr;
+}
+const SmartCandidate* findCandidate(const SmartCollection& collection, SmartField field,
+                                    const juce::String& source)
+{
+    for (const auto& candidate : collection.candidates)
+        if (candidate.field == field && candidate.source == source) return &candidate;
+    return nullptr;
+}
+}
+
+TEST_CASE("The smart pass adds a DSP key when metadata has none", "[smart][dsp]")
+{
+    TestDirectory t;
+    const auto file = t.wave("loop.wav", 440.0, 1, 88200);
+    const auto collection = SmartAnalysisService::collect(recordFor(file));
+    const auto* key = findCandidate(collection, SmartField::Key, "dsp");
+    INFO("dsp error: " << (findExtraction(collection, "dsp") != nullptr
+                               ? findExtraction(collection, "dsp")->error : juce::String()));
+    REQUIRE(key != nullptr);
+    REQUIRE(key->textValue == "A");
+    REQUIRE(key->status == CandidateStatus::Valid);
+}
+
+TEST_CASE("A filename key suppresses the DSP key", "[smart][dsp]")
+{
+    TestDirectory t;
+    const auto file = t.wave("loop_Cm.wav", 440.0, 1, 88200);
+    const auto collection = SmartAnalysisService::collect(recordFor(file));
+    REQUIRE(findCandidate(collection, SmartField::Key, "dsp") == nullptr);
+}
+
+TEST_CASE("A one-shot without pitch metadata gets a DSP pitch", "[smart][dsp]")
+{
+    TestDirectory t;
+    const auto file = t.wave("bass_oneshot.wav", 440.0, 1, 44100);
+    const auto collection = SmartAnalysisService::collect(recordFor(file));
+    const auto* pitch = findCandidate(collection, SmartField::Pitch, "dsp");
+    INFO("dsp error: " << (findExtraction(collection, "dsp") != nullptr
+                               ? findExtraction(collection, "dsp")->error : juce::String()));
+    REQUIRE(pitch != nullptr);
+    REQUIRE(pitch->numericValue == Catch::Approx(69.0).margin(0.05));
+}
+
+TEST_CASE("A loop never gets a DSP pitch", "[smart][dsp]")
+{
+    TestDirectory t;
+    const auto file = t.wave("bass_loop.wav", 440.0, 1, 88200);
+    const auto collection = SmartAnalysisService::collect(recordFor(file));
+    REQUIRE(findCandidate(collection, SmartField::Pitch, "dsp") == nullptr);
+}
+
+TEST_CASE("The DSP extraction is skipped when metadata answers", "[smart][dsp]")
+{
+    TestDirectory t;
+    const auto file = t.wave("bass_loop_128bpm_Cm.wav", 440.0, 1, 88200);
+    const auto collection = SmartAnalysisService::collect(recordFor(file));
+    const auto* extraction = findExtraction(collection, "dsp");
+    REQUIRE(extraction != nullptr);
+    REQUIRE(extraction->status == "skipped");
+    REQUIRE(findCandidate(collection, SmartField::Key, "dsp") == nullptr);
+}
+
+TEST_CASE("The DSP version is two after the tonal pass", "[smart][dsp]")
+{
+    REQUIRE(smartDspVersion == 2);
+}
+
+TEST_CASE("A corrupt audio file records an unsupported DSP pass", "[smart][dsp]")
+{
+    TestDirectory t;
+    const auto file = t.dir.getChildFile("broken.wav");
+    file.replaceWithText("this is not audio");
+    const auto collection = SmartAnalysisService::collect(recordFor(file));
+    const auto* extraction = findExtraction(collection, "dsp");
+    REQUIRE(extraction != nullptr);
+    REQUIRE(extraction->status == "unsupported");
+}
+

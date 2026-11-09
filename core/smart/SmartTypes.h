@@ -19,7 +19,7 @@ std::optional<SmartField> smartFieldFromKey(const juce::String&);
 // - DSP: bump when the DSP stage changes (1 = rhythm structure and BPM).
 inline constexpr int smartExtractorsVersion = 2;
 inline constexpr int smartResolverVersion = 2;
-inline constexpr int smartDspVersion = 1;
+inline constexpr int smartDspVersion = 2; // 1 = rhythm; 2 = rhythm + key + one-shot pitch
 
 // Invalid means "the field was present but its value is not usable"; Unsupported means the
 // container/version is not handled. Both stay visible for provenance, but never resolve a value.
