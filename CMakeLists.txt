@@ -39,6 +39,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/tagging/TaggingService.cpp core/tagging/AutoTagRules.cpp core/tagging/AutoTagService.cpp
     core/smart/SmartTypes.cpp core/smart/KeyNames.cpp core/smart/SmartResolver.cpp core/smart/NameHeuristics.cpp core/smart/WavMetadata.cpp core/smart/AiffMetadata.cpp core/smart/AbletonAsd.cpp core/smart/Rex2Metadata.cpp core/smart/SmartAnalysisService.cpp core/smart/AssetAnalyzer.cpp
     core/sf2/Sf2Bank.cpp core/sf2/Sf2KitSampler.cpp
+    core/reason/ReasonPatch.cpp
     core/sampler/FileInstrument.cpp core/sampler/ExternalKitSampler.cpp
     core/tracker/TrackerFormats.cpp core/tracker/TrackerModReader.cpp core/tracker/TrackerXmReader.cpp
     core/tracker/TrackerS3mReader.cpp core/tracker/TrackerDocument.cpp core/tracker/TrackerSongRenderer.cpp
