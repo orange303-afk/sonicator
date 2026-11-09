@@ -19,6 +19,10 @@ public:
     void prepare(double outputRate);
     void reset();
     void setLooping(bool enabled) { looping = enabled; }
+    // Restricts the next voices to a time range of the current source; an empty/invalid range
+    // plays the whole source. A range is also looped while Loop is on.
+    void setRange(double startSeconds,double endSeconds);
+    void clearRange();
     void render(juce::AudioBuffer<float>&, int start, int count, const juce::MidiBuffer&);
     int activeVoices() const;
 private:
@@ -35,6 +39,8 @@ private:
         bool active = false, releasing = false, sustained = false, loop = false;
         int note = 0, channel = 1, source = -1, direction = 1;
         double position = 0, increment = 1;
+        double end = 0, loopStart = 0, loopEnd = 0;
+        bool pingPong = false;
         float envelope = 0, velocity = 0, releaseStep = 0;
     };
     std::array<Voice, maxVoices> voices;
@@ -43,6 +49,7 @@ private:
     int currentSource = -1;
     double outputRate = 44100.0;
     std::atomic<bool> looping {false};
+    std::atomic<double> rangeStart {0}, rangeEnd {0};
     void event(const juce::MidiMessage&);
     void renderRange(juce::AudioBuffer<float>&, int start, int count);
     void release(Voice&);

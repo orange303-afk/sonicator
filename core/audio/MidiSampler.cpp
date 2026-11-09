@@ -73,7 +73,28 @@ juce::String MidiSampler::load(const juce::File& file)
     }
     return {};
 }
-void MidiSampler::clear() { reset(); samples.setSize(0,0); onset = 0; }
+void MidiSampler::clear() { reset(); samples.setSize(0,0); onset = 0; clearRange(); }
+void MidiSampler::clearRange()
+{
+    rangeEnd.store(-1, std::memory_order_release); // end <= start means "whole sample"
+    rangeStart.store(0, std::memory_order_relaxed);
+}
+void MidiSampler::setRange(double startSeconds,double endSeconds)
+{
+    const auto length = (int64_t) samples.getNumSamples();
+    if (! std::isfinite(startSeconds) || ! std::isfinite(endSeconds) || endSeconds <= startSeconds
+        || length <= 0 || ! (inputRate > 0))
+    { clearRange(); return; }
+    const auto frame = [this,length](double seconds)
+    {
+        return juce::jlimit<int64_t>(0,length,(int64_t) std::llround(seconds * inputRate));
+    };
+    const auto start = frame(startSeconds), end = frame(endSeconds);
+    if (end <= start) { clearRange(); return; }
+    rangeEnd.store(-1, std::memory_order_release); // never publish a half-updated range
+    rangeStart.store(start, std::memory_order_relaxed);
+    rangeEnd.store(end, std::memory_order_release);
+}
 void MidiSampler::prepare(double rate) { outputRate = std::isfinite(rate) && rate > 0 ? rate : 44100; reset(); }
 void MidiSampler::reset() { for (auto& v : voices) v = {}; sustain.fill(false); }
 int MidiSampler::activeVoices() const { int n = 0; for (const auto& v : voices) if (v.active) ++n; return n; }
@@ -105,33 +126,44 @@ void MidiSampler::event(const juce::MidiMessage& message)
     for (auto& v : voices) if (! v.active) { chosen = &v; break; }
     if (! chosen) return;
     auto& v = *chosen; v = {}; v.active = true; v.note = message.getNoteNumber(); v.channel = channel;
-    v.velocity = message.getFloatVelocity(); v.startFrame = skipSilence.load() ? (int) onset : 0;
-    v.position = v.startFrame; v.looping = loop.load();
+    v.velocity = message.getFloatVelocity();
+    // Range and Skip Silence are captured for this voice; a later selection edit or toggle does
+    // not move a note that is already sounding.
+    const auto length = (int64_t) samples.getNumSamples();
+    auto first = rangeStart.load(std::memory_order_acquire);
+    auto last = rangeEnd.load(std::memory_order_acquire);
+    if (last <= first) { first = 0; last = length; }
+    if (skipSilence.load() && onset >= first && onset < last) first = onset;
+    v.startFrame = juce::jlimit<int64_t>(0,length,first);
+    v.endFrame = juce::jlimit<int64_t>(v.startFrame,length,last);
+    v.position = (double) v.startFrame; v.looping = loop.load();
     v.increment = inputRate/outputRate * std::pow(2.0,(v.note-60)/12.0);
     v.attackFrames = juce::jmax(1,(int) std::lround(outputRate*0.002));
     v.releaseFrames = juce::jmax(1,(int) std::lround(outputRate*0.020));
 }
 void MidiSampler::renderRange(juce::AudioBuffer<float>& out,int start,int count)
 {
-    const int length = samples.getNumSamples();
+    const auto length = (int64_t) samples.getNumSamples();
     if (length == 0) return;
     for (auto& v : voices)
     {
         if (! v.active) continue;
+        const auto first = juce::jlimit<int64_t>(0,length,v.startFrame);
+        const auto last = juce::jlimit<int64_t>(first,length,v.endFrame);
         for (int i = 0; i < count && v.active; ++i)
         {
-            if (v.position >= length)
+            if (v.position >= (double) last)
             {
-                if (! v.looping) { v.active = false; break; }
-                v.position = v.startFrame + std::fmod(v.position-v.startFrame,(double) length-v.startFrame);
+                if (! v.looping || last <= first) { v.active = false; break; }
+                v.position = (double) first + std::fmod(v.position-(double) first,(double) (last-first));
             }
-            const int frame = (int) v.position;
-            const int next = juce::jmin(length-1,frame+1);
-            const float fraction = (float) (v.position-frame);
-            // Fade toward EOF as well as NoteOff, preventing a hard cut on finite one-shots.
+            const int64_t frame = (int64_t) v.position;
+            const int64_t next = juce::jmin(last-1,frame+1);
+            const float fraction = (float) (v.position-(double) frame);
+            // Fade toward the range end as well as NoteOff, preventing a hard cut on one-shots.
             const float endGain = v.looping
-                ? (float) juce::jlimit(0.0,1.0,juce::jmin(length-v.position,v.position-v.startFrame)/(v.increment*v.attackFrames))
-                : (float) juce::jlimit(0.0,1.0,(length-v.position)/(v.increment*v.releaseFrames));
+                ? (float) juce::jlimit(0.0,1.0,juce::jmin((double)last-v.position,v.position-(double)first)/(v.increment*v.attackFrames))
+                : (float) juce::jlimit(0.0,1.0,((double)last-v.position)/(v.increment*v.releaseFrames));
             const float gain = v.envelope * v.velocity * endGain * 0.25f;
             for (int ch = 0; ch < out.getNumChannels(); ++ch)
             {

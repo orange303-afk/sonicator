@@ -762,12 +762,16 @@ void PreviewPanel::selectionChanged(selection::Range range)
 {
     if (! range.valid())
     {
+        engine.setMidiSelection(0.0, 0.0);
         clearSelectionButton.setVisible(false);
         selectionStatus.setText({},juce::dontSendNotification);
         exporter.cancel();
         applyTransportLooping();
         return;
     }
+    // MIDI Preview follows the same range: new voices start at its beginning and stop (or loop)
+    // at its end, exactly like ordinary Play.
+    engine.setMidiSelection(range.start, range.end);
     clearSelectionButton.setVisible(true);
     selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
     if (engine.isTrackerMode())

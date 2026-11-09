@@ -30,6 +30,10 @@ public:
     void setVolume(float);
     void setLooping(bool);
     bool setMidiPreview(bool);
+    // A waveform selection restricts the next MIDI voices of an ordinary file or a selected
+    // tracker/disc source to that range. Empty/invalid plays the whole source. SF2/EXS/NKI zone
+    // maps and REX slice maps are unchanged.
+    void setMidiSelection(double startSeconds, double endSeconds);
     // SF2 banks are presets of zones, not a single audio file. previewSoundFont selects a drum
     // preset (first drum bank if index < 0) and routes MIDI Preview to the kit sampler.
     bool previewSoundFont(const juce::File&, int presetIndex = -1);
@@ -142,6 +146,7 @@ private:
     bool deviceMode, looping = false;
     bool skipSilence = false, startAtNextPlay = true, midiInputsConnected = false;
     double audibleStart = -1;
+    double midiSelectionStart = 0, midiSelectionEnd = 0;
     juce::File loadedFile;
     double inputRate = 0;
     juce::String lastError;
@@ -181,6 +186,7 @@ private:
     juce::AudioSourcePlayer player;
     void attach();
     void clearContainers();
+    void applyMidiSelection();
     bool refreshSoundFontSamples(bool selectFirstPlayable);
     bool previewFileInstrument(const juce::File&);
     bool previewTracker(const juce::File&);

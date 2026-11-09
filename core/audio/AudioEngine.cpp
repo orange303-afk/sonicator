@@ -173,6 +173,28 @@ void AudioEngine::clearContainers()
     output.discMidi = false;
     discSample.reset();
     sampleVoices.clear();
+    midiSelectionStart = midiSelectionEnd = 0;
+    sampler.clearRange();
+    sampleVoices.clearRange();
+}
+void AudioEngine::applyMidiSelection()
+{
+    sampler.clearRange();
+    sampleVoices.clearRange();
+    if (! (midiSelectionEnd > midiSelectionStart)) return;
+    if (trackerMode || discMode) sampleVoices.setRange(midiSelectionStart, midiSelectionEnd);
+    else if (! sf2Mode && ! externalMode && ! rexMode)
+        sampler.setRange(midiSelectionStart, midiSelectionEnd);
+}
+void AudioEngine::setMidiSelection(double startSeconds, double endSeconds)
+{
+    if (std::isfinite(startSeconds) && std::isfinite(endSeconds) && endSeconds > startSeconds)
+    {
+        midiSelectionStart = startSeconds;
+        midiSelectionEnd = endSeconds;
+    }
+    else midiSelectionStart = midiSelectionEnd = 0;
+    applyMidiSelection();
 }
 double AudioEngine::deviceSampleRate() const
 {
@@ -385,6 +407,8 @@ bool AudioEngine::selectTrackerSample(SampleId id)
     discSample.reset();
     {
         const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        midiSelectionStart = midiSelectionEnd = 0;
+        sampleVoices.clearRange();
         sf2Audition.setAudio(audio);
         sf2Audition.prepare(deviceSampleRate());
         if (slot.looping) sf2Audition.setLoopRange(slot.loopStart, slot.loopEnd, slot.pingPong);
@@ -407,6 +431,8 @@ bool AudioEngine::selectTrackerWholeSong()
     trackerSample.reset();
     {
         const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        midiSelectionStart = midiSelectionEnd = 0;
+        sampleVoices.clearRange();
         sf2Audition.stop();
         sf2Audition.clear();
         sampleVoices.reset();
@@ -596,6 +622,7 @@ bool AudioEngine::setMidiPreview(bool enabled)
     sampler.clear(); sampleVoices.reset(); lastError.clear();
     if (enabled && loadedFile != juce::File() && ! sf2Mode && ! externalMode && ! rexMode
         && ! trackerMode && ! discMode) lastError = sampler.load(loadedFile);
+    applyMidiSelection(); // a waveform selection survives a MIDI toggle
     output.midi = enabled && lastError.isEmpty();
     if (deviceMode)
     {

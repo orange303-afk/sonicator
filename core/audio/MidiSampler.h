@@ -38,12 +38,17 @@ public:
     void render(juce::AudioBuffer<float>&,int start,int count,const juce::MidiBuffer&);
     int activeVoices() const;
     int64_t silenceStart() const { return onset; }
+    // Restricts the next voices to a time range of the loaded sample; an empty/invalid range
+    // plays the whole sample. Captured per voice at NoteOn, so ringing notes are not retuned.
+    void setRange(double startSeconds,double endSeconds);
+    void clearRange();
     std::atomic<bool> skipSilence {false}, loop {false};
 private:
     struct Voice
     {
         bool active = false, releasing = false, looping = false, sustained = false;
-        int note = 0, channel = 1, age = 0, attackFrames = 1, releaseFrames = 1, startFrame = 0;
+        int note = 0, channel = 1, age = 0, attackFrames = 1, releaseFrames = 1;
+        int64_t startFrame = 0, endFrame = 0;
         double position = 0, increment = 1;
         float envelope = 0, releaseStep = 0, velocity = 0;
     };
@@ -52,6 +57,7 @@ private:
     juce::AudioBuffer<float> samples;
     double inputRate = 44100, outputRate = 44100;
     int64_t onset = 0;
+    std::atomic<int64_t> rangeStart {0}, rangeEnd {-1};
     void event(const juce::MidiMessage&);
     void renderRange(juce::AudioBuffer<float>&,int start,int count);
     void release(Voice&);

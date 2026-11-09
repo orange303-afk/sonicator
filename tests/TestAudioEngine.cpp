@@ -120,6 +120,65 @@ TEST_CASE("MIDI pitch is chromatic and Skip Silence affects the next voice only"
     note.addEvent(juce::MidiMessage::noteOn(1,64,1.0f),0);
     sampler.render(block,0,256,note); REQUIRE(block.getMagnitude(0,256) > 0.05f);
 }
+TEST_CASE("MIDI selection starts, stops and loops at the waveform range", "[audio][midi][selection]")
+{
+    TestDirectory t;
+    auto file = t.wave("leading.wav", 440, 1, 44100 * 2);
+    REQUIRE(TestDirectory::zeroFrames(file, 0, 44100));
+    MidiSampler sampler;
+    REQUIRE(sampler.load(file).isEmpty()); sampler.prepare(44100);
+    juce::AudioBuffer<float> block(2, 512);
+    juce::MidiBuffer note, empty;
+    note.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0);
+    // No selection: the whole sample starts at zero, which is silent here.
+    sampler.render(block, 0, 512, note);
+    REQUIRE(block.getMagnitude(0, 512) == 0.0f);
+    // A range starts the note at its beginning instead.
+    sampler.reset(); sampler.setRange(1.0, 1.25);
+    sampler.render(block, 0, 512, note);
+    REQUIRE(block.getMagnitude(0, 512) > 0.05f);
+    // One-shot: the voice ends at the selected range end.
+    for (int i = 0; i < 30; ++i) sampler.render(block, 0, 512, empty);
+    REQUIRE(sampler.activeVoices() == 0);
+    // Loop: the voice wraps inside the range and keeps sounding.
+    sampler.loop = true; sampler.reset(); sampler.setRange(1.0, 1.1);
+    sampler.render(block, 0, 512, note);
+    bool audible = false;
+    for (int i = 0; i < 30; ++i)
+    {
+        sampler.render(block, 0, 512, empty);
+        if (block.getMagnitude(0, 512) > 0.01f) audible = true;
+    }
+    REQUIRE(audible);
+    REQUIRE(sampler.activeVoices() == 1);
+    sampler.clearRange(); sampler.loop = false;
+}
+
+TEST_CASE("MIDI selection applies to a decoded source sample", "[audio][midi][selection]")
+{
+    SampleAudio audio;
+    audio.sampleRate = 44100; audio.channels = 1; audio.frames = 44100 * 2;
+    audio.left.assign((size_t) audio.frames, 0.0f);
+    for (int64_t i = 44100; i < audio.frames; ++i) audio.left[(size_t) i] = 0.3f;
+    const auto source = std::make_shared<const SampleAudio>(audio);
+    SampleVoicePlayer voices; voices.setSource(source, false, 0, 0, false); voices.prepare(44100);
+    juce::AudioBuffer<float> block(2, 512);
+    juce::MidiBuffer note, empty;
+    note.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0);
+    voices.render(block, 0, 512, note);
+    REQUIRE(voices.activeVoices() == 1);
+    REQUIRE(block.getMagnitude(0, 512) == 0.0f);
+    voices.reset(); voices.setRange(1.0, 1.25);
+    voices.render(block, 0, 512, note);
+    REQUIRE(voices.activeVoices() == 1);
+    REQUIRE(block.getMagnitude(0, 512) > 0.02f);
+    for (int i = 0; i < 30; ++i) voices.render(block, 0, 512, empty);
+    REQUIRE(voices.activeVoices() == 0);
+    voices.setLooping(true); voices.reset(); voices.setRange(1.0, 1.1);
+    voices.render(block, 0, 512, note);
+    for (int i = 0; i < 30; ++i) voices.render(block, 0, 512, empty);
+    REQUIRE(voices.activeVoices() == 1);
+}
 TEST_CASE("MIDI voices are bounded and the output honours buffer offsets", "[audio][midi]")
 {
     TestDirectory t; MidiSampler sampler; REQUIRE(sampler.load(t.wave()).isEmpty()); sampler.prepare(48000);

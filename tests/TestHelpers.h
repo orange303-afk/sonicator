@@ -30,6 +30,14 @@ struct TestDirectory
             }
         return f;
     }
+    // Writes zero PCM frames over an existing mono/stereo 16-bit WAV fixture.
+    static bool zeroFrames(const juce::File& file, int firstFrame, int frames, int channels = 1)
+    {
+        juce::FileOutputStream out(file);
+        std::vector<char> zeros((size_t) frames * (size_t) channels * 2, 0);
+        return out.setPosition(44 + (juce::int64) firstFrame * channels * 2)
+            && out.write(zeros.data(), (int) zeros.size());
+    }
     // Minimal AIFC with a COMM compression type. Used to test codecs without decoding audio.
     juce::File aifc(const juce::String& name, const char* codec)
     {

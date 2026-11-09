@@ -34,6 +34,21 @@ void SampleVoicePlayer::clear()
     currentSource = -1;
 }
 
+void SampleVoicePlayer::clearRange()
+{
+    rangeEnd.store(0.0, std::memory_order_release); // end <= start means "whole source"
+    rangeStart.store(0.0, std::memory_order_relaxed);
+}
+
+void SampleVoicePlayer::setRange(double startSeconds, double endSeconds)
+{
+    if (! std::isfinite(startSeconds) || ! std::isfinite(endSeconds) || endSeconds <= startSeconds)
+    { clearRange(); return; }
+    rangeEnd.store(0.0, std::memory_order_release); // never publish a half-updated range
+    rangeStart.store(juce::jmax(0.0, startSeconds), std::memory_order_relaxed);
+    rangeEnd.store(endSeconds, std::memory_order_release);
+}
+
 void SampleVoicePlayer::prepare(double sampleRate)
 {
     outputRate = std::isfinite(sampleRate) && sampleRate > 0 ? sampleRate : 44100.0;
@@ -120,9 +135,41 @@ void SampleVoicePlayer::event(const juce::MidiMessage& message)
     voice.channel = channel;
     voice.velocity = message.getFloatVelocity();
     voice.source = currentSource;
-    voice.position = 0;
+    // Range and Loop are captured for this voice; a later selection edit does not move a note
+    // that is already sounding.
+    const auto frames = (double) source.audio->frames;
+    const auto rate = (double) source.audio->sampleRate;
+    auto first = 0.0, last = frames;
+    bool hasRange = false;
+    const auto rangeBegin = rangeStart.load(std::memory_order_acquire);
+    const auto rangeFinish = rangeEnd.load(std::memory_order_acquire);
+    if (std::isfinite(rangeBegin) && std::isfinite(rangeFinish) && rangeFinish > rangeBegin)
+    {
+        first = juce::jlimit(0.0, frames, rangeBegin * rate);
+        last = juce::jlimit(first, frames, rangeFinish * rate);
+        hasRange = last > first;
+        if (! hasRange) { first = 0.0; last = frames; }
+    }
+    voice.position = first;
+    voice.end = last;
     voice.direction = 1;
-    voice.loop = looping.load(std::memory_order_relaxed) && source.loopAvailable;
+    voice.loop = looping.load(std::memory_order_relaxed) && (source.loopAvailable || hasRange);
+    if (voice.loop)
+    {
+        if (hasRange)
+        {
+            // The selected fragment owns the loop; declared tracker loops do not override it.
+            voice.loopStart = first;
+            voice.loopEnd = last;
+            voice.pingPong = false;
+        }
+        else
+        {
+            voice.loopStart = (double) source.loopStart;
+            voice.loopEnd = (double) source.loopEnd;
+            voice.pingPong = source.pingPong;
+        }
+    }
     const double semitones = (double) (voice.note - 60) / 12.0;
     voice.increment = juce::jlimit(0.0001, 64.0,
         (double) source.audio->sampleRate / outputRate * std::pow(2.0, semitones));
@@ -144,11 +191,11 @@ void SampleVoicePlayer::renderRange(juce::AudioBuffer<float>& out, int start, in
         {
             if (voice.loop)
             {
-                const auto loopStart = (double) source.loopStart;
-                const auto loopEnd = (double) source.loopEnd;
+                const auto loopStart = voice.loopStart;
+                const auto loopEnd = voice.loopEnd;
                 if (voice.position >= loopEnd)
                 {
-                    if (source.pingPong)
+                    if (voice.pingPong)
                     {
                         voice.position = loopEnd - (voice.position - loopEnd) - 1.0;
                         voice.direction = -1;
@@ -161,7 +208,7 @@ void SampleVoicePlayer::renderRange(juce::AudioBuffer<float>& out, int start, in
                     voice.direction = 1;
                 }
             }
-            else if (voice.position >= (double) frames)
+            else if (voice.position >= voice.end)
             {
                 stopVoice(voice);
                 break;

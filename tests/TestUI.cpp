@@ -47,6 +47,27 @@ TEST_CASE("Auto Preview is independently switchable while MIDI remains enabled",
     autoPreview->setToggleState(false,juce::sendNotificationSync);
     REQUIRE(preview.loadFile(t.wave("b.wav"))); REQUIRE_FALSE(engine.isPlaying()); REQUIRE(engine.isMidiPreview());
 }
+TEST_CASE("Waveform selection drives the MIDI preview range", "[ui][midi][selection]")
+{
+    TestDirectory t;
+    auto file = t.wave("leading.wav", 440, 1, 44100 * 2);
+    REQUIRE(TestDirectory::zeroFrames(file, 0, 44100));
+    AudioEngine engine(false); PreviewPanel preview(engine, t.dir.getChildFile("cache"));
+    REQUIRE(preview.loadFile(file, false));
+    REQUIRE(engine.setMidiPreview(true));
+    preview.selectRange(1.0, 1.25);
+    engine.preparePreviewBlock(512);
+    juce::AudioBuffer<float> block(2, 512);
+    engine.midiCollector().push(juce::MidiMessage::noteOn(1, 60, 1.0f));
+    engine.renderPreviewBlock(block, 512);
+    REQUIRE(block.getMagnitude(0, 512) > 0.05f);
+    // Clearing the selection returns new voices to the whole source, which is silent here.
+    engine.stop();
+    preview.clearSelection();
+    engine.midiCollector().push(juce::MidiMessage::noteOn(1, 60, 1.0f));
+    engine.renderPreviewBlock(block, 512);
+    REQUIRE(block.getMagnitude(0, 512) == 0.0f);
+}
 TEST_CASE("Preview controls leave keyboard navigation with the library", "[ui][focus]")
 {
     TestDirectory t; AudioEngine engine(false); PreviewPanel preview(engine,t.dir.getChildFile("cache"));
