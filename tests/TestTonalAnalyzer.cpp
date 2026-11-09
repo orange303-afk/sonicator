@@ -181,3 +181,89 @@ TEST_CASE("A file shorter than the minimum gives no key", "[tonal][key]")
     const auto key = TonalAnalyzer::analyzeKey(audio, defaultRate);
     REQUIRE_FALSE(key.found);
 }
+
+TEST_CASE("A detuned triad keeps its key and reports the tuning", "[tonal][key][decision]")
+{
+    const auto audio = triad(0, 4, defaultRate, 2.0, 25.0);
+    const auto key = TonalAnalyzer::analyzeKey(audio, defaultRate);
+    INFO("explanation: " << key.explanation);
+    REQUIRE(key.found);
+    REQUIRE(key.tonic == 0);
+    REQUIRE(key.mode == "major");
+    REQUIRE(key.tuningCents == Catch::Approx(25.0).margin(8.0));
+}
+
+TEST_CASE("An impulse train is percussive, not a key", "[tonal][key][decision]")
+{
+    auto buffer = makeBuffer(4.0, defaultRate);
+    for (double time = 0.1; time < 4.0; time += 0.5)
+    {
+        const int index = (int) std::llround(time * defaultRate);
+        if (index < buffer.getNumSamples()) buffer.setSample(0, index, 0.9f);
+    }
+    const auto key = TonalAnalyzer::analyzeKey(buffer, defaultRate);
+    INFO("explanation: " << key.explanation);
+    REQUIRE_FALSE(key.found);
+    REQUIRE(key.percussive);
+}
+
+TEST_CASE("Noise bursts are percussive, not a key", "[tonal][key][decision]")
+{
+    auto buffer = makeBuffer(4.0, defaultRate);
+    std::mt19937 generator(999);
+    std::uniform_real_distribution<double> distribution(-0.6, 0.6);
+    for (double time = 0.1; time < 4.0; time += 0.25)
+    {
+        const int start = (int) std::llround(time * defaultRate);
+        const int length = (int) std::llround(0.06 * defaultRate);
+        for (int i = 0; i < length && start + i < buffer.getNumSamples(); ++i)
+        {
+            const double envelope = std::exp(-(double) i / (0.015 * defaultRate));
+            buffer.addSample(0, start + i, (float) (distribution(generator) * envelope));
+        }
+    }
+    const auto key = TonalAnalyzer::analyzeKey(buffer, defaultRate);
+    INFO("explanation: " << key.explanation);
+    REQUIRE_FALSE(key.found);
+}
+
+TEST_CASE("A tritone-split chord gives no key", "[tonal][key][decision]")
+{
+    auto buffer = makeBuffer(2.0, defaultRate);
+    for (int root : { 0, 6 })
+    {
+        const double midiRoot = 60.0 + root;
+        for (double note : { midiRoot, midiRoot + 4.0, midiRoot + 7.0 })
+            addSine(buffer, defaultRate, midiFrequency(note), 0.0, 2.0, 0.10);
+    }
+    const auto key = TonalAnalyzer::analyzeKey(buffer, defaultRate);
+    INFO("explanation: " << key.explanation);
+    REQUIRE_FALSE(key.found);
+}
+
+TEST_CASE("Competing modes at one tonic give a bare tonic", "[tonal][key][decision]")
+{
+    auto buffer = makeBuffer(2.0, defaultRate);
+    for (double note : { 60.0, 64.0, 67.0 })
+        addSine(buffer, defaultRate, midiFrequency(note), 0.0, 1.0, 0.18);
+    for (double note : { 60.0, 63.0, 67.0 })
+        addSine(buffer, defaultRate, midiFrequency(note), 1.0, 1.0, 0.18);
+    const auto key = TonalAnalyzer::analyzeKey(buffer, defaultRate);
+    INFO("explanation: " << key.explanation);
+    REQUIRE(key.found);
+    REQUIRE(key.tonic == 0);
+    REQUIRE(key.mode.isEmpty());
+}
+
+TEST_CASE("A found key has a bounded confidence and an explanation", "[tonal][key][decision]")
+{
+    const auto audio = triad(0, 4);
+    const auto key = TonalAnalyzer::analyzeKey(audio, defaultRate);
+    REQUIRE(key.found);
+    REQUIRE(std::isfinite(key.confidence));
+    REQUIRE(key.confidence >= 0.0);
+    REQUIRE(key.confidence <= 1.0);
+    REQUIRE(key.explanation.containsIgnoreCase("Krumhansl"));
+    REQUIRE(key.explanation.containsIgnoreCase("margin"));
+}
+

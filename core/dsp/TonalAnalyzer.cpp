@@ -353,6 +353,7 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
     const double weightAverage = audibleFrames > 0 ? weightSum / (double) audibleFrames : 0.0;
     const double retained = rawEnergy > 1.0e-20 ? medianEnergy / rawEnergy : 0.0;
     result.tonality = std::min(weightAverage, retained);
+    result.percussive = result.tonality < options.minTonality;
     double norm = 0.0;
     for (double value : summed) norm += value * value;
     norm = std::sqrt(norm);
@@ -382,7 +383,6 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
     result.runnerUpCorrelation = runnerUp != nullptr ? runnerUp->score : 0.0;
     result.runnerUpTonic = runnerUp != nullptr ? runnerUp->tonic : -1;
     result.runnerUpMode = runnerUp != nullptr ? runnerUp->mode : juce::String();
-    result.percussive = result.tonality < options.minTonality;
 
     juce::String explanation = "key: dsp chroma, Krumhansl-Kessler + Temperley; best "
         + juce::String(best.score, 3) + " for tonic " + juce::String(best.tonic)
