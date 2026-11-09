@@ -4,6 +4,9 @@ namespace sonicator {
 
 FastAcousticDecision FastAcousticRules::evaluate(const AcousticDescriptors& desc, double duration)
 {
+    if (duration <= 0.0)
+        return {};
+
     // 1. Kick:
     // - Sub dominant (subBandEnergy[0] >= 0.40) OR (sub+low >= 0.70 with sub >= 0.30)
     // - Fast attack: logAttackTime <= -1.7 (~20 ms)
