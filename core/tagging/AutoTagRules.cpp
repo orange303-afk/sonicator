@@ -214,6 +214,8 @@ AutoTagDecision AutoTagRules::evaluate(const AutoTagInput& in, const AutoTagOpti
     // Stored candidates from metadata, sidecars or the filename. Folder candidates are context.
     std::set<juce::String> metadataClasses;
     juce::String metadataSource, metadataDetail;
+    std::set<juce::String> acousticClasses;
+    juce::String acousticSource, acousticDetail;
     const bool smartResultStale = in.result.has_value()
         && (in.result->pipelineState == SmartPipelineState::Stale
             || in.result->extractorVersion != options.extractorVersion
@@ -228,18 +230,36 @@ AutoTagDecision AutoTagRules::evaluate(const AutoTagInput& in, const AutoTagOpti
             folderProvenance = true;
             continue;
         }
-        if (candidate.extractorVersion != options.extractorVersion || smartResultStale)
+        const bool isAcoustic = (candidate.source == "dsp_acoustic" || candidate.source == "ml_classifier");
+        const bool versionOk = isAcoustic
+            ? (candidate.extractorVersion == options.extractorVersion
+               || candidate.extractorVersion == options.dspVersion
+               || candidate.extractorVersion == smartDspVersion)
+            : (candidate.extractorVersion == options.extractorVersion);
+        if (! versionOk || smartResultStale)
         {
             staleEvidence = true;
             continue;
         }
         const auto type = canonicalFromAliases(candidate.textValue);
         if (type.isEmpty()) continue;
-        metadataClasses.insert(type);
-        if (metadataSource.isEmpty())
+        if (isAcoustic)
         {
-            metadataSource = candidate.source;
-            metadataDetail = candidate.textValue;
+            acousticClasses.insert(type);
+            if (acousticSource.isEmpty())
+            {
+                acousticSource = candidate.source;
+                acousticDetail = candidate.textValue;
+            }
+        }
+        else
+        {
+            metadataClasses.insert(type);
+            if (metadataSource.isEmpty())
+            {
+                metadataSource = candidate.source;
+                metadataDetail = candidate.textValue;
+            }
         }
     }
 
@@ -272,6 +292,13 @@ AutoTagDecision AutoTagRules::evaluate(const AutoTagInput& in, const AutoTagOpti
         source = smartSource;
         reason = "resolved smart type " + quote(smartDetail) + " from " + smartSource;
     }
+    else if (! acousticClasses.empty())
+    {
+        evidenceClasses = acousticClasses;
+        rule = AutoTagRule::SmartType;
+        source = acousticSource;
+        reason = "acoustic classification " + quote(acousticDetail) + " from " + acousticSource;
+    }
 
     if (filename.classes.size() > 1)
         return skip(in, "ambiguous-types", "the filename names more than one instrument",
@@ -286,6 +313,7 @@ AutoTagDecision AutoTagRules::evaluate(const AutoTagInput& in, const AutoTagOpti
         std::set<juce::String> all = evidenceClasses;
         all.insert(metadataClasses.begin(), metadataClasses.end());
         all.insert(smartClasses.begin(), smartClasses.end());
+        all.insert(acousticClasses.begin(), acousticClasses.end());
         if (all.size() > 1)
             return skip(in, "conflicting-types", "evidence points at different instrument types",
                         { joinClasses(all) });

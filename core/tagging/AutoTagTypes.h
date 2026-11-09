@@ -48,6 +48,7 @@ struct AutoTagOptions
 {
     int extractorVersion = smartExtractorsVersion;
     int resolverVersion = smartResolverVersion;
+    int dspVersion = smartDspVersion;
     std::map<juce::String, int64_t> tagIds; // canonical type -> existing tag id
 };
 

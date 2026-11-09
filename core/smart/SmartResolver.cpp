@@ -1,5 +1,6 @@
 #include "SmartResolver.h"
 #include "KeyNames.h"
+#include "NameHeuristics.h"
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -73,7 +74,17 @@ void resolveText(const std::vector<SmartCandidate>& all,
         return;
     }
     std::set<juce::String> distinct;
-    for (const auto& c : list) distinct.insert(c.textValue.trim().toLowerCase());
+    for (const auto& c : list)
+    {
+        auto normalized = c.textValue.trim().toLowerCase();
+        if (field == SmartField::Type)
+        {
+            auto canonical = canonicalSmartTypeToken(c.textValue.trim());
+            if (canonical.isNotEmpty())
+                normalized = canonical.toLowerCase();
+        }
+        distinct.insert(normalized);
+    }
     value = list.front().textValue;
     source = list.front().source;
     state = distinct.size() == 1 ? SmartState::Resolved : SmartState::Ambiguous;
@@ -359,20 +370,22 @@ int smartSourcePriority(const juce::String& source)
 {
     if (source == "rx2_recy") return 0;
     if (source == "rx2_glob") return 1;
+    if (source == "wav_smpl" || source == "wav_inst") return 0;
     if (source == "aiff_basc") return 2;
     if (source == "wav_acid") return 3;
     if (source == "id3") return 3;
-    if (source == "filename") return 4;
-    if (source == "dsp") return 5;
-    if (source == "wav_smpl" || source == "wav_inst") return 0;
-    if (source == "asd_warp") return 6;
+    if (source == "dsp_acoustic") return 4;
+    if (source == "filename") return 5;
+    if (source == "ml_classifier") return 6;
+    if (source == "dsp") return 7;
+    if (source == "asd_warp") return 8;
     return 10;
 }
 juce::String smartSourceGroup(const juce::String& source)
 {
-    if (source == "filename" || source == "folder") return "name";
+    if (source == "filename" || source == "folder" || source == "path") return "name";
     if (source == "asd_warp") return "sidecar";
-    if (source == "dsp") return "dsp";
+    if (source == "dsp" || source == "dsp_acoustic" || source == "ml_classifier") return "dsp";
     if (source == "override") return "override";
     // Container metadata of one exporter is one evidence group, not several.
     return "container";

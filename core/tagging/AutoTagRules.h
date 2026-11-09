@@ -3,8 +3,8 @@
 #include <set>
 namespace sonicator {
 // Pure, deterministic instrument-only rules. They never read files, SQLite or the UI; the caller
-// supplies stored evidence and the mapping to existing tags. A file with competing or weak
-// evidence is skipped rather than confidently mistagged.
+// supplies stored evidence (filename tokens, metadata, or acoustic candidates) and the mapping
+// to existing tags. A file with competing or weak evidence is skipped rather than confidently mistagged.
 class AutoTagRules
 {
 public:
