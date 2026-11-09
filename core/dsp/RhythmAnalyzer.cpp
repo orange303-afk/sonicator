@@ -1,4 +1,5 @@
 #include "RhythmAnalyzer.h"
+#include "AnalysisAudio.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_dsp/juce_dsp.h>
 #include <algorithm>
@@ -531,29 +532,15 @@ RhythmAnalysis RhythmAnalyzer::analyzeFile(const juce::File& file, const RhythmO
                                            const CancelCheck& cancel)
 {
     RhythmAnalysis result;
-    juce::AudioFormatManager formats;
-    formats.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
-    if (reader == nullptr || reader->sampleRate <= 0 || reader->lengthInSamples <= 0
-        || reader->numChannels == 0 || reader->numChannels > 64)
-    {
-        result.error = "unsupported, empty or corrupt audio file";
-        return result;
-    }
-    const int64_t byTime = (int64_t) std::llround(options.maxAnalysisSeconds * reader->sampleRate);
-    const int64_t byMemory = options.maxDecodedBytes / (4 * (int64_t) reader->numChannels);
-    const int64_t length = std::min({ reader->lengthInSamples, byTime, byMemory });
-    if (length <= 0) { result.error = "empty audio file"; return result; }
-    juce::AudioBuffer<float> audio((int) reader->numChannels, (int) length);
-    if (! reader->read(&audio, 0, (int) length, 0, true, true))
-    {
-        result.error = "audio decode failed";
-        return result;
-    }
-    result = analyze(audio, reader->sampleRate, options, cancel);
-    if (reader->lengthInSamples > length)
+    AnalysisAudioOptions audioOptions;
+    audioOptions.maxSeconds = options.maxAnalysisSeconds;
+    audioOptions.maxDecodedBytes = options.maxDecodedBytes;
+    const auto audio = readAnalysisAudio(file, audioOptions, cancel);
+    if (! audio.ok()) { result.error = audio.error; return result; }
+    result = analyze(audio.buffer, audio.sampleRate, options, cancel);
+    if (audio.truncated)
         result.explanation += " (first "
-            + juce::String((double) length / reader->sampleRate, 0) + " s analysed)";
+            + juce::String((double) audio.buffer.getNumSamples() / audio.sampleRate, 0) + " s analysed)";
     return result;
 }
 } // namespace sonicator
