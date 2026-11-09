@@ -84,8 +84,7 @@ std::vector<MlPrediction> OnnxAudioClassifier::classify(const juce::AudioBuffer<
     if (topK <= 0 || buffer.getNumSamples() == 0 || buffer.getNumChannels() == 0 || sampleRate <= 40.0)
         return {};
 
-    std::lock_guard<std::mutex> lock(impl->mutex);
-    if (!impl->session)
+    if (!isLoaded())
         return {};
 
     const int melBands = 64;
@@ -98,6 +97,10 @@ std::vector<MlPrediction> OnnxAudioClassifier::classify(const juce::AudioBuffer<
 
     auto melData = MelSpectrogram::computeLogMel(buffer, sampleRate, melBands, fftSize, hopSize);
     if (melData.empty())
+        return {};
+
+    std::lock_guard<std::mutex> lock(impl->mutex);
+    if (!impl->session)
         return {};
 
     try {
