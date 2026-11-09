@@ -259,13 +259,6 @@ void ExtractService::run()
                 [this] { return cancelled.load(); });
             if (! exported.success)
             {
-                ++result.failed;
-                result.problems.add(entry.name + ": " + exported.error);
-                updateProgress([](ExtractProgress& p)
-                {
-                    ++p.processedSamples;
-                    ++p.failed;
-                });
                 if (exported.error.containsIgnoreCase("cancel"))
                 {
                     result.state = ExtractFileState::cancelled;
@@ -273,6 +266,13 @@ void ExtractService::run()
                     updateProgress([](ExtractProgress& p) { p.cancelled = true; });
                     break;
                 }
+                ++result.failed;
+                result.problems.add(entry.name + ": " + exported.error);
+                updateProgress([](ExtractProgress& p)
+                {
+                    ++p.processedSamples;
+                    ++p.failed;
+                });
             }
             else
             {
@@ -306,14 +306,13 @@ void ExtractService::run()
             break;
         }
     }
-    updateProgress([this](ExtractProgress& p)
-    {
-        p.running = false;
-        p.processedFiles = (int) files.size();
-        p.fraction = p.cancelled ? p.fraction : 1.0;
-        p.current.clear();
-    });
+    // Results and the terminal progress state are published together: the owner polls progress(),
+    // and seeing running == false must mean results() is already complete.
     std::lock_guard lock(stateMutex);
     fileResults = std::move(results);
+    state.running = false;
+    state.processedFiles = (int) files.size();
+    state.fraction = state.cancelled ? state.fraction : 1.0;
+    state.current.clear();
 }
 } // namespace sonicator

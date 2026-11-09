@@ -15,6 +15,10 @@ struct EmbeddedSampleEntry
 // external audio (EXS24, NKI) are deliberately excluded: nothing can be extracted without
 // collecting files from elsewhere.
 bool isEmbeddedSampleSource(const juce::File&);
+// Filters a selection down to the files the extract action can read: existing tracker modules and
+// SoundFont banks. The library also treats those formats as metadata-only for scanning, so this
+// decision must be independent of that split-candidate filter.
+std::vector<juce::File> embeddedSources(const std::vector<juce::File>& files);
 // Opens one tracker module or SoundFont bank and enumerates its embedded samples. Empty slots,
 // FM instruments without PCM, SF2 right-channel halves and samples with no audio range are not
 // listed. Reading one entry decodes exactly that source; the set must outlive its audio pointers

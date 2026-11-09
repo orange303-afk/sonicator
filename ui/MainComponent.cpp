@@ -1740,14 +1740,16 @@ void MainComponent::startExtract(const std::vector<juce::File>& files)
             if (safe == nullptr || safe->extractor == nullptr) return false;
             safe->appSettings.extractSameFolder = options.sameFolder;
             safe->appSettings.extractNormalize = options.normalize;
-            safe->appSettings.extractOutputFolder = options.outputFolder.getFullPathName();
+            if (! options.sameFolder && options.outputFolder.isDirectory())
+                safe->appSettings.extractOutputFolder = options.outputFolder.getFullPathName();
             try
             {
                 safe->settingsStore.update([options](AppSettings& saved)
                 {
                     saved.extractSameFolder = options.sameFolder;
                     saved.extractNormalize = options.normalize;
-                    saved.extractOutputFolder = options.outputFolder.getFullPathName();
+                    if (! options.sameFolder && options.outputFolder.isDirectory())
+                        saved.extractOutputFolder = options.outputFolder.getFullPathName();
                 });
             }
             catch (const std::exception&)
@@ -2147,15 +2149,18 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         allIgnored = allIgnored && ignored;
         if (ignored && ! readRepo->hasExactIgnore(record.filePath)) anyInherited = true;
     }
-    std::vector<juce::File> splitCandidates, extractCandidates;
+    std::vector<juce::File> existingFiles, splitCandidates, extractCandidates;
     for (const auto& record : selection)
     {
         const juce::File file(record.filePath);
         if (! file.existsAsFile() || isPathIgnored(record.filePath, ignoredPaths)) continue;
-        if (! FileScanner::isSupportedFormat(file) || FileScanner::isMetadataOnlyFormat(file)) continue;
-        splitCandidates.push_back(file);
-        if (isEmbeddedSampleSource(file)) extractCandidates.push_back(file);
+        if (! FileScanner::isSupportedFormat(file)) continue;
+        existingFiles.push_back(file);
+        if (! FileScanner::isMetadataOnlyFormat(file)) splitCandidates.push_back(file);
     }
+    // Embedded sources are metadata-only for scanning, so they must be selected from the
+    // existing-file list rather than from the split candidates.
+    extractCandidates = embeddedSources(existingFiles);
     const auto assignments = readRepo->tagsForSamples(ids);
     std::map<int64_t, bool> allHave;
     for (const auto& tag : allTags)

@@ -201,3 +201,18 @@ TEST_CASE("Embedded listing rejects formats without packed audio", "[extract]")
     REQUIRE_FALSE(set.open(t.dir.getChildFile("bank.exs"), error));
     REQUIRE(error.isNotEmpty());
 }
+
+TEST_CASE("Extract candidates include embedded sources and exclude ordinary audio", "[extract][menu]")
+{
+    TestDirectory t;
+    auto module = writeMod(t);
+    auto bank = writeBank(t, "one.sf2", { sampleHeader("used", 0, 64, 1, 0) }, 64);
+    auto wave = t.wave("plain.wav");
+    auto missing = t.dir.getChildFile("missing.mod");
+    auto exs = t.dir.getChildFile("bank.exs");
+    exs.replaceWithText("not audio");
+    const auto candidates = embeddedSources({ wave, module, bank, missing, exs });
+    REQUIRE(candidates.size() == 2);
+    REQUIRE(candidates[0] == module);
+    REQUIRE(candidates[1] == bank);
+}

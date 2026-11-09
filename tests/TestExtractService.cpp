@@ -3,6 +3,7 @@
 #include "core/extract/ExtractService.h"
 #include "TestHelpers.h"
 #include <algorithm>
+#include <cstring>
 #include <cmath>
 using namespace sonicator;
 namespace {
@@ -50,7 +51,7 @@ juce::File writeMod(TestDirectory& t)
     file.replaceWithData(b.v.data(), b.v.size());
     return file;
 }
-juce::File writeBank(TestDirectory& t, int sampleCount)
+juce::File writeBank(TestDirectory& t, int sampleCount, int badRateIndex = -1)
 {
     Blob pcm;
     for (int i = 0; i < sampleCount * 64; ++i)
@@ -71,7 +72,8 @@ juce::File writeBank(TestDirectory& t, int sampleCount)
     {
         const auto start = (juce::uint32) (i * 64), end = (juce::uint32) (i * 64 + 64);
         Blob h; h.ascii("s" + juce::String(i + 1), 20);
-        h.u32(start); h.u32(end); h.u32(start); h.u32(end); h.u32(44100);
+        h.u32(start); h.u32(end); h.u32(start); h.u32(end);
+        h.u32(i == badRateIndex ? 0 : 44100);
         h.u8(60); h.u8(0); h.u16(0); h.u16(1);
         shdr.v.insert(shdr.v.end(), h.v.begin(), h.v.end());
     }
@@ -266,4 +268,119 @@ TEST_CASE("Extract keeps a non-ASCII source name in the sample folder", "[extrac
     REQUIRE(service.results()[0].folder
             == t.dir.getChildFile(juce::String::fromUTF8("Бочка samples")));
     REQUIRE(wavsIn(service.results()[0].folder).size() == 1);
+}
+
+TEST_CASE("Cancelling mid-file keeps finished WAVs and reports no sample errors", "[extract][service]")
+{
+    TestDirectory t;
+    auto bank = writeBank(t, 600);
+    ExtractService service;
+    REQUIRE(service.start({ bank }, ExtractOptions{}));
+    for (int spins = 0; spins < 5000 && service.progress().written == 0; ++spins)
+        juce::Thread::sleep(1);
+    service.cancel();
+    REQUIRE(service.waitUntilFinished(20000));
+    const auto progress = service.progress();
+    REQUIRE(progress.cancelled);
+    REQUIRE(progress.written >= 1);
+    REQUIRE(progress.failed == 0);
+    const auto results = service.results();
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].state == ExtractFileState::cancelled);
+    REQUIRE(results[0].failed == 0);
+    REQUIRE(results[0].problems.isEmpty());
+    const auto files = wavsIn(results[0].folder);
+    REQUIRE_FALSE(files.empty());
+    for (const auto& file : files) REQUIRE(file.getSize() > 0);
+    for (const auto& entry : juce::RangedDirectoryIterator(results[0].folder, true, "*.part",
+                                                             juce::File::findFiles))
+        FAIL("partial file left behind: " << entry.getFile().getFullPathName());
+}
+
+TEST_CASE("A corrupt embedded source does not stop the batch", "[extract][service]")
+{
+    TestDirectory t;
+    auto broken = t.dir.getChildFile("broken.sf2");
+    broken.replaceWithText("this is not a SoundFont");
+    auto module = writeMod(t);
+    ExtractService service;
+    REQUIRE(service.start({ broken, module }, ExtractOptions{}));
+    REQUIRE(service.waitUntilFinished(20000));
+    const auto results = service.results();
+    REQUIRE(results.size() == 2);
+    REQUIRE(results[0].state == ExtractFileState::failed);
+    REQUIRE(results[0].error.isNotEmpty());
+    REQUIRE(results[1].state == ExtractFileState::extracted);
+    REQUIRE(results[1].written == 1);
+    REQUIRE(service.progress().written == 1);
+}
+
+TEST_CASE("One undecodable sample is reported and its siblings are still written", "[extract][service]")
+{
+    TestDirectory t;
+    auto bank = writeBank(t, 2, 1);
+    ExtractService service;
+    REQUIRE(service.start({ bank }, ExtractOptions{}));
+    REQUIRE(service.waitUntilFinished(20000));
+    const auto results = service.results();
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].state == ExtractFileState::extracted);
+    REQUIRE(results[0].written == 1);
+    REQUIRE(results[0].failed == 1);
+    REQUIRE(results[0].problems.size() == 1);
+    REQUIRE(results[0].problems[0].contains("s2"));
+    REQUIRE(wavsIn(results[0].folder).size() == 1);
+    REQUIRE(service.progress().failed == 1);
+}
+
+TEST_CASE("An output path that is a file fails the source without writing", "[extract][service]")
+{
+    TestDirectory t;
+    auto module = writeMod(t);
+    auto notAFolder = t.dir.getChildFile("output.wav");
+    notAFolder.replaceWithText("occupied");
+    ExtractService service;
+    ExtractOptions options;
+    options.sameFolder = false;
+    options.outputFolder = notAFolder;
+    REQUIRE(service.start({ module }, options));
+    REQUIRE(service.waitUntilFinished(20000));
+    const auto results = service.results();
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].state == ExtractFileState::failed);
+    REQUIRE(results[0].error.containsIgnoreCase("output folder"));
+    REQUIRE(results[0].written == 0);
+    REQUIRE(notAFolder.loadFileAsString() == "occupied");
+}
+
+TEST_CASE("A hostile sample name stays inside the destination folder", "[extract][service]")
+{
+    TestDirectory t;
+    auto bank = writeBank(t, 1);
+    // Rewrite the first shdr name in place: 20 bytes at the start of the shdr chunk data.
+    juce::MemoryBlock data;
+    REQUIRE(t.dir.getChildFile("bank.sf2").loadFileAsData(data));
+    auto* bytes = static_cast<char*>(data.getData());
+    const std::string marker("shdr");
+    const auto position = std::search(bytes, bytes + data.getSize(), marker.begin(), marker.end());
+    REQUIRE(position != bytes + data.getSize());
+    const auto nameOffset = (size_t) (position - bytes) + 8;
+    const char hostile[] = "../a:b*c?";
+    std::memcpy(bytes + nameOffset, hostile, sizeof(hostile) - 1);
+    for (size_t i = nameOffset + sizeof(hostile) - 1; i < nameOffset + 20; ++i) bytes[i] = 0;
+    REQUIRE(t.dir.getChildFile("bank.sf2").replaceWithData(data.getData(), data.getSize()));
+    ExtractService service;
+    REQUIRE(service.start({ t.dir.getChildFile("bank.sf2") }, ExtractOptions{}));
+    REQUIRE(service.waitUntilFinished(20000));
+    const auto results = service.results();
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].written == 1);
+    const auto files = wavsIn(results[0].folder);
+    REQUIRE(files.size() == 1);
+    REQUIRE(files[0].getParentDirectory() == results[0].folder);
+    const auto name = files[0].getFileName();
+    REQUIRE_FALSE(name.containsChar('/'));
+    REQUIRE_FALSE(name.containsChar(':'));
+    REQUIRE_FALSE(name.containsChar('*'));
+    REQUIRE_FALSE(name.containsChar('?'));
 }

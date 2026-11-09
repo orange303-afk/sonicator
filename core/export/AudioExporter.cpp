@@ -392,16 +392,26 @@ ExportResult AudioExporter::exportSampleFile(const SampleAudio& audio, const juc
     int64_t frame = 0;
     while (frame < audio.frames)
     {
-        if (cancel && cancel()) return failure(part, "Export cancelled");
+        if (cancel && cancel())
+        {
+            writer.reset();
+            return failure(part, "Export cancelled");
+        }
         const int count = (int) juce::jmin<int64_t>(exportChunkFrames, audio.frames - frame);
         buffer.copyFrom(0, 0, audio.left.data() + frame, count, gain);
         if (channels > 1) buffer.copyFrom(1, 0, audio.right.data() + frame, count, gain);
         if (! writer->writeFromFloatArrays(buffer.getArrayOfReadPointers(), channels, count))
+        {
+            writer.reset();
             return failure(part, "Cannot write export audio: " + destination.getFileName());
+        }
         frame += count;
     }
     if (! writer->flush())
+    {
+        writer.reset();
         return failure(part, "Cannot finalise export file: " + destination.getFileName());
+    }
     writer.reset();
     const auto validation = validateWavOutput(part, audio.frames, (double) audio.sampleRate,
                                               channels, bits, floating);

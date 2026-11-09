@@ -457,3 +457,20 @@ TEST_CASE("Embedded sample export never overwrites and cancels without a partial
     REQUIRE_FALSE(cancelled.existsAsFile());
     REQUIRE_FALSE(juce::File(cancelled.getFullPathName() + ".part").existsAsFile());
 }
+
+TEST_CASE("A mid-write cancellation closes the stream and removes the part", "[export][extract]")
+{
+    TestDirectory t;
+    SampleAudio audio;
+    audio.sampleRate = 44100; audio.channels = 1;
+    audio.frames = AudioExporter::exportChunkFrames * 3 + 17;
+    audio.left.assign((size_t) audio.frames, 0.25f);
+    const auto destination = t.dir.getChildFile("mid-cancel.wav");
+    int calls = 0;
+    const auto result = AudioExporter().exportSampleFile(audio, destination, false,
+        [&] { return ++calls >= 3; });
+    REQUIRE_FALSE(result.success);
+    REQUIRE(result.error.containsIgnoreCase("cancel"));
+    REQUIRE_FALSE(destination.existsAsFile());
+    REQUIRE_FALSE(juce::File(destination.getFullPathName() + ".part").existsAsFile());
+}

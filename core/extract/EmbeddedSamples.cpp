@@ -16,6 +16,13 @@ bool isEmbeddedSampleSource(const juce::File& file)
 {
     return file.hasFileExtension("mod;xm;s3m;sf2");
 }
+std::vector<juce::File> embeddedSources(const std::vector<juce::File>& files)
+{
+    std::vector<juce::File> out;
+    for (const auto& file : files)
+        if (file.existsAsFile() && isEmbeddedSampleSource(file)) out.push_back(file);
+    return out;
+}
 bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
 {
     error.clear();
