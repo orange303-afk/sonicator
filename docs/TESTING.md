@@ -104,6 +104,7 @@ Environment: macOS, native arm64, Apple Clang 21.0.0, CMake 4.4.0, JUCE 9.0.5. T
 - SQLite persistence/reopen, stable upserts, duplicate paths, Unicode strings and open errors.
 - Recursive scanner, format filtering, directory-only cancellation, full SHA-256 and AppleDouble exclusion.
 - Sine/silence/short-file DSP, anti-phase stereo, corruption, physical truncation and inaccurate outer RIFF sizes.
+- Rhythm analysis: silence, sustained tones, one-shots with long tails, accented and eighth-note patterns, out-of-range doubles, anti-phase stereo, leading silence, quiet material, 22.05/44.1/48 kHz, short files, white noise, decoded-memory cap and WAV reading. A hidden `[.][rhythm][real]` test evaluates a labelled library from `SONICATOR_RHYTHM_EVAL_DIR`; no library path is committed.
 - WAV/AIFF/FLAC/MP3 decoding and actual preview rendering; resampling, looping, transport, gain and missing-file errors.
 - Incremental import, failed-file retry, force reanalysis, cancel, missing-file restoration and analyzer-version invalidation.
 - UI filtering/sorting/selection, keyboard transport, persisted startup, minimum/large layout snapshots, Unicode filesystem→index→reopen→preview, settings-dialog teardown.

@@ -165,15 +165,21 @@ runs on the audio thread, and the pass uses no network, model weights or cache f
    candidates are evaluated explicitly instead of being assumed.
 5. Ranking uses mean onset strength on the grid times the share of onset strength the
    grid explains, so a half-tempo grid that lands on every other hit is not a rival.
-6. Structure:
-   - `RhythmicLoop` when at least four onsets, at least 3.5 beats of context, ≥45%
+6. Octave preference. Tempo octaves are musically equivalent. When a half/double rival
+   is comparably supported (at least 50% of the winner's quality), the DSP reports the
+   octave inside 70–180 BPM, the range sample libraries actually use. The rival stays
+   in the alternatives list. A half/double rival no longer makes the tempo ambiguous;
+   an unrelated rival with ≥92% of the winner's quality does.
+7. Structure:
+   - `RhythmicLoop` when at least four onsets, at least 3.5 beats of context, ≥30%
      weighted grid coverage, ≥35% filled grid positions and grid strength ≥0.30;
    - `OneShot` when there are at most three onsets, at most four active seconds and
      peak/active-RMS ≥3 (a pad or texture stays below that);
    - `Undetermined` otherwise, including short rhythmic fragments.
 
-Tempo is `Determined` only for a loop with grid strength ≥0.40 and no competing grid
-within 80% of the winner's quality (or an unrelated grid within 92%). Otherwise it is
+Tempo is `Determined` only for a loop with no competing grid and either grid strength
+≥0.55 with weighted coverage ≥0.45, or a dense grid: strength ≥0.75, coverage ≥0.30
+and at least 8 beats (percussion with many ghost subdivisions). Otherwise it is
 `Ambiguous`, and the smart layer stores an invalid candidate with the primary value
 and its alternatives. The BPM confidence is `0.55 × grid strength + 0.45 × coverage`,
 reduced by 30% when ambiguous. Both scores are heuristics, not probabilities.
@@ -181,5 +187,53 @@ reduced by 30% when ambiguous. Both scores are heuristics, not probabilities.
 A hit with a reverb tail, a two-hit stab and a sparse syncopated phrase deliberately
 stay away from "loop + tempo" unless the grid evidence is there. The unit tests in
 `tests/TestRhythmAnalyzer.cpp` pin silence, sustained tones, one-shots, accented bars,
-eighth-note hats, anti-phase stereo, leading silence, quiet material, several sample
-rates, short files, white noise and WAV reading.
+eighth-note hats, out-of-range doubles, anti-phase stereo, leading silence, quiet
+material, several sample rates, short files, white noise, the decoded-memory cap and
+WAV reading.
+
+### Real-library evaluation
+
+`tests/TestRhythmRealSamples.cpp` is a hidden test (`[.][rhythm][real]`) that takes a
+folder from `SONICATOR_RHYTHM_EVAL_DIR` and writes a per-file CSV to the temporary
+folder. It is not part of the default suite and no library path is hard-coded.
+
+Its reference parser is deliberately stricter than the app's: an explicit `NNNbpm`
+wins; a bare number is used only when it is the single candidate in the name or in
+the immediate parent folder; a label is rejected when the file's duration is not a
+whole bar at that tempo (a sample number rarely lands on a bar). Only files under a
+loop path are scored against a reference — a one-shot carries its pack's tempo in the
+name, not a tempo of its own. One-shot paths are instead used to count published
+false BPMs. Results are split by category and include structure, tempo state,
+coverage, grid strength and a correct / half-double / wrong classification.
+
+Measured on the owner's Splice library on 2026-11-09 (macOS Debug, native arm64):
+
+| Measure | Result |
+|---|---|
+| Audio files analysed | 8 549 |
+| Reference labels after the bar-fit filter | 2 893 (44 rejected) |
+| Structure on labelled loop files | 1 940 `loop` (67.1%), 949 `undetermined` (32.8%), 4 `one-shot` |
+| Tempo on labelled loop files | 816 determined (28.2%), 1 124 ambiguous (38.9%), 953 unknown (32.9%) |
+| Published BPM within 2% of the reference | 632 / 816 (77.5%) |
+| Published BPM within 1% | 627 (76.8%) |
+| Median error among published | 0.082% |
+| Half/double-time octave | 149 (18.3% of published) |
+| Clearly wrong | 35 (4.3% of published) |
+| Drums/percussion loops with `loop` structure | 556 / 642 (86.6%); 83.7% of their published BPMs correct |
+| Melodic loops with `loop` structure | 548 / 926 (59.2%); 62.6% of their published BPMs correct |
+| Vocal loops with `loop` structure | 177 / 301 (58.8%); 60% of their published BPMs correct |
+| One-shots publishing any BPM | 9 / 1 097 (0.8%); several carry their pack's tempo in the name anyway |
+| Wall time | 2 200 s, ≈0.26 s per file at a mean duration of 9.6 s |
+
+What this says:
+
+- The grid and the number are accurate when they are confident: almost all error
+  among published values is the octave, not a wrong tempo.
+- Octave ambiguity is irreducible without accents or metadata. The DSP now folds
+  out-of-range doubles/triples into 70–180 BPM and leaves the rival in the
+  alternatives; an in-range rival (75 vs 150, 90 vs 180) can still win on coverage.
+- Melodic, vocal and pad loops are often honestly `undetermined`; publishing a beat
+  for them would be a guess. Percussion and drum loops, the material this fallback is
+  most useful for, reach 83.7% among published values with 2.3% clearly wrong.
+- The app still prefers metadata: the same library carries BPM in names and ACID/ASD
+  data, so the DSP fills gaps rather than replacing reliable values.

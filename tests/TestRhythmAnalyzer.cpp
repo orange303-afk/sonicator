@@ -281,3 +281,14 @@ TEST_CASE("The file reader honours the decoded-memory cap", "[rhythm]")
     REQUIRE(result.durationSeconds == Catch::Approx(2.0).margin(0.01));
     REQUIRE(result.explanation.contains("first 2 s analysed"));
 }
+
+TEST_CASE("An out-of-range double is folded into the library range", "[rhythm]")
+{
+    // Eighth notes at 120 BPM: the onset grid itself is 240 BPM, which no sample library uses as
+    // the headline tempo. The reported value must be the conventional octave.
+    const auto buffer = clickTrack(240.0, 4.0, defaultRate);
+    const auto result = RhythmAnalyzer::analyze(buffer, defaultRate);
+    REQUIRE(result.kind == RhythmKind::RhythmicLoop);
+    REQUIRE(result.tempo == RhythmTempo::Determined);
+    REQUIRE(result.bpm == Catch::Approx(120.0).epsilon(0.01));
+}

@@ -30,16 +30,30 @@ struct RhythmOptions
     // A tempo needs at least this many beats of context; fewer cannot distinguish a rhythm from
     // a coincidence of two hits.
     double minBeatsForTempo = 3.5;
-    double minGridCoverage = 0.45;  // share of onset strength explained by the beat grid
+    double minGridCoverage = 0.30;  // share of onset strength explained by the beat grid
     double minGridFill = 0.35;      // share of grid positions that carry an onset
     double minGridScore = 0.30;     // average onset strength on the grid
-    double determinedGridScore = 0.40;
+    // A loop can be recognised with weaker evidence than it takes to publish a BPM. These gates
+    // are what the real-library evaluation showed necessary to keep published values free of
+    // clearly wrong tempi; below them the tempo stays ambiguous.
+    double determinedGridScore = 0.55;
+    double determinedMinCoverage = 0.45;
+    // A dense percussion pattern has many subdivisions off the beat, so its weighted coverage is
+    // low even though the grid is unambiguous. A very strong grid over enough beats may publish
+    // with less coverage.
+    double determinedDenseStrength = 0.75;
+    double determinedDenseCoverage = 0.30;
+    double determinedDenseMinBeats = 8.0;
     // A competing grid with this share of the winner's score makes the tempo ambiguous.
     double ambiguityScoreShare = 0.80;
     // A grid with almost the same score but an unrelated ratio is ambiguous too.
     double unrelatedAmbiguityScoreShare = 0.92;
     // The ratio window around 2x and 0.5x that counts as the same tempo at half/double time.
     double halfDoubleRatioTolerance = 0.10;
+    // Sample libraries use a conventional tempo range. When a half/double rival is comparably
+    // supported, the octave inside this range is reported; the rival stays an alternative.
+    double preferredMinBpm = 70.0, preferredMaxBpm = 180.0;
+    double octaveFallbackQualityShare = 0.50;
     int oneShotMaxOnsets = 3;
     double oneShotMaxActiveSeconds = 4.0;
     double oneShotMinCrest = 3.0;   // peak / active RMS; a pad or texture stays below this
@@ -57,6 +71,12 @@ struct RhythmAnalysis
     int onsetCount = 0;
     double durationSeconds = 0.0;  // analysed prefix
     double activeSeconds = 0.0;    // span from first to last audible frame
+    // Diagnostics behind the verdict. They are not probabilities and are not persisted by the
+    // smart pipeline; they exist so a report or the inspector can explain a decision.
+    double gridStrength = 0.0;     // mean onset strength on the chosen grid
+    double gridCoverage = 0.0;     // share of onset strength the grid explains
+    double gridFill = 0.0;         // share of grid positions carrying an onset
+    double gridBeats = 0.0;        // grid positions inside the active span
     juce::String explanation;      // short, deterministic, safe to store and show
     juce::String error;            // non-empty only when the audio could not be analysed
 };

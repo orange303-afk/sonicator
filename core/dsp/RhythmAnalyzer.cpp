@@ -160,7 +160,6 @@ Envelope buildEnvelope(const juce::AudioBuffer<float>& audio, double sampleRate,
     Envelope envelope;
     const int channels = audio.getNumChannels();
     const int64_t samples = audio.getNumSamples();
-    const double seconds = (double) samples / sampleRate;
     int hop = (int) std::llround(sampleRate / framesPerSecondTarget);
     hop = std::clamp(hop, 64, 2048);
     int fftSize = 1024;
@@ -302,7 +301,6 @@ Envelope buildEnvelope(const juce::AudioBuffer<float>& audio, double sampleRate,
     }
     envelope.activeStart = std::max(0, envelope.activeStart);
     envelope.activeEnd = envelope.activeEnd < 0 ? frames - 1 : envelope.activeEnd;
-    (void) seconds;
     return envelope;
 }
 } // namespace
@@ -406,16 +404,50 @@ RhythmAnalysis RhythmAnalyzer::analyze(const juce::AudioBuffer<float>& audio, do
     {
         return a.quality() > b.quality();
     });
+    // Octave preference. Tempo octaves are musically equivalent, and a library expects the
+    // conventional range rather than whichever grid happened to cover one more onset. The rival
+    // octave is not suppressed as evidence: it stays in the alternatives list.
+    if (! fits.empty())
+    {
+        size_t choice = 0;
+        auto inPreferredRange = [&options](double bpm)
+        {
+            return bpm >= options.preferredMinBpm && bpm < options.preferredMaxBpm;
+        };
+        for (size_t i = 1; i < fits.size(); ++i)
+        {
+            if (! nearHalfOrDouble(fits[i].bpm, fits[choice].bpm, 0.02)) continue;
+            if (fits[i].quality() < options.octaveFallbackQualityShare * fits[choice].quality())
+                continue;
+            if (inPreferredRange(fits[i].bpm) && ! inPreferredRange(fits[choice].bpm)) choice = i;
+            else if (inPreferredRange(fits[i].bpm) == inPreferredRange(fits[choice].bpm)
+                     && fits[i].quality() > fits[choice].quality())
+                choice = i;
+        }
+        if (choice != 0)
+            std::rotate(fits.begin(), fits.begin() + (std::ptrdiff_t) choice,
+                        fits.begin() + (std::ptrdiff_t) choice + 1);
+    }
     bool hasGrid = ! fits.empty() && fits.front().quality() > 0;
     GridFit best = hasGrid ? fits.front() : GridFit {};
+    if (hasGrid)
+    {
+        result.gridStrength = best.score;
+        result.gridCoverage = best.coverage;
+        result.gridFill = best.fill;
+        result.gridBeats = (double) best.count;
+    }
     bool ambiguous = false;
     if (hasGrid)
         for (size_t i = 1; i < fits.size(); ++i)
         {
             const double share = best.quality() > 0 ? fits[i].quality() / best.quality() : 0.0;
             if (share < options.ambiguityScoreShare) continue;
-            if (nearHalfOrDouble(fits[i].bpm, best.bpm, options.halfDoubleRatioTolerance)
-                || share >= options.unrelatedAmbiguityScoreShare)
+            // A half/double rival is the same tempo at another metrical level; the preferred
+            // octave was chosen above, so it does not make the tempo ambiguous. Any other rival
+            // that is nearly as strong does.
+            if (! nearHalfOrDouble(fits[i].bpm, best.bpm, options.halfDoubleRatioTolerance)
+                && share >= options.unrelatedAmbiguityScoreShare)
                 ambiguous = true;
         }
     const bool loopEvidence = hasGrid
@@ -431,9 +463,13 @@ RhythmAnalysis RhythmAnalyzer::analyze(const juce::AudioBuffer<float>& audio, do
         result.bpm = best.bpm;
         result.bpmConfidence = std::clamp(0.55 * best.score + 0.45 * best.coverage, 0.0, 1.0);
         if (ambiguous) result.bpmConfidence *= 0.7;
-        result.tempo = best.score >= options.determinedGridScore && ! ambiguous
-                           ? RhythmTempo::Determined
-                           : RhythmTempo::Ambiguous;
+        const bool strongGrid = best.score >= options.determinedGridScore
+                                && best.coverage >= options.determinedMinCoverage;
+        const bool denseGrid = best.score >= options.determinedDenseStrength
+                               && best.coverage >= options.determinedDenseCoverage
+                               && (double) best.count >= options.determinedDenseMinBeats;
+        result.tempo = (strongGrid || denseGrid) && ! ambiguous ? RhythmTempo::Determined
+                                                                : RhythmTempo::Ambiguous;
         result.kindConfidence = std::clamp(0.5 + 0.5 * result.bpmConfidence, 0.0, 1.0);
         for (size_t i = 1; i < fits.size(); ++i)
         {
