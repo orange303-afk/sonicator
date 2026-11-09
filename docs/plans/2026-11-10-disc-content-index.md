@@ -5,7 +5,7 @@
 - [x] DiscContentIndexer: обход ISO/IMG/CUE и Akai через существующий DiscBrowserService, состояние образа, инкрементальность.
 - [x] Интеграция в IndexingService: фоновый проход, отмена, очистка отсутствующих образов.
 - [x] UI: выбор виртуального сэмпла декодирует и играет, Enter/двойной клик открывает образ на папке записи.
-- [ ] Документация, полный ctest, ревью, graphify, ff merge/push и перезапуск.
+- [x] Документация, полный ctest, ревью, graphify, ff merge/push и перезапуск.
 
 Спецификация: Todo `254b0a7d` и запрос пользователя 2026-11-10.
 Только чтение образа: без распаковки, без изменения образов, без MDX, без полного PCM при индексации.
@@ -67,6 +67,10 @@ countUnderRoot считает виртуальные строки; AutoTag по�
 нет отдельного UI-теста status-строки дискового прохода; нет теста multi-track CUE индексатора.
 Final verification: `[disc-content]` 13 test cases / 142 assertions; полный ctest passed (54.50 s);
 real Akai ISO повторно проходит opt-in тест после изменений.
+Final integration: ff merge feature/disc-content-index → main (da68123), graphify update выполнен,
+ctest на main passed (52.35 s), push выполнен, feature-ветка удалена. Приложение перезапущено
+(build/Sonicator_artefacts/Debug/SONICATOR.app, PID 45725); пользовательская база мигрирована на
+схему 12, таблица disc_index создана, существующие образы ждут Scan folder/Rescan.
 Ruling: состояние образа сравнивается по size+mtime; правка внутри той же секунды на файловых
 системах с секундным разрешением может не заметиться до следующего изменения; цена: редкий
 устаревший список содержимого, исправляется полным Rescan после изменения mtime.
