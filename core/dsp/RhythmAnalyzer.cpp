@@ -504,8 +504,9 @@ RhythmAnalysis RhythmAnalyzer::analyzeFile(const juce::File& file, const RhythmO
         result.error = "unsupported, empty or corrupt audio file";
         return result;
     }
-    const int64_t limit = (int64_t) std::llround(options.maxAnalysisSeconds * reader->sampleRate);
-    const int64_t length = std::min(reader->lengthInSamples, limit);
+    const int64_t byTime = (int64_t) std::llround(options.maxAnalysisSeconds * reader->sampleRate);
+    const int64_t byMemory = options.maxDecodedBytes / (4 * (int64_t) reader->numChannels);
+    const int64_t length = std::min({ reader->lengthInSamples, byTime, byMemory });
     if (length <= 0) { result.error = "empty audio file"; return result; }
     juce::AudioBuffer<float> audio((int) reader->numChannels, (int) length);
     if (! reader->read(&audio, 0, (int) length, 0, true, true))
@@ -515,8 +516,8 @@ RhythmAnalysis RhythmAnalyzer::analyzeFile(const juce::File& file, const RhythmO
     }
     result = analyze(audio, reader->sampleRate, options, cancel);
     if (reader->lengthInSamples > length)
-        result.explanation += " (first " + juce::String(options.maxAnalysisSeconds, 0)
-                            + " s analysed)";
+        result.explanation += " (first "
+            + juce::String((double) length / reader->sampleRate, 0) + " s analysed)";
     return result;
 }
 } // namespace sonicator

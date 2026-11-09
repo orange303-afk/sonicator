@@ -40,6 +40,21 @@ juce::AudioBuffer<float> clickTrack(double bpm, double seconds, double sampleRat
     return buffer;
 }
 
+juce::File writeWav(const juce::AudioBuffer<float>& buffer, double sampleRate)
+{
+    const auto file = juce::File::createTempFile(".wav");
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::FileOutputStream> stream(file.createOutputStream());
+    if (stream == nullptr) return {};
+    auto* writer = wav.createWriterFor(stream.get(), sampleRate,
+                                      (unsigned) buffer.getNumChannels(), 16, {}, 0);
+    if (writer == nullptr) return {};
+    stream.release();
+    writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+    delete writer;
+    return file;
+}
+
 juce::AudioBuffer<float> tone(double seconds, double sampleRate, double frequency,
                               double amplitude, double fadeIn = 0.0)
 {
@@ -219,18 +234,8 @@ TEST_CASE("The same loop at different rates gives the same tempo", "[rhythm]")
 TEST_CASE("A loop is read from a WAV file", "[rhythm]")
 {
     const auto buffer = clickTrack(120.0, 4.0, defaultRate);
-    const auto file = juce::File::createTempFile(".wav");
+    const auto file = writeWav(buffer, defaultRate);
     REQUIRE(file != juce::File());
-    {
-        juce::WavAudioFormat wav;
-        std::unique_ptr<juce::FileOutputStream> stream(file.createOutputStream());
-        REQUIRE(stream != nullptr);
-        auto* writer = wav.createWriterFor(stream.get(), defaultRate, 1, 16, {}, 0);
-        REQUIRE(writer != nullptr);
-        stream.release();
-        REQUIRE(writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples()));
-        delete writer;
-    }
     const auto result = RhythmAnalyzer::analyzeFile(file);
     file.deleteFile();
     REQUIRE(result.error.isEmpty());
@@ -261,4 +266,18 @@ TEST_CASE("Rhythm analysis timing on this machine", "[.][rhythm][bench]")
                   << " onsets=" << result.onsetCount << std::endl;
         if (seconds >= 5.0) REQUIRE(result.kind == RhythmKind::RhythmicLoop);
     }
+}
+
+TEST_CASE("The file reader honours the decoded-memory cap", "[rhythm]")
+{
+    const auto buffer = clickTrack(120.0, 4.0, defaultRate);
+    const auto file = writeWav(buffer, defaultRate);
+    REQUIRE(file != juce::File());
+    RhythmOptions options;
+    options.maxDecodedBytes = (int64_t) (defaultRate * 4.0 * 2.0); // two mono seconds
+    const auto result = RhythmAnalyzer::analyzeFile(file, options);
+    file.deleteFile();
+    REQUIRE(result.error.isEmpty());
+    REQUIRE(result.durationSeconds == Catch::Approx(2.0).margin(0.01));
+    REQUIRE(result.explanation.contains("first 2 s analysed"));
 }

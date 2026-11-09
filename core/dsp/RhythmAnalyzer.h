@@ -18,6 +18,9 @@ struct RhythmOptions
     // result describes that prefix and carries a limitation note; it is never presented as a
     // whole-file verdict.
     double maxAnalysisSeconds = 60.0;
+    // Peak decoded PCM held for one pass. 64 MB fits 60 s of stereo 48 kHz; very high rates are
+    // truncated earlier instead of allocating an unbounded buffer.
+    int64_t maxDecodedBytes = 64ll * 1024 * 1024;
     double minBpm = 40.0, maxBpm = 240.0;
     double minOnsetSeparationSeconds = 0.06;
     // Peak at or below this is digital silence for this analysis, matching the library's Hide

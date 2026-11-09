@@ -115,8 +115,9 @@ visible underneath, including when it is stale.
 - Audio is not parsed for embedded metadata beyond the implemented containers
   (WAV, AIFF, ASD sidecar, REX2). Other formats record `unsupported` for the
   container extractor and still get name candidates.
-- The rhythm DSP reads at most the first 60 seconds; a longer file keeps the
-  limitation note and is never presented as a whole-file verdict.
+- The rhythm DSP reads at most the first 60 seconds, or fewer when the decoded PCM
+  would exceed 64 MB (very high sample rates); a truncated file keeps the limitation
+  note and is never presented as a whole-file verdict.
 - Rhythm thresholds were tuned on synthetic patterns. Real one-shots, sparse
   syncopation and dense textures can still be `undetermined`; that is the intended
   answer when the evidence is insufficient, not a failure to be papered over.
