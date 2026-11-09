@@ -205,7 +205,9 @@ double estimateTuningCents(const std::vector<Frame>& frames, const TonalOptions&
         const Peak* strongest = nullptr;
         for (const auto& peak : frame.peaks)
         {
-            if (peak.frequency < 70.0 || peak.frequency > 1200.0) continue;
+            if (peak.frequency < options.tuningMinFrequency
+                || peak.frequency > options.tuningMaxFrequency)
+                continue;
             if (strongest == nullptr || peak.magnitude > strongest->magnitude)
                 strongest = &peak;
         }
@@ -665,6 +667,82 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
     if (chromaFrames.empty()) return result;
 
     const int frameCount = (int) chromaFrames.size();
+    Chroma meanChroma {};
+    int harmonicFrames = 0;
+    for (const auto& frame : chromaFrames)
+    {
+        if (frame.weight <= 0.0) continue;
+        double norm = 0.0;
+        for (double value : frame.chroma) norm += value * value;
+        norm = std::sqrt(norm);
+        if (norm <= 1.0e-12) continue;
+        for (int i = 0; i < pitchClassCount; ++i)
+            meanChroma[(size_t) i] += frame.chroma[(size_t) i] / norm;
+        ++harmonicFrames;
+    }
+    double consistency = 0.0;
+    if (harmonicFrames > 0)
+    {
+        double meanNorm = 0.0;
+        for (double value : meanChroma) meanNorm += value * value;
+        meanNorm = std::sqrt(meanNorm);
+        if (meanNorm > 1.0e-12)
+        {
+            for (double& value : meanChroma) value /= meanNorm;
+            double similarity = 0.0;
+            int compared = 0;
+            for (const auto& frame : chromaFrames)
+            {
+                if (frame.weight <= 0.0) continue;
+                double norm = 0.0;
+                for (double value : frame.chroma) norm += value * value;
+                norm = std::sqrt(norm);
+                if (norm <= 1.0e-12) continue;
+                double dot = 0.0;
+                for (int i = 0; i < pitchClassCount; ++i)
+                    dot += (frame.chroma[(size_t) i] / norm) * meanChroma[(size_t) i];
+                similarity += std::clamp(dot, 0.0, 1.0);
+                ++compared;
+            }
+            if (compared > 0) consistency = similarity / (double) compared;
+        }
+    }
+    result.chromaConsistency = consistency;
+    double rmsVariation = 0.0, onsetDensity = 0.0;
+    {
+        std::vector<double> rmsValues, fluxValues;
+        for (const auto& frame : frames)
+        {
+            if (frame.rms < silenceRms) continue;
+            rmsValues.push_back(frame.rms);
+            fluxValues.push_back(frame.flux);
+        }
+        if (! rmsValues.empty())
+        {
+            const double mean = std::accumulate(rmsValues.begin(), rmsValues.end(), 0.0)
+                                / (double) rmsValues.size();
+            double variance = 0.0;
+            for (double value : rmsValues) variance += (value - mean) * (value - mean);
+            variance /= (double) rmsValues.size();
+            rmsVariation = mean > 1.0e-20 ? std::sqrt(variance) / mean : 0.0;
+        }
+        if (! fluxValues.empty() && hop > 0)
+        {
+            std::vector<double> sorted = fluxValues;
+            const auto middle = sorted.begin() + (std::ptrdiff_t) (sorted.size() / 2);
+            std::nth_element(sorted.begin(), middle, sorted.end());
+            const double threshold = std::max(*middle * 2.5, 0.01);
+            int onsets = 0;
+            for (size_t i = 1; i + 1 < fluxValues.size(); ++i)
+                if (fluxValues[i] > threshold && fluxValues[i] >= fluxValues[i - 1]
+                    && fluxValues[i] > fluxValues[i + 1])
+                    ++onsets;
+            const double duration = (double) rmsValues.size() * (double) hop / sampleRate;
+            onsetDensity = duration > 0.0 ? (double) onsets / duration : 0.0;
+        }
+    }
+    result.rmsVariation = rmsVariation;
+    result.onsetDensity = onsetDensity;
     const int radius = std::max(0, options.medianFrames);
     Chroma summed {};
     double rawEnergy = 0.0, medianEnergy = 0.0, weightSum = 0.0;
@@ -696,7 +774,9 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
     const double weightAverage = audibleFrames > 0 ? weightSum / (double) audibleFrames : 0.0;
     const double retained = rawEnergy > 1.0e-20 ? medianEnergy / rawEnergy : 0.0;
     result.tonality = std::min(weightAverage, retained);
-    result.percussive = result.tonality < options.minTonality;
+    result.percussive = result.tonality < options.minTonality
+                        || (consistency < options.minChromaConsistency
+                            && (rmsVariation > 0.8 || onsetDensity > 8.0));
     double norm = 0.0;
     for (double value : summed) norm += value * value;
     norm = std::sqrt(norm);
@@ -742,9 +822,12 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
         explanation += ", runner-up " + juce::String(runnerUp->score, 3)
             + " for tonic " + juce::String(runnerUp->tonic) + " " + runnerUp->mode;
     explanation += ", tuning " + juce::String(result.tuningCents, 1) + " cents"
-        + ", tonality " + juce::String(result.tonality, 3);
+        + ", tonality " + juce::String(result.tonality, 3)
+        + ", consistency " + juce::String(consistency, 3)
+        + ", rms variation " + juce::String(rmsVariation, 2)
+        + ", onsets/s " + juce::String(onsetDensity, 1);
 
-    if (result.tonality < options.minTonality)
+    if (result.percussive)
     {
         result.explanation = explanation + " (percussive or noise-dominated)";
         return result;

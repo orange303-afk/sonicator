@@ -325,9 +325,11 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
         const auto structureKey = metadataStructure.trim().toLowerCase().replace("_", "-");
         const bool structureOneShot = structureKey == "one-shot" || structureKey == "oneshot";
         const bool needRhythm = needsRhythmAnalysis(out.candidates);
-        const bool needKey = ! hasValidKeyMetadata(out.candidates) && ! typeIsDrum(metadataType);
+        const bool percussivePath = pathIsPercussive(record.filePath);
+        const bool needKey = ! hasValidKeyMetadata(out.candidates)
+                             && ! typeIsDrum(metadataType) && ! percussivePath;
         const bool pitchEligible = ! hasValidPitchOrRootMetadata(out.candidates)
-                                   && typeAllowsPitch(metadataType);
+                                   && typeAllowsPitch(metadataType) && ! percussivePath;
         // If the structure is unknown and the rhythm pass is not going to run, the file cannot be
         // confirmed as a one-shot; publishing a pitch would be a guess.
         const bool needPitch = pitchEligible
@@ -379,7 +381,8 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
                                          ? resolved.structure : juce::String();
         if (needKey || needPitch)
         {
-            auto tonal = extractTonalCandidates(audio, out.candidates, gatingStructure, gatingType);
+            auto tonal = extractTonalCandidates(audio, out.candidates, gatingStructure, gatingType,
+                                                record.filePath);
             append(out.candidates, std::move(tonal.candidates));
             if (tonal.status == "error")
             {

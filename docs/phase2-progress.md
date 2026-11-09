@@ -10,6 +10,17 @@
   fingerprint verification with an in-job reprocess pass; override edits that
   never get overwritten by an in-flight job; explicit **Smart metadata** button
   with pause/cancel and progress. See `docs/SMART_ANALYSIS.md`.
+- **DSP key and one-shot pitch (2026-11-09):** one bounded PCM decode now feeds the
+  rhythm and tonal analyses. Key comes from a chromagram with a tuning estimate,
+  transient/flatness percussion suppression, a chroma median filter and 24
+  Krumhansl–Kessler/Temperley profiles plus a bass prior; a confident tonic without a
+  mode is a bare key, a tonic dispute publishes nothing, and drums stay unknown.
+  Pitch comes from FFT-accelerated YIN over the most stable segment of a one-shot,
+  with clarity, stability and harmonicity gates; loops, chords, vocals, effects and
+  non-harmonic hits stay unknown. Values use the existing key/pitch columns, Pitch is
+  shown in the bottom selection bar, and `smartDspVersion` is 2. The hidden
+  `[.][tonal][real]` test and `docs/key-pitch-accuracy.md` record the measured
+  agreement with the library's key labels.
 - **Analyze selected** in the row context menu queues a chosen set into the smart
   job, including while a pass is already running.
 - **Auto Preview / MIDI Preview / Skip Silence / Loop / Gate** persist with

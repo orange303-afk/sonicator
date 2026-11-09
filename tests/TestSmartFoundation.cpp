@@ -597,6 +597,14 @@ TEST_CASE("A loop never gets a DSP pitch", "[smart][dsp]")
     REQUIRE(findCandidate(collection, SmartField::Pitch, "dsp") == nullptr);
 }
 
+TEST_CASE("A drum path never gets a DSP key", "[smart][dsp]")
+{
+    TestDirectory t;
+    const auto file = t.wave("drum_loop.wav", 440.0, 1, 88200);
+    const auto collection = SmartAnalysisService::collect(recordFor(file));
+    REQUIRE(findCandidate(collection, SmartField::Key, "dsp") == nullptr);
+}
+
 TEST_CASE("The DSP extraction is skipped when metadata answers", "[smart][dsp]")
 {
     TestDirectory t;

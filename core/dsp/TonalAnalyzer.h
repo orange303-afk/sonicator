@@ -12,8 +12,11 @@ struct TonalOptions
     int keyFftSize = 8192;
     int keyHop = 1024;
     double minKeyFrequency = 40.0, maxKeyFrequency = 5000.0;
-    double tuningMinFrequency = 60.0, tuningMaxFrequency = 3000.0;
+    double tuningMinFrequency = 70.0, tuningMaxFrequency = 1200.0;
     double minTonality = 0.30;
+    // A tonal loop keeps the same pitch classes over time; a drum loop's chroma jumps between
+    // resonances. Low consistency is a percussion signal even when each hit is pitched.
+    double minChromaConsistency = 0.35;
     double minKeyCorrelation = 0.37;
     double minTonicMargin = 0.06;
     double modeMargin = 0.06;
@@ -70,6 +73,9 @@ struct KeyAnalysis
     juce::String runnerUpMode;
     double tuningCents = 0.0;
     double tonality = 0.0;
+    double chromaConsistency = 0.0;
+    double rmsVariation = 0.0;
+    double onsetDensity = 0.0;
     bool percussive = false;
     // Diagnostics for the inspector and the evaluation report. Normalized, C at index 0.
     std::array<double, 12> chroma {};

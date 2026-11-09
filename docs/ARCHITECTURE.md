@@ -113,6 +113,8 @@ Decode in 2048-frame blocks, bounded by 64 channels. Peak = maximum absolute cha
 
 For each channel/frame: zero-pad final partial frame; apply non-normalized Hann window; compute FFT magnitude and accumulate squared magnitudes. Channels are combined in the power domain, so anti-phase stereo does not disappear. Centroid is power weighted, rolloff includes 85% of accumulated spectral power, flatness is geometric/arithmetic mean of power with a 1e-30 log floor. Silence descriptors are zero, never NaN. No claim of psychoacoustic loudness or pitch accuracy.
 
+The smart DSP stage decodes a bounded prefix once (`core/dsp/AnalysisAudio`) and feeds both `RhythmAnalyzer` and `TonalAnalyzer`. Key uses an 8192-point chromagram with a circular tuning estimate, transient/flatness weighting, a chroma median filter and 24 Krumhansl–Kessler/Temperley profiles plus a low-frequency bass prior. Pitch uses FFT-accelerated YIN over the most stable segment of a one-shot, with clarity, stability and harmonicity gates. Both are pure, bounded, read-only functions called from the smart worker; nothing runs on the audio callback. `smartDspVersion` is 2. See `docs/SMART_ANALYSIS.md`.
+
 ## Deliberate changes from the initial chat plan
 
 - Full hashing, not prefix hashing; equal-hash files are not silently dropped.

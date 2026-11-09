@@ -21,6 +21,11 @@ Files are split deterministically by `FNV-1a(full path) % 2` into **calibration*
 **report** halves. Thresholds were tuned on the calibration half only. The full
 report half was not used for tuning.
 
+The evaluator applies the same percussion path gate as the app: a file whose name or
+immediate folder names a drum/percussion family is counted as `unknown` without
+running the key analyzer. Pack names and higher ancestors are not treated as drum
+markers, so a melodic loop inside a drum pack is still scored.
+
 Categories come from the path: `one_shot`, `drum` (drum/kick/snare/hat/percussion),
 `loop` (loop/phrase/song starter), `other`.
 
@@ -100,7 +105,9 @@ note corpus that this library does not provide.
   therefore lower than a forced guess, and the app never invents a key.
 - Keys are the lowest-priority source; a filename or container key always wins in the
   app. The DSP fills gaps rather than replacing reliable metadata.
-- Drums and non-harmonic hits remain `unknown`. This is the intended answer, not a
+- Drums and non-harmonic hits remain `unknown`. A drum whose name or immediate folder
+  says drum/perc is skipped before the analyzer; a drum that reaches the analyzer is
+  rejected by the percussive/consistency gate. This is the intended answer, not a
   failure to be papered over.
 
 ## Reproduction notes

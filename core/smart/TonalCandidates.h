@@ -10,6 +10,10 @@ bool hasValidKeyMetadata(const std::vector<SmartCandidate>&);
 bool hasValidPitchOrRootMetadata(const std::vector<SmartCandidate>&);
 bool typeIsDrum(const juce::String& type);
 bool typeAllowsPitch(const juce::String& type);
+// True when the file name or its immediate folder names a percussion family. Pack names and
+// higher ancestors are deliberately ignored: a melodic loop inside a drum pack still gets a key
+// when its own folder does not say drum.
+bool pathIsPercussive(const juce::String& path);
 
 struct TonalExtraction
 {
@@ -25,5 +29,6 @@ TonalExtraction extractTonalCandidates(const AnalysisAudio&,
                                        const std::vector<SmartCandidate>& metadata,
                                        const juce::String& structure,
                                        const juce::String& type,
+                                       const juce::String& path = {},
                                        const TonalOptions& = {});
 } // namespace sonicator

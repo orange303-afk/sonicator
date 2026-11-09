@@ -118,28 +118,31 @@ Simplest code, but violates the one-decode requirement and doubles disk/decode w
    - Krumhansl–Kessler major/minor;
    - Temperley major/minor.
    Each key score is the mean of the Pearson correlations of the normalized chroma
-   with both profile rotations. Both individual correlations are kept in diagnostics.
+   with both profile rotations. A normalized low-frequency (40–300 Hz) bass chroma
+   adds a small tonic prior, because a full-mix chroma often overweights the fifth.
 6. **Decision.**
-   - If tonality is below the percussion/noise gate, or the best correlation is below
-     the absolute floor, publish nothing (drums, noise, silence, very short material).
+   - If tonality is below the percussion/noise gate, the chroma is inconsistent over
+     time, or the best correlation is below the absolute floor, publish nothing
+     (drums, noise, silence, very short material).
    - Let `best` be the winning key and `runnerUp` the best key with a **different
      tonic**. If the tonic margin is below `minTonicMargin`, publish nothing
      ("dispute about the tonic — nothing").
+   - If a relative major/minor runner-up is within `relativeMargin`, the tonic is
+     genuinely disputed and nothing is published.
    - If the same tonic has a competing mode within `modeMargin`, publish the bare
      tonic (`"C"`, mode empty).
    - Otherwise publish the full key (`"C# minor"`).
    - Confidence is a documented heuristic from the best-vs-runner-up margin and the
      absolute correlation, not a probability. It is stored in the candidate's
      `auxValue`.
-7. **Type and drum gates.**
+7. **Type, name and drum gates.**
    - Key is skipped for resolved Types `kick`, `snare`, `clap`, `hat`, `percussion`,
-     `cymbal`. A drum loop whose Type is unknown still reaches the analyzer and is
-     rejected there by the percussive gate.
-   - Pitch is skipped for the same drum Types plus `vocal` and `fx` (the non-goals rule
-     out vocals and non-harmonic effects). `pad`/`synth`/polyphonic one-shots are not
-     skipped by Type; the stability and harmonicity checks reject them.
-   - A sequence that is dominated by transients, has high flatness and low tonality is
-     percussive. Either gate means `unknown`, never a key or a note.
+     `cymbal`, and for a file name or immediate folder that names a percussion family
+     (`drum`, `perc`, `kick`, `snare`, `hat`, `cymbal`, `crash`, `ride`, `tom`,
+     `clap`, `break`, `darbuka`, `djembe`, and similar). Pack names and higher
+     ancestors are ignored, so a melodic loop inside a drum pack still gets a key.
+   - A sequence that is dominated by transients, has high flatness, low tonality or
+     an unstable chroma is percussive. Either gate means `unknown`, never a key.
 
 Thresholds live in `TonalOptions` and are calibrated on a deterministic half of the
 real library; the other half is reported untouched. Calibration is **precision-first**,
@@ -166,11 +169,12 @@ coverage and accuracy among published rather than hiding the unknown share.
 5. **Output.** Exact fractional MIDI (e.g. `69.12`), cents = `(midi − round(midi)) × 100`.
    Confidence from clarity × stability × harmonicity is written to the explanation;
    the candidate's `auxValue` stays 0 because the resolver treats it as extra cents.
-6. **Gate.** Only one-shots with no valid Pitch and no valid RootNote. A
-   `DefaultValue` root (unity/base note 60 written by `smpl`/`inst`/ACID) is a sampler
-   mapping default, not a measured pitch, so it does not block the DSP. Structure comes
-   from metadata first; when it is unknown and no metadata BPM exists, the rhythm pass
-   determines it. A loop or an unknown structure publishes no pitch.
+6. **Gate.** Only one-shots with no valid Pitch and no valid RootNote, and no
+   percussion path. A `DefaultValue` root (unity/base note 60 written by
+   `smpl`/`inst`/ACID) is a sampler mapping default, not a measured pitch, so it does
+   not block the DSP. Structure comes from metadata first; when it is unknown and no
+   metadata BPM exists, the rhythm pass determines it. A loop or an unknown structure
+   publishes no pitch.
 7. **Channels.** YIN runs per channel and keeps the channel with the higher clarity. If
    the channels disagree by more than 50 cents at comparable confidence, the pitch is
    ambiguous and nothing is published. A mono sum is never used, so an anti-phase
@@ -183,8 +187,9 @@ coverage and accuracy among published rather than hiding the unknown share.
 - `SmartAnalysisService::collect`:
   1. run metadata extractors as today;
   2. decide `needRhythm = !needsRhythmAnalysis(metadata)`,
-     `needKey = !hasValidKeyMetadata`,
-     `needPitch = !hasValidPitchOrRootMetadata && structureMayBeOneShot`;
+     `needKey = !hasValidKeyMetadata && !typeIsDrum(type) && !pathIsPercussive(path)`,
+     `needPitch = !hasValidPitchOrRootMetadata && typeAllowsPitch(type) &&
+     !pathIsPercussive(path) && structureMayBeOneShot`;
      a `DefaultValue` root does not count as pitched metadata;
   3. if any DSP need exists, decode once with the shared bounded reader;
   4. run `RhythmAnalyzer::analyze` when `needRhythm` or when structure is needed for the
@@ -279,5 +284,7 @@ coverage and accuracy among published rather than hiding the unknown share.
   candidate does. Unity 60 is a mapping default, not a measured note.
 - Pitch runs per channel and picks the clearer one; a mono sum is never used.
 - Key/Pitch Type gates: drums are skipped for both; `vocal`/`fx` are skipped for pitch.
+- A file name or immediate folder that names a percussion family skips both fields; a
+  higher pack name does not.
 - Calibration is precision-first, not coverage-first.
 - The DSP stays the lowest-priority source, so a filename key always wins.

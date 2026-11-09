@@ -201,3 +201,18 @@ TEST_CASE("Pitch stores the fractional MIDI and its cents", "[tonal][candidates]
     REQUIRE((pitch->numericValue - std::round(pitch->numericValue)) * 100.0
             == Catch::Approx(25.0).margin(3.0));
 }
+
+TEST_CASE("A percussion path suppresses key and pitch", "[tonal][candidates]")
+{
+    REQUIRE(pathIsPercussive("/packs/Drums/loop.wav"));
+    REQUIRE(pathIsPercussive("/packs/Loops/drum_loops/foo.wav"));
+    REQUIRE(pathIsPercussive("/packs/Perc/OS_VV_130_percussion_loop.wav"));
+    REQUIRE(pathIsPercussive("/packs/Kick/kick_01.wav"));
+    REQUIRE_FALSE(pathIsPercussive("/packs/Melodic Loops/piano_loop_Cm.wav"));
+    REQUIRE_FALSE(pathIsPercussive("/packs/Drums/Melodic Loops/piano_loop_Cm.wav"));
+
+    const auto extraction = extractTonalCandidates(audioOf(triad(0, 4)),
+        {}, "loop", "keys", "/packs/drum_loop.wav");
+    REQUIRE(findField(extraction.candidates, SmartField::Key) == nullptr);
+    REQUIRE(findField(extraction.candidates, SmartField::Pitch) == nullptr);
+}

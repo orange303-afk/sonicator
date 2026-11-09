@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/dsp/AnalysisAudio.h"
 #include "core/dsp/TonalAnalyzer.h"
+#include "core/smart/TonalCandidates.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -162,6 +163,7 @@ TEST_CASE("Evaluate key analysis on a real loop library", "[.][tonal][real]")
     readDouble("SONICATOR_TONAL_TONIC_MARGIN", options.minTonicMargin);
     readDouble("SONICATOR_TONAL_MODE_MARGIN", options.modeMargin);
     readDouble("SONICATOR_TONAL_MIN_TONALITY", options.minTonality);
+    readDouble("SONICATOR_TONAL_CONSISTENCY", options.minChromaConsistency);
     readDouble("SONICATOR_TONAL_PEAK", options.peakThreshold);
     readDouble("SONICATOR_TONAL_MAG_POWER", options.magnitudePower);
     readInt("SONICATOR_TONAL_MEDIAN", options.medianFrames);
@@ -173,7 +175,8 @@ TEST_CASE("Evaluate key analysis on a real loop library", "[.][tonal][real]")
     if (csv != nullptr)
         csv->writeText("path,split,category,reference_tonic,reference_mode,found,tonic,mode,"
                        "classification,confidence,best_correlation,runner_up_correlation,"
-                       "tuning_cents,tonality,error,chroma,bass\n", false, false, "\n");
+                       "tuning_cents,tonality,consistency,rms_variation,onset_density,error,chroma,bass\n",
+                       false, false, "\n");
 
     const juce::File root(directory);
     std::map<juce::String, Tally> tallies;
@@ -191,7 +194,10 @@ TEST_CASE("Evaluate key analysis on a real loop library", "[.][tonal][real]")
         const auto category = categoryOf(file);
         const auto audio = readAnalysisAudio(file);
         if (! audio.ok()) { ++skipped; continue; }
-        const auto key = TonalAnalyzer::analyzeKey(audio.buffer, audio.sampleRate, options);
+        const bool percussivePath = pathIsPercussive(file.getFullPathName());
+        KeyAnalysis key;
+        if (percussivePath) key.explanation = "percussion path";
+        else key = TonalAnalyzer::analyzeKey(audio.buffer, audio.sampleRate, options);
         if (key.error.isNotEmpty()) { ++skipped; continue; }
         ++processed;
 
@@ -213,6 +219,7 @@ TEST_CASE("Evaluate key analysis on a real loop library", "[.][tonal][real]")
                 for (Tally* tally : { &all, &splitAll, &splitCategory })
                     tally->addReference(key.found);
                 if (! key.found) classification = "unknown";
+                if (percussivePath) classification = "percussion_path";
                 if (key.found)
                 {
                     if (key.tonic == reference->tonic && key.mode == reference->mode)
@@ -272,7 +279,11 @@ TEST_CASE("Evaluate key analysis on a real loop library", "[.][tonal][real]")
                                + juce::String(key.runnerUpCorrelation, 3) + ","
                                + juce::String(key.tuningCents, 1) + ","
                                + juce::String(key.tonality, 3) + ","
-                               + key.error + "," + chromaValues.joinIntoString(";")
+                               + juce::String(key.chromaConsistency, 3) + ","
+                               + juce::String(key.rmsVariation, 3) + ","
+                               + juce::String(key.onsetDensity, 2) + ","
+                               + (percussivePath ? juce::String("percussion-path") : key.error)
+                               + "," + chromaValues.joinIntoString(";")
                                + "," + bassValues.joinIntoString(";") + "\n",
                            false, false, "\n");
         }

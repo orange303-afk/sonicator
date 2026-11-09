@@ -1,6 +1,7 @@
 #include "TonalCandidates.h"
 #include "KeyNames.h"
 #include <cmath>
+#include <set>
 namespace sonicator {
 namespace {
 bool usableNumber(const SmartCandidate& candidate)
@@ -48,10 +49,29 @@ bool typeAllowsPitch(const juce::String& type)
     return ! typeIsDrum(value) && value != "vocal" && value != "fx";
 }
 
+bool pathIsPercussive(const juce::String& path)
+{
+    static const std::set<juce::String> percussionTokens {
+        "drum", "drums", "perc", "percussion", "kick", "kicks", "snare", "snares",
+        "hat", "hats", "hihat", "cymbal", "cymbals", "crash", "crashes", "ride", "rides",
+        "tom", "toms", "clap", "claps", "rim", "rimshot", "shaker", "tambourine",
+        "conga", "congas", "bongo", "bongos", "djembe", "tabla", "darbuka", "daf",
+        "riq", "bendir", "break", "breaks", "breakbeat"
+    };
+    const juce::File file(path);
+    const auto text = file.getFileNameWithoutExtension().toLowerCase() + " "
+                    + file.getParentDirectory().getFileName().toLowerCase();
+    const auto tokens = juce::StringArray::fromTokens(text, "/\\_.- ()[]", "");
+    for (const auto& token : tokens)
+        if (percussionTokens.count(token) != 0) return true;
+    return false;
+}
+
 TonalExtraction extractTonalCandidates(const AnalysisAudio& audio,
                                        const std::vector<SmartCandidate>& metadata,
                                        const juce::String& structure,
                                        const juce::String& type,
+                                       const juce::String& path,
                                        const TonalOptions& options)
 {
     TonalExtraction out;
@@ -62,8 +82,9 @@ TonalExtraction extractTonalCandidates(const AnalysisAudio& audio,
         return out;
     }
     const auto normalizedType = type.trim().toLowerCase();
+    const bool percussivePath = path.isNotEmpty() && pathIsPercussive(path);
 
-    if (! hasValidKeyMetadata(metadata) && ! typeIsDrum(normalizedType))
+    if (! hasValidKeyMetadata(metadata) && ! typeIsDrum(normalizedType) && ! percussivePath)
     {
         const auto key = TonalAnalyzer::analyzeKey(audio.buffer, audio.sampleRate, options);
         if (key.error.isNotEmpty())
@@ -87,7 +108,7 @@ TonalExtraction extractTonalCandidates(const AnalysisAudio& audio,
     }
 
     if (isOneShot(structure) && typeAllowsPitch(normalizedType)
-        && ! hasValidPitchOrRootMetadata(metadata))
+        && ! percussivePath && ! hasValidPitchOrRootMetadata(metadata))
     {
         const auto pitch = TonalAnalyzer::analyzePitch(audio.buffer, audio.sampleRate, options);
         if (pitch.error.isNotEmpty())
