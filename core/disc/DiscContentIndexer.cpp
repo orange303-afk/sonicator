@@ -28,11 +28,9 @@ bool waitFor(DiscBrowserService& service, DiscBrowserService::Kind kind,
         juce::Thread::sleep(2);
     }
 }
-juce::String internalPath(const DiscBrowserService::Completion& listing, const DiscEntry& entry,
+juce::String internalPath(const std::map<DiscEntryId, const DiscEntry*>& byId, const DiscEntry& entry,
                           DiscEntryId root)
 {
-    std::map<DiscEntryId, const DiscEntry*> byId;
-    for (const auto& candidate : listing.listing.entries) byId[candidate.id] = &candidate;
     juce::StringArray parts { entry.displayName };
     std::set<DiscEntryId> seen;
     auto parent = entry.parent;
@@ -45,8 +43,8 @@ juce::String internalPath(const DiscBrowserService::Completion& listing, const D
     }
     return "/" + parts.joinIntoString("/");
 }
-SampleRecord makeRow(const juce::File& image, const DiscIndexState&, const DiscEntry& entry,
-                     const juce::String& path, bool akai)
+SampleRecord makeRow(const juce::File& image, const DiscEntry& entry, const juce::String& path,
+                     bool akai)
 {
     SampleRecord row;
     row.filePath = image.getFullPathName() + "::" + path;
@@ -68,6 +66,41 @@ SampleRecord makeRow(const juce::File& image, const DiscIndexState&, const DiscE
     row.discPath = path;
     return row;
 }
+juce::File cueDataFile(const juce::File& cue)
+{
+    juce::FileInputStream input(cue);
+    if (! input.openedOk()) return {};
+    juce::MemoryBlock block;
+    const auto bytes = (size_t) juce::jlimit<juce::int64>(0, 1 << 20, input.getTotalLength());
+    if (input.readIntoMemoryBlock(block, bytes) == 0) return {};
+    const auto text = block.toString();
+    const auto fileAt = text.indexOfIgnoreCase("FILE");
+    if (fileAt < 0) return {};
+    const auto firstQuote = text.indexOfChar(fileAt, '"');
+    if (firstQuote < 0) return {};
+    const auto secondQuote = text.indexOfChar(firstQuote + 1, '"');
+    if (secondQuote <= firstQuote) return {};
+    auto name = text.substring(firstQuote + 1, secondQuote).trim();
+    if (name.isEmpty()) return {};
+    return juce::File::isAbsolutePath(name) ? juce::File(name) : cue.getSiblingFile(name);
+}
+}
+DiscImageStamp discImageStamp(const juce::File& file)
+{
+    DiscImageStamp stamp;
+    if (! file.existsAsFile()) return stamp;
+    stamp.ok = true;
+    stamp.size = file.getSize();
+    stamp.modified = file.getLastModificationTime().toMilliseconds();
+    if (! file.hasFileExtension("cue")) return stamp;
+    const auto data = cueDataFile(file);
+    if (! data.existsAsFile()) return stamp;
+    juce::uint64 mixed = (juce::uint64) data.getLastModificationTime().toMilliseconds();
+    mixed = mixed * 1099511628211ull ^ (juce::uint64) data.getSize();
+    mixed ^= (juce::uint64) stamp.modified * 31;
+    stamp.size = data.getSize();
+    stamp.modified = (int64_t) mixed;
+    return stamp;
 }
 bool isDiscContentFormat(const juce::File& file)
 {
@@ -77,8 +110,13 @@ bool isDiscContentCandidate(const juce::File& file)
 {
     if (! isDiscContentFormat(file)) return false;
     if (! file.hasFileExtension("bin")) return true;
-    const auto cue = file.getSiblingFile(file.getFileNameWithoutExtension() + ".cue");
-    return ! cue.existsAsFile();
+    // Case-insensitive like the browser's cue lookup; otherwise the same contents appear twice.
+    for (const auto& entry : juce::RangedDirectoryIterator(file.getParentDirectory(), false, "*.cue",
+                                                          juce::File::findFiles,
+                                                          juce::File::FollowSymlinks::no))
+        if (entry.getFile().getFileNameWithoutExtension().equalsIgnoreCase(file.getFileNameWithoutExtension()))
+            return false;
+    return true;
 }
 DiscIndexSummary indexDiscContents(SampleRepository& repo, const std::vector<juce::File>& images,
                                    CancelCheck cancel,
@@ -94,8 +132,9 @@ DiscIndexSummary indexDiscContents(SampleRepository& repo, const std::vector<juc
         ++summary.imagesTried;
         if (progress) progress(index + 1, total, image.getFileName());
         const auto imagePath = image.getFullPathName();
-        const auto size = image.getSize();
-        const auto modified = image.getLastModificationTime().toMilliseconds();
+        const auto stamp = discImageStamp(image);
+        const auto size = stamp.size;
+        const auto modified = stamp.modified;
         if (const auto state = repo.discIndexState(imagePath);
             state && state->imageSize == size && state->imageModified == modified)
         {
@@ -107,6 +146,7 @@ DiscIndexSummary indexDiscContents(SampleRepository& repo, const std::vector<juc
         if (! waitFor(service, DiscBrowserService::Kind::open, opened, cancel)) break;
         if (opened.status != DiscStatus::ready)
         {
+            repo.invalidateDiscState(imagePath);
             ++summary.imagesFailed;
             summary.lastError = image.getFileName() + ": "
                 + (opened.error.isNotEmpty() ? opened.error : juce::String("cannot open image"));
@@ -114,6 +154,7 @@ DiscIndexSummary indexDiscContents(SampleRepository& repo, const std::vector<juc
         }
         if (opened.probe.kind != DiscImageKind::iso9660 && opened.probe.kind != DiscImageKind::akaiRaw)
         {
+            repo.invalidateDiscState(imagePath);
             ++summary.imagesFailed;
             summary.lastError = image.getFileName() + ": unsupported disc layout";
             continue;
@@ -123,22 +164,28 @@ DiscIndexSummary indexDiscContents(SampleRepository& repo, const std::vector<juc
         if (! waitFor(service, DiscBrowserService::Kind::list, listing, cancel)) break;
         if (listing.status != DiscStatus::ready)
         {
+            repo.invalidateDiscState(imagePath);
             ++summary.imagesFailed;
             summary.lastError = image.getFileName() + ": "
                 + (listing.error.isNotEmpty() ? listing.error : juce::String("cannot list image"));
             continue;
         }
         const bool akai = opened.probe.kind == DiscImageKind::akaiRaw;
+        std::map<DiscEntryId, const DiscEntry*> byId;
+        for (const auto& entry : listing.listing.entries) byId[entry.id] = &entry;
         std::vector<SampleRecord> rows;
+        int visited = 0;
         for (const auto& entry : listing.listing.entries)
         {
+            if ((++visited & 255) == 0 && cancel && cancel()) break;
             if (entry.kind != DiscEntryKind::file || entry.capability.isNotEmpty()) continue;
             if (! akai && ! audioName(entry.displayName)) continue;
-            const auto path = internalPath(listing, entry, opened.root);
-            rows.push_back(makeRow(image, DiscIndexState{}, entry, path, akai));
+            const auto path = internalPath(byId, entry, opened.root);
+            rows.push_back(makeRow(image, entry, path, akai));
         }
-        repo.replaceDiscContents(imagePath, size, modified, rows);
-        if (listing.listing.partial)
+        const bool partial = listing.listing.partial;
+        repo.replaceDiscContents(imagePath, size, modified, rows, ! partial);
+        if (partial)
         {
             // Keep what was found, but do not treat the image as fully walked.
             repo.invalidateDiscState(imagePath);

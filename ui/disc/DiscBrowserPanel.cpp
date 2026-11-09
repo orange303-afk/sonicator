@@ -28,6 +28,7 @@ DiscBrowserPanel::~DiscBrowserPanel()
 }
 void DiscBrowserPanel::open(const juce::File& file)
 {
+    revealPending = false;
     if (onSelectionBegin) onSelectionBegin();
     image = file;
     imageSize = file.getSize(); imageModified = file.getLastModificationTime().toMilliseconds();
@@ -47,6 +48,7 @@ void DiscBrowserPanel::open(const juce::File& file)
 }
 void DiscBrowserPanel::closeImage()
 {
+    revealPending = false;
     if (onSelectionBegin) onSelectionBegin();
     service.close();
     entries.clear();
@@ -213,9 +215,7 @@ void DiscBrowserPanel::previewEntry(const juce::File& file, DiscEntryId parent, 
                                     const juce::String& name)
 {
     if (! file.existsAsFile()) { showError("The disc image is not available"); return; }
-    revealParent = parent; revealEntry = entry; revealName = name;
-    revealPending = ! canReuseImage(file);
-    if (! revealPending)
+    if (canReuseImage(file))
     {
         showDirectory(parent);
         for (int row = 0; row < (int) entries.size(); ++row)
@@ -225,10 +225,12 @@ void DiscBrowserPanel::previewEntry(const juce::File& file, DiscEntryId parent, 
                 list.selectRow(row);
                 return;
             }
-        statusLabel.setText(revealName + " is no longer in this image", juce::dontSendNotification);
+        statusLabel.setText(name + " is no longer in this image", juce::dontSendNotification);
         return;
     }
-    open(file);
+    open(file); // clears any previous reveal
+    revealParent = parent; revealEntry = entry; revealName = name;
+    revealPending = true;
 }
 void DiscBrowserPanel::setHideEmpty(bool hide)
 {

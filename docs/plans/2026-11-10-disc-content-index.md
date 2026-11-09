@@ -46,6 +46,27 @@ Ruling: состояние образа — только size+mtime; содер�
 не переиндексируется до изменения файла; цена: редкий устаревший список.
 Ruling: индексатор обрабатывает только образы, уже найденные сканером в обычных roots; отдельного
 фонового автоскана при старте нет — содержимое появляется после Rescan/добавления папки.
+Final review: 0 Critical, 8 Important, 6 Minor; Declined to judge: 8 пунктов (MDX, Akai-программы,
+строка BIN, папочные представления, AutoTag, аудиодвижок, DiscLimits, ignore одной строки).
+Final: fixed Smart folder/selected больше не берут виртуальные строки; idsInFolder/countInFolder
+получили includeDiscContents=false, nonDiscIds, processSample считает их обработанными — тест RED → GREEN.
+Final: fixed partial listing использует merge-only replace и сохраняет старые строки/теги — тест.
+Final: fixed CUE identity включает size/mtime парного data-файла (discImageStamp) — тест.
+Final: fixed скрытый preview сверяется с текущим selectedSampleId; поздний decode не перекрывает
+новый выбор — тест, добавлен isDiscPreview().
+Final: fixed NewOnly больше не запускает дисковый проход — тест.
+Final: fixed ошибки/пропуски/число записей дискового прохода выводятся в status и tooltip.
+Final: fixed missing-образ больше не удаляет виртуальные строки и теги: prune только синхронизирует
+missing и удаляет сирот; tags/stars сохраняются — тест.
+Final: fixed (re-graded) internalPath строится одним map + cancel каждые 256 записей; revealPending
+сбрасывается в open/close; relocation probe не считает синтетические пути файлами; CUE ищется
+case-insensitively; неудачный reindex инвалидирует state. Тесты частично покрывают.
+Final: fixed тесты CUE stamp, partial merge, Smart scopes, NewOnly, missing-image tags, preview race.
+Final: minor (deferred): deleteDiscContents не используется; discPartner хранится без потребителя;
+countUnderRoot считает виртуальные строки; AutoTag поведение на виртуальных строках не специфицировано;
+нет отдельного UI-теста status-строки дискового прохода; нет теста multi-track CUE индексатора.
+Final verification: `[disc-content]` 13 test cases / 142 assertions; полный ctest passed (54.50 s);
+real Akai ISO повторно проходит opt-in тест после изменений.
 Ruling: состояние образа сравнивается по size+mtime; правка внутри той же секунды на файловых
 системах с секундным разрешением может не заметиться до следующего изменения; цена: редкий
 устаревший список содержимого, исправляется полным Rescan после изменения mtime.

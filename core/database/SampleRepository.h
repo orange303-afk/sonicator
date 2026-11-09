@@ -87,7 +87,7 @@ public:
     void removeByPaths(const juce::StringArray& paths);
     void setMissing(const std::vector<int64_t>& ids);
     int count(bool includeIgnored = false) const;
-    int countInFolder(const juce::String& folder) const;
+    int countInFolder(const juce::String& folder, bool includeDiscContents = true) const;
     std::vector<SampleRecord> pageInFolder(const juce::String& folder, int limit = 10000, int offset = 0) const;
     // Whole-catalog query. Text, folder and tags are combined with AND; the returned total is the
     // full match count, independent of the requested page.
@@ -97,6 +97,8 @@ public:
     std::vector<SampleRecord> recordsByIds(const std::vector<int64_t>&) const;
     // The subset of ids that is not hidden by an ignore entry, preserving input order.
     std::vector<int64_t> visibleIds(const std::vector<int64_t>& ids) const;
+    // Keeps input order; drops rows that live inside disc images.
+    std::vector<int64_t> nonDiscIds(const std::vector<int64_t>& ids) const;
     // Representative id -> partner path for every valid mono L/R stereo pair.
     std::map<int64_t, juce::String> stereoPairPartners(const std::vector<int64_t>& ids) const;
     int countHash(const juce::String&) const;
@@ -105,8 +107,9 @@ public:
     // path; this API keeps them isolated from real-file bookkeeping and stores the image state so
     // an unchanged image is not walked again.
     std::optional<DiscIndexState> discIndexState(const juce::String& imagePath) const;
+    // removeMissing=false is used for a partial listing: upsert what was found, keep earlier rows.
     void replaceDiscContents(const juce::String& imagePath, int64_t imageSize, int64_t imageModified,
-                             const std::vector<SampleRecord>& rows);
+                             const std::vector<SampleRecord>& rows, bool removeMissing = true);
     void deleteDiscContents(const juce::String& imagePath);
     // Forget that this image was fully walked (used after a partial listing) so a later scan
     // retries it while keeping the rows already found.
@@ -162,7 +165,7 @@ public:
     std::vector<Tag> recentTags(int limit = 5) const;
     // Every catalogued sample inside a folder and its descendants. Separator-aware, independent
     // of search, tags, stars, duplicate filters and pagination. Empty folder means no scope.
-    std::vector<int64_t> idsInFolder(const juce::String& folder) const;
+    std::vector<int64_t> idsInFolder(const juce::String& folder, bool includeDiscContents = true) const;
     int countWithTagInFolder(const juce::String& folder, int64_t tagId) const;
     void setStarred(const std::vector<int64_t>& sampleIds, bool starred);
     // Rebuilds the byte-identical duplicate groups (same full SHA-256 and size).

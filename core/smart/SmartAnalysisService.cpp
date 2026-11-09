@@ -111,7 +111,7 @@ bool SmartAnalysisService::startSelected(const std::vector<int64_t>& sampleIds)
     waitForThreadToExit(-1);
     cancelled = false;
     { std::lock_guard lock(pauseMutex); paused = false; }
-    const auto visible = repo.visibleIds(sampleIds);
+    const auto visible = repo.nonDiscIds(repo.visibleIds(sampleIds));
     {
         std::lock_guard lock(queueMutex);
         queue.clear(); queued.clear();
@@ -155,7 +155,7 @@ bool SmartAnalysisService::startFolder(const juce::String& folder)
         state = {};
         state.running = true;
         state.stage = SmartStage::Extracting;
-        state.total = repo.countInFolder(folder);
+        state.total = repo.countInFolder(folder, false);
         state.message = "Analyzing folder metadata";
     }
     if (! startThread())
@@ -172,6 +172,7 @@ bool SmartAnalysisService::requestSample(int64_t sampleId)
 {
     if (sampleId <= 0) return false;
     if (repo.visibleIds({ sampleId }).empty()) return false;
+    if (const auto record = repo.findById(sampleId); record && record->isDiscEntry()) return false;
     {
         std::lock_guard lock(queueMutex);
         if (queued.count(sampleId) != 0) return true;
@@ -347,8 +348,8 @@ bool SmartAnalysisService::processSample(int64_t sampleId, const juce::String& c
     auto record = repo.findById(sampleId);
     if (! record) return false;
     // Disc contents have no real path to read; decoding them is a preview action, not a library
-    // analysis, and their metadata stays metadata-only.
-    if (record->isDiscEntry()) return false;
+    // analysis. Treat them as processed, not failed, if one ever reaches a queue.
+    if (record->isDiscEntry()) return true;
     {
         std::lock_guard lock(stateMutex);
         state.stage = SmartStage::Extracting;
@@ -475,7 +476,7 @@ void SmartAnalysisService::run()
         if (mode == Mode::Folder && ! cancelled)
         {
             setStage(SmartStage::Extracting, "Analyzing catalogued files in folder");
-            const auto ids = repo.idsInFolder(folderScope);
+            const auto ids = repo.idsInFolder(folderScope, false);
             {
                 std::lock_guard lock(stateMutex);
                 state.total = (int) ids.size();

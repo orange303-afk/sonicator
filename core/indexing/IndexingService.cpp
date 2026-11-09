@@ -137,7 +137,7 @@ void IndexingService::run()
             if (result.error.isEmpty()) ++state.analyzed; else ++state.failed;
             if (duplicate) ++state.duplicates;
         }
-        if (! cancelled && ! discImages.empty())
+        if (! cancelled && scanMode != ScanMode::NewOnly && ! discImages.empty())
         {
             { std::lock_guard lock(stateMutex); state.message = "Indexing disc contents"; }
             const auto summary = indexDiscContents(repo, discImages, [this] { return checkpoint(); },

@@ -13,6 +13,14 @@ struct DiscIndexSummary
 bool isDiscContentFormat(const juce::File&);
 // A .bin that has a sibling .cue is represented by the cue, so its contents are indexed once.
 bool isDiscContentCandidate(const juce::File&);
+struct DiscImageStamp
+{
+    int64_t size = 0, modified = 0;
+    bool ok = false;
+};
+// Identity used for incremental indexing. For a .cue it includes the data file's size/mtime, so
+// replacing the .bin invalidates the cached contents even when the cue itself did not change.
+DiscImageStamp discImageStamp(const juce::File&);
 // Walks playable audio entries of each image and stores them as synthetic catalog rows. Never
 // extracts files and never decodes PCM. An unchanged image (same size and mtime) is skipped.
 DiscIndexSummary indexDiscContents(SampleRepository&, const std::vector<juce::File>& images,

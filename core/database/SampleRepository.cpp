@@ -950,13 +950,14 @@ int SampleRepository::count(bool includeIgnored) const
     bindFilter(s, parts);
     return s.step() ? (int) s.integer(0) : 0;
 }
-int SampleRepository::countInFolder(const juce::String& folder) const
+int SampleRepository::countInFolder(const juce::String& folder, bool includeDiscContents) const
 {
     if (folder.isEmpty()) return count();
     std::lock_guard lock(db.mutex);
     auto [lower,upper] = folderRange(folder);
     FilterSql parts;
     parts.where += " AND samples.path>=? AND samples.path<?";
+    if (! includeDiscContents) parts.where += " AND samples.container_path=''";
     parts.params.emplace_back(lower); parts.params.emplace_back(upper);
     appendIgnore(parts, ignoredPathsLocked());
     appendStereoVisibility(parts);
@@ -1064,6 +1065,27 @@ std::vector<int64_t> SampleRepository::visibleIds(const std::vector<int64_t>& id
     std::vector<int64_t> out;
     for (auto id : ids)
         if (visible.count(id) != 0) out.push_back(id);
+    return out;
+}
+std::vector<int64_t> SampleRepository::nonDiscIds(const std::vector<int64_t>& ids) const
+{
+    if (ids.empty()) return {};
+    std::lock_guard lock(db.mutex);
+    std::set<int64_t> kept;
+    constexpr size_t chunkSize = 400;
+    for (size_t start = 0; start < ids.size(); start += chunkSize)
+    {
+        const size_t end = std::min(ids.size(), start + chunkSize);
+        juce::String placeholders;
+        for (size_t i = start; i < end; ++i) placeholders += (i == start ? "?" : ",?");
+        detail::Statement s(db.handle,
+            ("SELECT id FROM samples WHERE id IN (" + placeholders + ") AND container_path=''").toRawUTF8());
+        int index = 1;
+        for (size_t i = start; i < end; ++i) s.integer(index++, ids[i]);
+        while (s.step()) kept.insert(s.integer(0));
+    }
+    std::vector<int64_t> out;
+    for (auto id : ids) if (kept.count(id) != 0) out.push_back(id);
     return out;
 }
 std::map<int64_t, juce::String> SampleRepository::stereoPairPartners(const std::vector<int64_t>& ids) const
@@ -1204,7 +1226,8 @@ std::optional<DiscIndexState> SampleRepository::discIndexState(const juce::Strin
     return DiscIndexState{ s.integer(0), s.integer(1), s.integer(2) };
 }
 void SampleRepository::replaceDiscContents(const juce::String& imagePath, int64_t imageSize,
-                                           int64_t imageModified, const std::vector<SampleRecord>& rows)
+                                           int64_t imageModified, const std::vector<SampleRecord>& rows,
+                                           bool removeMissing)
 {
     if (imagePath.isEmpty()) return;
     std::lock_guard lock(db.mutex);
@@ -1215,9 +1238,10 @@ void SampleRepository::replaceDiscContents(const juce::String& imagePath, int64_
         std::set<juce::String> wanted;
         for (const auto& row : rows) wanted.insert(row.filePath);
         detail::Statement remove(db.handle, "DELETE FROM samples WHERE path=?");
-        for (const auto& path : existing)
-            if (wanted.find(path) == wanted.end())
-            { remove.reset(); remove.text(1, path); remove.step(); }
+        if (removeMissing)
+            for (const auto& path : existing)
+                if (wanted.find(path) == wanted.end())
+                { remove.reset(); remove.text(1, path); remove.step(); }
         const auto ignoredEntries = ignoredPathsLocked();
         for (const auto& row : rows) upsertLocked(row, &ignoredEntries);
         detail::Statement state(db.handle,
@@ -1268,13 +1292,20 @@ int SampleRepository::pruneDiscContents()
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
     try
     {
+        // Contents of a disc image mirror the image row's missing flag. Unplugging or deleting an
+        // image never drops tags/stars; an explicit Remove of the image or its folder does.
         detail::exec(db.handle,
             "DELETE FROM samples WHERE container_path<>'' AND NOT EXISTS("
-            "SELECT 1 FROM samples image WHERE image.path=samples.container_path AND image.missing=0)");
+            "SELECT 1 FROM samples image WHERE image.path=samples.container_path)");
         const int removed = sqlite3_changes(db.handle);
         detail::exec(db.handle,
+            "UPDATE samples SET missing=(SELECT image.missing FROM samples image"
+            " WHERE image.path=samples.container_path) WHERE container_path<>'' AND EXISTS("
+            "SELECT 1 FROM samples image WHERE image.path=samples.container_path)"
+            " AND missing<>(SELECT image.missing FROM samples image WHERE image.path=samples.container_path)");
+        detail::exec(db.handle,
             "DELETE FROM disc_index WHERE NOT EXISTS("
-            "SELECT 1 FROM samples image WHERE image.path=disc_index.image_path AND image.missing=0)");
+            "SELECT 1 FROM samples image WHERE image.path=disc_index.image_path)");
         detail::exec(db.handle, "COMMIT;");
         return removed;
     }
@@ -1776,7 +1807,7 @@ std::vector<Tag> SampleRepository::recentTags(int limit) const
     while (s.step()) out.push_back(readTag(s, 0));
     return out;
 }
-std::vector<int64_t> SampleRepository::idsInFolder(const juce::String& folder) const
+std::vector<int64_t> SampleRepository::idsInFolder(const juce::String& folder, bool includeDiscContents) const
 {
     std::vector<int64_t> out;
     if (folder.isEmpty()) return out;
@@ -1784,6 +1815,7 @@ std::vector<int64_t> SampleRepository::idsInFolder(const juce::String& folder) c
     auto [lower, upper] = folderRange(folder);
     FilterSql parts;
     parts.where += " AND samples.path>=? AND samples.path<?";
+    if (! includeDiscContents) parts.where += " AND samples.container_path=''";
     parts.params.emplace_back(lower); parts.params.emplace_back(upper);
     appendIgnore(parts, ignoredPathsLocked());
     appendStereoVisibility(parts);

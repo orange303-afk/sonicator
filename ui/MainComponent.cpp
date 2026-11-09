@@ -902,6 +902,7 @@ void MainComponent::showRelocateDialog()
                 lastId = rows.back().id;
                 for (const auto& row : rows)
                 {
+                    if (row.containerPath.isNotEmpty()) continue; // synthetic path, not a file
                     if (! pathrelocation::isUnder(row.path, oldRoot)) continue;
                     ++probe.sampled;
                     if (juce::File(pathrelocation::remap(row.path, oldRoot, newRoot)).existsAsFile())
@@ -1239,6 +1240,15 @@ void MainComponent::ensureDiscBrowser()
                                            SampleAudioPtr audio)
     {
         if (! discBrowser || discBrowser->openedImage() != container) return;
+        if (! discBrowser->isVisible())
+        {
+            // A hidden preview belongs to the library selection. Ignore a decode that finished
+            // after the user selected another row (ordinary file, image or different entry).
+            const auto current = selectedSampleId > 0 && readRepo != nullptr
+                ? readRepo->findById(selectedSampleId) : std::nullopt;
+            if (! current || ! current->isDiscEntry() || current->containerPath != container.getFullPathName()
+                || current->fileName != stem) return;
+        }
         if (! preview.loadDiscSample(container, stem, std::move(audio), false, 0, 0, false, true))
             status.setText(engine.error(), juce::dontSendNotification);
         else
@@ -2633,11 +2643,18 @@ void MainComponent::timerCallback()
     }
     else if (p.running || wasRunning)
     {
-        status.setText((p.paused ? "Paused  |  " : juce::String()) + p.message + "  "
+        juce::String text = (p.paused ? "Paused  |  " : juce::String()) + p.message + "  "
             + juce::String(p.processed) + "/" + juce::String(p.total) + "  |  analyzed " + juce::String(p.analyzed)
             + "  skipped " + juce::String(p.skipped) + "  errors " + juce::String(p.failed)
-            + "  duplicates " + juce::String(p.duplicates) + (p.running ? "  |  " + p.current : ""),juce::dontSendNotification);
-        status.setTooltip(status.getText());
+            + "  duplicates " + juce::String(p.duplicates);
+        if (p.discImages + p.discSkipped + p.discFailed + p.discEntries > 0)
+            text += "  |  disc " + juce::String(p.discEntries) + " entries, "
+                + juce::String(p.discImages) + " images"
+                + (p.discSkipped > 0 ? ", cached " + juce::String(p.discSkipped) : juce::String())
+                + (p.discFailed > 0 ? ", failed " + juce::String(p.discFailed) : juce::String());
+        text += p.running ? "  |  " + p.current : juce::String();
+        status.setText(text, juce::dontSendNotification);
+        status.setTooltip(p.discMessage.isNotEmpty() ? p.discMessage : text);
     }
     else if (smartRunning || smartWasRunning)
     {

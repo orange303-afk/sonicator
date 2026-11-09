@@ -88,6 +88,8 @@ public:
     selection::Range selectedRange() const { return waveform.selection(); }
     void clearSelection() { waveform.clearSelection(); }
     bool isSelectionReady() const;
+    // True when the transport owns a decoded disc-image sample (used to ignore stale previews).
+    bool isDiscPreview() const { return engine.isDiscMode(); }
     // Applies the last source that really started on the instrument when no selection pins the
     // waveform. The preview timer calls this; tests call it directly.
     void refreshMidiFollow();

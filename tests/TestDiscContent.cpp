@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include "core/database/SampleRepository.h"
+#include "core/dsp/BasicAnalyzer.h"
 #include "core/disc/DiscContentIndexer.h"
 #include "core/indexing/IndexingService.h"
 #include "core/scanner/FileScanner.h"
@@ -152,7 +153,7 @@ TEST_CASE("Disc contents are searchable rows tied to their image", "[disc-conten
     REQUIRE_FALSE(repo.findByPath(imagePath).has_value());
     REQUIRE(imageId > 0);
 }
-TEST_CASE("Disc contents of missing images are pruned, existing ones stay", "[disc-content][database]")
+TEST_CASE("A missing image marks its contents missing instead of deleting tags", "[disc-content][database]")
 {
     TestDirectory t; Database db(t.dir.getChildFile("prune.sqlite"));
     SampleRepository repo(db); repo.createTables();
@@ -165,12 +166,26 @@ TEST_CASE("Disc contents of missing images are pruned, existing ones stay", "[di
     repo.upsert(live);
     repo.replaceDiscContents(gonePath, 1, 2, { discRow(gonePath, "/GONE.WAV") });
     repo.replaceDiscContents(livePath, 1, 2, { discRow(livePath, "/LIVE.WAV") });
+    const auto virtualId = repo.findByPath(gonePath + "::/GONE.WAV")->id;
+    const auto tag = repo.createTag("Kick", 0xff00ff00);
+    repo.setSampleTag(virtualId, tag, true);
+    repo.setStarred({ virtualId }, true);
     repo.setMissing({ goneId });
-    REQUIRE(repo.pruneDiscContents() == 1);
-    REQUIRE_FALSE(repo.findByPath(gonePath + "::/GONE.WAV").has_value());
-    REQUIRE_FALSE(repo.discIndexState(gonePath).has_value());
-    REQUIRE(repo.findByPath(livePath + "::/LIVE.WAV").has_value());
-    REQUIRE(repo.discIndexState(livePath).has_value());
+    REQUIRE(repo.pruneDiscContents() == 0); // unplugged/deleted images keep their catalog rows
+    auto virtualRow = repo.findByPath(gonePath + "::/GONE.WAV");
+    REQUIRE(virtualRow.has_value());
+    REQUIRE(virtualRow->missing);
+    REQUIRE(repo.tagsForSample(virtualId).size() == 1);
+    REQUIRE(virtualRow->starred);
+    REQUIRE(repo.discIndexState(gonePath).has_value());
+    REQUIRE_FALSE(repo.findByPath(livePath + "::/LIVE.WAV")->missing);
+
+    // The image returns: the same rows become current again.
+    auto returned = gone; returned.missing = false;
+    repo.upsert(returned);
+    repo.pruneDiscContents();
+    REQUIRE_FALSE(repo.findByPath(gonePath + "::/GONE.WAV")->missing);
+    REQUIRE(repo.tagsForSample(virtualId).size() == 1);
 }
 
 TEST_CASE("An indexed ISO contributes searchable rows without extraction", "[disc-content][indexing]")
@@ -245,7 +260,7 @@ TEST_CASE("An indexed ISO contributes searchable rows without extraction", "[dis
     REQUIRE(iso.existsAsFile());
 }
 
-TEST_CASE("Deleting a disc image prunes its indexed contents", "[disc-content][indexing]")
+TEST_CASE("Deleting a disc image keeps its contents marked missing for a later return", "[disc-content][indexing]")
 {
     TestDirectory t;
     const auto iso = writeIsoWithWaves(t, "gone.iso");
@@ -254,13 +269,14 @@ TEST_CASE("Deleting a disc image prunes its indexed contents", "[disc-content][i
     IndexingService indexer(repo);
     REQUIRE(indexer.start({t.dir.getFullPathName()}));
     REQUIRE(indexer.waitUntilFinished(30000));
-    REQUIRE(repo.findByPath(iso.getFullPathName() + "::/KICK.WAV").has_value());
+    const auto virtualPath = iso.getFullPathName() + "::/KICK.WAV";
+    REQUIRE(repo.findByPath(virtualPath).has_value());
     REQUIRE(iso.deleteFile());
     REQUIRE(indexer.start({t.dir.getFullPathName()}));
     REQUIRE(indexer.waitUntilFinished(30000));
-    REQUIRE_FALSE(repo.findByPath(iso.getFullPathName() + "::/KICK.WAV").has_value());
-    REQUIRE_FALSE(repo.discIndexState(iso.getFullPathName()).has_value());
     REQUIRE(repo.findByPath(iso.getFullPathName())->missing);
+    REQUIRE(repo.findByPath(virtualPath)->missing); // tags survive an unplugged or moved image
+    REQUIRE(repo.discIndexState(iso.getFullPathName()).has_value());
 }
 
 TEST_CASE("A disc content row previews and opens the image at its entry", "[disc-content][ui]")
@@ -412,4 +428,109 @@ TEST_CASE("Relocating a root moves disc containers and index state", "[disc-cont
     REQUIRE_FALSE(repo.findByPath(oldImage + "::/KICK.WAV").has_value());
     REQUIRE(repo.discIndexState(newImage).has_value());
     REQUIRE_FALSE(repo.discIndexState(oldImage).has_value());
+}
+
+TEST_CASE("A partial disc listing keeps earlier rows and tags", "[disc-content][database]")
+{
+    TestDirectory t;
+    const auto imagePath = t.dir.getChildFile("partial.iso").getFullPathName();
+    Database db(t.dir.getChildFile("partial.sqlite")); SampleRepository repo(db); repo.createTables();
+    auto first = discRow(imagePath, "/A.WAV", "1");
+    auto second = discRow(imagePath, "/B.WAV", "2");
+    repo.replaceDiscContents(imagePath, 10, 20, { first, second });
+    const auto secondId = repo.findByPath(second.filePath)->id;
+    const auto tag = repo.createTag("Kick", 0xff00ff00);
+    repo.setSampleTag(secondId, tag, true);
+    repo.replaceDiscContents(imagePath, 10, 21, { first }, false); // partial listing: merge only
+    REQUIRE(repo.findByPath(second.filePath).has_value());
+    REQUIRE(repo.tagsForSample(secondId).size() == 1);
+    repo.invalidateDiscState(imagePath);
+    REQUIRE_FALSE(repo.discIndexState(imagePath).has_value());
+    repo.replaceDiscContents(imagePath, 10, 22, { first }, true); // complete listing: B is gone
+    REQUIRE_FALSE(repo.findByPath(second.filePath).has_value());
+}
+TEST_CASE("A CUE image identity includes its data file", "[disc-content]")
+{
+    TestDirectory t;
+    const auto bin = t.dir.getChildFile("disk.bin");
+    bin.replaceWithData("data", 4);
+    const auto cue = t.dir.getChildFile("disk.cue");
+    cue.replaceWithText("FILE \"disk.bin\" BINARY\n  TRACK 01 MODE1/2048\n    INDEX 01 00:00:00\n");
+    const auto first = discImageStamp(cue);
+    REQUIRE(first.ok);
+    REQUIRE(first.size == 4);
+    juce::Thread::sleep(1100);
+    bin.setLastModificationTime(juce::Time::getCurrentTime());
+    const auto changedBin = discImageStamp(cue);
+    REQUIRE(changedBin.modified != first.modified);
+    juce::Thread::sleep(1100);
+    cue.replaceWithText("FILE \"disk.bin\" BINARY\n  TRACK 01 MODE1/2048\n  REM edited\n    INDEX 01 00:00:00\n");
+    const auto changedCue = discImageStamp(cue);
+    REQUIRE(changedCue.modified != changedBin.modified);
+    const auto binStamp = discImageStamp(bin);
+    REQUIRE(binStamp.ok);
+    REQUIRE(binStamp.size == 4);
+}
+TEST_CASE("Smart folder and selected scopes exclude disc contents", "[disc-content][smart]")
+{
+    TestDirectory t;
+    const auto imagePath = t.dir.getChildFile("smart.iso").getFullPathName();
+    Database db(t.dir.getChildFile("smart.sqlite")); SampleRepository repo(db); repo.createTables();
+    SampleRecord image; image.filePath = imagePath; image.fileName = "smart.iso"; image.format = "ISO";
+    const auto imageId = repo.upsert(image);
+    const auto virtualId = repo.upsert(discRow(imagePath, "/KICK.WAV"));
+    const auto normal = t.wave("normal.wav");
+    const auto normalId = repo.upsert(BasicAnalyzer().analyze(normal));
+    REQUIRE(repo.idsInFolder(t.dir.getFullPathName(), false) == std::vector<int64_t>{ imageId, normalId });
+    REQUIRE(repo.countInFolder(t.dir.getFullPathName(), false) == 2);
+    REQUIRE(repo.idsInFolder(t.dir.getFullPathName(), true).size() == 3);
+    REQUIRE(repo.nonDiscIds({ virtualId, normalId }) == std::vector<int64_t>{ normalId });
+}
+TEST_CASE("New-only scans leave disc contents untouched", "[disc-content][indexing]")
+{
+    TestDirectory t;
+    const auto iso = writeIsoWithWaves(t, "newonly.iso");
+    Database db(t.dir.getChildFile("newonly.sqlite")); SampleRepository repo(db); repo.createTables();
+    repo.addRoot(t.dir.getFullPathName());
+    IndexingService indexer(repo);
+    REQUIRE(indexer.start({t.dir.getFullPathName()}));
+    REQUIRE(indexer.waitUntilFinished(30000));
+    const auto state = repo.discIndexState(iso.getFullPathName());
+    REQUIRE(state.has_value());
+    juce::Thread::sleep(1100);
+    iso.setLastModificationTime(juce::Time::getCurrentTime());
+    REQUIRE(indexer.startNewOnly({t.dir.getFullPathName()}));
+    REQUIRE(indexer.waitUntilFinished(30000));
+    REQUIRE(indexer.progress().discImages == 0); // additive scan does not rewrite contents
+    REQUIRE(repo.discIndexState(iso.getFullPathName())->imageModified == state->imageModified);
+}
+
+TEST_CASE("A newer library selection wins over a hidden disc preview", "[disc-content][ui]")
+{
+    TestDirectory t;
+    writeIsoWithWaves(t, "race.iso");
+    const auto dbPath = t.dir.getChildFile("race.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        repo.addRoot(t.dir.getFullPathName());
+        IndexingService indexer(repo);
+        REQUIRE(indexer.start({t.dir.getFullPathName()}));
+        REQUIRE(indexer.waitUntilFinished(30000));
+    }
+    MainComponent app(dbPath, false, {}, t.dir.getChildFile("race-settings.json"));
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    auto* preview = dynamic_cast<PreviewPanel*>(app.findChildWithID("preview"));
+    REQUIRE(library != nullptr); REQUIRE(preview != nullptr);
+    app.searchLibrary("snare");
+    REQUIRE(library->getNumRows() == 1);
+    library->selectRow(0); // starts the hidden disc preview
+    app.searchLibrary("seed");
+    REQUIRE(library->getNumRows() == 1);
+    library->selectRow(0); // user picks an ordinary WAV before/after the disc decode finishes
+    const auto start = juce::Time::currentTimeMillis();
+    while (preview->waveformLength() <= 0.0 && juce::Time::currentTimeMillis() - start < 10000)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(1000);
+    REQUIRE_FALSE(preview->isDiscPreview());
+    REQUIRE(preview->waveformLength() > 0.0);
 }
