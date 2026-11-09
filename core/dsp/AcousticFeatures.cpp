@@ -349,24 +349,36 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
         }
         else
         {
-            int tauMax = std::max(10, static_cast<int>(sampleRate / 30.0));
-            int tauMin = std::max(2, static_cast<int>(sampleRate / 2500.0));
+            const int dsFactor = (sampleRate > 24000.0) ? 2 : 1;
+            const double effSampleRate = sampleRate / dsFactor;
+            const int effNumSamples = numSamples / dsFactor;
 
-            if (tauMax > numSamples / 2)
-                tauMax = numSamples / 2;
+            std::vector<float> dsMono;
+            if (dsFactor > 1)
+            {
+                dsMono.resize(static_cast<size_t>(effNumSamples));
+                for (int i = 0; i < effNumSamples; ++i)
+                    dsMono[static_cast<size_t>(i)] = mono[static_cast<size_t>(i * dsFactor)];
+            }
+            const float* monoData = (dsFactor > 1) ? dsMono.data() : mono.data();
+
+            int tauMax = std::max(10, static_cast<int>(effSampleRate / 40.0));
+            int tauMin = std::max(2, static_cast<int>(effSampleRate / 2500.0));
+
+            if (tauMax > effNumSamples / 2)
+                tauMax = effNumSamples / 2;
 
             if (tauMax <= tauMin)
                 tauMin = std::max(1, tauMax / 2);
 
             if (tauMax > tauMin)
             {
-                constexpr int targetW = 512;
-                int W = std::min(targetW, numSamples - tauMax);
+                constexpr int targetW = 256;
+                int W = std::min(targetW, effNumSamples - tauMax);
 
                 int peakSample = 0;
                 float peakMonoVal = 0.0f;
-                const float* monoData = mono.data();
-                for (int i = 0; i < numSamples; ++i)
+                for (int i = 0; i < effNumSamples; ++i)
                 {
                     float absVal = std::abs(monoData[i]);
                     if (absVal > peakMonoVal)
@@ -377,8 +389,8 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
                 }
 
                 int start = peakSample;
-                if (start + W + tauMax > numSamples)
-                    start = std::max(0, numSamples - W - tauMax);
+                if (start + W + tauMax > effNumSamples)
+                    start = std::max(0, effNumSamples - W - tauMax);
 
                 const float* pA = monoData + start;
                 std::vector<double> d(static_cast<size_t>(tauMax + 1), 0.0);
