@@ -1157,7 +1157,8 @@ void MainComponent::updateSelectionStatus(const SampleRecord& r)
             return value;
         };
         text += "   |   Type: " + field(10) + "   Structure: " + field(13)
-              + "   BPM: " + field(11) + "   Key: " + field(12);
+              + "   BPM: " + field(11) + "   Key: " + field(12)
+              + "   Pitch: " + pitchDisplayText(d);
         if (const auto tags = readRepo->tagsForSample(r.id); ! tags.empty())
         {
             juce::StringArray names;

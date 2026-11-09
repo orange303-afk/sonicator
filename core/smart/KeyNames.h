@@ -19,6 +19,10 @@ std::optional<MusicalKey> parseKeyValue(const juce::String& value);
 juce::String canonicalKeyName(int tonic, const juce::String& mode);
 // "A minor", or just "A" when only the tonic is known. Empty for an invalid tonic.
 juce::String keyDisplayName(int tonic, const juce::String& mode);
+// MIDI note name in the selection bar, e.g. 69 -> "A4", 61 -> "C#4". Empty outside 0..127.
+juce::String midiNoteName(int midi);
+// Signed cents for display, e.g. +12.4 -> "+12c", -0.2 -> "0c".
+juce::String formatCents(double cents);
 struct NoteName
 {
     int tonic = -1;   // 0 = C .. 11 = B

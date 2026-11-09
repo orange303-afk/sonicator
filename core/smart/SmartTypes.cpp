@@ -1,4 +1,6 @@
 #include "SmartTypes.h"
+#include "KeyNames.h"
+#include <cmath>
 namespace sonicator {
 juce::String smartFieldKey(SmartField field)
 {
@@ -120,5 +122,28 @@ std::optional<OverrideState> overrideStateFromKey(const juce::String& key)
     if (key == "unknown") return OverrideState::Unknown;
     if (key == "not_applicable") return OverrideState::NotApplicable;
     return std::nullopt;
+}
+juce::String pitchDisplayText(const SmartDisplay& d)
+{
+    juce::String value;
+    if (d.pitchOverride == OverrideState::NotApplicable)
+        value = "n/a";
+    else if (d.pitchOverride == OverrideState::Unknown)
+        value = "manual: unknown";
+    else if (d.hasPitch)
+    {
+        value = midiNoteName(d.pitchMidi);
+        if (std::abs(d.pitchCents) >= 0.5) value += " " + formatCents(d.pitchCents);
+        if (d.pitchOverride == OverrideState::Value) value += " (manual)";
+    }
+    else if (d.pitchState == SmartState::NotApplicable || d.pitchState == SmartState::Unsupported)
+        value = "n/a";
+    else if (d.pitchState == SmartState::Error) value = "!";
+    else value = d.pipelineState == SmartPipelineState::NotAnalyzed ? "--" : "?";
+    if (d.pitchState == SmartState::Conflicting) value += " (conflict)";
+    else if (d.pitchState == SmartState::Ambiguous) value += " (ambiguous)";
+    if (d.pipelineState == SmartPipelineState::Stale) value += " (stale)";
+    if (d.pipelineState == SmartPipelineState::Error) value += " (error)";
+    return value;
 }
 } // namespace sonicator

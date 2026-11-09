@@ -2509,7 +2509,7 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
         }
         detail::Statement results(db.handle,
             ("SELECT sample_id,type,type_state,structure,structure_state,bpm,has_bpm,bpm_state,"
-             "key_tonic,key_mode,key_state,"
+             "key_tonic,key_mode,key_state,pitch_midi,pitch_cents,pitch_state,"
              "pipeline_state FROM smart_results WHERE sample_id IN (" + placeholders + ")").toRawUTF8());
         for (size_t i = start; i < end; ++i) results.integer((int) (i - start + 1), sampleIds[i]);
         while (results.step())
@@ -2527,19 +2527,24 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
             const auto mode = results.text(9);
             d.keyState = smartStateFromKey(results.text(10)).value_or(SmartState::Unknown);
             d.key = keyDisplayName(tonic, mode);
-            d.pipelineState = smartPipelineStateFromKey(results.text(11))
+            d.pitchMidi = (int) results.integer(11);
+            d.pitchCents = results.real(12);
+            d.pitchState = smartStateFromKey(results.text(13)).value_or(SmartState::Unknown);
+            d.hasPitch = d.pitchMidi >= 0 && d.pitchState != SmartState::Unknown
+                         && d.pitchState != SmartState::NotApplicable;
+            d.pipelineState = smartPipelineStateFromKey(results.text(14))
                                   .value_or(SmartPipelineState::NotAnalyzed);
             // A pre-v7 row can carry values without a pipeline state. It is not "never analyzed":
             // show the values with the stale marker until a pass rewrites them.
             if (d.pipelineState == SmartPipelineState::NotAnalyzed
-                && (d.type.isNotEmpty() || d.hasBpm || d.key.isNotEmpty()))
+                && (d.type.isNotEmpty() || d.hasBpm || d.key.isNotEmpty() || d.hasPitch))
                 d.pipelineState = SmartPipelineState::Stale;
             out[id] = d;
         }
         detail::Statement overrides(db.handle,
-            ("SELECT sample_id,field,cleared,not_applicable,text_value,numeric_value"
+            ("SELECT sample_id,field,cleared,not_applicable,text_value,numeric_value,aux_value"
              " FROM smart_overrides WHERE sample_id IN (" + placeholders + ")"
-             " AND field IN ('type','structure','bpm','key')").toRawUTF8());
+             " AND field IN ('type','structure','bpm','key','pitch')").toRawUTF8());
         for (size_t i = start; i < end; ++i) overrides.integer((int) (i - start + 1), sampleIds[i]);
         while (overrides.step())
         {
@@ -2582,6 +2587,17 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
                         d.key = overrides.text(4);
                 }
                 else d.key.clear();
+            }
+            else if (field == "pitch")
+            {
+                d.pitchOverride = state;
+                const auto value = overrides.real(5);
+                const bool valid = state == OverrideState::Value && std::isfinite(value)
+                                   && value >= 0.0 && value <= 127.0;
+                d.hasPitch = valid;
+                d.pitchMidi = valid ? (int) std::lround(value) : -1;
+                d.pitchCents = valid
+                    ? (value - std::round(value)) * 100.0 + overrides.real(6) : 0.0;
             }
         }
     }

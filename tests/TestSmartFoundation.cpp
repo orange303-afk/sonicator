@@ -473,6 +473,73 @@ TEST_CASE("A key display keeps a tonic without an invented mode", "[smart][colum
     REQUIRE(keyDisplayName(9, "unknown") == "A");
 }
 
+TEST_CASE("MIDI note names and cents format for the selection bar", "[smart][display]")
+{
+    REQUIRE(midiNoteName(69) == "A4");
+    REQUIRE(midiNoteName(61) == "C#4");
+    REQUIRE(midiNoteName(60) == "C4");
+    REQUIRE(midiNoteName(0) == "C-1");
+    REQUIRE(midiNoteName(-1).isEmpty());
+    REQUIRE(midiNoteName(128).isEmpty());
+    REQUIRE(formatCents(12.0) == "+12c");
+    REQUIRE(formatCents(-3.0) == "-3c");
+    REQUIRE(formatCents(0.0) == "0c");
+}
+
+TEST_CASE("Smart displays expose resolved pitch and its override", "[smart][display]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("smart-pitch.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    SampleRecord r; r.filePath = "/lib/pitch.wav"; r.fileName = "pitch.wav"; r.fileHash = "h";
+    const auto id = repo.upsert(r);
+    SmartResult result;
+    result.pipelineState = SmartPipelineState::Complete;
+    result.keyTonic = 0; result.keyMode = "major"; result.keyState = SmartState::Resolved;
+    result.pitchMidi = 69; result.pitchCents = 12.0; result.pitchState = SmartState::Resolved;
+    result.pitchSource = "dsp";
+    repo.setSmartResult(id, result);
+    auto display = repo.smartDisplays({ id })[id];
+    REQUIRE(display.hasPitch);
+    REQUIRE(display.pitchMidi == 69);
+    REQUIRE(display.pitchCents == Catch::Approx(12.0));
+    REQUIRE(display.pitchState == SmartState::Resolved);
+
+    SmartOverride pitch;
+    pitch.numericValue = 62;
+    pitch.auxValue = 5.0;
+    repo.setSmartOverride(id, SmartField::Pitch, pitch);
+    display = repo.smartDisplays({ id })[id];
+    REQUIRE(display.pitchOverride == OverrideState::Value);
+    REQUIRE(display.pitchMidi == 62);
+    REQUIRE(display.pitchCents == Catch::Approx(5.0));
+}
+
+TEST_CASE("Pitch display text carries the state markers", "[smart][display]")
+{
+    SmartDisplay display;
+    display.pipelineState = SmartPipelineState::Complete;
+    display.pitchState = SmartState::Resolved;
+    display.hasPitch = true;
+    display.pitchMidi = 69;
+    display.pitchCents = 12.0;
+    REQUIRE(pitchDisplayText(display) == "A4 +12c");
+    display.pitchCents = 0.0;
+    REQUIRE(pitchDisplayText(display) == "A4");
+    display.pitchState = SmartState::Conflicting;
+    REQUIRE(pitchDisplayText(display) == "A4 (conflict)");
+    display.pitchState = SmartState::Unknown;
+    display.hasPitch = false;
+    REQUIRE(pitchDisplayText(display) == "?");
+    display.pipelineState = SmartPipelineState::NotAnalyzed;
+    REQUIRE(pitchDisplayText(display) == "--");
+    display.pipelineState = SmartPipelineState::Complete;
+    display.pitchOverride = OverrideState::Unknown;
+    REQUIRE(pitchDisplayText(display) == "manual: unknown");
+    display.pitchOverride = OverrideState::NotApplicable;
+    REQUIRE(pitchDisplayText(display) == "n/a");
+}
+
+
 namespace {
 const SmartExtraction* findExtraction(const SmartCollection& collection, const juce::String& source)
 {

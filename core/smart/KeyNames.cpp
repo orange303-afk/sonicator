@@ -1,4 +1,5 @@
 #include "KeyNames.h"
+#include <cmath>
 namespace sonicator {
 namespace {
 const char* const sharpNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -28,6 +29,18 @@ juce::String keyDisplayName(int tonic, const juce::String& mode)
     const juce::String name(sharpNames[tonic]);
     if (mode.isEmpty() || mode == "unknown") return name;
     return name + " " + mode;
+}
+juce::String midiNoteName(int midi)
+{
+    if (midi < 0 || midi > 127) return {};
+    return juce::String(sharpNames[midi % 12]) + juce::String(midi / 12 - 1);
+}
+juce::String formatCents(double cents)
+{
+    if (! std::isfinite(cents)) return {};
+    const int rounded = (int) std::lround(cents);
+    if (rounded == 0) return "0c";
+    return (rounded > 0 ? "+" : "") + juce::String(rounded) + "c";
 }
 std::optional<MusicalKey> parseKeyToken(const juce::String& token)
 {

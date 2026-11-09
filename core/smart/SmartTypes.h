@@ -106,16 +106,25 @@ struct SmartDisplay
     juce::String type, structure, key;
     double bpm = 0;
     bool hasBpm = false;
+    bool hasPitch = false;
+    int pitchMidi = -1;
+    double pitchCents = 0;
     SmartState typeState = SmartState::Unknown;
     SmartState structureState = SmartState::Unknown;
     SmartState bpmState = SmartState::Unknown;
     SmartState keyState = SmartState::Unknown;
+    SmartState pitchState = SmartState::Unknown;
     OverrideState typeOverride = OverrideState::None;
     OverrideState structureOverride = OverrideState::None;
     OverrideState bpmOverride = OverrideState::None;
     OverrideState keyOverride = OverrideState::None;
+    OverrideState pitchOverride = OverrideState::None;
     SmartPipelineState pipelineState = SmartPipelineState::NotAnalyzed;
 };
+
+// Selection-bar text for the resolved pitch, with the same textual state markers as the other
+// smart fields. Pure; the UI owns layout only.
+juce::String pitchDisplayText(const SmartDisplay&);
 
 struct SmartFailure
 {
