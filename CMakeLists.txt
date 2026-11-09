@@ -21,6 +21,41 @@ set(BUILD_LITE OFF CACHE BOOL "" FORCE)
 set(LIBXMP_DISABLE_DEPACKERS ON CACHE BOOL "" FORCE)
 set(LIBXMP_DISABLE_PROWIZARD ON CACHE BOOL "" FORCE)
 set(LIBXMP_PIC ON CACHE BOOL "" FORCE)
+if(APPLE)
+    FetchContent_Declare(
+        onnxruntime
+        URL "https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-osx-universal2-1.20.1.tgz"
+    )
+    FetchContent_MakeAvailable(onnxruntime)
+    add_library(onnxruntime_lib SHARED IMPORTED GLOBAL)
+    set_target_properties(onnxruntime_lib PROPERTIES
+        IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.dylib"
+        INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include"
+    )
+elseif(WIN32)
+    FetchContent_Declare(
+        onnxruntime
+        URL "https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-win-x64-1.20.1.zip"
+    )
+    FetchContent_MakeAvailable(onnxruntime)
+    add_library(onnxruntime_lib SHARED IMPORTED GLOBAL)
+    set_target_properties(onnxruntime_lib PROPERTIES
+        IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll"
+        IMPORTED_IMPLIB "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include"
+    )
+else()
+    FetchContent_Declare(
+        onnxruntime
+        URL "https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz"
+    )
+    FetchContent_MakeAvailable(onnxruntime)
+    add_library(onnxruntime_lib SHARED IMPORTED GLOBAL)
+    set_target_properties(onnxruntime_lib PROPERTIES
+        IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.so"
+        INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include"
+    )
+endif()
 FetchContent_Declare(libxmp
     GIT_REPOSITORY https://github.com/libxmp/libxmp.git
     GIT_TAG libxmp-4.6.2 GIT_SHALLOW TRUE)
@@ -57,13 +92,14 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/disc/CueSheet.cpp
     core/disc/AkaiSampleReader.cpp
     core/disc/DiscContentIndexer.cpp
-    core/rex/Rex2Decoder.cpp core/rex/Rex2SlicePlayer.cpp)
+    core/rex/Rex2Decoder.cpp core/rex/Rex2SlicePlayer.cpp
+    core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
 target_link_libraries(SonicatorCore PUBLIC
-    juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static)
+    juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib)
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png)
 add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/SongProgress.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/settings/SettingsPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp)
@@ -78,6 +114,7 @@ juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/icon-glossy-chevron-1024.png")
 target_sources(Sonicator PRIVATE app/Main.cpp)
 target_link_libraries(Sonicator PRIVATE SonicatorUI)
+set_target_properties(Sonicator PROPERTIES BUILD_RPATH "${onnxruntime_SOURCE_DIR}/lib")
 if(APPLE)
     # The linker's signature covers only the Mach-O; seal the complete local app bundle.
     # This is an ad-hoc development signature, not Developer ID signing/notarization.
