@@ -2,6 +2,7 @@
 #include "core/database/SampleRepository.h"
 #include "core/settings/AppSettings.h"
 #include <algorithm>
+#include <cstring>
 namespace sonicator {
 namespace {
 juce::uint32 be32(const unsigned char* p)
@@ -37,13 +38,17 @@ bool isAbletonProtectedSample(const juce::File& file)
     if (std::memcmp(header, "FORM", 4) != 0 || std::memcmp(header + 8, "AIFC", 4) != 0) return false;
     const auto declared = 8 + (int64_t) be32(header + 4);
     const auto end = juce::jmin(declared, input.getTotalLength());
+    // A malformed AIFC must not turn discovery into a long seek loop over zero-size chunks.
+    static constexpr int maxChunks = 1024;
+    int visited = 0;
     for (int64_t position = 12; position + 8 <= end;)
     {
+        if (++visited > maxChunks) return false;
         input.setPosition(position);
         unsigned char chunk[8] {};
         if (input.read(chunk, 8) != 8) break;
         const auto size = (int64_t) be32(chunk + 4);
-        if (size < 0 || size > end - position - 8) break;
+        if (size > end - position - 8) break;
         if (std::memcmp(chunk, "COMM", 4) == 0)
         {
             if (size < 22) return false;

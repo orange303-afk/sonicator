@@ -32,6 +32,21 @@ constexpr PaletteColour tagPalette[] = {
     { "Pink", 0xffd06ab8 }, { "Rose", 0xffd06a7a }, { "Grey", 0xff8a8f9c }
 };
 constexpr int pageSize = 10000;
+// Catalog rows for formats this build no longer indexes: archive metadata rows and older error
+// rows for protected Ableton AIFC samples. Source files are never opened beyond their headers.
+int purgeUnsupportedRows(SampleRepository& repo)
+{
+    int removed = repo.removeSamplesWithFormats({ "CMB", "RFL" });
+    juce::StringArray protectedRows;
+    for (const auto& path : repo.errorPathsWithFormats({ "AIF", "AIFF", "AIFC" }))
+        if (isAbletonProtectedSample(juce::File(path))) protectedRows.add(path);
+    if (! protectedRows.isEmpty())
+    {
+        removed += protectedRows.size();
+        repo.removeByPaths(protectedRows);
+    }
+    return removed;
+}
 juce::String canonicalFolderPath(const juce::String& path)
 {
     return path.isEmpty() ? juce::String() : juce::File(path).getFullPathName();
@@ -444,7 +459,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         writeDb = std::make_unique<Database>(dbPath); writeRepo = std::make_unique<SampleRepository>(*writeDb);
         writeRepo->createTables();
         // Formats this build no longer indexes leave the catalog; the files stay on disk.
-        writeRepo->removeSamplesWithFormats({"CMB", "RFL"});
+        purgeUnsupportedRows(*writeRepo);
         writeRepo->refreshDuplicates();
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         indexer = std::make_unique<IndexingService>(*writeRepo);
@@ -688,8 +703,9 @@ void MainComponent::beginImport(const juce::File& folder)
     if (! indexer || indexer->progress().running) return;
     try
     {
-        // Adding a folder is an explicit request: a previous Remove no longer keeps it ignored.
-        if (writeRepo->hasExactIgnore(folder.getFullPathName())) writeRepo->unignorePath(folder.getFullPathName());
+        // Adding a folder is an explicit request: a previous Remove or Ignore of this folder or
+        // any ancestor no longer keeps the chosen subtree out of the scan.
+        writeRepo->unignoreCoveringFolders(folder.getFullPathName());
         writeRepo->addRoot(folder.getFullPathName()); folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored); refreshFavorites();
         if (indexer->start({folder.getFullPathName()})) { wasRunning = true; reloadLibrary(); }
     }
@@ -730,6 +746,11 @@ bool MainComponent::removeFolderFromLibrary(const juce::String& path)
         {
             selectedFolder.clear();
             filter.folder.clear();
+        }
+        if (! appSettings.lastFolder.isEmpty()
+            && (canonicalFolderPath(appSettings.lastFolder) == target
+                || juce::File(appSettings.lastFolder).isAChildOf(juce::File(target))))
+        {
             appSettings.lastFolder.clear();
             settingsStore.update([](AppSettings& saved) { saved.lastFolder.clear(); });
         }
@@ -748,7 +769,8 @@ bool MainComponent::removeFolderFromLibrary(const juce::String& path)
         status.setText("Removed " + juce::String(removal.rowsRemoved) + " catalogued file(s) from " + target
             + ". Files on disk are unchanged."
             + (removal.wasRoot ? " The folder is no longer a library root."
-                               : " The folder stays out of parent scans until you add it again."),
+                               : juce::String())
+            + " It stays out of scanning until you add it again.",
             juce::dontSendNotification);
         return true;
     }
@@ -2089,8 +2111,12 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     menu.addSeparator();
     menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0 && ! splitBusy);
     menu.addItem(7005, "Reset tags...", catalogued > 0 && autoTagIdle && autoTagDialog == nullptr);
-    menu.addSeparator();
-    menu.addItem(7008, "Remove from library...", autoTagIdle);
+    const bool removable = available || readRepo->roots().contains(path);
+    if (removable)
+    {
+        menu.addSeparator();
+        menu.addItem(7008, "Remove from library...", autoTagIdle);
+    }
     const juce::String folderPath = path;
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&folders).withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 })
@@ -2815,7 +2841,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
         newWriteDb = std::make_unique<Database>(target);
         newWriteRepo = std::make_unique<SampleRepository>(*newWriteDb);
         newWriteRepo->createTables();
-        newWriteRepo->removeSamplesWithFormats({"CMB", "RFL"});
+        purgeUnsupportedRows(*newWriteRepo);
         newReadDb = std::make_unique<Database>(target);
         newReadRepo = std::make_unique<SampleRepository>(*newReadDb);
     }

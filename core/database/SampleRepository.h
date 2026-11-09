@@ -72,6 +72,12 @@ public:
     bool hasExactIgnore(const juce::String& path) const;
     void ignorePath(const juce::String& path, bool folder);
     void unignorePath(const juce::String& path);
+    // Clears every folder ignore that covers this path (the path itself or an ancestor). Used when
+    // the user explicitly adds a folder that a previous Remove had kept out of parent scans.
+    int unignoreCoveringFolders(const juce::String& path);
+    // Paths with one of the given formats whose stored analysis failed. Used to migrate rows for
+    // formats this build no longer accepts.
+    std::vector<juce::String> errorPathsWithFormats(const juce::StringArray& formats) const;
     // Deletes catalog rows for paths whose files were removed, together with exact ignore entries.
     void removeByPaths(const juce::StringArray& paths);
     void setMissing(const std::vector<int64_t>& ids);
@@ -192,6 +198,8 @@ public:
     juce::String catalogPath() const { return db.file().getFullPathName(); }
 private:
     std::vector<IgnoredPath> ignoredPathsLocked() const;
+    // Caller holds db.mutex and an open transaction.
+    void unignorePathLocked(const juce::String& path);
     Database& db;
 };
 } // namespace sonicator

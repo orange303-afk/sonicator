@@ -35,7 +35,7 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 
 ## Use
 
-1. **+ Add folder** imports one directory recursively. Repeat for multiple roots. Right-click any folder in the sidebar and choose **Remove from library...** to drop that folder's catalog rows, tags and analysis without touching files on disk. Removing a registered root also unregisters it; removing a subfolder keeps it out of parent scans until you add it again with **+ Add folder**.
+1. **+ Add folder** imports one directory recursively. Repeat for multiple roots. Right-click any folder in the sidebar and choose **Remove from library...** to drop that folder's catalog rows, tags and analysis without touching files on disk. A registered root is unregistered, and any removed folder stays out of later scans (including a parent root's rescan) until you add it again with **+ Add folder**.
 2. Indexing runs in the background; **Pause / Resume / Cancel** control it. Completed file results remain saved on cancellation.
 3. Select a row to immediately preview its original file. Use **Play / Pause / Stop / Loop**, volume, and drag on the waveform to select a time range. A plain click on the waveform seeks and clears the selection.
 4. Keyboard: **Space** play/pause, **Left / Right** seek one second, **Escape** stop and clear the waveform selection (when not consumed by an editing control).
@@ -78,7 +78,7 @@ On macOS, `~/Library/Application Support/Propellerhead Software/Packs` is regist
 
 On macOS, `~/Music/Ableton/Factory Packs` is registered once when present. The global `abletonPacksAdded` setting prevents it returning after **Remove**. Playable WAV/AIFF and the rendered OGG previews under `Ableton Folder Info/Previews` are indexed normally and appear in **All samples** and the general search. A preview row is labelled **Ableton Preview** in the preview panel with the rack, clip or device name it demonstrates.
 
-Ableton factory AIFC samples compressed with the closed `able` codec (marked "Ableton Content") are skipped: only Live can decode them, so they are not catalogued and produce no error rows. Omni-present `.asd` sidecars, Live presets (`.adg`, `.adv`, `.alc`, `.als`) and Max devices (`.amxd`) are not indexed in this stage; the previews are the only audio representation of those presets.
+Ableton factory AIFC samples compressed with the closed `able` codec (marked "Ableton Content") are skipped: only Live can decode them, so they are not catalogued and produce no error rows. Catalogs created by an earlier build have those error rows purged once on open; the files themselves stay untouched. Omni-present `.asd` sidecars, Live presets (`.adg`, `.adv`, `.alc`, `.als`) and Max devices (`.amxd`) are not indexed in this stage; the previews are the only audio representation of those presets.
 
 ## Modules
 

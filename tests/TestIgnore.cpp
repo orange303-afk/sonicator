@@ -190,9 +190,52 @@ TEST_CASE("Removing a folder deletes only its rows and keeps it out of parent re
     REQUIRE(rootRemoved.wasRoot);
     REQUIRE(rootRemoved.rowsRemoved >= 2);
     REQUIRE(repo.roots().isEmpty());
+    REQUIRE(repo.isIgnored(root.getFullPathName())); // explicit re-add clears this
     REQUIRE_FALSE(repo.findByPath(keep.getFullPathName()).has_value());
     REQUIRE(keep.existsAsFile()); // files on disk are never touched
     REQUIRE(keepId > 0);
+}
+TEST_CASE("Removing a nested registered root keeps it out of the parent rescan", "[database][remove]")
+{
+    TestDirectory t;
+    const auto root = t.dir.getChildFile("Root");
+    const auto nested = t.dir.getChildFile("Root/Gone");
+    const auto feed = t.wave("Root/Gone/kick.wav");
+    const auto keep = t.wave("Root/Keep/keep.wav");
+    Database db(t.dir.getChildFile("nested-root.sqlite")); SampleRepository repo(db); repo.createTables();
+    repo.addRoot(root.getFullPathName());
+    repo.addRoot(nested.getFullPathName());
+    REQUIRE(repo.upsert(BasicAnalyzer().analyze(feed)) > 0);
+    REQUIRE(repo.upsert(BasicAnalyzer().analyze(keep)) > 0);
+
+    const auto removed = repo.removeFolder(nested.getFullPathName());
+    REQUIRE(removed.wasRoot); // it was registered on its own
+    REQUIRE(repo.isIgnored(nested.getFullPathName())); // and is still inside the parent root
+    REQUIRE(repo.roots().contains(root.getFullPathName()));
+    REQUIRE_FALSE(repo.roots().contains(nested.getFullPathName()));
+
+    IndexingService indexer(repo);
+    REQUIRE(indexer.start({root.getFullPathName()}));
+    REQUIRE(indexer.waitUntilFinished(20000));
+    REQUIRE_FALSE(repo.findByPath(feed.getFullPathName()).has_value());
+    REQUIRE(repo.findByPath(keep.getFullPathName()).has_value());
+}
+TEST_CASE("Explicitly adding a folder clears ignores of itself and its ancestors", "[database][remove]")
+{
+    TestDirectory t;
+    const auto parent = t.dir.getChildFile("Removed");
+    const auto child = t.wave("Removed/Sub/kick.wav");
+    Database db(t.dir.getChildFile("covering.sqlite")); SampleRepository repo(db); repo.createTables();
+    const auto id = repo.upsert(BasicAnalyzer().analyze(child));
+    repo.ignorePath(parent.getFullPathName(), true);
+    REQUIRE(repo.isIgnored(child.getFullPathName()));
+    REQUIRE(repo.visibleIds({ id }).empty());
+
+    REQUIRE(repo.unignoreCoveringFolders(t.dir.getChildFile("Removed/Sub").getFullPathName()) == 1);
+    REQUIRE_FALSE(repo.isIgnored(parent.getFullPathName()));
+    REQUIRE_FALSE(repo.isIgnored(child.getFullPathName()));
+    REQUIRE(repo.visibleIds({ id }) == std::vector<int64_t>{ id });
+    REQUIRE(repo.unignoreCoveringFolders(t.dir.getChildFile("Removed/Sub").getFullPathName()) == 0);
 }
 TEST_CASE("Removing a folder drops unsupported archive records only", "[database][remove][reason]")
 {

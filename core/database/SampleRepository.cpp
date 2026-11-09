@@ -789,48 +789,52 @@ void SampleRepository::ignorePath(const juce::String& path, bool folder)
         throw;
     }
 }
+void SampleRepository::unignorePathLocked(const juce::String& path)
+{
+    bool folder = false;
+    {
+        detail::Statement s(db.handle, "SELECT is_folder FROM ignored_paths WHERE path=?");
+        s.text(1, path);
+        if (! s.step()) return;
+        folder = s.integer(0) != 0;
+    }
+    {
+        detail::Statement d(db.handle, "DELETE FROM ignored_paths WHERE path=?");
+        d.text(1, path); d.step();
+    }
+    // A row may still be covered by another entry (an exact file inside an ignored folder, or
+    // a nested folder), so recompute the cached flag from the remaining table.
+    const auto entries = ignoredPathsLocked();
+    std::unique_ptr<detail::Statement> select;
+    if (folder)
+    {
+        auto [lower, upper] = folderRange(path);
+        select = std::make_unique<detail::Statement>(db.handle,
+            "SELECT id,path FROM samples WHERE path>=? AND path<?");
+        select->text(1, lower); select->text(2, upper);
+    }
+    else
+    {
+        select = std::make_unique<detail::Statement>(db.handle,
+            "SELECT id,path FROM samples WHERE path=?");
+        select->text(1, path);
+    }
+    detail::Statement update(db.handle, "UPDATE samples SET ignored=? WHERE id=?");
+    while (select->step())
+    {
+        update.reset();
+        update.integer(1, isPathIgnored(select->text(1), entries) ? 1 : 0);
+        update.integer(2, select->integer(0));
+        update.step();
+    }
+}
 void SampleRepository::unignorePath(const juce::String& path)
 {
     std::lock_guard lock(db.mutex);
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
     try
     {
-        bool folder = false;
-        {
-            detail::Statement s(db.handle, "SELECT is_folder FROM ignored_paths WHERE path=?");
-            s.text(1, path);
-            if (! s.step()) { detail::exec(db.handle, "ROLLBACK;"); return; }
-            folder = s.integer(0) != 0;
-        }
-        {
-            detail::Statement d(db.handle, "DELETE FROM ignored_paths WHERE path=?");
-            d.text(1, path); d.step();
-        }
-        // A row may still be covered by another entry (an exact file inside an ignored folder, or
-        // a nested folder), so recompute the cached flag from the remaining table.
-        const auto entries = ignoredPathsLocked();
-        std::unique_ptr<detail::Statement> select;
-        if (folder)
-        {
-            auto [lower, upper] = folderRange(path);
-            select = std::make_unique<detail::Statement>(db.handle,
-                "SELECT id,path FROM samples WHERE path>=? AND path<?");
-            select->text(1, lower); select->text(2, upper);
-        }
-        else
-        {
-            select = std::make_unique<detail::Statement>(db.handle,
-                "SELECT id,path FROM samples WHERE path=?");
-            select->text(1, path);
-        }
-        detail::Statement update(db.handle, "UPDATE samples SET ignored=? WHERE id=?");
-        while (select->step())
-        {
-            update.reset();
-            update.integer(1, isPathIgnored(select->text(1), entries) ? 1 : 0);
-            update.integer(2, select->integer(0));
-            update.step();
-        }
+        unignorePathLocked(path);
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -838,6 +842,42 @@ void SampleRepository::unignorePath(const juce::String& path)
         try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
         throw;
     }
+}
+int SampleRepository::unignoreCoveringFolders(const juce::String& path)
+{
+    if (path.isEmpty()) return 0;
+    const juce::File folder(path);
+    std::lock_guard lock(db.mutex);
+    juce::StringArray targets;
+    for (const auto& entry : ignoredPathsLocked())
+        if (entry.folder && (folder == juce::File(entry.path) || folder.isAChildOf(juce::File(entry.path))))
+            targets.addIfNotAlreadyThere(entry.path);
+    if (targets.isEmpty()) return 0;
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        for (const auto& target : targets) unignorePathLocked(target);
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+    return targets.size();
+}
+std::vector<juce::String> SampleRepository::errorPathsWithFormats(const juce::StringArray& formats) const
+{
+    std::vector<juce::String> out;
+    if (formats.isEmpty()) return out;
+    juce::String placeholders;
+    for (int i = 0; i < formats.size(); ++i) placeholders << (i == 0 ? "?" : ",?");
+    const auto sql = "SELECT path FROM samples WHERE error<>'' AND format IN (" + placeholders + ")";
+    std::lock_guard lock(db.mutex);
+    detail::Statement select(db.handle, sql.toRawUTF8());
+    for (int i = 0; i < formats.size(); ++i) select.text(i + 1, formats[i]);
+    while (select.step()) out.push_back(select.text(0));
+    return out;
 }
 void SampleRepository::setMissing(const std::vector<int64_t>& ids)
 {
@@ -1053,9 +1093,9 @@ FolderRemoval SampleRepository::removeFolder(const juce::String& folder)
             remove.text(2, registeredRoot.isNotEmpty() ? registeredRoot : canonical);
             remove.text(3, lower); remove.text(4, upper); remove.step();
         }
-        if (! outcome.wasRoot)
         {
-            // The parent may still be scanned: keep the removed subtree out of that discovery.
+            // A removed folder stays out of every later scan, including a parent root or another
+            // root that contains it. Explicitly adding it again clears this entry.
             detail::Statement ignore(db.handle,
                 "INSERT OR REPLACE INTO ignored_paths(path,is_folder,created_at) VALUES(?,1,?)");
             ignore.text(1, canonical); ignore.integer(2, juce::Time::currentTimeMillis()); ignore.step();

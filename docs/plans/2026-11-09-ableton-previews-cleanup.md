@@ -41,6 +41,16 @@ Ruling: Ableton Factory Packs регистрируется тем же одно�
 после обновления дольше обычного, но UI остаётся отзывчивым.
 Ruling: ISO-индексация содержимого образов остаётся отдельным бэклогом (записано в To do), в
 этот этап не входит.
+Final review: независимый read-only reviewer, 0 Critical, 5 Important, несколько Minor; Declined to judge: 7 пунктов (ISO вне этапа, Favorites, глобальный флаг, прямой CMB/RFL, Unicode путей, multi-instance, произвольные пути API).
+Final: fixed вложенный root теперь всегда получает ignore после Remove — `nested registered root` тест RED → GREEN, parent rescan не возвращает.
+Final: fixed + Add folder снимает ignore самого пути и всех папок-предков — `Explicitly adding a folder clears ignores` RED → GREEN.
+Final: fixed подпись Ableton Preview вынесена в отдельный label `abletonInfo`, скрывается при любом следующем файле — переход preview → WAV RED → GREEN.
+Final: fixed старые error-строки защищённых AIFC удаляются при открытии каталога, обычные битые AIFF остаются — тест RED → GREEN.
+Final: fixed обход AIFC ограничен 1024 чанками — тест с 1500 JUNK RED → GREEN.
+Final: fixed удаление скрыто для не-папочных узлов (образы), lastFolder очищается отдельно от selectedFolder, добавлен <cstring>, убран неиспользуемый тестовый helper; независимый подсчёт raw AIF в real-тесте.
+Final fixes: targeted ctest `[ableton],[remove],[reason]` — 22 test cases, 4413 assertions passed;
+полный ctest passed (36.76 s).
+Final: minor отложены — синхронный refreshDuplicates в UI после Remove, полный скан форматов при каждом старте, частичный успех при ошибке записи settings, очистка refreshDuplicates/кэша ignored при image-узлах, отсутствие теста каскада smart/duplicates и отдельного теста UI-пункта меню.
 Runtime acceptance: каталог 339 638 строк; CMB/RFL 0; Ableton Factory Packs зарегистрирован
 автоматически, проиндексировано 2 684 файла без ошибок (1 461 OGG-превью, 1 223 WAV/AIFF/AIF),
 protected able не попали; 1 461 превью имеет длительность/частоту. Root виден в боковой панели,

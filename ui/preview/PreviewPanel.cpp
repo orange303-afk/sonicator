@@ -98,6 +98,11 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     reasonInfo.setFont(juce::FontOptions(12));
     reasonInfo.setJustificationType(juce::Justification::topLeft);
     reasonInfo.setColour(juce::Label::textColourId,theme::text);
+    addChildComponent(abletonInfo);
+    abletonInfo.setComponentID("abletonInfo");
+    abletonInfo.setFont(juce::FontOptions(12));
+    abletonInfo.setJustificationType(juce::Justification::centredLeft);
+    abletonInfo.setColour(juce::Label::textColourId,theme::muted);
     sourceList.setComponentID("containerSources");
     sourceList.setRowHeight(30);
     songProgress.setComponentID("songProgress");
@@ -238,6 +243,9 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
 {
     if (file == loadedFile && file != juce::File() && file.getSize() == loadedSize
         && file.getLastModificationTime().toMilliseconds() == loadedModified) return true;
+    // Preview provenance belongs to one loaded file only; never leak it to the next selection.
+    abletonInfo.setVisible(false);
+    abletonInfo.setText({}, juce::dontSendNotification);
     // A physical L/R pair becomes one stereo source for playback, MIDI and WAV export.
     auto pair = file.hasFileExtension("cmb;repatch;rfl") ? StereoPairResult() : loadStereoPair(file);
     if (pair.paired && pair.ok)
@@ -344,9 +352,10 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
             if (preview.isPreview)
             {
                 filename.setText(file.getFileName() + "  —  Ableton Preview", juce::dontSendNotification);
-                selectionStatus.setText("Ableton Preview of " + preview.source + " (" + preview.kind
+                abletonInfo.setText("Ableton Preview of " + preview.source + " (" + preview.kind
                     + ")  ·  rendered demo audio, not the pack's original sample",
                     juce::dontSendNotification);
+                abletonInfo.setVisible(true);
             }
         }
     }
@@ -957,6 +966,7 @@ void PreviewPanel::lookAndFeelChanged()
 {
     time.setColour(juce::Label::textColourId,theme::muted);
     reasonInfo.setColour(juce::Label::textColourId,theme::text);
+    abletonInfo.setColour(juce::Label::textColourId,theme::muted);
     selectionStatus.setColour(juce::Label::textColourId,theme::muted);
     repaint();
 }
@@ -975,6 +985,7 @@ void PreviewPanel::resized()
     auto top = r.removeFromTop(24); filename.setBounds(top.removeFromLeft(juce::jmax(200,top.getWidth()-160)));
     time.setBounds(top);
     r.removeFromTop(8);
+    if (abletonInfo.isVisible()) abletonInfo.setBounds(r.removeFromTop(18));
     auto controls = r.removeFromRight(330); r.removeFromRight(16); waveform.setBounds(r); songProgress.setBounds(r);
     if (reasonInfo.isVisible())
     {

@@ -927,12 +927,23 @@ TEST_CASE("Startup drops CMB and RFL catalog rows but keeps files", "[ui][remove
     TestDirectory t;
     const auto dbPath = t.dir.getChildFile("purge.sqlite");
     const auto wav = t.wave("keep.wav");
+    const auto protectedSample = t.aifc("protected.aif", "able");
+    const auto broken = t.dir.getChildFile("broken.aif");
+    broken.replaceWithText("not an audio header");
     {
         Database db(dbPath); SampleRepository repo(db); repo.createTables();
         REQUIRE(repo.upsert(BasicAnalyzer().analyze(wav)) > 0);
         SampleRecord cmb; cmb.filePath = "/Packs/Test.cmb"; cmb.fileName = "Test.cmb"; cmb.format = "CMB";
         SampleRecord rfl; rfl.filePath = "/Refills/Bank.rfl"; rfl.fileName = "Bank.rfl"; rfl.format = "RFL";
         repo.upsert(cmb); repo.upsert(rfl);
+        SampleRecord legacy; legacy.filePath = protectedSample.getFullPathName();
+        legacy.fileName = protectedSample.getFileName(); legacy.format = "AIF";
+        legacy.error = "Cannot decode protected.aif";
+        repo.upsert(legacy);
+        SampleRecord ordinary; ordinary.filePath = broken.getFullPathName();
+        ordinary.fileName = broken.getFileName(); ordinary.format = "AIF";
+        ordinary.error = "Cannot decode broken.aif";
+        repo.upsert(ordinary);
         repo.addRoot(t.dir.getFullPathName());
     }
     {
@@ -942,8 +953,11 @@ TEST_CASE("Startup drops CMB and RFL catalog rows but keeps files", "[ui][remove
         REQUIRE(library->getNumRows() == 1);
     }
     Database db(dbPath); SampleRepository repo(db);
-    REQUIRE(repo.count() == 1);
+    REQUIRE(repo.count() == 2); // the ordinary unreadable AIFF stays for a later rescan
     REQUIRE_FALSE(repo.findByPath("/Packs/Test.cmb").has_value());
     REQUIRE_FALSE(repo.findByPath("/Refills/Bank.rfl").has_value());
+    REQUIRE_FALSE(repo.findByPath(protectedSample.getFullPathName()).has_value());
+    REQUIRE(repo.findByPath(broken.getFullPathName()).has_value());
     REQUIRE(repo.findByPath(wav.getFullPathName()).has_value());
+    REQUIRE(protectedSample.existsAsFile());
 }
