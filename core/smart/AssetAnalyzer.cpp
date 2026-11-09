@@ -45,11 +45,8 @@ SampleRecord analyzeMetadataAsset(const juce::File& file, CancelCheck cancel)
         const auto patch=readReasonPatch(file, false);
         if (patch.error.isNotEmpty())
         { r.error=patch.error; r.compatibility=AssetCompatibility::invalid; return r; }
-        if (r.format=="RFL")
-        {
-            r.compatibility=AssetCompatibility::supported; // recognised metadata card; not audio support
-            return r; // No archive-body reads or full-file hashing for multi-gigabyte ReFills.
-        }
+        r.compatibility=AssetCompatibility::supported; // recognised metadata card, not patch synthesis
+        return r; // No full-file hash: do not read CMB BODY or any ReFill archive payload.
     }
     else if (isLegacyTrackerExtension(file))
     {

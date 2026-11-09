@@ -104,9 +104,18 @@ TEST_CASE("Reason scanning indexes metadata and local audio but excludes only pa
         auto r=repo.findByPath(f.getFullPathName()); REQUIRE(r.has_value());
         REQUIRE(r->version==metadataOnlyVersion); REQUIRE(r->duration==0); REQUIRE(r->sampleRate==0);
         REQUIRE(r->compatibility==AssetCompatibility::supported); // supported metadata, not a playable archive
+        REQUIRE(r->fileHash.isEmpty()); // metadata-only Reason reads must not hash BODY/archive payload
     }
     LibraryFilter filter; filter.hideEmpty=true; REQUIRE(repo.query(filter,100,0).total==5);
     REQUIRE(repo.findByPath(wav.getFullPathName())->error.isEmpty());
+}
+TEST_CASE("Reason demo exclusion does not hide ordinary libraries with common folder names", "[reason]")
+{
+    TestDirectory t;
+    t.wave("Ordinary/_samples/source.wav");
+    t.wave("Ordinary/Audio Previews/keep.wav");
+    t.wave("Packs/Ordinary/Audio Previews/keep.wav");
+    REQUIRE(FileScanner::scanDirectory(t.dir).size()==3);
 }
 TEST_CASE("Reason Packs registration persists once and respects removal", "[reason]")
 {

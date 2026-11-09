@@ -65,6 +65,28 @@ bool previewFolder(const juce::File& f)
 {
     return f.getFileName().equalsIgnoreCase("_audio previews") || f.getFileName().equalsIgnoreCase("Audio Previews");
 }
+bool hasReasonPatch(const juce::File& folder)
+{
+    struct Directory { juce::File file; int depth; };
+    std::vector<Directory> pending {{folder,0}};
+    size_t count=0;
+    while (!pending.empty())
+    {
+        const auto dir=pending.back(); pending.pop_back();
+        if (dir.file.isSymbolicLink()) continue;
+        for (const auto& entry:juce::RangedDirectoryIterator(dir.file,false,"*",juce::File::findFilesAndDirectories,juce::File::FollowSymlinks::no))
+        {
+            if (++count>2048) return false; // Uncertain folders keep their ordinary audio.
+            const auto f=entry.getFile(); if (f.isSymbolicLink()) continue;
+            if (f.isDirectory())
+            {
+                if (dir.depth<3 && !previewFolder(f) && f.getFileName()!="_samples") pending.push_back({f,dir.depth+1});
+            }
+            else if (f.hasFileExtension("cmb;repatch") && readReasonPatch(f,false).error.isEmpty()) return true;
+        }
+    }
+    return false;
+}
 void resolve(ReasonPatch& result,const juce::File& patch)
 {
     const auto root=packRoot(patch);
@@ -99,9 +121,11 @@ bool isReasonPackPreview(const juce::File& file)
     {
         if (previewFolder(folder))
         {
-            const auto root=packRoot(folder.getChildFile("placeholder"));
-            return root!=folder && (root.getChildFile("_samples").isDirectory()
-                || root.getParentDirectory().getFileName()=="Packs");
+            const auto installed=juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+                .getChildFile("Library/Application Support/Propellerhead Software/Packs");
+            // The exact installed root is authoritative. Copied packs must contain an actual
+            // readable Reason patch; generic names like Packs/_samples are not evidence.
+            return folder.isAChildOf(installed) || hasReasonPatch(folder.getParentDirectory());
         }
         const auto parent=folder.getParentDirectory(); if (parent==folder) break; folder=parent;
     }

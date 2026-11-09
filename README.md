@@ -68,6 +68,12 @@ Waveform selection exports are new WAV files under `Sonicator/exports/` in the s
 
 The source sample rate and channel count are preserved; 16-bit sources stay 16-bit PCM, 24/32-bit integer sources become 24-bit PCM, float sources become 32-bit float, and compressed sources become 24-bit PCM. Exported files are not deleted automatically because a DAW project or a message may reference them, so the folder grows until you remove files manually. Source originals are opened read-only and are never moved by a drag.
 
+## Reason Packs
+
+On macOS, `~/Library/Application Support/Propellerhead Software/Packs` is registered once when present. The global `reasonPacksAdded` setting prevents it returning after removal. WAV/AIFF/RX2 files use normal indexing and preview; `_audio previews` and `Audio Previews` directories inside packs are excluded, regardless of audio format.
+
+Combinator (`.cmb`) cards show the patch name, devices and external sample references. Select a local source in the source list to audition it; missing or ambiguous names remain unavailable. Resolution stays inside the pack and does not follow symbolic links. `.repatch` XML shows its device product only. `.rfl` files show **Reason ReFill: закрытый формат, содержимое недоступно**. ReFill archives are never decoded, and their contents are not indexed. Neither Combinator nor device patches are synthesized; Combinators are not an **Extract samples** source because they contain references, not embedded audio.
+
 ## Modules
 
 ```text
@@ -78,6 +84,7 @@ core/dsp/                    chunked audio decoding and measured descriptors
 core/audio/                  preview transport, sample-rate conversion, read-ahead, selection boundaries
 core/tracker/                MOD/XM/S3M document parsing, source PCM and whole-song rendering
 core/legacy/                 content-based tracker recognition
+core/reason/                 bounded patch metadata, local references and one-time Packs registration
 core/export/                 selection WAV export, background preparation, external file drag
 core/indexing/               background import, pause/cancel, incremental updates
 core/settings/               persisted application settings
