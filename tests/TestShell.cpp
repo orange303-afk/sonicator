@@ -85,6 +85,25 @@ TEST_CASE("Hide empty restores on startup and saves toggles without losing other
     REQUIRE(restored != nullptr);
     REQUIRE(restored->getToggleState());
 }
+TEST_CASE("An unchecked Hide empty stays unchecked after restart", "[ui][settings][hide-empty]")
+{
+    TestDirectory t;
+    const auto settings = t.dir.getChildFile("settings-off.json");
+    REQUIRE(settings.replaceWithText("{\"hideEmpty\":false}"));
+    SettingsStore store(settings);
+    {
+        MainComponent app(t.dir.getChildFile("off.sqlite"), false, store.load(), settings);
+        auto* toggle = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty"));
+        REQUIRE(toggle != nullptr);
+        REQUIRE_FALSE(toggle->getToggleState());
+    }
+    MainComponent reopened(t.dir.getChildFile("off.sqlite"), false, store.load(), settings);
+    auto* restored = dynamic_cast<juce::ToggleButton*>(reopened.findChildWithID("hideEmpty"));
+    REQUIRE(restored != nullptr);
+    REQUIRE_FALSE(restored->getToggleState());
+    REQUIRE_FALSE((bool) juce::JSON::parse(settings)["hideEmpty"]);
+}
+
 TEST_CASE("Large catalog startup restores the actual page and folder tree", "[.catalog-ui]")
 {
     const auto fixture = juce::SystemStats::getEnvironmentVariable("SONICATOR_CATALOG_FIXTURE",{});
