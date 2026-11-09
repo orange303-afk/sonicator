@@ -243,7 +243,7 @@ bool SmartAnalysisService::takeQueued(int64_t& sampleId)
     queued.erase(sampleId);
     return true;
 }
-SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
+SmartCollection SmartAnalysisService::collect(const SampleRecord& record, CancelCheck cancel)
 {
     SmartCollection out;
     auto runExtractor = [&](const juce::String& source, auto&& extractor)
@@ -327,7 +327,8 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
         const bool needRhythm = needsRhythmAnalysis(out.candidates);
         const bool percussivePath = pathIsPercussive(record.filePath);
         const bool needKey = ! hasValidKeyMetadata(out.candidates)
-                             && ! typeIsDrum(metadataType) && ! percussivePath;
+                             && ! typeIsDrum(metadataType) && ! percussivePath
+                             && ! structureOneShot;
         const bool pitchEligible = ! hasValidPitchOrRootMetadata(out.candidates)
                                    && typeAllowsPitch(metadataType) && ! percussivePath;
         // If the structure is unknown and the rhythm pass is not going to run, the file cannot be
@@ -349,7 +350,9 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
             out.extractions.push_back(std::move(extraction));
             return out;
         }
-        const auto audio = readAnalysisAudio(file);
+        AnalysisAudioOptions audioOptions;
+        audioOptions.maxSeconds = needRhythm ? 60.0 : (needKey ? 30.0 : 15.0);
+        const auto audio = readAnalysisAudio(file, audioOptions, cancel);
         if (! audio.ok())
         {
             extraction.status = audio.error.startsWith("unsupported")
@@ -364,7 +367,9 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
         juce::String dspError;
         if (needRhythm)
         {
-            auto rhythm = rhythmCandidatesFrom(RhythmAnalyzer::analyze(audio.buffer, audio.sampleRate));
+            auto rhythm = rhythmCandidatesFrom(
+                RhythmAnalyzer::analyze(audio.buffer, audio.sampleRate, {}, cancel), audio.truncated,
+                (double) audio.buffer.getNumSamples() / audio.sampleRate);
             append(out.candidates, std::move(rhythm.candidates));
             if (rhythm.status == "error")
             {
@@ -382,7 +387,7 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
         if (needKey || needPitch)
         {
             auto tonal = extractTonalCandidates(audio, out.candidates, gatingStructure, gatingType,
-                                                record.filePath);
+                                                record.filePath, cancel);
             append(out.candidates, std::move(tonal.candidates));
             if (tonal.status == "error")
             {
@@ -390,6 +395,7 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
                 if (dspError.isEmpty()) dspError = tonal.error;
             }
             else if (tonal.status == "ok") anyRan = true;
+            if (tonal.error.isNotEmpty() && dspError.isEmpty()) dspError = tonal.error;
         }
         if (anyError)
         {
@@ -397,7 +403,11 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
             extraction.error = dspError;
             if (out.error.isEmpty()) out.error = dspError;
         }
-        else extraction.status = anyRan ? "ok" : "unsupported";
+        else
+        {
+            extraction.status = anyRan ? "ok" : "unsupported";
+            extraction.error = dspError;
+        }
         out.extractions.push_back(std::move(extraction));
     }
     return out;
@@ -455,7 +465,7 @@ bool SmartAnalysisService::processSample(int64_t sampleId, const juce::String& c
     SmartCollection collection;
     try
     {
-        collection = collect(*record);
+        collection = collect(*record, [this] { return cancelled.load(); });
     }
     catch (const std::exception& e)
     {

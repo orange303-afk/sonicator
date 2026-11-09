@@ -452,6 +452,9 @@ PitchAnalysis analyzeChannelPitch(const float* data, int length, double sampleRa
     }
     const int endSample = std::min(activeEnd,
                                    startSample + (int) std::llround(options.maxPitchSeconds * sampleRate));
+    const juce::String capNote = endSample < activeEnd
+        ? " (first " + juce::String((double) (endSample - startSample) / sampleRate, 0)
+              + " s analysed)" : juce::String();
 
     int window = nextPowerOfTwo((int) std::ceil(2.2 * sampleRate / options.minPitchFrequency));
     window = std::clamp(window, 1024, 16384);
@@ -637,7 +640,8 @@ PitchAnalysis analyzeChannelPitch(const float* data, int length, double sampleRa
         + ", harmonicity " + juce::String(harmonicity.ratio, 2)
         + ", fundamental " + juce::String(harmonicity.fundamentalShare, 2)
         + ", MIDI " + juce::String(run.midi, 2)
-        + (std::abs(result.cents) >= 0.5 ? " (" + juce::String(result.cents, 1) + " cents)" : "");
+        + (std::abs(result.cents) >= 0.5 ? " (" + juce::String(result.cents, 1) + " cents)" : "")
+        + capNote;
     return result;
 }
 } // namespace
@@ -660,6 +664,10 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
         result.explanation = "key: invalid analysis geometry";
         return result;
     }
+    const double analysedSeconds = (double) frames.size() * (double) hop / sampleRate;
+    const double totalSeconds = (double) audio.getNumSamples() / sampleRate;
+    const juce::String capNote = totalSeconds > analysedSeconds + (double) hop / sampleRate
+        ? " (first " + juce::String(analysedSeconds, 0) + " s analysed)" : juce::String();
 
     result.tuningCents = estimateTuningCents(frames, options);
     Chroma bassChroma {};
@@ -708,7 +716,7 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
         }
     }
     result.chromaConsistency = consistency;
-    double rmsVariation = 0.0, onsetDensity = 0.0;
+    double rmsVariation = 0.0, onsetDensity = 0.0, dutyCycle = 0.0;
     {
         std::vector<double> rmsValues, fluxValues;
         for (const auto& frame : frames)
@@ -725,6 +733,14 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
             for (double value : rmsValues) variance += (value - mean) * (value - mean);
             variance /= (double) rmsValues.size();
             rmsVariation = mean > 1.0e-20 ? std::sqrt(variance) / mean : 0.0;
+            const double peak = *std::max_element(rmsValues.begin(), rmsValues.end());
+            int active = 0, loud = 0;
+            for (double value : rmsValues)
+            {
+                if (value >= peak * 0.0056) ++active; // -45 dBFS below the peak
+                if (value >= peak * 0.5) ++loud;
+            }
+            dutyCycle = active > 0 ? (double) loud / (double) active : 0.0;
         }
         if (! fluxValues.empty() && hop > 0)
         {
@@ -743,6 +759,41 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
     }
     result.rmsVariation = rmsVariation;
     result.onsetDensity = onsetDensity;
+    result.dutyCycle = dutyCycle;
+    double lowHarmonicSupport = 0.0;
+    {
+        std::vector<double> supportValues;
+        for (const auto& frame : frames)
+        {
+            if (frame.rms < silenceRms) continue;
+            const Peak* fundamental = nullptr;
+            for (const auto& peak : frame.peaks)
+            {
+                if (peak.frequency < 40.0 || peak.frequency > 200.0) continue;
+                if (fundamental == nullptr || peak.magnitude > fundamental->magnitude)
+                    fundamental = &peak;
+            }
+            if (fundamental == nullptr) continue;
+            double harmonics = 0.0;
+            for (int harmonic = 2; harmonic <= 4; ++harmonic)
+            {
+                const double target = fundamental->frequency * (double) harmonic;
+                for (const auto& peak : frame.peaks)
+                    if (std::abs(peak.frequency - target) / target < 0.03)
+                        harmonics += peak.magnitude;
+            }
+            const double total = fundamental->magnitude + harmonics;
+            if (total > 1.0e-20) supportValues.push_back(harmonics / total);
+        }
+        if (! supportValues.empty())
+        {
+            const auto middle = supportValues.begin()
+                                + (std::ptrdiff_t) (supportValues.size() / 2);
+            std::nth_element(supportValues.begin(), middle, supportValues.end());
+            lowHarmonicSupport = *middle;
+        }
+    }
+    result.lowHarmonicSupport = lowHarmonicSupport;
     const int radius = std::max(0, options.medianFrames);
     Chroma summed {};
     double rawEnergy = 0.0, medianEnergy = 0.0, weightSum = 0.0;
@@ -776,13 +827,15 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
     result.tonality = std::min(weightAverage, retained);
     result.percussive = result.tonality < options.minTonality
                         || (consistency < options.minChromaConsistency
-                            && (rmsVariation > 0.8 || onsetDensity > 8.0));
+                            && (rmsVariation > 0.8 || onsetDensity > 8.0))
+                        || (lowHarmonicSupport < options.minLowHarmonicSupport
+                            && (dutyCycle < options.minDutyCycle || rmsVariation > 0.6));
     double norm = 0.0;
     for (double value : summed) norm += value * value;
     norm = std::sqrt(norm);
     if (norm <= 1.0e-12)
     {
-        result.explanation = "key: no stable tonal content";
+        result.explanation = "key: no stable tonal content" + capNote;
         return result;
     }
     for (double& value : summed) value /= norm;
@@ -825,7 +878,10 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
         + ", tonality " + juce::String(result.tonality, 3)
         + ", consistency " + juce::String(consistency, 3)
         + ", rms variation " + juce::String(rmsVariation, 2)
-        + ", onsets/s " + juce::String(onsetDensity, 1);
+        + ", onsets/s " + juce::String(onsetDensity, 1)
+        + ", duty " + juce::String(dutyCycle, 2)
+        + ", low harmonics " + juce::String(lowHarmonicSupport, 2)
+        + capNote;
 
     if (result.percussive)
     {
@@ -903,14 +959,20 @@ PitchAnalysis TonalAnalyzer::analyzePitch(const juce::AudioBuffer<float>& audio,
         if (result.confidence > best.confidence) best = result;
     if (found.size() >= 2)
     {
-        const double difference = std::abs(found[0].midi - found[1].midi);
-        const double high = std::max(found[0].confidence, found[1].confidence);
-        const double low = std::min(found[0].confidence, found[1].confidence);
-        if (difference > 0.5 && low >= 0.7 * high)
+        double lowestMidi = found.front().midi, highestMidi = found.front().midi;
+        double lowestConfidence = found.front().confidence, highestConfidence = found.front().confidence;
+        for (const auto& result : found)
+        {
+            lowestMidi = std::min(lowestMidi, result.midi);
+            highestMidi = std::max(highestMidi, result.midi);
+            lowestConfidence = std::min(lowestConfidence, result.confidence);
+            highestConfidence = std::max(highestConfidence, result.confidence);
+        }
+        if (highestMidi - lowestMidi > 0.5 && lowestConfidence >= 0.7 * highestConfidence)
         {
             PitchAnalysis ambiguous;
             ambiguous.explanation = "pitch: channels disagree ("
-                + juce::String(found[0].midi, 2) + " vs " + juce::String(found[1].midi, 2) + ")";
+                + juce::String(lowestMidi, 2) + " vs " + juce::String(highestMidi, 2) + ")";
             return ambiguous;
         }
     }

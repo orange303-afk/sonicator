@@ -27,8 +27,9 @@ on synthetic notes because the library carries no note labels.
   24 major/minor profiles from Krumhansl–Kessler and Temperley, confidence from the
   margin over the runner-up.
 - Pitch: YIN on the most stable segment of a one-shot, output MIDI + cents.
-- Per-file gate: Key only when no usable Key metadata exists; Pitch only for one-shots
-  with no usable Pitch or Root metadata.
+- Per-file gate: Key only when no usable Key metadata exists and the resolved structure
+  is not a one-shot (the slice is about loops); Pitch only for one-shots with no usable
+  Pitch or Root metadata.
 - Confident tonic without a mode is published as a bare tonic (`"C"`); a dispute about
   the tonic publishes nothing.
 - Store through the existing `key_*` and `pitch_*` smart fields. No schema migration.
@@ -135,7 +136,9 @@ Simplest code, but violates the one-decode requirement and doubles disk/decode w
    - Confidence is a documented heuristic from the best-vs-runner-up margin and the
      absolute correlation, not a probability. It is stored in the candidate's
      `auxValue`.
-7. **Type, name and drum gates.**
+7. **Type, name, structure and drum gates.**
+   - Key is skipped for a resolved structure of `one-shot`: this slice derives key for
+     loops, while a one-shot gets pitch.
    - Key is skipped for resolved Types `kick`, `snare`, `clap`, `hat`, `percussion`,
      `cymbal`, and for a file name or immediate folder that names a percussion family
      (`drum`, `perc`, `kick`, `snare`, `hat`, `cymbal`, `crash`, `ride`, `tom`,
@@ -187,7 +190,8 @@ coverage and accuracy among published rather than hiding the unknown share.
 - `SmartAnalysisService::collect`:
   1. run metadata extractors as today;
   2. decide `needRhythm = !needsRhythmAnalysis(metadata)`,
-     `needKey = !hasValidKeyMetadata && !typeIsDrum(type) && !pathIsPercussive(path)`,
+     `needKey = !hasValidKeyMetadata && !typeIsDrum(type) && !pathIsPercussive(path) &&
+     !structureIsOneShot`,
      `needPitch = !hasValidPitchOrRootMetadata && typeAllowsPitch(type) &&
      !pathIsPercussive(path) && structureMayBeOneShot`;
      a `DefaultValue` root does not count as pitched metadata;

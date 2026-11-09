@@ -124,15 +124,24 @@ TEST_CASE("A one-shot with no pitch metadata gets a DSP pitch", "[tonal][candida
     REQUIRE(pitch->limitation.isNotEmpty());
 }
 
+TEST_CASE("A one-shot never gets a DSP key", "[tonal][candidates]")
+{
+    const auto extraction = extractTonalCandidates(audioOf(triad(0, 4)),
+        {}, "one-shot", "keys");
+    REQUIRE(findField(extraction.candidates, SmartField::Key) == nullptr);
+}
+
 TEST_CASE("Drum types skip key and pitch", "[tonal][candidates]")
 {
     for (const auto& type : { "kick", "snare", "hat", "percussion", "cymbal", "clap" })
     {
         INFO("type " << type);
-        const auto extraction = extractTonalCandidates(audioOf(triad(0, 4)),
+        const auto keyExtraction = extractTonalCandidates(audioOf(triad(0, 4)),
+            {}, "loop", type);
+        REQUIRE(findField(keyExtraction.candidates, SmartField::Key) == nullptr);
+        const auto pitchExtraction = extractTonalCandidates(audioOf(triad(0, 4)),
             {}, "one-shot", type);
-        REQUIRE(findField(extraction.candidates, SmartField::Key) == nullptr);
-        REQUIRE(findField(extraction.candidates, SmartField::Pitch) == nullptr);
+        REQUIRE(findField(pitchExtraction.candidates, SmartField::Pitch) == nullptr);
     }
 }
 
@@ -141,10 +150,12 @@ TEST_CASE("Vocal and fx types skip pitch but not key", "[tonal][candidates]")
     for (const auto& type : { "vocal", "fx" })
     {
         INFO("type " << type);
-        const auto extraction = extractTonalCandidates(audioOf(triad(0, 4)),
+        const auto keyExtraction = extractTonalCandidates(audioOf(triad(0, 4)),
+            {}, "loop", type);
+        REQUIRE(findField(keyExtraction.candidates, SmartField::Key) != nullptr);
+        const auto pitchExtraction = extractTonalCandidates(audioOf(triad(0, 4)),
             {}, "one-shot", type);
-        REQUIRE(findField(extraction.candidates, SmartField::Pitch) == nullptr);
-        REQUIRE(findField(extraction.candidates, SmartField::Key) != nullptr);
+        REQUIRE(findField(pitchExtraction.candidates, SmartField::Pitch) == nullptr);
     }
 }
 
@@ -215,4 +226,22 @@ TEST_CASE("A percussion path suppresses key and pitch", "[tonal][candidates]")
         {}, "loop", "keys", "/packs/drum_loop.wav");
     REQUIRE(findField(extraction.candidates, SmartField::Key) == nullptr);
     REQUIRE(findField(extraction.candidates, SmartField::Pitch) == nullptr);
+}
+
+TEST_CASE("Cancellation stops the tonal pass", "[tonal][candidates]")
+{
+    const auto extraction = extractTonalCandidates(audioOf(triad(0, 4)),
+        {}, "loop", "keys", {}, [] { return true; });
+    REQUIRE(extraction.status == "error");
+    REQUIRE(extraction.error == "Cancelled");
+}
+
+TEST_CASE("A truncated decode is noted on the candidate", "[tonal][candidates]")
+{
+    auto audio = audioOf(singleNote(69));
+    audio.truncated = true;
+    const auto extraction = extractTonalCandidates(audio, {}, "one-shot", "bass");
+    const auto* pitch = findField(extraction.candidates, SmartField::Pitch);
+    REQUIRE(pitch != nullptr);
+    REQUIRE(pitch->limitation.contains("first 2 s decoded"));
 }

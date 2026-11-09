@@ -17,6 +17,8 @@ struct TonalOptions
     // A tonal loop keeps the same pitch classes over time; a drum loop's chroma jumps between
     // resonances. Low consistency is a percussion signal even when each hit is pitched.
     double minChromaConsistency = 0.35;
+    double minLowHarmonicSupport = 0.15;
+    double minDutyCycle = 0.70;
     double minKeyCorrelation = 0.37;
     double minTonicMargin = 0.06;
     double modeMargin = 0.06;
@@ -76,6 +78,8 @@ struct KeyAnalysis
     double chromaConsistency = 0.0;
     double rmsVariation = 0.0;
     double onsetDensity = 0.0;
+    double dutyCycle = 0.0;
+    double lowHarmonicSupport = 0.0;
     bool percussive = false;
     // Diagnostics for the inspector and the evaluation report. Normalized, C at index 0.
     std::array<double, 12> chroma {};

@@ -30,5 +30,6 @@ TonalExtraction extractTonalCandidates(const AnalysisAudio&,
                                        const juce::String& structure,
                                        const juce::String& type,
                                        const juce::String& path = {},
+                                       const CancelCheck& = {},
                                        const TonalOptions& = {});
 } // namespace sonicator

@@ -2,8 +2,9 @@
 
 Measured on 2026-11-09 on macOS (native arm64, Debug build, Apple Clang). The
 evaluation calls `TonalAnalyzer::analyzeKey` directly on the same bounded decode the
-smart pipeline uses. It does not go through the app's metadata gate, so the numbers
-describe the DSP itself; in the app a filename key always wins.
+smart pipeline uses. It bypasses the metadata key/BPM gates but applies the app's
+percussion path gate, so the numbers describe the tonal DSP plus the drum gate; in the
+app a filename or container key always wins.
 
 ## Reference corpus
 
@@ -21,9 +22,10 @@ Files are split deterministically by `FNV-1a(full path) % 2` into **calibration*
 **report** halves. Thresholds were tuned on the calibration half only. The full
 report half was not used for tuning.
 
-The evaluator applies the same percussion path gate as the app: a file whose name or
-immediate folder names a drum/percussion family is counted as `unknown` without
-running the key analyzer. Pack names and higher ancestors are not treated as drum
+The evaluator applies the same percussion path gate and the same structure gate as the
+app: a file whose name or immediate folder names a drum/percussion family is counted
+as `unknown`, and a one-shot path is not scored for key (the key slice is for loops;
+one-shots get pitch). Pack names and higher ancestors are not treated as drum
 markers, so a melodic loop inside a drum pack is still scored.
 
 Categories come from the path: `one_shot`, `drum` (drum/kick/snare/hat/percussion),
@@ -52,23 +54,26 @@ build/tests/SonicatorTests "[.][tonal][real]"
 
 The test writes a per-file CSV to the temporary directory
 (`sonicator-tonal-eval.csv`) with the reference, detected key, confidence, profile
-scores, tuning, tonality, chroma and bass chroma.
+scores, tuning, tonality, chroma consistency, RMS variation, onset density, chroma
+and bass chroma.
 
 ## Calibration half (loop files)
 
 A bounded sample of the first 500 traversal files, calibration half, loop category:
-179 loop files, 103 labelled, 67 published.
+179 loop files, 103 labelled, 51 published. These are the final gate values
+(percussion path gate, chroma-consistency/RMS/onset/duty/low-harmonic support gate,
+and the one-shot key gate).
 
 | Measure | Count |
 |---|---:|
-| Correct key | 26 (38.8% of published, 25.2% of labelled) |
-| Bare tonic | 4 |
-| Wrong mode (parallel) | 4 |
+| Correct key | 24 (47.1% of published, 23.3% of labelled) |
+| Bare tonic | 1 |
+| Wrong mode (parallel) | 1 |
 | Relative | 7 |
-| Wrong | 26 |
-| Unknown | 36 |
+| Wrong | 18 |
+| Unknown | 52 |
 
-Harmonically compatible: 41 / 67 published (61.2%), 39.8% of labelled.
+Harmonically compatible: 33 / 51 published (64.7%), 32.0% of labelled.
 
 ## Report half (loop files)
 
@@ -92,11 +97,11 @@ note corpus that this library does not provide.
 
 ## Interpretation
 
-- The DSP agrees with the pack label on roughly two fifths of published loop keys, and
-  is harmonically compatible with about three fifths when relative and parallel
-  spellings are counted. A relative major/minor or a parallel mode is the same
-  key signature or tonic; calling it "wrong" measures the label convention, not a
-  wrong scale.
+- The DSP agrees with the pack label on roughly two fifths to half of published loop
+  keys, and is harmonically compatible with about three fifths when relative and
+  parallel spellings are counted. A relative major/minor or a parallel mode is the
+  same key signature or tonic; calling it "wrong" measures the label convention, not
+  a wrong scale.
 - Commercial pack names are not guaranteed to be the audible tonal centre of every
   loop. Several labelled loops analysed here are clearly their relative major or their
   dominant; the report measures agreement with the label, not absolute musical truth.

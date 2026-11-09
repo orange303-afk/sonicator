@@ -1,5 +1,6 @@
 #pragma once
 #include "core/database/SampleRepository.h"
+#include "core/scanner/FileScanner.h"
 #include <juce_events/juce_events.h>
 #include <atomic>
 #include <condition_variable>
@@ -49,7 +50,7 @@ public:
     // Synchronous; worker and tests only. UI code must use requestSample() so file I/O and
     // parsing never run on the message thread.
     bool refreshSample(int64_t sampleId);
-    static SmartCollection collect(const SampleRecord&);
+    static SmartCollection collect(const SampleRecord&, CancelCheck = {});
     static std::vector<SmartCandidate> collectCandidates(const SampleRecord&, juce::String* error = nullptr);
     static std::vector<SmartInput> currentInputs(const SampleRecord&);
     static bool inputsDiffer(const std::vector<SmartInput>& stored, const std::vector<SmartInput>& current);

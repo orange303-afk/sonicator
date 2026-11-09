@@ -127,6 +127,40 @@ TEST_CASE("A major scale resolves its key", "[tonal][key]")
     REQUIRE(key.mode == "major");
 }
 
+TEST_CASE("A tuned kick loop stays unknown", "[tonal][key][decision]")
+{
+    auto buffer = makeBuffer(4.0, defaultRate);
+    for (double time = 0.1; time < 4.0; time += 0.5)
+    {
+        const int start = (int) std::llround(time * defaultRate);
+        const int length = (int) std::llround(0.5 * defaultRate);
+        for (int i = 0; i < length && start + i < buffer.getNumSamples(); ++i)
+        {
+            const double t = (double) i / defaultRate;
+            const double body = 0.8 * std::exp(-t / 0.20)
+                * std::sin(2.0 * juce::MathConstants<double>::pi * 80.0 * t);
+            const double click = i < 80 ? 0.25 * (1.0 - (double) i / 80.0) : 0.0;
+            buffer.addSample(0, start + i, (float) (body + click));
+        }
+    }
+    const auto key = TonalAnalyzer::analyzeKey(buffer, defaultRate);
+    INFO("explanation: " << key.explanation);
+    REQUIRE_FALSE(key.found);
+}
+
+TEST_CASE("A harmonic bass note keeps its key", "[tonal][key][decision]")
+{
+    auto buffer = makeBuffer(2.0, defaultRate);
+    const double fundamental = 440.0 * std::pow(2.0, (36.0 - 69.0) / 12.0); // C2
+    addSine(buffer, defaultRate, fundamental, 0.0, 2.0, 0.30);
+    addSine(buffer, defaultRate, fundamental * 2.0, 0.0, 2.0, 0.15);
+    addSine(buffer, defaultRate, fundamental * 3.0, 0.0, 2.0, 0.08);
+    const auto key = TonalAnalyzer::analyzeKey(buffer, defaultRate);
+    INFO("explanation: " << key.explanation);
+    REQUIRE(key.found);
+    REQUIRE(key.tonic == 0);
+}
+
 TEST_CASE("A single tone gives a bare tonic, not an invented mode", "[tonal][key]")
 {
     const auto audio = singleNote(69); // A4
@@ -254,6 +288,16 @@ TEST_CASE("Competing modes at one tonic give a bare tonic", "[tonal][key][decisi
     REQUIRE(key.found);
     REQUIRE(key.tonic == 0);
     REQUIRE(key.mode.isEmpty());
+}
+
+TEST_CASE("A capped key analysis records the prefix", "[tonal][key]")
+{
+    TonalOptions options;
+    options.maxKeySeconds = 0.5;
+    const auto key = TonalAnalyzer::analyzeKey(triad(0, 4), defaultRate, options);
+    INFO("explanation: " << key.explanation);
+    REQUIRE(key.found);
+    REQUIRE(key.explanation.contains("first"));
 }
 
 TEST_CASE("A found key has a bounded confidence and an explanation", "[tonal][key][decision]")
@@ -384,6 +428,16 @@ TEST_CASE("A found pitch has a bounded confidence", "[tonal][pitch]")
     REQUIRE(std::isfinite(pitch.confidence));
     REQUIRE(pitch.confidence >= 0.0);
     REQUIRE(pitch.confidence <= 1.0);
+}
+
+TEST_CASE("A capped pitch analysis records the prefix", "[tonal][pitch]")
+{
+    TonalOptions options;
+    options.maxPitchSeconds = 0.5;
+    const auto pitch = TonalAnalyzer::analyzePitch(singleNote(69), defaultRate, options);
+    INFO("explanation: " << pitch.explanation);
+    REQUIRE(pitch.found);
+    REQUIRE(pitch.explanation.contains("first"));
 }
 
 

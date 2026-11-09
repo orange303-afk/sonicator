@@ -3,6 +3,7 @@
 #include "core/database/SampleRepository.h"
 #include "core/smart/SmartAnalysisService.h"
 #include "core/smart/SmartResolver.h"
+#include "core/smart/RhythmCandidates.h"
 #include "core/smart/KeyNames.h"
 #include "TestHelpers.h"
 #include <sqlite3.h>
@@ -587,6 +588,7 @@ TEST_CASE("A one-shot without pitch metadata gets a DSP pitch", "[smart][dsp]")
                                ? findExtraction(collection, "dsp")->error : juce::String()));
     REQUIRE(pitch != nullptr);
     REQUIRE(pitch->numericValue == Catch::Approx(69.0).margin(0.05));
+    REQUIRE(findCandidate(collection, SmartField::Key, "dsp") == nullptr);
 }
 
 TEST_CASE("A loop never gets a DSP pitch", "[smart][dsp]")
@@ -595,6 +597,20 @@ TEST_CASE("A loop never gets a DSP pitch", "[smart][dsp]")
     const auto file = t.wave("bass_loop.wav", 440.0, 1, 88200);
     const auto collection = SmartAnalysisService::collect(recordFor(file));
     REQUIRE(findCandidate(collection, SmartField::Pitch, "dsp") == nullptr);
+}
+
+TEST_CASE("A truncated rhythm pass keeps its limitation note", "[smart][dsp]")
+{
+    RhythmAnalysis analysis;
+    analysis.kind = RhythmKind::RhythmicLoop;
+    analysis.tempo = RhythmTempo::Determined;
+    analysis.bpm = 120.0;
+    analysis.explanation = "loop";
+    const auto extraction = rhythmCandidatesFrom(analysis, true, 60.0);
+    REQUIRE(extraction.candidates.size() == 2);
+    REQUIRE(extraction.candidates[0].limitation.contains("first 60 s"));
+    REQUIRE(extraction.candidates[0].detail.contains("first 60 s"));
+    REQUIRE(extraction.candidates[1].limitation.contains("first 60 s"));
 }
 
 TEST_CASE("A drum path never gets a DSP key", "[smart][dsp]")

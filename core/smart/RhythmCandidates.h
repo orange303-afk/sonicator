@@ -13,7 +13,8 @@ struct RhythmExtraction
 };
 // Maps an already computed analysis to candidates. The smart pipeline decodes once and uses this
 // entry point so the rhythm pass does not open the file a second time.
-RhythmExtraction rhythmCandidatesFrom(const RhythmAnalysis&);
+RhythmExtraction rhythmCandidatesFrom(const RhythmAnalysis&, bool truncated = false,
+                                      double analysedSeconds = 0.0);
 // Decoding audio is the expensive part, and a reliable metadata tempo already answers the
 // question. The DSP pass therefore runs only when no usable BPM candidate exists. Structure from
 // audio is not requested on its own: the library treats DSP as a fallback, not a second opinion.

@@ -18,7 +18,8 @@ bool hasDecodableAudioExtension(const juce::String& extensionWithoutDot)
         || extension == "ogg" || extension == "oga" || extension == "m4a"
         || extension == "aac" || extension == "caf" || extension == "w64";
 }
-RhythmExtraction rhythmCandidatesFrom(const RhythmAnalysis& analysis)
+RhythmExtraction rhythmCandidatesFrom(const RhythmAnalysis& analysis, bool truncated,
+                                      double analysedSeconds)
 {
     RhythmExtraction out;
     if (analysis.error.isNotEmpty())
@@ -28,13 +29,15 @@ RhythmExtraction rhythmCandidatesFrom(const RhythmAnalysis& analysis)
         return out;
     }
     if (analysis.kind == RhythmKind::Undetermined) return out;
+    const juce::String truncation = truncated
+        ? " (first " + juce::String(analysedSeconds, 0) + " s analysed)" : juce::String();
     SmartCandidate structure;
     structure.field = SmartField::Structure;
     structure.source = "dsp";
     structure.textValue = analysis.kind == RhythmKind::OneShot ? "one-shot" : "loop";
-    structure.detail = analysis.explanation;
+    structure.detail = analysis.explanation + truncation;
     structure.auxValue = analysis.kindConfidence;
-    structure.limitation = "structure inferred from audio, not metadata";
+    structure.limitation = "structure inferred from audio, not metadata" + truncation;
     out.candidates.push_back(std::move(structure));
     if (analysis.kind != RhythmKind::RhythmicLoop || analysis.bpm <= 0) return out;
     SmartCandidate bpm;
@@ -42,9 +45,9 @@ RhythmExtraction rhythmCandidatesFrom(const RhythmAnalysis& analysis)
     bpm.source = "dsp";
     bpm.numericValue = analysis.bpm;
     bpm.auxValue = analysis.bpmConfidence;
-    bpm.detail = analysis.explanation;
+    bpm.detail = analysis.explanation + truncation;
     bpm.rawValue = juce::String(analysis.bpm, 2);
-    bpm.limitation = "tempo estimated from audio; verify against the source";
+    bpm.limitation = "tempo estimated from audio; verify against the source" + truncation;
     juce::StringArray alternatives;
     for (double value : analysis.alternatives) alternatives.add(juce::String(value, 1));
     if (! alternatives.isEmpty())

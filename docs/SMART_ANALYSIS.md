@@ -275,8 +275,8 @@ the same pass as the rhythm stage, after one PCM decode; the DSP version is 2.
 2. Spectral peaks are picked per frame; the strongest low/mid peak per tonal frame
    gives a circular tuning estimate. The estimate is applied to the chroma mapping.
 3. A per-frame weight from spectral flatness and positive flux suppresses transients.
-   A median filter over the frame chroma series (default 8 frames) removes short
-   percussive spikes. Frames are whitened against their own maximum and L2-normalized
+   A median filter over the frame chroma series (default radius 4 frames, a 9-frame
+   window) removes short percussive spikes. Frames are whitened against their own maximum and L2-normalized
    before summing, so a loud section cannot outvote the rest of the loop.
 4. The chroma is correlated with 24 keys from the Krumhansl–Kessler and Temperley
    major/minor profiles. A low-frequency bass chroma adds a small tonic prior.
@@ -285,12 +285,13 @@ the same pass as the rhythm stage, after one PCM decode; the DSP version is 2.
    tonic gate. A relative major/minor pair with a weak margin is a tonic dispute and
    publishes nothing. A confident tonic whose two modes are close publishes the bare
    tonic (`"C"`).
-6. Resolved Type `kick`, `snare`, `clap`, `hat`, `percussion` or `cymbal` skips key
-   analysis. A file name or immediate folder that names a percussion family (`drum`,
-   `perc`, `kick`, `snare`, `hat`, `cymbal`, `crash`, `ride`, `tom`, `clap`, `break`,
-   `darbuka`, `djembe`, …) also skips both fields; a higher pack name does not. A drum
-   loop whose Type and path are unknown still reaches the analyzer and is rejected
-   there by the percussive/consistency gate.
+6. Resolved structure `one-shot` skips key: this slice derives key for loops, while a
+   one-shot gets pitch. Resolved Type `kick`, `snare`, `clap`, `hat`, `percussion` or
+   `cymbal` skips key analysis. A file name or immediate folder that names a percussion
+   family (`drum`, `perc`, `kick`, `snare`, `hat`, `cymbal`, `crash`, `ride`, `tom`,
+   `clap`, `break`, `darbuka`, `djembe`, …) also skips both fields; a higher pack name
+   does not. A drum loop whose Type and path are unknown still reaches the analyzer and
+   is rejected there by the percussive/consistency gate.
 
 ### Pitch
 

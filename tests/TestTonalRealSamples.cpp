@@ -38,7 +38,7 @@ std::optional<ReferenceKey> referenceKey(const juce::File& file)
     if (tokens.isEmpty()) return std::nullopt;
     auto token = tokens[tokens.size() - 1].trim();
     token = token.trimCharactersAtStart("(").trimCharactersAtEnd(")");
-    if (token.length() < 2 || token.length() > 6) return std::nullopt;
+    if (token.length() < 2 || token.length() > 8) return std::nullopt;
     int index = 0;
     const int letter = letterTonic(token[0]);
     if (letter < 0) return std::nullopt;
@@ -193,12 +193,28 @@ TEST_CASE("Evaluate key analysis on a real loop library", "[.][tonal][real]")
         if (! onlySplit.isEmpty() && onlySplit != split) continue;
         const auto category = categoryOf(file);
         const auto audio = readAnalysisAudio(file);
-        if (! audio.ok()) { ++skipped; continue; }
+        if (! audio.ok())
+        {
+            ++skipped;
+            ++tallies["all"].unreadable;
+            bucket(tallies, split, "all").unreadable++;
+            bucket(tallies, split, category).unreadable++;
+            continue;
+        }
         const bool percussivePath = pathIsPercussive(file.getFullPathName());
+        const bool oneShotPath = category == "one_shot";
         KeyAnalysis key;
         if (percussivePath) key.explanation = "percussion path";
+        else if (oneShotPath) key.explanation = "one-shot structure";
         else key = TonalAnalyzer::analyzeKey(audio.buffer, audio.sampleRate, options);
-        if (key.error.isNotEmpty()) { ++skipped; continue; }
+        if (key.error.isNotEmpty())
+        {
+            ++skipped;
+            ++tallies["all"].unreadable;
+            bucket(tallies, split, "all").unreadable++;
+            bucket(tallies, split, category).unreadable++;
+            continue;
+        }
         ++processed;
 
         if (onlySplit.isEmpty() || onlySplit == split)
@@ -220,6 +236,7 @@ TEST_CASE("Evaluate key analysis on a real loop library", "[.][tonal][real]")
                     tally->addReference(key.found);
                 if (! key.found) classification = "unknown";
                 if (percussivePath) classification = "percussion_path";
+                if (oneShotPath) classification = "one_shot_path";
                 if (key.found)
                 {
                     if (key.tonic == reference->tonic && key.mode == reference->mode)
@@ -282,7 +299,9 @@ TEST_CASE("Evaluate key analysis on a real loop library", "[.][tonal][real]")
                                + juce::String(key.chromaConsistency, 3) + ","
                                + juce::String(key.rmsVariation, 3) + ","
                                + juce::String(key.onsetDensity, 2) + ","
-                               + (percussivePath ? juce::String("percussion-path") : key.error)
+                               + (percussivePath ? juce::String("percussion-path")
+                                                 : oneShotPath ? juce::String("one-shot-path")
+                                                               : key.error)
                                + "," + chromaValues.joinIntoString(";")
                                + "," + bassValues.joinIntoString(";") + "\n",
                            false, false, "\n");
