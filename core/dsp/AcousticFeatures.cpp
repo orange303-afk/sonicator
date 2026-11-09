@@ -92,15 +92,17 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
     }
     else
     {
+        const float* monoData = mono.data();
         for (int start = 0; start + frameSize <= numSamples; start += hopSize)
         {
-            double sumSq = 0.0;
+            const float* p = monoData + start;
+            float sumSq = 0.0f;
             for (int i = 0; i < frameSize; ++i)
             {
-                double v = mono[static_cast<size_t>(start + i)];
+                float v = p[i];
                 sumSq += v * v;
             }
-            frameRms.push_back(std::sqrt(sumSq / frameSize));
+            frameRms.push_back(std::sqrt(static_cast<double>(sumSq) / frameSize));
             frameTime.push_back((static_cast<double>(start) + frameSize * 0.5) / sampleRate);
         }
     }
@@ -252,6 +254,11 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
         std::array<float, fftSize * 2> transform {};
         std::vector<float> frameSpectrum(numBins, 0.0f);
 
+        const int bin80 = std::min(numBins, static_cast<int>(std::ceil(80.0 * static_cast<double>(fftSize) / sampleRate)));
+        const int bin350 = std::min(numBins, static_cast<int>(std::ceil(350.0 * static_cast<double>(fftSize) / sampleRate)));
+        const int bin2500 = std::min(numBins, static_cast<int>(std::ceil(2500.0 * static_cast<double>(fftSize) / sampleRate)));
+        const int bin7000 = std::min(numBins, static_cast<int>(std::ceil(7000.0 * static_cast<double>(fftSize) / sampleRate)));
+
         int numFftFrames = (numSamples <= fftSize) ? 1 : ((numSamples - fftSize) / fftHop + 1);
 
         for (int f = 0; f < numFftFrames; ++f)
@@ -278,20 +285,8 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
                     float mag = transform[static_cast<size_t>(k)];
                     frameSpectrum[static_cast<size_t>(k)] += mag;
 
-                    double power = static_cast<double>(mag) * static_cast<double>(mag);
-                    double freq = static_cast<double>(k) * sampleRate / static_cast<double>(fftSize);
-
-                    int band = 4; // Air: >= 7000 Hz
-                    if (freq < 80.0)
-                        band = 0;
-                    else if (freq < 350.0)
-                        band = 1;
-                    else if (freq < 2500.0)
-                        band = 2;
-                    else if (freq < 7000.0)
-                        band = 3;
-
-                    bandEnergySum[static_cast<size_t>(band)] += power;
+                    int band = (k < bin80) ? 0 : ((k < bin350) ? 1 : ((k < bin2500) ? 2 : ((k < bin7000) ? 3 : 4)));
+                    bandEnergySum[static_cast<size_t>(band)] += static_cast<double>(mag) * static_cast<double>(mag);
                 }
             }
 
@@ -365,14 +360,15 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
 
             if (tauMax > tauMin)
             {
-                constexpr int targetW = 2048;
+                constexpr int targetW = 512;
                 int W = std::min(targetW, numSamples - tauMax);
 
                 int peakSample = 0;
                 float peakMonoVal = 0.0f;
+                const float* monoData = mono.data();
                 for (int i = 0; i < numSamples; ++i)
                 {
-                    float absVal = std::abs(mono[static_cast<size_t>(i)]);
+                    float absVal = std::abs(monoData[i]);
                     if (absVal > peakMonoVal)
                     {
                         peakMonoVal = absVal;
@@ -384,17 +380,18 @@ AcousticDescriptors AcousticFeatures::extract(const juce::AudioBuffer<float>& bu
                 if (start + W + tauMax > numSamples)
                     start = std::max(0, numSamples - W - tauMax);
 
+                const float* pA = monoData + start;
                 std::vector<double> d(static_cast<size_t>(tauMax + 1), 0.0);
                 for (int tau = 1; tau <= tauMax; ++tau)
                 {
-                    double sumSq = 0.0;
+                    const float* pB = pA + tau;
+                    float sumSq = 0.0f;
                     for (int j = 0; j < W; ++j)
                     {
-                        double diff = static_cast<double>(mono[static_cast<size_t>(start + j)])
-                                      - static_cast<double>(mono[static_cast<size_t>(start + j + tau)]);
+                        float diff = pA[j] - pB[j];
                         sumSq += diff * diff;
                     }
-                    d[static_cast<size_t>(tau)] = sumSq;
+                    d[static_cast<size_t>(tau)] = static_cast<double>(sumSq);
                 }
 
                 double runningSum = 0.0;
