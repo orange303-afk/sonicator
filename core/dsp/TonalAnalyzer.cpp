@@ -297,6 +297,315 @@ std::vector<KeyScore> scoreKeys(const Chroma& chroma)
     }
     return scores;
 }
+
+struct PitchFrame
+{
+    int index = 0;
+    double midi = 0.0;
+    double clarity = 0.0;
+    double rms = 0.0;
+};
+
+struct PitchRun
+{
+    int begin = 0, end = 0;
+    double midi = 0.0;
+    double clarity = 0.0;
+    double deviationCents = 0.0;
+    double score = 0.0;
+};
+
+double midiOfFrequency(double frequency)
+{
+    return 69.0 + 12.0 * std::log2(frequency / 440.0);
+}
+
+struct Harmonicity
+{
+    double ratio = 0.0;
+    double fundamentalShare = 0.0;
+};
+
+Harmonicity harmonicityOf(const float* data, int length, double sampleRate, double frequency,
+                          const TonalOptions& options)
+{
+    Harmonicity result;
+    const int fftSize = nextPowerOfTwo(std::max(1024, length));
+    int order = 0;
+    while ((1 << order) < fftSize) ++order;
+    juce::dsp::FFT fft(order);
+    juce::dsp::WindowingFunction<float> window((size_t) fftSize,
+                                               juce::dsp::WindowingFunction<float>::hann, false);
+    std::vector<float> buffer((size_t) fftSize * 2, 0.0f);
+    for (int i = 0; i < length && i < fftSize; ++i) buffer[(size_t) i] = data[i];
+    window.multiplyWithWindowingTable(buffer.data(), (size_t) fftSize);
+    fft.performFrequencyOnlyForwardTransform(buffer.data());
+    const int bins = fftSize / 2 + 1;
+    const int lowBin = std::max(1, (int) std::floor(options.minPitchFrequency * fftSize / sampleRate));
+    const int highBin = std::min(bins - 1, (int) std::ceil(5000.0 * fftSize / sampleRate));
+    double total = 0.0;
+    for (int bin = lowBin; bin <= highBin; ++bin) total += buffer[(size_t) bin];
+    if (total <= 1.0e-20) return result;
+    auto sumAround = [&](double centre)
+    {
+        const double bin = centre * fftSize / sampleRate;
+        const int first = std::clamp((int) std::floor(bin) - 1, lowBin, highBin);
+        const int last = std::clamp((int) std::ceil(bin) + 1, lowBin, highBin);
+        double sum = 0.0;
+        for (int index = first; index <= last; ++index) sum += buffer[(size_t) index];
+        return sum;
+    };
+    double partials = 0.0;
+    for (int harmonic = 1; harmonic <= 8; ++harmonic)
+    {
+        const double partial = frequency * (double) harmonic;
+        if (partial > 5000.0 || partial >= sampleRate * 0.5) break;
+        partials += sumAround(partial);
+    }
+    result.ratio = std::clamp(partials / total, 0.0, 1.0);
+    result.fundamentalShare = std::clamp(sumAround(frequency) / total, 0.0, 1.0);
+    return result;
+}
+
+PitchAnalysis analyzeChannelPitch(const float* data, int length, double sampleRate,
+                                  const TonalOptions& options, const CancelCheck& cancel)
+{
+    PitchAnalysis result;
+    if (data == nullptr || length <= 0 || sampleRate <= 0.0)
+    {
+        result.error = "invalid audio";
+        return result;
+    }
+    const int activeWindow = std::min(1024, length);
+    const int activeHop = std::max(64, options.pitchHop);
+    if (activeWindow < 64) { result.explanation = "pitch: too short"; return result; }
+    double peak = 0.0;
+    for (int start = 0; start + activeWindow <= length; start += activeHop)
+    {
+        double squares = 0.0;
+        for (int i = 0; i < activeWindow; ++i) squares += (double) data[start + i] * data[start + i];
+        peak = std::max(peak, std::sqrt(squares / activeWindow));
+    }
+    if (peak < silenceRms)
+    {
+        result.explanation = "pitch: silence";
+        return result;
+    }
+    const double activeThreshold = peak * std::pow(10.0, options.minActiveDbfs / 20.0);
+    int firstActive = -1, lastActive = -1;
+    for (int start = 0; start + activeWindow <= length; start += activeHop)
+    {
+        double squares = 0.0;
+        for (int i = 0; i < activeWindow; ++i) squares += (double) data[start + i] * data[start + i];
+        if (std::sqrt(squares / activeWindow) >= activeThreshold)
+        {
+            if (firstActive < 0) firstActive = start / activeHop;
+            lastActive = start;
+        }
+    }
+    if (firstActive < 0 || lastActive < 0)
+    {
+        result.explanation = "pitch: no active region";
+        return result;
+    }
+    const int activeStart = firstActive * activeHop;
+    const int activeEnd = std::min(length, lastActive + activeWindow);
+    const int startSample = activeStart + (int) std::llround(options.attackSkipSeconds * sampleRate);
+    if (startSample >= activeEnd - activeWindow / 4)
+    {
+        result.explanation = "pitch: no stable region after the attack";
+        return result;
+    }
+    const int endSample = std::min(activeEnd,
+                                   startSample + (int) std::llround(options.maxPitchSeconds * sampleRate));
+
+    int window = nextPowerOfTwo((int) std::ceil(2.2 * sampleRate / options.minPitchFrequency));
+    window = std::clamp(window, 1024, 16384);
+    window = std::min(window, nextPowerOfTwo(std::max(1024, length)));
+    const int hop = std::max(options.pitchHop, window / 8);
+    const int fftSize = nextPowerOfTwo(2 * window);
+    int order = 0;
+    while ((1 << order) < fftSize) ++order;
+    juce::dsp::FFT fft(order);
+    const int maxLag = std::min(window - 1, (int) std::floor(sampleRate / options.minPitchFrequency));
+    const int minLag = std::max(2, (int) std::floor(sampleRate / options.maxPitchFrequency));
+    if (maxLag <= minLag || maxLag <= 2)
+    {
+        result.explanation = "pitch: invalid lag range";
+        return result;
+    }
+    std::vector<juce::dsp::Complex<float>> input((size_t) fftSize), output((size_t) fftSize);
+    std::vector<float> frame((size_t) window, 0.0f);
+    std::vector<double> prefix((size_t) window + 1, 0.0);
+    std::vector<double> difference((size_t) maxLag + 1, 1.0);
+    std::vector<PitchFrame> frames;
+    int frameIndex = 0;
+    for (int start = startSample; start < endSample; start += hop, ++frameIndex)
+    {
+        if (cancel && cancel())
+        {
+            result.error = "Cancelled";
+            return result;
+        }
+        const int count = std::min(window, length - start);
+        if (count <= window / 4) break;
+        std::fill(frame.begin(), frame.end(), 0.0f);
+        double squares = 0.0;
+        for (int i = 0; i < count; ++i)
+        {
+            frame[(size_t) i] = data[start + i];
+            squares += (double) data[start + i] * data[start + i];
+        }
+        const double rms = std::sqrt(squares / count);
+        if (rms < activeThreshold) continue;
+        prefix[0] = 0.0;
+        for (int i = 0; i < window; ++i) prefix[(size_t) i + 1] = prefix[(size_t) i]
+            + (double) frame[(size_t) i] * frame[(size_t) i];
+        for (int i = 0; i < fftSize; ++i)
+            input[(size_t) i] = { i < window ? frame[(size_t) i] : 0.0f, 0.0f };
+        fft.perform(input.data(), output.data(), false);
+        for (int i = 0; i < fftSize; ++i)
+        {
+            const float real = output[(size_t) i].real();
+            const float imaginary = output[(size_t) i].imag();
+            output[(size_t) i] = { real * real + imaginary * imaginary, 0.0f };
+        }
+        fft.perform(output.data(), input.data(), true);
+        const double acf0 = input[0].real();
+        const double energy = prefix[(size_t) window];
+        if (acf0 <= 1.0e-20 || energy <= 1.0e-20) continue;
+        const double scale = acf0 / energy;
+        difference[0] = 1.0;
+        double running = 0.0;
+        for (int tau = 1; tau <= maxLag; ++tau)
+        {
+            const double acf = input[(size_t) tau].real() / scale;
+            double value = prefix[(size_t) (window - tau)] + (energy - prefix[(size_t) tau])
+                           - 2.0 * acf;
+            value = std::max(value, 0.0);
+            running += value;
+            difference[(size_t) tau] = running > 1.0e-20
+                                           ? value * (double) tau / running : 1.0;
+        }
+        int bestTau = -1;
+        for (int tau = minLag; tau <= maxLag; ++tau)
+            if (difference[(size_t) tau] < options.yinThreshold) { bestTau = tau; break; }
+        if (bestTau < 0)
+        {
+            bestTau = minLag;
+            for (int tau = minLag + 1; tau <= maxLag; ++tau)
+                if (difference[(size_t) tau] < difference[(size_t) bestTau]) bestTau = tau;
+        }
+        else
+        {
+            while (bestTau + 1 <= maxLag
+                   && difference[(size_t) (bestTau + 1)] < difference[(size_t) bestTau])
+                ++bestTau;
+        }
+        if (bestTau <= 1 || bestTau >= maxLag) continue;
+        const double left = difference[(size_t) (bestTau - 1)];
+        const double centre = difference[(size_t) bestTau];
+        const double right = difference[(size_t) (bestTau + 1)];
+        const double denominator = left - 2.0 * centre + right;
+        const double delta = std::abs(denominator) > 1.0e-12
+                                 ? 0.5 * (left - right) / denominator : 0.0;
+        const double tau = (double) bestTau + std::clamp(delta, -0.5, 0.5);
+        if (tau <= 0.0) continue;
+        const double frequency = sampleRate / tau;
+        const double clarity = std::clamp(1.0 - centre, 0.0, 1.0);
+        if (frequency < options.minPitchFrequency || frequency > options.maxPitchFrequency
+            || clarity < options.minPitchClarity)
+            continue;
+        frames.push_back({ frameIndex, midiOfFrequency(frequency), clarity, rms });
+    }
+    if (frames.empty())
+    {
+        result.explanation = "pitch: no periodic frames";
+        return result;
+    }
+
+    std::vector<PitchRun> runs;
+    for (size_t i = 0; i < frames.size();)
+    {
+        size_t j = i + 1;
+        while (j < frames.size()
+               && frames[j].index - frames[j - 1].index <= 2
+               && std::abs(frames[j].midi - frames[j - 1].midi)
+                      <= options.maxRunCents / 100.0)
+            ++j;
+        if ((int) (j - i) >= options.minStableFrames)
+        {
+            std::vector<double> values;
+            double clarity = 0.0;
+            for (size_t k = i; k < j; ++k)
+            {
+                values.push_back(frames[k].midi);
+                clarity += frames[k].clarity;
+            }
+            std::sort(values.begin(), values.end());
+            const double median = values[values.size() / 2];
+            double squares = 0.0;
+            for (double value : values) squares += (value - median) * (value - median);
+            const double deviation = std::sqrt(squares / (double) values.size()) * 100.0;
+            if (deviation <= options.maxStableDeviationCents)
+            {
+                PitchRun run;
+                run.begin = (int) i;
+                run.end = (int) j;
+                run.midi = median;
+                run.clarity = clarity / (double) (j - i);
+                run.deviationCents = deviation;
+                run.score = (double) (j - i) * run.clarity;
+                runs.push_back(run);
+            }
+        }
+        i = j;
+    }
+    if (runs.empty())
+    {
+        result.explanation = "pitch: no stable segment";
+        return result;
+    }
+    const auto run = *std::max_element(runs.begin(), runs.end(),
+        [](const PitchRun& a, const PitchRun& b) { return a.score < b.score; });
+    const int middle = frames[(size_t) (run.begin + (run.end - run.begin) / 2)].index;
+    const int segmentStart = startSample + middle * hop;
+    const int segmentLength = std::min(window, std::max(0, length - segmentStart));
+    if (segmentLength <= 0)
+    {
+        result.explanation = "pitch: stable segment outside the buffer";
+        return result;
+    }
+    const double frequency = 440.0 * std::pow(2.0, (run.midi - 69.0) / 12.0);
+    const auto harmonicity = harmonicityOf(data + segmentStart, segmentLength, sampleRate,
+                                           frequency, options);
+    if (harmonicity.ratio < options.minHarmonicity
+        || harmonicity.fundamentalShare < options.minFundamentalShare)
+    {
+        result.explanation = "pitch: stable but inharmonic (harmonicity "
+            + juce::String(harmonicity.ratio, 2) + ", fundamental "
+            + juce::String(harmonicity.fundamentalShare, 2) + ")";
+        return result;
+    }
+    result.found = true;
+    result.midi = run.midi;
+    result.cents = (run.midi - std::round(run.midi)) * 100.0;
+    result.clarity = run.clarity;
+    result.stabilityCents = run.deviationCents;
+    result.harmonicity = harmonicity.ratio;
+    result.stableFrames = run.end - run.begin;
+    result.confidence = std::clamp(run.clarity
+        * std::clamp(1.0 - run.deviationCents / options.maxStableDeviationCents, 0.0, 1.0)
+        * harmonicity.ratio, 0.0, 1.0);
+    result.explanation = "pitch: YIN, " + juce::String(run.end - run.begin)
+        + " stable frames, clarity " + juce::String(run.clarity, 2)
+        + ", deviation " + juce::String(run.deviationCents, 1) + " cents"
+        + ", harmonicity " + juce::String(harmonicity.ratio, 2)
+        + ", fundamental " + juce::String(harmonicity.fundamentalShare, 2)
+        + ", MIDI " + juce::String(run.midi, 2)
+        + (std::abs(result.cents) >= 0.5 ? " (" + juce::String(result.cents, 1) + " cents)" : "");
+    return result;
+}
 } // namespace
 
 KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, double sampleRate,
@@ -423,5 +732,44 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
         + (result.mode.isEmpty() ? " (confident tonic without a mode)" : "")
         + ", confidence " + juce::String(result.confidence, 2);
     return result;
+}
+
+PitchAnalysis TonalAnalyzer::analyzePitch(const juce::AudioBuffer<float>& audio, double sampleRate,
+                                          const TonalOptions& options, const CancelCheck& cancel)
+{
+    PitchAnalysis best;
+    std::vector<PitchAnalysis> found;
+    juce::String firstExplanation;
+    for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+    {
+        auto result = analyzeChannelPitch(audio.getReadPointer(channel), audio.getNumSamples(),
+                                          sampleRate, options, cancel);
+        if (result.error == "Cancelled") return result;
+        if (firstExplanation.isEmpty()) firstExplanation = result.explanation;
+        if (result.found) found.push_back(std::move(result));
+    }
+    if (found.empty())
+    {
+        best.explanation = firstExplanation.isNotEmpty() ? firstExplanation
+                                                         : "pitch: no periodic frames";
+        return best;
+    }
+    best = found.front();
+    for (const auto& result : found)
+        if (result.confidence > best.confidence) best = result;
+    if (found.size() >= 2)
+    {
+        const double difference = std::abs(found[0].midi - found[1].midi);
+        const double high = std::max(found[0].confidence, found[1].confidence);
+        const double low = std::min(found[0].confidence, found[1].confidence);
+        if (difference > 0.5 && low >= 0.7 * high)
+        {
+            PitchAnalysis ambiguous;
+            ambiguous.explanation = "pitch: channels disagree ("
+                + juce::String(found[0].midi, 2) + " vs " + juce::String(found[1].midi, 2) + ")";
+            return ambiguous;
+        }
+    }
+    return best;
 }
 } // namespace sonicator

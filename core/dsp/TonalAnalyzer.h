@@ -17,6 +17,32 @@ struct TonalOptions
     double minTonicMargin = 0.04;
     double modeMargin = 0.03;
     double percussiveFlatness = 0.55;
+
+    // Pitch: YIN over the most stable segment of a one-shot.
+    double maxPitchSeconds = 5.0;
+    double minPitchFrequency = 50.0, maxPitchFrequency = 2000.0;
+    double yinThreshold = 0.15;
+    double minPitchClarity = 0.5;
+    int pitchHop = 256;
+    int minStableFrames = 5;
+    double maxRunCents = 50.0;
+    double maxStableDeviationCents = 30.0;
+    double minHarmonicity = 0.55;
+    double minFundamentalShare = 0.05;
+    double minActiveDbfs = -45.0;
+    double attackSkipSeconds = 0.02;
+};
+
+struct PitchAnalysis
+{
+    bool found = false;
+    double midi = 0.0;       // exact fractional MIDI
+    double cents = 0.0;      // (midi - round(midi)) * 100
+    double clarity = 0.0, stabilityCents = 0.0, harmonicity = 0.0;
+    double confidence = 0.0;
+    int stableFrames = 0;
+    juce::String explanation;
+    juce::String error;
 };
 
 struct KeyAnalysis
@@ -42,5 +68,7 @@ class TonalAnalyzer
 public:
     static KeyAnalysis analyzeKey(const juce::AudioBuffer<float>&, double sampleRate,
                                   const TonalOptions& = {}, const CancelCheck& = {});
+    static PitchAnalysis analyzePitch(const juce::AudioBuffer<float>&, double sampleRate,
+                                      const TonalOptions& = {}, const CancelCheck& = {});
 };
 } // namespace sonicator
