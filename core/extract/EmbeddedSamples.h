@@ -26,6 +26,9 @@ public:
     ~EmbeddedSampleSet();
     bool open(const juce::File&, juce::String& error);
     const std::vector<EmbeddedSampleEntry>& entries() const { return listed; }
+    // Slots and headers that hold no audio at all (empty tracker slots, FM instruments and
+    // zero-length SF2 ranges). Reported as "empty" by the extract batch.
+    int emptyCount() const { return empties; }
     SampleAudioPtr read(int index, juce::String& error) const;
 private:
     enum class Kind { none, tracker, sf2 };
@@ -33,5 +36,6 @@ private:
     std::unique_ptr<class TrackerDocument> tracker;
     std::unique_ptr<class Sf2Bank> bank;
     std::vector<EmbeddedSampleEntry> listed;
+    int empties = 0;
 };
 } // namespace sonicator

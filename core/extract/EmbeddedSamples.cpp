@@ -23,6 +23,7 @@ bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
     tracker.reset();
     bank.reset();
     listed.clear();
+    empties = 0;
     if (! file.existsAsFile())
     {
         error = "File is missing";
@@ -34,7 +35,7 @@ bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
         if (document == nullptr) return false;
         for (const auto& slot : document->slots())
         {
-            if (slot.empty || slot.fmInstrument || slot.frames <= 0) continue;
+            if (slot.empty || slot.fmInstrument || slot.frames <= 0) { ++empties; continue; }
             listed.push_back({ entryName(slot.name.isNotEmpty() ? slot.name : slot.displayText,
                                          (int) listed.size() + 1),
                                slot.slot });
@@ -53,7 +54,7 @@ bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
             const auto& sample = samples[(size_t) i];
             // A right-channel header is decoded through its left partner, which is listed instead.
             if (sample.sampleType == 2) continue;
-            if (sample.end <= sample.start) continue;
+            if (sample.end <= sample.start) { ++empties; continue; }
             listed.push_back({ entryName(sample.name, (int) listed.size() + 1), i });
         }
         kind = Kind::sf2;
