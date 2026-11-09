@@ -48,6 +48,9 @@ public:
     void lookAndFeelChanged() override;
     bool keyPressed(const juce::KeyPress& k) override;
     void beginImport(const juce::File&);
+    // Drops a folder (a registered root or any visible subfolder) from this catalog. Files on
+    // disk stay untouched. Returns false when a background job owns the catalog.
+    bool removeFolderFromLibrary(const juce::String& path);
     bool refreshIfCatalogChanged();
     juce::File backupCatalog();
     // Registered roots that do not exist on this computer.

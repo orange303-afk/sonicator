@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "core/ableton/AbletonPacks.h"
 #include "core/reason/ReasonPatch.h"
 #include "ui/tagging/AutoTagDialog.h"
 #include "ui/split/SplitDialog.h"
@@ -442,17 +443,27 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     {
         writeDb = std::make_unique<Database>(dbPath); writeRepo = std::make_unique<SampleRepository>(*writeDb);
         writeRepo->createTables();
+        // Formats this build no longer indexes leave the catalog; the files stay on disk.
+        writeRepo->removeSamplesWithFormats({"CMB", "RFL"});
         writeRepo->refreshDuplicates();
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         indexer = std::make_unique<IndexingService>(*writeRepo);
-        // Only a real application startup may register the user's system Packs folder.
+        // Only a real application startup may register the user's system pack folders.
         if (persistSessionState)
         {
-            const auto packs=juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+            const auto reasonPacks=juce::File::getSpecialLocation(juce::File::userHomeDirectory)
                 .getChildFile("Library/Application Support/Propellerhead Software/Packs");
-            if (registerReasonPacks(*writeRepo,settingsStore,packs)
-                && indexer->start({packs.getFullPathName()})) wasRunning=true;
-            appSettings.reasonPacksAdded=settingsStore.load().reasonPacksAdded;
+            const auto abletonPacks=juce::File::getSpecialLocation(juce::File::userMusicDirectory)
+                .getChildFile("Ableton/Factory Packs");
+            juce::StringArray packRoots;
+            if (registerReasonPacks(*writeRepo,settingsStore,reasonPacks))
+                packRoots.add(reasonPacks.getFullPathName());
+            if (registerAbletonPacks(*writeRepo,settingsStore,abletonPacks))
+                packRoots.add(abletonPacks.getFullPathName());
+            if (! packRoots.isEmpty() && indexer->start(packRoots)) wasRunning=true;
+            const auto saved=settingsStore.load();
+            appSettings.reasonPacksAdded=saved.reasonPacksAdded;
+            appSettings.abletonPacksAdded=saved.abletonPacksAdded;
         }
         smart = std::make_unique<SmartAnalysisService>(*writeRepo);
         tagging = std::make_unique<TaggingService>(*writeRepo);
@@ -677,10 +688,75 @@ void MainComponent::beginImport(const juce::File& folder)
     if (! indexer || indexer->progress().running) return;
     try
     {
+        // Adding a folder is an explicit request: a previous Remove no longer keeps it ignored.
+        if (writeRepo->hasExactIgnore(folder.getFullPathName())) writeRepo->unignorePath(folder.getFullPathName());
         writeRepo->addRoot(folder.getFullPathName()); folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored); refreshFavorites();
         if (indexer->start({folder.getFullPathName()})) { wasRunning = true; reloadLibrary(); }
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+}
+bool MainComponent::removeFolderFromLibrary(const juce::String& path)
+{
+    if (readRepo == nullptr || writeRepo == nullptr) return false;
+    const auto target = canonicalFolderPath(path);
+    if (target.isEmpty()) return false;
+    if (isSplitRunning() || (indexer != nullptr && indexer->progress().running)
+        || (smart != nullptr && smart->progress().running)
+        || (tagging != nullptr && tagging->progress().running)
+        || (autoTag != nullptr && autoTag->progress().running))
+    {
+        status.setText("Wait for background work to finish before removing a folder.", juce::dontSendNotification);
+        return false;
+    }
+    try
+    {
+        const auto removal = writeRepo->removeFolder(target);
+        auto favorites = appSettings.favoriteFolders;
+        bool favoritesChanged = false;
+        for (int i = favorites.size(); --i >= 0;)
+        {
+            const auto favorite = canonicalFolderPath(favorites[i]);
+            if (favorite == target || juce::File(favorite).isAChildOf(juce::File(target)))
+            { favorites.remove(i); favoritesChanged = true; }
+        }
+        if (favoritesChanged)
+        {
+            settingsStore.update([&favorites](AppSettings& saved) { saved.favoriteFolders = favorites; });
+            appSettings.favoriteFolders = favorites;
+        }
+        if (! selectedFolder.isEmpty()
+            && (canonicalFolderPath(selectedFolder) == target
+                || juce::File(selectedFolder).isAChildOf(juce::File(target))))
+        {
+            selectedFolder.clear();
+            filter.folder.clear();
+            appSettings.lastFolder.clear();
+            settingsStore.update([](AppSettings& saved) { saved.lastFolder.clear(); });
+        }
+        if (! sessionSamplePath.isEmpty()
+            && (sessionSamplePath == target || juce::File(sessionSamplePath).isAChildOf(juce::File(target))))
+        {
+            selectedSampleId = 0;
+            sessionSamplePath.clear();
+            markSessionStateDirty();
+        }
+        writeRepo->refreshDuplicates();
+        reloadLibrary();
+        folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored);
+        refreshFavorites();
+        ensureSelectedFolderVisible();
+        status.setText("Removed " + juce::String(removal.rowsRemoved) + " catalogued file(s) from " + target
+            + ". Files on disk are unchanged."
+            + (removal.wasRoot ? " The folder is no longer a library root."
+                               : " The folder stays out of parent scans until you add it again."),
+            juce::dontSendNotification);
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        status.setText("Could not remove the folder: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+        return false;
+    }
 }
 void MainComponent::requestScan(bool reanalyzeAll)
 {
@@ -2013,6 +2089,8 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     menu.addSeparator();
     menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0 && ! splitBusy);
     menu.addItem(7005, "Reset tags...", catalogued > 0 && autoTagIdle && autoTagDialog == nullptr);
+    menu.addSeparator();
+    menu.addItem(7008, "Remove from library...", autoTagIdle);
     const juce::String folderPath = path;
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&folders).withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 })
@@ -2130,6 +2208,22 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                 else if (result == 7004)
                 {
                     safe->startAutoTagFolder(folderPath);
+                }
+                else if (result == 7008)
+                {
+                    dialogs::showAlert(*safe, "Remove folder from library",
+                        "Folder:\n" + folderPath
+                            + "\n\nCatalogued files: " + juce::String(catalogued)
+                            + "\n\nTheir catalog rows, tags and analysis are removed from this catalog."
+                            + "\nFiles on disk are not changed."
+                            + (safe->readRepo->roots().contains(folderPath)
+                                   ? "\n\nThe folder is also removed from the library roots."
+                                   : "\n\nA later scan of the parent folder will not bring it back."),
+                        { { "Remove", 1 }, { "Cancel", 0 } },
+                        [safe, folderPath](int choice)
+                        {
+                            if (safe != nullptr && choice == 1) safe->removeFolderFromLibrary(folderPath);
+                        }, juce::MessageBoxIconType::WarningIcon);
                 }
             }
             catch (const std::exception& e)
@@ -2721,6 +2815,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
         newWriteDb = std::make_unique<Database>(target);
         newWriteRepo = std::make_unique<SampleRepository>(*newWriteDb);
         newWriteRepo->createTables();
+        newWriteRepo->removeSamplesWithFormats({"CMB", "RFL"});
         newReadDb = std::make_unique<Database>(target);
         newReadRepo = std::make_unique<SampleRepository>(*newReadDb);
     }

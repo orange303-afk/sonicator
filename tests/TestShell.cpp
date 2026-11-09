@@ -879,3 +879,71 @@ TEST_CASE("Hide empty and unsupported hides incompatible assets and keeps their 
         REQUIRE(png.writeImageToStream(app.createComponentSnapshot(app.getLocalBounds()), *stream));
     }
 }
+
+TEST_CASE("Removing a folder through the shell cleans rows and favorites", "[ui][remove]")
+{
+    TestDirectory t;
+    const auto root = t.dir.getChildFile("Root"); root.createDirectory();
+    const auto keep = t.wave("Root/Keep/keep.wav");
+    const auto kick = t.wave("Root/Gone/kick.wav");
+    const auto dbPath = t.dir.getChildFile("remove-folder.sqlite");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        repo.addRoot(root.getFullPathName());
+        REQUIRE(repo.upsert(BasicAnalyzer().analyze(keep)) > 0);
+        REQUIRE(repo.upsert(BasicAnalyzer().analyze(kick)) > 0);
+    }
+    AppSettings settings;
+    settings.favoriteFolders.add(t.dir.getChildFile("Root/Gone").getFullPathName());
+    settings.favoriteFolders.add(t.dir.getChildFile("Root/Keep").getFullPathName());
+    const auto settingsFile = t.dir.getChildFile("remove-settings.json");
+    SettingsStore(settingsFile).save(settings);
+    {
+        MainComponent app(dbPath, false, settings, settingsFile);
+        auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+        REQUIRE(library != nullptr);
+        REQUIRE(library->getNumRows() == 2);
+        REQUIRE(app.removeFolderFromLibrary(t.dir.getChildFile("Root/Gone").getFullPathName()));
+        app.searchLibrary("kick");
+        REQUIRE(library->getNumRows() == 0);
+        app.searchLibrary("keep");
+        REQUIRE(library->getNumRows() == 1);
+    }
+    {
+        Database db(dbPath); SampleRepository repo(db);
+        REQUIRE_FALSE(repo.findByPath(kick.getFullPathName()).has_value());
+        REQUIRE(repo.findByPath(keep.getFullPathName()).has_value());
+        REQUIRE(repo.hasExactIgnore(t.dir.getChildFile("Root/Gone").getFullPathName()));
+        REQUIRE(repo.roots().contains(root.getFullPathName()));
+    }
+    const auto saved = SettingsStore(settingsFile).load();
+    REQUIRE(saved.favoriteFolders.size() == 1); // only the removed subtree leaves the favorites
+    REQUIRE(saved.favoriteFolders[0] == t.dir.getChildFile("Root/Keep").getFullPathName());
+    REQUIRE(kick.existsAsFile()); // originals on disk stay untouched
+}
+
+TEST_CASE("Startup drops CMB and RFL catalog rows but keeps files", "[ui][remove][reason]")
+{
+    TestDirectory t;
+    const auto dbPath = t.dir.getChildFile("purge.sqlite");
+    const auto wav = t.wave("keep.wav");
+    {
+        Database db(dbPath); SampleRepository repo(db); repo.createTables();
+        REQUIRE(repo.upsert(BasicAnalyzer().analyze(wav)) > 0);
+        SampleRecord cmb; cmb.filePath = "/Packs/Test.cmb"; cmb.fileName = "Test.cmb"; cmb.format = "CMB";
+        SampleRecord rfl; rfl.filePath = "/Refills/Bank.rfl"; rfl.fileName = "Bank.rfl"; rfl.format = "RFL";
+        repo.upsert(cmb); repo.upsert(rfl);
+        repo.addRoot(t.dir.getFullPathName());
+    }
+    {
+        MainComponent app(dbPath, false);
+        auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+        REQUIRE(library != nullptr);
+        REQUIRE(library->getNumRows() == 1);
+    }
+    Database db(dbPath); SampleRepository repo(db);
+    REQUIRE(repo.count() == 1);
+    REQUIRE_FALSE(repo.findByPath("/Packs/Test.cmb").has_value());
+    REQUIRE_FALSE(repo.findByPath("/Refills/Bank.rfl").has_value());
+    REQUIRE(repo.findByPath(wav.getFullPathName()).has_value());
+}

@@ -18,6 +18,7 @@ struct AppSettings
     bool hideEmpty = true;
     bool showIgnored = false;          // reveal catalog rows hidden by ignored_paths
     bool reasonPacksAdded = false;     // global one-time registration, not reset on root removal
+    bool abletonPacksAdded = false;    // same rule for the installed Ableton factory packs
     double splitThresholdDb = -60.0;
     int splitMinSilenceMs = 250;
     int splitMinPartMs = 100;

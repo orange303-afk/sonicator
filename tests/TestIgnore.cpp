@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/database/SampleRepository.h"
+#include "core/indexing/IndexingService.h"
+#include "core/dsp/BasicAnalyzer.h"
 #include "TestHelpers.h"
 #include <sqlite3.h>
 using namespace sonicator;
@@ -152,6 +154,63 @@ TEST_CASE("Smart verification skips ignored completed results", "[ignore][databa
     }
 }
 
+TEST_CASE("Removing a folder deletes only its rows and keeps it out of parent rescans", "[database][remove]")
+{
+    TestDirectory t;
+    const auto root = t.dir.getChildFile("Root");
+    const auto keep = t.wave("Root/Keep/keep.wav");
+    const auto gone = t.wave("Root/Gone/kick.wav");
+    const auto similar = t.wave("Root/Gone2/snare.wav");
+    Database db(t.dir.getChildFile("remove-folder.sqlite")); SampleRepository repo(db); repo.createTables();
+    repo.addRoot(root.getFullPathName());
+    auto keepId = repo.upsert(BasicAnalyzer().analyze(keep));
+    const auto goneId = repo.upsert(BasicAnalyzer().analyze(gone));
+    repo.upsert(BasicAnalyzer().analyze(similar));
+    const auto tag = repo.createTag("Kick", 0xff00ff00);
+    repo.setSampleTag(goneId, tag, true);
+
+    const auto removed = repo.removeFolder(t.dir.getChildFile("Root/Gone").getFullPathName());
+    REQUIRE(removed.rowsRemoved == 1);
+    REQUIRE_FALSE(removed.wasRoot);
+    REQUIRE_FALSE(repo.findByPath(gone.getFullPathName()).has_value());
+    REQUIRE(repo.tagsForSample(goneId).empty());
+    REQUIRE(repo.isIgnored(t.dir.getChildFile("Root/Gone").getFullPathName()));
+    REQUIRE(repo.findByPath(keep.getFullPathName()).has_value());
+    REQUIRE(repo.findByPath(similar.getFullPathName()).has_value()); // Gone2 is not Gone
+    REQUIRE(repo.roots().contains(root.getFullPathName()));
+
+    // A later parent scan must not resurrect the removed subtree.
+    IndexingService indexer(repo);
+    REQUIRE(indexer.start({root.getFullPathName()}));
+    REQUIRE(indexer.waitUntilFinished(20000));
+    REQUIRE_FALSE(repo.findByPath(gone.getFullPathName()).has_value());
+    REQUIRE(repo.findByPath(keep.getFullPathName()).has_value());
+
+    const auto rootRemoved = repo.removeFolder(root.getFullPathName());
+    REQUIRE(rootRemoved.wasRoot);
+    REQUIRE(rootRemoved.rowsRemoved >= 2);
+    REQUIRE(repo.roots().isEmpty());
+    REQUIRE_FALSE(repo.findByPath(keep.getFullPathName()).has_value());
+    REQUIRE(keep.existsAsFile()); // files on disk are never touched
+    REQUIRE(keepId > 0);
+}
+TEST_CASE("Removing a folder drops unsupported archive records only", "[database][remove][reason]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("formats.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    SampleRecord cmb, rfl, patch, wav;
+    cmb.filePath = "/Packs/Test.cmb"; cmb.fileName = "Test.cmb"; cmb.format = "CMB";
+    rfl.filePath = "/Refills/Bank.rfl"; rfl.fileName = "Bank.rfl"; rfl.format = "RFL";
+    patch.filePath = "/Packs/Test.repatch"; patch.fileName = "Test.repatch"; patch.format = "REPATCH";
+    wav.filePath = "/Packs/loop.wav"; wav.fileName = "loop.wav"; wav.format = "WAV";
+    for (const auto& record : { cmb, rfl, patch, wav }) repo.upsert(record);
+    REQUIRE(repo.removeSamplesWithFormats({ "CMB", "RFL" }) == 2);
+    REQUIRE_FALSE(repo.findByPath(cmb.filePath).has_value());
+    REQUIRE_FALSE(repo.findByPath(rfl.filePath).has_value());
+    REQUIRE(repo.findByPath(patch.filePath).has_value());
+    REQUIRE(repo.findByPath(wav.filePath).has_value());
+    REQUIRE(repo.removeSamplesWithFormats({ "CMB", "RFL" }) == 0);
+}
 TEST_CASE("removeByPaths drops rows, tag links and exact ignore entries", "[database][remove]")
 {
     TestDirectory t; Database db(t.dir.getChildFile("remove.sqlite"));

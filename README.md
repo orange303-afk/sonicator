@@ -35,7 +35,7 @@ macOS builds receive a local ad-hoc bundle signature. This is not Developer ID s
 
 ## Use
 
-1. **+ Add folder** imports one directory recursively. Repeat for multiple roots.
+1. **+ Add folder** imports one directory recursively. Repeat for multiple roots. Right-click any folder in the sidebar and choose **Remove from library...** to drop that folder's catalog rows, tags and analysis without touching files on disk. Removing a registered root also unregisters it; removing a subfolder keeps it out of parent scans until you add it again with **+ Add folder**.
 2. Indexing runs in the background; **Pause / Resume / Cancel** control it. Completed file results remain saved on cancellation.
 3. Select a row to immediately preview its original file. Use **Play / Pause / Stop / Loop**, volume, and drag on the waveform to select a time range. A plain click on the waveform seeks and clears the selection.
 4. Keyboard: **Space** play/pause, **Left / Right** seek one second, **Escape** stop and clear the waveform selection (when not consumed by an editing control).
@@ -72,7 +72,13 @@ The source sample rate and channel count are preserved; 16-bit sources stay 16-b
 
 On macOS, `~/Library/Application Support/Propellerhead Software/Packs` is registered once when present. The global `reasonPacksAdded` setting prevents it returning after removal. WAV/AIFF/RX2 files use normal indexing and preview; `_audio previews` and `Audio Previews` directories inside packs are excluded, regardless of audio format.
 
-Combinator (`.cmb`) cards show the patch name, devices and external sample references. Select a local source in the source list to audition it; missing or ambiguous names remain unavailable. Resolution stays inside the pack and does not follow symbolic links. `.repatch` XML shows its device product only. `.rfl` files show **Reason ReFill: закрытый формат, содержимое недоступно**. ReFill archives are never decoded, and their contents are not indexed. Neither Combinator nor device patches are synthesized; Combinators are not an **Extract samples** source because they contain references, not embedded audio.
+`.repatch` XML is indexed as a metadata card and shows its device product only. Combinator (`.cmb`) and ReFill (`.rfl`) files are not indexed: they contain no embedded audio and cannot be decoded outside Reason. Existing CMB/RFL catalog rows are dropped when a catalog is opened; files on disk are unchanged. ReFill archives are never decoded. The bounded Combinator reader remains available for files opened directly, but nothing is synthesized. Combinators are not an **Extract samples** source because they contain references, not embedded audio.
+
+## Ableton Packs
+
+On macOS, `~/Music/Ableton/Factory Packs` is registered once when present. The global `abletonPacksAdded` setting prevents it returning after **Remove**. Playable WAV/AIFF and the rendered OGG previews under `Ableton Folder Info/Previews` are indexed normally and appear in **All samples** and the general search. A preview row is labelled **Ableton Preview** in the preview panel with the rack, clip or device name it demonstrates.
+
+Ableton factory AIFC samples compressed with the closed `able` codec (marked "Ableton Content") are skipped: only Live can decode them, so they are not catalogued and produce no error rows. Omni-present `.asd` sidecars, Live presets (`.adg`, `.adv`, `.alc`, `.als`) and Max devices (`.amxd`) are not indexed in this stage; the previews are the only audio representation of those presets.
 
 ## Modules
 
@@ -85,6 +91,7 @@ core/audio/                  preview transport, sample-rate conversion, read-ahe
 core/tracker/                MOD/XM/S3M document parsing, source PCM and whole-song rendering
 core/legacy/                 content-based tracker recognition
 core/reason/                 bounded patch metadata, local references and one-time Packs registration
+core/ableton/                Ableton preview naming, protected-sample probe and one-time Packs registration
 core/export/                 selection WAV export, background preparation, external file drag
 core/indexing/               background import, pause/cancel, incremental updates
 core/settings/               persisted application settings
@@ -142,6 +149,8 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - Duplicate grouping compares full file bytes only (SHA-256 + size); different containers or metadata with identical decoded audio are not grouped. The `DUPLICATES` column shows the group size and **Show all copies** reveals it; no file is deleted or moved. **Hide empty** uses the measured peak only: files at or above -60 dBFS stay visible, quieter files are hidden.
 - With **All**, changing the filter or sort runs one ID query over the whole catalog (measured ~35 ms for 300k rows by name and ~130 ms with a text filter in Debug); rows themselves are loaded in 400-row blocks (~2 ms) and cached around the viewport. The list is never materialized as 300k full records.
 - A saved catalog that is missing or is not a SONICATOR catalog falls back to the default location at startup; the fallback is written to the log.
+- OGG Vorbis is indexed as ordinary audio. Ableton factory AIFC samples with the closed `able` codec are skipped by design; they can only be decoded inside Live. Ableton preset/device files are not indexed yet.
+- **Remove from library...** deletes catalog rows only; it never deletes, moves or renames source files.
 - A catalog moved between computers needs **Relocate folders...** once per machine. It rewrites stored paths and does not copy audio. Folder structure inside each root must be preserved; a 200-path existence sample warns about a wrong choice, and the automatic `.relocate-<timestamp>.sqlite` backup is the recovery point.
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.

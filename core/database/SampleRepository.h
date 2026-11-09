@@ -26,6 +26,11 @@ struct RootRelocation
 {
     juce::String oldRoot, newRoot;
 };
+struct FolderRemoval
+{
+    int rowsRemoved = 0;
+    bool wasRoot = false;
+};
 struct RelocationResult
 {
     int64_t movedFiles = 0, conflicts = 0;
@@ -85,6 +90,12 @@ public:
     std::map<int64_t, juce::String> stereoPairPartners(const std::vector<int64_t>& ids) const;
     int countHash(const juce::String&) const;
     void addRoot(const juce::String&);
+    // Deletes every catalog row below a folder. A registered root also loses its root entry; any
+    // other folder gets an exact ignore entry so a parent rescan does not restore it. Files on
+    // disk are never touched.
+    FolderRemoval removeFolder(const juce::String& folder);
+    // Drops catalog rows for the given format labels, e.g. formats this build no longer indexes.
+    int removeSamplesWithFormats(const juce::StringArray& formats);
     juce::StringArray roots() const;
     int countUnderRoot(const juce::String& root) const;
     // Rewrites every sample path below each old root to the matching new root, preserving the

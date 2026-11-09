@@ -2,5 +2,6 @@ add_executable(SonicatorTests TestIgnore.cpp TestStereoPairs.cpp TestSilenceSpli
 target_link_libraries(SonicatorTests PRIVATE SonicatorUI Catch2::Catch2)
 target_sources(SonicatorTests PRIVATE TestUIPolish.cpp)
 target_sources(SonicatorTests PRIVATE TestReasonPacks.cpp)
+target_sources(SonicatorTests PRIVATE TestAbletonPacks.cpp)
 target_compile_definitions(SonicatorTests PRIVATE SONICATOR_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures" JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME SonicatorTests COMMAND SonicatorTests)

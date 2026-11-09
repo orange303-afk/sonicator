@@ -1015,6 +1015,86 @@ void SampleRepository::addRoot(const juce::String& path)
     std::lock_guard lock(db.mutex);
     detail::Statement s(db.handle,"INSERT OR IGNORE INTO roots(path) VALUES(?)"); s.text(1,path); s.step();
 }
+FolderRemoval SampleRepository::removeFolder(const juce::String& folder)
+{
+    FolderRemoval outcome;
+    if (folder.trim().isEmpty()) return outcome;
+    const auto canonical = pathrelocation::trimTrailingSeparators(juce::File(folder).getFullPathName());
+    if (canonical.isEmpty()) return outcome;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        juce::String registeredRoot;
+        {
+            detail::Statement roots(db.handle, "SELECT path FROM roots");
+            while (roots.step())
+                if (pathrelocation::trimTrailingSeparators(roots.text(0)) == canonical)
+                { registeredRoot = roots.text(0); break; }
+        }
+        outcome.wasRoot = registeredRoot.isNotEmpty();
+        const auto [lower, upper] = folderRange(canonical);
+        {
+            detail::Statement remove(db.handle, "DELETE FROM samples WHERE path>=? AND path<?");
+            remove.text(1, lower); remove.text(2, upper); remove.step();
+            outcome.rowsRemoved = sqlite3_changes(db.handle);
+        }
+        {
+            // Ignore entries inside the removed subtree, plus the folder itself, no longer apply.
+            detail::Statement remove(db.handle,
+                "DELETE FROM ignored_paths WHERE path=? OR (path>=? AND path<?)");
+            remove.text(1, canonical); remove.text(2, lower); remove.text(3, upper); remove.step();
+        }
+        {
+            // A nested root cannot survive its parent leaving the library.
+            detail::Statement remove(db.handle,
+                "DELETE FROM roots WHERE path=? OR path=? OR (path>=? AND path<?)");
+            remove.text(1, canonical);
+            remove.text(2, registeredRoot.isNotEmpty() ? registeredRoot : canonical);
+            remove.text(3, lower); remove.text(4, upper); remove.step();
+        }
+        if (! outcome.wasRoot)
+        {
+            // The parent may still be scanned: keep the removed subtree out of that discovery.
+            detail::Statement ignore(db.handle,
+                "INSERT OR REPLACE INTO ignored_paths(path,is_folder,created_at) VALUES(?,1,?)");
+            ignore.text(1, canonical); ignore.integer(2, juce::Time::currentTimeMillis()); ignore.step();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+    return outcome;
+}
+int SampleRepository::removeSamplesWithFormats(const juce::StringArray& formats)
+{
+    juce::StringArray cleaned;
+    for (const auto& format : formats)
+        if (format.trim().isNotEmpty()) cleaned.addIfNotAlreadyThere(format.trim().toUpperCase());
+    if (cleaned.isEmpty()) return 0;
+    std::lock_guard lock(db.mutex);
+    juce::String placeholders;
+    for (int i = 0; i < cleaned.size(); ++i) placeholders << (i == 0 ? "?" : ",?");
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        const auto sql = "DELETE FROM samples WHERE UPPER(format) IN (" + placeholders + ")";
+        detail::Statement remove(db.handle, sql.toRawUTF8());
+        for (int i = 0; i < cleaned.size(); ++i) remove.text(i + 1, cleaned[i]);
+        remove.step();
+        const int removed = sqlite3_changes(db.handle);
+        detail::exec(db.handle, "COMMIT;");
+        return removed;
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
 juce::StringArray SampleRepository::roots() const
 {
     std::lock_guard lock(db.mutex);

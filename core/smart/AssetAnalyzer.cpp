@@ -40,13 +40,13 @@ SampleRecord analyzeMetadataAsset(const juce::File& file, CancelCheck cancel)
     r.dateModified = file.getLastModificationTime().toMilliseconds();
     r.dateAnalyzed = juce::Time::currentTimeMillis();
     r.version = metadataOnlyVersion;
-    if (file.hasFileExtension("cmb;repatch;rfl"))
+    if (file.hasFileExtension("repatch"))
     {
         const auto patch=readReasonPatch(file, false);
         if (patch.error.isNotEmpty())
         { r.error=patch.error; r.compatibility=AssetCompatibility::invalid; return r; }
         r.compatibility=AssetCompatibility::supported; // recognised metadata card, not patch synthesis
-        return r; // No full-file hash: do not read CMB BODY or any ReFill archive payload.
+        return r; // No full-file hash: a device patch carries no audio payload.
     }
     else if (isLegacyTrackerExtension(file))
     {

@@ -86,7 +86,7 @@ TEST_CASE("Reason XML provides deviceProduct and ReFill is recognised without de
     r=readReasonPatch(f); REQUIRE(r.error.isEmpty()); REQUIRE(r.message=="Reason ReFill: закрытый формат, содержимое недоступно");
     f.replaceWithText("not a refill"); REQUIRE(readReasonPatch(f).error.isNotEmpty());
 }
-TEST_CASE("Reason scanning indexes metadata and local audio but excludes only pack demos", "[reason]")
+TEST_CASE("Reason scanning indexes local audio and device patches but never CMB or ReFill", "[reason]")
 {
     TestDirectory t;
     const auto patch=cmb(t,{}); const auto wav=t.wave("Pack/_samples/loop.wav");
@@ -94,19 +94,26 @@ TEST_CASE("Reason scanning indexes metadata and local audio but excludes only pa
     t.wave("ordinary/Audio Previews/keep.wav");
     const auto xml=t.dir.getChildFile("p.repatch"); xml.replaceWithText("<JukeboxPatch deviceProduct=\"Europa\"/>");
     const auto rfl=t.dir.getChildFile("p.rfl"); rfl.replaceWithText("Propellerheads ReFill File\x1a");
-    for (const auto& f:{patch,xml,rfl}) REQUIRE(FileScanner::isMetadataOnlyFormat(f));
-    REQUIRE(FileScanner::scanDirectory(t.dir).size()==5);
+    REQUIRE(FileScanner::isMetadataOnlyFormat(xml));
+    for (const auto& f:{patch,rfl})
+    {
+        REQUIRE_FALSE(FileScanner::isMetadataOnlyFormat(f));
+        REQUIRE_FALSE(FileScanner::isSupportedFormat(f));
+    }
+    REQUIRE(FileScanner::scanDirectory(t.dir).size()==3); // playable audio + repatch only
+    const auto rejected=analyzeMetadataAsset(patch);
+    REQUIRE(rejected.error.isNotEmpty());
+    REQUIRE(rejected.compatibility==AssetCompatibility::unsupported);
     Database db(t.dir.getChildFile("catalog.sqlite")); SampleRepository repo(db); repo.createTables();
     IndexingService indexer(repo); REQUIRE(indexer.start({t.dir.getFullPathName()})); REQUIRE(indexer.waitUntilFinished(20000));
-    REQUIRE(repo.count()==5);
-    for (const auto& f:{patch,xml,rfl})
-    {
-        auto r=repo.findByPath(f.getFullPathName()); REQUIRE(r.has_value());
-        REQUIRE(r->version==metadataOnlyVersion); REQUIRE(r->duration==0); REQUIRE(r->sampleRate==0);
-        REQUIRE(r->compatibility==AssetCompatibility::supported); // supported metadata, not a playable archive
-        REQUIRE(r->fileHash.isEmpty()); // metadata-only Reason reads must not hash BODY/archive payload
-    }
-    LibraryFilter filter; filter.hideEmpty=true; REQUIRE(repo.query(filter,100,0).total==5);
+    REQUIRE(repo.count()==3);
+    REQUIRE_FALSE(repo.findByPath(patch.getFullPathName()).has_value());
+    REQUIRE_FALSE(repo.findByPath(rfl.getFullPathName()).has_value());
+    auto r=repo.findByPath(xml.getFullPathName()); REQUIRE(r.has_value());
+    REQUIRE(r->version==metadataOnlyVersion); REQUIRE(r->duration==0); REQUIRE(r->sampleRate==0);
+    REQUIRE(r->compatibility==AssetCompatibility::supported);
+    REQUIRE(r->fileHash.isEmpty());
+    LibraryFilter filter; filter.hideEmpty=true; REQUIRE(repo.query(filter,100,0).total==3);
     REQUIRE(repo.findByPath(wav.getFullPathName())->error.isEmpty());
 }
 TEST_CASE("Reason demo exclusion does not hide ordinary libraries with common folder names", "[reason]")
@@ -179,6 +186,7 @@ TEST_CASE("Installed Reason Packs metadata and sources can be opened read-only",
     {
         REQUIRE_FALSE(item.file.getFullPathName().containsIgnoreCase("/Audio Previews/"));
         REQUIRE_FALSE(item.file.getFullPathName().containsIgnoreCase("/_audio previews/"));
+        REQUIRE_FALSE(item.file.hasFileExtension("cmb;rfl"));
         if (item.file.hasFileExtension("wav;aif;aiff;rx2"))
         {
             ++audio;
@@ -188,16 +196,25 @@ TEST_CASE("Installed Reason Packs metadata and sources can be opened read-only",
                 REQUIRE(engine.loadFile(item.file)); REQUIRE(engine.length()>0);
             }
         }
-        if (!item.file.hasFileExtension("cmb;repatch")) continue;
+        if (!item.file.hasFileExtension("repatch")) continue;
         auto patch=readReasonPatch(item.file); INFO(item.file.getFullPathName()); INFO(patch.error);
+        REQUIRE(patch.error.isEmpty()); REQUIRE(patch.name.isNotEmpty()); ++patches;
+    }
+    // The parser is still exercised against real Combinators, but they are not indexed.
+    int parsed=0;
+    for (const auto& entry:juce::RangedDirectoryIterator(root,true,"*.cmb",juce::File::findFiles,
+                                                          juce::File::FollowSymlinks::no))
+    {
+        if (++parsed>300) break;
+        auto patch=readReasonPatch(entry.getFile()); INFO(entry.getFile().getFullPathName()); INFO(patch.error);
         REQUIRE(patch.error.isEmpty()); REQUIRE(patch.name.isNotEmpty());
-        if (item.file.hasFileExtension("cmb")) ++patches;
         for (const auto& ref:patch.references)
         {
             if (ref.isLocal()) { ++local; REQUIRE(ref.file.isAChildOf(root)); }
             if (ref.refill.isNotEmpty()) ++refill;
         }
     }
-    std::cout << "Installed Reason Packs: CMB="<<patches<<" audio="<<audio<<" local references="<<local<<" ReFill references="<<refill<<"\n";
-    REQUIRE(patches>0); REQUIRE(audio>0); REQUIRE(local>0); REQUIRE(refill>0);
+    std::cout << "Installed Reason Packs: repatches="<<patches<<" parsed CMB="<<parsed<<" audio="<<audio
+              << " local references="<<local<<" ReFill references="<<refill<<"\n";
+    REQUIRE(patches>0); REQUIRE(parsed>0); REQUIRE(audio>0); REQUIRE(local>0); REQUIRE(refill>0);
 }

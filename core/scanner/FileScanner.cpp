@@ -1,4 +1,5 @@
 #include "FileScanner.h"
+#include "core/ableton/AbletonPacks.h"
 #include "core/reason/ReasonPatch.h"
 #include <stdexcept>
 namespace sonicator {
@@ -6,12 +7,14 @@ bool FileScanner::isMetadataOnlyFormat(const juce::File& f)
 {
     // Tracker modules are indexed by identity and header metadata; their PCM is decoded only
     // when the module is opened, never during a library scan.
-    return f.hasFileExtension("rx2;sf2;exs;nki;mod;xm;s3m;iso;img;bin;cue;mdx;cmb;repatch;rfl");
+    return f.hasFileExtension("rx2;sf2;exs;nki;mod;xm;s3m;iso;img;bin;cue;mdx;repatch");
 }
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {
     if (isMetadataOnlyFormat(f)) return true;
-    if (! f.hasFileExtension("wav;aif;aiff;flac;mp3")) return false;
+    if (! f.hasFileExtension("wav;aif;aiff;flac;mp3;ogg")) return false;
+    // Ableton factory AIFC samples use the closed "able" codec and only Live can decode them.
+    if (isAbletonProtectedSample(f)) return false;
     if (f.getFileName().startsWith("._"))
         if (auto input = f.createInputStream())
             if (input->readIntBigEndian() == 0x00051607) return false; // AppleDouble, not audio.

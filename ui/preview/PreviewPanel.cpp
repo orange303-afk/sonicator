@@ -1,4 +1,5 @@
 #include "PreviewPanel.h"
+#include "core/ableton/AbletonPacks.h"
 #include "core/audio/StereoPair.h"
 #include "core/audio/SelectionPlayback.h"
 #include "ui/shell/Theme.h"
@@ -337,6 +338,17 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
         rexInfo.setVisible(false);
         filename.setText(success ? file.getFileName()
                                  : file.getFileName() + "  —  " + engine.error(),juce::dontSendNotification);
+        if (success)
+        {
+            const auto preview = abletonPreviewInfo(file);
+            if (preview.isPreview)
+            {
+                filename.setText(file.getFileName() + "  —  Ableton Preview", juce::dontSendNotification);
+                selectionStatus.setText("Ableton Preview of " + preview.source + " (" + preview.kind
+                    + ")  ·  rendered demo audio, not the pack's original sample",
+                    juce::dontSendNotification);
+            }
+        }
     }
     if (reason)
     {
