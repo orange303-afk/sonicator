@@ -77,7 +77,27 @@ Harmonically compatible: 33 / 51 published (64.7%), 32.0% of labelled.
 
 ## Report half (loop files)
 
-<!-- FINAL REPORT NUMBERS -->
+Full report half, loop category: 1289 files, 746 labelled, 407 published. Wall time
+for the whole report half (4358 files) was 927.6 s on the machine above.
+
+| Measure | Count |
+|---|---:|
+| Correct key | 161 (39.6% of published, 21.6% of labelled) |
+| Bare tonic | 16 |
+| Wrong mode (parallel) | 19 |
+| Relative | 74 |
+| Wrong | 137 |
+| Unknown | 339 |
+
+Harmonically compatible: 270 / 407 published (66.3%), 36.2% of labelled.
+
+All categories together: 969 labelled, 458 published, 180 correct (39.3% of
+published, 18.6% of labelled); harmonically compatible 303 / 458 (66.2%).
+One-shot paths contributed 126 labelled files and **zero** published keys (the
+structure gate). Drum-labelled files published 6 of 15: 1 correct, 2 bare tonic,
+3 parallel mode, 0 wrong tonic. The drum-name gate catches most but not every
+percussion file; a drum only reaches the analyzer when its own name and immediate
+folder do not say drum/perc.
 
 ## Pitch
 
@@ -98,7 +118,7 @@ note corpus that this library does not provide.
 ## Interpretation
 
 - The DSP agrees with the pack label on roughly two fifths to half of published loop
-  keys, and is harmonically compatible with about three fifths when relative and
+  keys, and is harmonically compatible with about two thirds when relative and
   parallel spellings are counted. A relative major/minor or a parallel mode is the
   same key signature or tonic; calling it "wrong" measures the label convention, not
   a wrong scale.
