@@ -1,5 +1,15 @@
 #include "RhythmCandidates.h"
+#include <cmath>
 namespace sonicator {
+bool needsRhythmAnalysis(const std::vector<SmartCandidate>& metadataCandidates)
+{
+    for (const auto& candidate : metadataCandidates)
+        if (candidate.field == SmartField::Bpm && candidate.status == CandidateStatus::Valid
+            && std::isfinite(candidate.numericValue)
+            && candidate.numericValue >= 20.0 && candidate.numericValue <= 400.0)
+            return false;
+    return true;
+}
 bool hasDecodableAudioExtension(const juce::String& extensionWithoutDot)
 {
     const auto extension = extensionWithoutDot.toLowerCase();

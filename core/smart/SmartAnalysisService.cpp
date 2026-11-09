@@ -306,38 +306,47 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record)
         extraction.updatedAt = juce::Time::currentTimeMillis();
         out.extractions.push_back(std::move(extraction));
     }
-    // Audio-only fallback. It runs after metadata, never replaces it at this stage: the resolver
-    // decides by source priority. A file that cannot be decoded is recorded as unsupported so the
-    // next pass does not retry it as if it had failed.
+    // Audio-only fallback. It runs after metadata and only when metadata did not answer the BPM
+    // question; the resolver still decides by source priority once it has run. A file that cannot
+    // be decoded is recorded as unsupported so the next pass does not retry it as if it failed.
     {
         SmartExtraction extraction;
         extraction.source = "dsp";
         extraction.extractorVersion = smartDspVersion;
         extraction.updatedAt = juce::Time::currentTimeMillis();
-        try
+        if (! needsRhythmAnalysis(out.candidates))
         {
-            auto rhythm = extractRhythmCandidates(record);
-            append(out.candidates, std::move(rhythm.candidates));
-            if (rhythm.status == "error")
+            // Metadata already has a usable tempo. Record that the pass was considered and
+            // skipped, rather than pretending it ran.
+            extraction.status = "skipped";
+        }
+        else
+        {
+            try
+            {
+                auto rhythm = extractRhythmCandidates(record);
+                append(out.candidates, std::move(rhythm.candidates));
+                if (rhythm.status == "error")
+                {
+                    extraction.status = "error";
+                    extraction.error = rhythm.error;
+                    if (out.error.isEmpty()) out.error = rhythm.error;
+                }
+                else if (rhythm.status == "unsupported") extraction.status = "unsupported";
+                else extraction.status = "ok";
+            }
+            catch (const std::exception& e)
             {
                 extraction.status = "error";
-                extraction.error = rhythm.error;
-                if (out.error.isEmpty()) out.error = rhythm.error;
+                extraction.error = juce::String::fromUTF8(e.what());
+                if (out.error.isEmpty()) out.error = extraction.error;
             }
-            else if (rhythm.status == "unsupported") extraction.status = "unsupported";
-            else extraction.status = "ok";
-        }
-        catch (const std::exception& e)
-        {
-            extraction.status = "error";
-            extraction.error = juce::String::fromUTF8(e.what());
-            if (out.error.isEmpty()) out.error = extraction.error;
-        }
-        catch (...)
-        {
-            extraction.status = "error";
-            extraction.error = "unknown DSP failure";
-            if (out.error.isEmpty()) out.error = extraction.error;
+            catch (...)
+            {
+                extraction.status = "error";
+                extraction.error = "unknown DSP failure";
+                if (out.error.isEmpty()) out.error = extraction.error;
+            }
         }
         out.extractions.push_back(std::move(extraction));
     }

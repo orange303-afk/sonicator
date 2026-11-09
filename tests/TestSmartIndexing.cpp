@@ -2,8 +2,10 @@
 #include <catch2/catch_approx.hpp>
 #include "core/smart/SmartAnalysisService.h"
 #include "core/smart/SmartResolver.h"
+#include "core/smart/RhythmCandidates.h"
 #include "TestHelpers.h"
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <algorithm>
 #include <cmath>
 using namespace sonicator;
 namespace {
@@ -265,4 +267,75 @@ TEST_CASE("A one-shot WAV gets a structure but no DSP tempo", "[smart][service][
     REQUIRE(result.structure == "one-shot");
     REQUIRE_FALSE(result.hasBpm);
     REQUIRE(result.bpmState == SmartState::Unknown);
+}
+
+namespace {
+// A WAV that carries both a real click pattern and ACID tempo metadata, used to prove that the
+// metadata answer suppresses the expensive DSP pass.
+juce::File writeAcidClickWav(TestDirectory& t, const juce::String& name, float tempo,
+                             double clickBpm, double seconds)
+{
+    juce::AudioBuffer<float> audio(1, (int) std::llround(seconds * 44100.0));
+    audio.clear();
+    const double interval = 60.0 / clickBpm;
+    for (double time = 0.05; time < seconds; time += interval)
+    {
+        const int start = (int) std::llround(time * 44100.0);
+        for (int i = 0; i < 1058 && start + i < audio.getNumSamples(); ++i)
+        {
+            const double x = (double) i / 44100.0;
+            audio.addSample(0, start + i,
+                            (float) (0.8 * std::exp(-x / 0.03)
+                                     * std::sin(2.0 * juce::MathConstants<double>::pi * 1200.0 * x)));
+        }
+    }
+    Bytes data;
+    data.v.reserve((size_t) audio.getNumSamples() * 2);
+    for (int i = 0; i < audio.getNumSamples(); ++i)
+    {
+        const int value = (int) std::lround(
+            juce::jlimit(-1.0f, 1.0f, audio.getSample(0, i)) * 32767.0f);
+        data.u16le((juce::uint16) value);
+    }
+    Bytes fmt; fmt.u16le(1); fmt.u16le(1); fmt.u32le(44100); fmt.u32le(88200);
+    fmt.u16le(2); fmt.u16le(16);
+    Bytes acid; acid.u32le(0); acid.u16le(60); acid.u16le(0); acid.u32le(0);
+    acid.u32le(8); acid.u16le(4); acid.u16le(4); acid.f32le(tempo);
+    Bytes body; chunk(body, "fmt ", fmt); chunk(body, "data", data); chunk(body, "acid", acid);
+    Bytes file; file.ascii("RIFF"); file.u32le((juce::uint32) body.v.size() + 4); file.ascii("WAVE");
+    file.v.insert(file.v.end(), body.v.begin(), body.v.end());
+    auto path = t.dir.getChildFile(name);
+    path.replaceWithData(file.v.data(), file.v.size());
+    return path;
+}
+} // namespace
+
+TEST_CASE("Rhythm analysis is requested only without a usable metadata tempo", "[smart][dsp]")
+{
+    REQUIRE(needsRhythmAnalysis({}));
+    SmartCandidate bpm;
+    bpm.field = SmartField::Bpm;
+    bpm.source = "wav_acid";
+    bpm.numericValue = 120.0;
+    bpm.status = CandidateStatus::Valid;
+    REQUIRE_FALSE(needsRhythmAnalysis({ bpm }));
+    bpm.status = CandidateStatus::Invalid;
+    REQUIRE(needsRhythmAnalysis({ bpm }));
+    bpm.status = CandidateStatus::Valid;
+    bpm.numericValue = 900.0;
+    REQUIRE(needsRhythmAnalysis({ bpm }));
+}
+TEST_CASE("A metadata tempo suppresses the DSP pass", "[smart][service][dsp]")
+{
+    TestDirectory t;
+    auto wav = writeAcidClickWav(t, "drum_groove_metadata.wav", 120.0f, 120.0, 4.0);
+    auto candidates = SmartAnalysisService::collectCandidates(recordFor(wav));
+    REQUIRE(std::none_of(candidates.begin(), candidates.end(), [](const SmartCandidate& c)
+    {
+        return c.source == "dsp";
+    }));
+    auto result = resolveSmart(candidates);
+    REQUIRE(result.bpm == Catch::Approx(120.0).epsilon(0.01));
+    REQUIRE(result.bpmSource == "wav_acid");
+    REQUIRE(result.structure.isEmpty());
 }

@@ -9,8 +9,9 @@ metadata filters are later slices.
 ## What runs
 
 `SmartAnalysisService` is a background thread owned by `MainComponent`. It reads
-metadata first, then decodes a bounded audio prefix for the rhythm DSP pass. It never
-touches measured Phase 1 features (`basicFeaturesVersion` stays 1).
+metadata first and, only when no usable metadata BPM exists, decodes a bounded audio
+prefix for the rhythm DSP pass. It never touches measured Phase 1 features
+(`basicFeaturesVersion` stays 1).
 
 Two modes:
 
@@ -154,6 +155,12 @@ metadata columns.
 reader. `core/smart/RhythmCandidates` maps its result to smart candidates. Nothing
 runs on the audio thread, and the pass uses no network, model weights or cache files.
 
+`needsRhythmAnalysis()` gates the pass: a valid metadata BPM from any source (name,
+WAV ACID, Apple Loops, ASD sidecar, REX2) suppresses it, and the extraction record is
+stored as `skipped`. Decoding is the expensive step, and the library treats DSP as a
+fallback rather than a second opinion, so a file with a known tempo does not pay for
+it. Structure from audio is not requested on its own.
+
 1. Frames of about 11.6 ms (`44100 / 512`, adapted to the file rate). Per channel
    spectra are averaged as powers, so anti-phase stereo is not cancelled.
 2. Log spectral flux, detrended by a local mean, normalised with the 95th percentile
@@ -206,7 +213,9 @@ name, not a tempo of its own. One-shot paths are instead used to count published
 false BPMs. Results are split by category and include structure, tempo state,
 coverage, grid strength and a correct / half-double / wrong classification.
 
-Measured on the owner's Splice library on 2026-11-09 (macOS Debug, native arm64):
+Measured on the owner's Splice library on 2026-11-09 (macOS Debug, native arm64).
+The evaluation calls the analyzer directly, so it covers the DSP path itself; in the
+app, loops with a usable metadata tempo never reach it.
 
 | Measure | Result |
 |---|---|

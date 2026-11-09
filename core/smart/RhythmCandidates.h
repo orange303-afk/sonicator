@@ -13,6 +13,10 @@ struct RhythmExtraction
     juce::String error;
 };
 RhythmExtraction extractRhythmCandidates(const SampleRecord&, const RhythmOptions& = {});
+// Decoding audio is the expensive part, and a reliable metadata tempo already answers the
+// question. The DSP pass therefore runs only when no usable BPM candidate exists. Structure from
+// audio is not requested on its own: the library treats DSP as a fallback, not a second opinion.
+bool needsRhythmAnalysis(const std::vector<SmartCandidate>& metadataCandidates);
 // True for formats the library can decode through JUCE's basic readers. Metadata-only containers
 // (RX2, SF2, RePatch and disc images) are deliberately excluded.
 bool hasDecodableAudioExtension(const juce::String& extensionWithoutDot);
