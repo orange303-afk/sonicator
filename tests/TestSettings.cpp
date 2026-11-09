@@ -198,3 +198,21 @@ TEST_CASE("Split defaults persist and clamp to the supported ranges", "[settings
     REQUIRE_FALSE(loaded.splitSameFolder);
     REQUIRE(loaded.splitMoveToTrash);
 }
+
+TEST_CASE("Extract defaults persist", "[settings][extract]")
+{
+    TestDirectory t; SettingsStore store(t.dir.getChildFile("settings.json"));
+    auto loaded = store.load();
+    REQUIRE(loaded.extractSameFolder);
+    REQUIRE_FALSE(loaded.extractNormalize);
+    REQUIRE(loaded.extractOutputFolder.isEmpty());
+    store.update([](AppSettings& s)
+    {
+        s.extractSameFolder = false; s.extractNormalize = true;
+        s.extractOutputFolder = "/tmp/extract-out";
+    });
+    loaded = store.load();
+    REQUIRE_FALSE(loaded.extractSameFolder);
+    REQUIRE(loaded.extractNormalize);
+    REQUIRE(loaded.extractOutputFolder == "/tmp/extract-out");
+}

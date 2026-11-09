@@ -22,6 +22,10 @@ struct AppSettings
     int splitMinPartMs = 100;
     bool splitSameFolder = true;
     bool splitMoveToTrash = false;
+    // Extract samples: one output folder shared by the batch, or each source's own folder.
+    bool extractSameFolder = true;
+    bool extractNormalize = false;
+    juce::String extractOutputFolder;
     // Preview panel toggles. Persisted so a restart keeps the same audition behaviour.
     bool midiPreview = false;
     bool skipSilence = false;

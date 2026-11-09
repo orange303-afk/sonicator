@@ -11,9 +11,11 @@
 #include "core/tagging/TaggingService.h"
 #include "core/tagging/AutoTagService.h"
 #include "core/split/SplitService.h"
+#include "core/extract/ExtractService.h"
 #include "core/settings/AppSettings.h"
 namespace sonicator {
 class SplitDialog;
+class ExtractDialog;
 class FavoritesSplitter final : public juce::Component
 {
 public:
@@ -105,13 +107,18 @@ private:
     std::unique_ptr<TaggingService> tagging;
     std::unique_ptr<AutoTagService> autoTag;
     std::unique_ptr<SplitService> splitter;
+    std::unique_ptr<ExtractService> extractor;
     juce::Component::SafePointer<juce::DialogWindow> splitDialog;
     juce::Component::SafePointer<SplitDialog> splitContent;
+    juce::Component::SafePointer<juce::DialogWindow> extractDialog;
+    juce::Component::SafePointer<ExtractDialog> extractContent;
     juce::StringArray pendingSplitScan;
     SplitOptions activeSplitOptions;
     juce::uint32 splitStartMs = 0;
     bool splitWasRunning = false;
     bool splitScanApproved = false;
+    juce::uint32 extractStartMs = 0;
+    bool extractWasRunning = false;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog, autoTagDialog;
     std::unique_ptr<DiscBrowserPanel> discBrowser;
@@ -173,6 +180,11 @@ private:
     void closeSplitDialog();
     void requestCloseSplit();
     bool isSplitRunning() const { return splitter != nullptr && splitter->progress().running; }
+    void startExtract(const std::vector<juce::File>& files);
+    void finishExtract();
+    void closeExtractDialog();
+    void requestCloseExtract();
+    bool isExtractRunning() const { return extractor != nullptr && extractor->progress().running; }
     void promptTagName(const juce::String& title, const juce::String& initial, std::function<void(juce::String)> onAccept);
     static bool contains(const std::vector<int64_t>& values, int64_t id);
     static void toggle(std::vector<int64_t>& values, int64_t id);

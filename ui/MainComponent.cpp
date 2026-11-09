@@ -1,6 +1,8 @@
 #include "MainComponent.h"
 #include "ui/tagging/AutoTagDialog.h"
 #include "ui/split/SplitDialog.h"
+#include "ui/extract/ExtractDialog.h"
+#include "core/extract/EmbeddedSamples.h"
 #include "core/scanner/FileScanner.h"
 #include "BinaryData.h"
 #include "core/database/PathRelocation.h"
@@ -77,6 +79,14 @@ class SplitDialogWindow final : public juce::DialogWindow
 {
 public:
     SplitDialogWindow() : juce::DialogWindow("Split by silence", theme::panel, true) {}
+    void closeButtonPressed() override { if (onClose) onClose(); }
+    void inputAttemptWhenModal() override {}
+    std::function<void()> onClose;
+};
+class ExtractDialogWindow final : public juce::DialogWindow
+{
+public:
+    ExtractDialogWindow() : juce::DialogWindow("Extract samples", theme::panel, true) {}
     void closeButtonPressed() override { if (onClose) onClose(); }
     void inputAttemptWhenModal() override {}
     std::function<void()> onClose;
@@ -438,6 +448,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         tagging = std::make_unique<TaggingService>(*writeRepo);
         autoTag = std::make_unique<AutoTagService>(*writeRepo);
         splitter = std::make_unique<SplitService>();
+        extractor = std::make_unique<ExtractService>();
         restoringSession = true;
         if (! appSettings.lastFolder.isEmpty()
             && juce::File(appSettings.lastFolder).isDirectory()
@@ -510,8 +521,14 @@ MainComponent::~MainComponent()
         splitDialog->setLookAndFeel(nullptr);
         closeSplitDialog();
     }
+    if (extractDialog != nullptr)
+    {
+        extractDialog->setLookAndFeel(nullptr);
+        closeExtractDialog();
+    }
     if (splitter) { splitter->cancel(); splitter->waitUntilFinished(-1); }
-    smart.reset(); indexer.reset(); tagging.reset(); autoTag.reset(); splitter.reset();
+    if (extractor) { extractor->cancel(); extractor->waitUntilFinished(-1); }
+    smart.reset(); indexer.reset(); tagging.reset(); autoTag.reset(); splitter.reset(); extractor.reset();
     setLookAndFeel(nullptr);
 }
 bool MainComponent::contains(const std::vector<int64_t>& values, int64_t id)
@@ -1586,7 +1603,8 @@ void MainComponent::startSplit(const std::vector<juce::File>& files)
         return;
     }
     if ((indexer && indexer->progress().running) || (smart && smart->progress().running)
-        || (tagging && tagging->progress().running) || (autoTag && autoTag->progress().running))
+        || (tagging && tagging->progress().running) || (autoTag && autoTag->progress().running)
+        || isExtractRunning())
     {
         status.setText("Wait for the background job to finish before splitting.", juce::dontSendNotification);
         return;
@@ -1694,6 +1712,127 @@ void MainComponent::requestCloseSplit()
     }
     if (splitContent->isFinished() && splitContent->onOk) splitContent->onOk();
     closeSplitDialog();
+}
+void MainComponent::startExtract(const std::vector<juce::File>& files)
+{
+    if (files.empty() || extractor == nullptr) return;
+    if (isExtractRunning())
+    {
+        status.setText("Extract is already running.", juce::dontSendNotification);
+        return;
+    }
+    if ((indexer && indexer->progress().running) || (smart && smart->progress().running)
+        || (tagging && tagging->progress().running) || (autoTag && autoTag->progress().running)
+        || isSplitRunning())
+    {
+        status.setText("Wait for the background job to finish before extracting.",
+                       juce::dontSendNotification);
+        return;
+    }
+    if (extractContent != nullptr)
+    {
+        if (extractDialog != nullptr) extractDialog->toFront(true);
+        return;
+    }
+    auto* dialog = new ExtractDialog(files, appSettings,
+        [safe = juce::Component::SafePointer<MainComponent>(this), files](ExtractOptions options) -> bool
+        {
+            if (safe == nullptr || safe->extractor == nullptr) return false;
+            safe->appSettings.extractSameFolder = options.sameFolder;
+            safe->appSettings.extractNormalize = options.normalize;
+            safe->appSettings.extractOutputFolder = options.outputFolder.getFullPathName();
+            try
+            {
+                safe->settingsStore.update([options](AppSettings& saved)
+                {
+                    saved.extractSameFolder = options.sameFolder;
+                    saved.extractNormalize = options.normalize;
+                    saved.extractOutputFolder = options.outputFolder.getFullPathName();
+                });
+            }
+            catch (const std::exception&)
+            {
+            }
+            if (! safe->extractor->start(files, options)) return false;
+            safe->extractStartMs = juce::Time::getMillisecondCounter();
+            safe->extractWasRunning = true;
+            safe->status.setText("Extracting samples from " + juce::String((int) files.size())
+                + " file(s)", juce::dontSendNotification);
+            return true;
+        });
+    dialog->onCancel = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr && safe->extractor != nullptr) safe->extractor->cancel();
+    };
+    extractContent = dialog;
+    auto* window = new ExtractDialogWindow();
+    window->setContentOwned(dialog, true);
+    window->setLookAndFeel(&look);
+    window->setUsingNativeTitleBar(false);
+    window->setResizable(false, false);
+    window->setSize(dialog->getWidth(), dialog->getHeight());
+    window->centreAroundComponent(this, window->getWidth(), window->getHeight());
+    window->onClose = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr) safe->requestCloseExtract();
+    };
+    extractDialog = window;
+    window->enterModalState(true, nullptr, true);
+}
+void MainComponent::finishExtract()
+{
+    if (extractor == nullptr) return;
+    const auto results = extractor->results();
+    const auto progress = extractor->progress();
+    int filesDone = 0, filesFailed = 0;
+    juce::StringArray details;
+    for (const auto& result : results)
+    {
+        if (result.state == ExtractFileState::extracted) ++filesDone;
+        else ++filesFailed;
+        if (result.state == ExtractFileState::failed && result.error.isNotEmpty())
+            details.add(result.source.getFileName() + ": " + result.error);
+        for (const auto& problem : result.problems)
+            details.add(result.source.getFileName() + ": " + problem);
+    }
+    if (filesFailed == 0 && details.isEmpty())
+        details.add("No problems.");
+    juce::String summary = "Extracted " + juce::String(progress.written) + " sample(s) from "
+        + juce::String(filesDone) + " of " + juce::String((int) results.size()) + " file(s).";
+    summary << "\nSkipped " << juce::String(progress.skippedEmpty) << " empty and "
+            << juce::String(progress.skippedSilent) << " silent.";
+    if (progress.failed > 0)
+        summary << "  " << juce::String(progress.failed) << " problem(s), see details.";
+    if (progress.cancelled)
+        summary << "\nCancelled; finished samples were kept.";
+    status.setText(summary.replace("\n", " "), juce::dontSendNotification);
+    status.setTooltip(details.joinIntoString("\n"));
+    if (extractContent != nullptr)
+        extractContent->showFinished(summary, details.joinIntoString("\n"),
+            progress.cancelled ? progress.fraction : 1.0);
+}
+void MainComponent::closeExtractDialog()
+{
+    if (extractDialog != nullptr)
+    {
+        extractDialog->exitModalState(0);
+        extractDialog = nullptr;
+    }
+    extractContent = nullptr;
+}
+void MainComponent::requestCloseExtract()
+{
+    if (extractContent == nullptr)
+    {
+        closeExtractDialog();
+        return;
+    }
+    if (extractContent->isRunning())
+    {
+        if (extractor != nullptr) extractor->cancel();
+        return;
+    }
+    closeExtractDialog();
 }
 void MainComponent::finishSplit()
 {
@@ -2008,13 +2147,14 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         allIgnored = allIgnored && ignored;
         if (ignored && ! readRepo->hasExactIgnore(record.filePath)) anyInherited = true;
     }
-    std::vector<juce::File> splitCandidates;
+    std::vector<juce::File> splitCandidates, extractCandidates;
     for (const auto& record : selection)
     {
         const juce::File file(record.filePath);
         if (! file.existsAsFile() || isPathIgnored(record.filePath, ignoredPaths)) continue;
         if (! FileScanner::isSupportedFormat(file) || FileScanner::isMetadataOnlyFormat(file)) continue;
         splitCandidates.push_back(file);
+        if (isEmbeddedSampleSource(file)) extractCandidates.push_back(file);
     }
     const auto assignments = readRepo->tagsForSamples(ids);
     std::map<int64_t, bool> allHave;
@@ -2046,6 +2186,9 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     menu.addItem(9008, splitCandidates.size() > 1
         ? "Split by silence (" + juce::String((int) splitCandidates.size()) + ")..."
         : juce::String("Split by silence..."), ! splitCandidates.empty());
+    menu.addItem(9010, extractCandidates.size() > 1
+        ? "Extract samples from " + juce::String((int) extractCandidates.size()) + " files..."
+        : juce::String("Extract samples..."), ! extractCandidates.empty());
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
                          allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
@@ -2083,12 +2226,13 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
-         ignoredPaths, allIgnored, anyInherited, splitCandidates](int result)
+         ignoredPaths, allIgnored, anyInherited, splitCandidates, extractCandidates](int result)
         {
             if (safe == nullptr || result == 0) return;
-            if (safe->isSplitRunning() && result != 9000 && result != 9002 && result != 9004)
+            if ((safe->isSplitRunning() || safe->isExtractRunning())
+                && result != 9000 && result != 9002 && result != 9004)
             {
-                safe->status.setText("Wait for Split to finish.", juce::dontSendNotification);
+                safe->status.setText("Wait for the running job to finish.", juce::dontSendNotification);
                 return;
             }
             try
@@ -2119,6 +2263,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                 else if (result == 9008)
                 {
                     safe->startSplit(splitCandidates);
+                }
+                else if (result == 9010)
+                {
+                    safe->startExtract(extractCandidates);
                 }
                 else if (result == 9009)
                 {
@@ -2241,11 +2389,14 @@ void MainComponent::timerCallback()
     const auto tg = tagging ? tagging->progress() : TaggingProgress {};
     const auto at = autoTag ? autoTag->progress() : AutoTagProgress {};
     const auto sp = splitter ? splitter->progress() : SplitProgress {};
+    const auto ep = extractor ? extractor->progress() : ExtractProgress {};
     const bool smartRunning = s.running;
     const bool taggingRunning = tg.running;
     const bool autoTagRunning = at.running;
     const bool splitRunning = sp.running;
-    const bool busy = p.running || smartRunning || taggingRunning || autoTagRunning || splitRunning;
+    const bool extractRunning = ep.running;
+    const bool busy = p.running || smartRunning || taggingRunning || autoTagRunning
+        || splitRunning || extractRunning;
     pause.setEnabled(! splitRunning && (p.running || smartRunning)); cancel.setEnabled(busy);
     addFolder.setEnabled(! busy); rescan.setEnabled(! busy);
     reanalyze.setEnabled(! busy); newFiles.setEnabled(! busy);
@@ -2257,6 +2408,18 @@ void MainComponent::timerCallback()
             splitContent->setProgress(sp, (juce::Time::getMillisecondCounter() - splitStartMs) / 1000.0);
         status.setText("Splitting " + juce::String(sp.processed) + "/" + juce::String(sp.total)
             + (sp.current.isNotEmpty() ? "  |  " + sp.current : juce::String()),
+            juce::dontSendNotification);
+        status.setTooltip(status.getText());
+    }
+    else if (extractRunning || extractWasRunning)
+    {
+        if (extractRunning && extractContent != nullptr)
+            extractContent->setProgress(ep,
+                (juce::Time::getMillisecondCounter() - extractStartMs) / 1000.0);
+        status.setText("Extracting " + juce::String(ep.processedFiles) + "/"
+            + juce::String(ep.totalFiles) + " file(s)  |  "
+            + juce::String(ep.written) + " sample(s)"
+            + (ep.current.isNotEmpty() ? "  |  " + ep.current : juce::String()),
             juce::dontSendNotification);
         status.setTooltip(status.getText());
     }
@@ -2358,6 +2521,8 @@ void MainComponent::timerCallback()
     autoTagWasRunning = autoTagRunning;
     if (splitWasRunning && ! splitRunning) finishSplit();
     splitWasRunning = splitRunning;
+    if (extractWasRunning && ! extractRunning) finishExtract();
+    extractWasRunning = extractRunning;
     if (! pendingSplitScan.isEmpty() && splitScanApproved && indexer && ! indexer->progress().running
         && ! (smart && smart->progress().running)
         && ! (tagging && tagging->progress().running)

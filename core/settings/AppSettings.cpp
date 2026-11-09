@@ -66,6 +66,9 @@ AppSettings SettingsStore::load() const
         readNumber("splitMinPart", (double) settings.splitMinPartMs));
     settings.splitSameFolder = readBool("splitSameFolder", settings.splitSameFolder);
     settings.splitMoveToTrash = readBool("splitMoveToTrash", settings.splitMoveToTrash);
+    settings.extractSameFolder = readBool("extractSameFolder", settings.extractSameFolder);
+    settings.extractNormalize = readBool("extractNormalize", settings.extractNormalize);
+    settings.extractOutputFolder = object->getProperty("extractOutputFolder").toString();
     settings.skipSilence = readBool("skipSilence", settings.skipSilence);
     settings.autoPreview = readBool("autoPreview", settings.autoPreview);
     settings.loopPreview = readBool("loopPreview", settings.loopPreview);
@@ -109,6 +112,9 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("splitMinPart", settings.splitMinPartMs);
     object->setProperty("splitSameFolder", settings.splitSameFolder);
     object->setProperty("splitMoveToTrash", settings.splitMoveToTrash);
+    object->setProperty("extractSameFolder", settings.extractSameFolder);
+    object->setProperty("extractNormalize", settings.extractNormalize);
+    object->setProperty("extractOutputFolder", settings.extractOutputFolder);
     object->setProperty("midiPreview", settings.midiPreview);
     object->setProperty("skipSilence", settings.skipSilence);
     object->setProperty("autoPreview", settings.autoPreview);

@@ -7,6 +7,7 @@
 #include "ui/settings/SettingsPanel.h"
 #include "ui/tagging/AutoTagDialog.h"
 #include "ui/split/SplitDialog.h"
+#include "ui/extract/ExtractDialog.h"
 #include "ui/settings/RelocateFoldersPanel.h"
 #include "ui/shell/WindowBounds.h"
 #include <set>
@@ -540,4 +541,65 @@ TEST_CASE("Split dialog swaps Split and Cancel for OK after the job", "[ui][spli
     REQUIRE_FALSE(cancel->isVisible());
     REQUIRE(ok->isVisible());
     REQUIRE(dialog.isFinished());
+}
+
+TEST_CASE("Extract dialog exposes the persisted defaults", "[ui][extract]")
+{
+    AppSettings settings;
+    settings.extractSameFolder = false;
+    settings.extractNormalize = true;
+    settings.extractOutputFolder = "/tmp/out";
+    int accepted = 0;
+    ExtractDialog dialog({ juce::File("/tmp/bank.sf2") }, settings,
+                         [&](ExtractOptions) -> bool { ++accepted; return true; });
+    const auto options = dialog.currentOptions();
+    REQUIRE_FALSE(options.sameFolder);
+    REQUIRE(options.normalize);
+    REQUIRE(options.outputFolder == juce::File("/tmp/out"));
+    REQUIRE(dialog.findChildWithID("extractFolder") != nullptr);
+    REQUIRE(dialog.findChildWithID("extractBrowse") != nullptr);
+    REQUIRE(dialog.findChildWithID("extractSameFolder") != nullptr);
+    REQUIRE(dialog.findChildWithID("extractNormalize") != nullptr);
+    REQUIRE(dialog.findChildWithID("extractAccept") != nullptr);
+    REQUIRE(dialog.findChildWithID("extractCancel") != nullptr);
+    REQUIRE(dialog.findChildWithID("extractOk") != nullptr);
+    REQUIRE(dialog.findChildWithID("extractProgress") != nullptr);
+    REQUIRE(dialog.findChildWithID("extractDetails") != nullptr);
+}
+
+TEST_CASE("Extract dialog swaps Extract and Cancel for OK and reveals details", "[ui][extract]")
+{
+    ExtractDialog dialog({ juce::File("/tmp/bank.sf2") }, AppSettings{},
+                         [](ExtractOptions) -> bool { return true; });
+    auto* accept = dialog.findChildWithID("extractAccept");
+    auto* cancel = dialog.findChildWithID("extractCancel");
+    auto* ok = dialog.findChildWithID("extractOk");
+    auto* progress = dialog.findChildWithID("extractProgress");
+    auto* details = dialog.findChildWithID("extractDetails");
+    auto* problems = dialog.findChildWithID("extractProblems");
+    REQUIRE(accept != nullptr); REQUIRE(cancel != nullptr); REQUIRE(ok != nullptr);
+    REQUIRE(progress != nullptr); REQUIRE(details != nullptr); REQUIRE(problems != nullptr);
+    REQUIRE(accept->isVisible());
+    REQUIRE_FALSE(ok->isVisible());
+    dialog.enterRunningState();
+    REQUIRE_FALSE(accept->isVisible());
+    REQUIRE(cancel->isVisible());
+    ExtractProgress state;
+    state.totalFiles = 2; state.processedFiles = 1; state.fraction = 0.5;
+    state.current = "bank.sf2";
+    dialog.setProgress(state, 1.0);
+    dialog.showFinished("Extracted 3 samples", "bank.sf2: cannot read", 1.0);
+    REQUIRE_FALSE(accept->isVisible());
+    REQUIRE_FALSE(cancel->isVisible());
+    REQUIRE(ok->isVisible());
+    REQUIRE(dialog.isFinished());
+    auto* toggle = dynamic_cast<juce::ToggleButton*>(details);
+    REQUIRE(toggle != nullptr);
+    REQUIRE(toggle->isEnabled());
+    REQUIRE_FALSE(problems->isVisible());
+    toggle->setToggleState(true, juce::sendNotification);
+    REQUIRE(problems->isVisible());
+    auto* problemsText = dynamic_cast<juce::TextEditor*>(problems);
+    REQUIRE(problemsText != nullptr);
+    REQUIRE(problemsText->getText().contains("cannot read"));
 }
