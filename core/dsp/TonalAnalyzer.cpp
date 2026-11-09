@@ -11,8 +11,6 @@ constexpr int pitchClassCount = 12;
 constexpr double minAnalysisSeconds = 0.20;
 constexpr double silenceRms = 1.0e-5;
 constexpr double chromaKernelSigma = 0.5;
-constexpr int tuningHistogramBins = 120;
-constexpr int medianRadius = 4; // ~0.2 s at 44.1 kHz with a 1024 hop
 
 // Krumhansl–Kessler (1982) and Temperley (2001) key profiles, C at index 0.
 constexpr double krumhanslMajor[pitchClassCount] =
@@ -177,7 +175,7 @@ std::vector<Frame> collectFrames(const juce::AudioBuffer<float>& audio, double s
             {
                 if (power[(size_t) k] < power[(size_t) (k - 1)]
                     || power[(size_t) k] <= power[(size_t) (k + 1)]
-                    || power[(size_t) k] <= frameMaximum * 0.01)
+                    || power[(size_t) k] <= frameMaximum * options.peakThreshold)
                     continue;
                 const double left = std::log(std::max(power[(size_t) (k - 1)], 1.0e-30));
                 const double centre = std::log(std::max(power[(size_t) k], 1.0e-30));
@@ -197,46 +195,38 @@ std::vector<Frame> collectFrames(const juce::AudioBuffer<float>& audio, double s
 
 double estimateTuningCents(const std::vector<Frame>& frames, const TonalOptions& options)
 {
-    std::array<double, tuningHistogramBins> histogram {};
-    double total = 0.0;
+    // Circular mean of the strongest low/mid peak per tonal frame. Averaging in the phase domain
+    // rejects drums and noise, whose deviations are spread across the circle, instead of letting
+    // them pull a histogram to an arbitrary offset.
+    double sumSin = 0.0, sumCos = 0.0, weightSum = 0.0;
     for (const auto& frame : frames)
     {
         if (frame.rms < silenceRms || frame.flatness >= options.percussiveFlatness) continue;
+        const Peak* strongest = nullptr;
         for (const auto& peak : frame.peaks)
         {
-            if (peak.frequency < options.tuningMinFrequency
-                || peak.frequency > options.tuningMaxFrequency)
-                continue;
-            const double midi = 69.0 + 12.0 * std::log2(peak.frequency / 440.0);
-            const double deviation = midi - std::round(midi);
-            int bin = (int) std::floor((deviation + 0.5) * tuningHistogramBins);
-            bin = std::clamp(bin, 0, tuningHistogramBins - 1);
-            histogram[(size_t) bin] += std::sqrt(peak.magnitude);
-            total += std::sqrt(peak.magnitude);
+            if (peak.frequency < 70.0 || peak.frequency > 1200.0) continue;
+            if (strongest == nullptr || peak.magnitude > strongest->magnitude)
+                strongest = &peak;
         }
+        if (strongest == nullptr) continue;
+        const double midi = 69.0 + 12.0 * std::log2(strongest->frequency / 440.0);
+        const double deviation = midi - std::round(midi);
+        const double weight = std::sqrt(strongest->magnitude);
+        sumSin += weight * std::sin(2.0 * juce::MathConstants<double>::pi * deviation);
+        sumCos += weight * std::cos(2.0 * juce::MathConstants<double>::pi * deviation);
+        weightSum += weight;
     }
-    if (total <= 1.0e-20) return 0.0;
-    std::array<double, tuningHistogramBins> smoothed {};
-    for (int i = 0; i < tuningHistogramBins; ++i)
-        for (int d = -2; d <= 2; ++d)
-            smoothed[(size_t) i] += histogram[(size_t) ((i + d + tuningHistogramBins)
-                                                        % tuningHistogramBins)];
-    int best = 0;
-    for (int i = 1; i < tuningHistogramBins; ++i)
-        if (smoothed[(size_t) i] > smoothed[(size_t) best]) best = i;
-    const double left = smoothed[(size_t) ((best - 1 + tuningHistogramBins) % tuningHistogramBins)];
-    const double centre = smoothed[(size_t) best];
-    const double right = smoothed[(size_t) ((best + 1) % tuningHistogramBins)];
-    const double denominator = left - 2.0 * centre + right;
-    const double delta = std::abs(denominator) > 1.0e-12
-                             ? 0.5 * (left - right) / denominator : 0.0;
-    const double deviation = ((double) best + 0.5 + std::clamp(delta, -0.5, 0.5))
-                                 / tuningHistogramBins - 0.5;
+    if (weightSum <= 1.0e-20) return 0.0;
+    const double strength = std::sqrt(sumSin * sumSin + sumCos * sumCos) / weightSum;
+    if (strength < 0.05) return 0.0;
+    const double deviation = std::atan2(sumSin, sumCos)
+                             / (2.0 * juce::MathConstants<double>::pi);
     return deviation * 100.0;
 }
 
 std::vector<ChromaFrame> buildChroma(const std::vector<Frame>& frames, double tuningCents,
-                                     const TonalOptions& options)
+                                     const TonalOptions& options, Chroma& bassChroma)
 {
     std::vector<ChromaFrame> out;
     out.reserve(frames.size());
@@ -246,10 +236,21 @@ std::vector<ChromaFrame> buildChroma(const std::vector<Frame>& frames, double tu
         if (frame.rms >= silenceRms)
         {
             const double tonalWeight = clamp01(1.0 - frame.flatness / options.percussiveFlatness);
-            const double transientWeight = 1.0 / (1.0 + 4.0 * frame.flux);
+            const double transientWeight = 1.0 / (1.0 + 8.0 * frame.flux);
             chromaFrame.weight = tonalWeight * transientWeight;
             if (chromaFrame.weight > 0.0)
             {
+                double frameMaximum = 0.0;
+                for (const auto& peak : frame.peaks)
+                    frameMaximum = std::max(frameMaximum, peak.magnitude);
+                const Peak* bassPeak = nullptr;
+                for (const auto& peak : frame.peaks)
+                {
+                    if (peak.frequency < 40.0 || peak.frequency > 300.0) continue;
+                    if (peak.magnitude < frameMaximum * 0.01) continue;
+                    if (bassPeak == nullptr || peak.magnitude > bassPeak->magnitude)
+                        bassPeak = &peak;
+                }
                 for (const auto& peak : frame.peaks)
                 {
                     const double midi = 69.0 + 12.0 * std::log2(peak.frequency / 440.0)
@@ -260,8 +261,38 @@ std::vector<ChromaFrame> buildChroma(const std::vector<Frame>& frames, double tu
                                                    * (deviation / chromaKernelSigma));
                     int pitchClass = ((int) nearest % pitchClassCount + pitchClassCount)
                                      % pitchClassCount;
-                    chromaFrame.chroma[(size_t) pitchClass] += peak.magnitude * peak.magnitude
-                                                               * kernel * chromaFrame.weight;
+                    // Whitening against the frame maximum keeps the bass and the strongest
+                    // partial from drowning the rest of the chord.
+                    const double relative = frameMaximum > 0.0
+                                                ? peak.magnitude / frameMaximum : 0.0;
+                    chromaFrame.chroma[(size_t) pitchClass] += std::pow(relative,
+                                                                        options.magnitudePower)
+                                                               * kernel;
+                }
+                if (options.normalizeFrames)
+                {
+                    double norm = 0.0;
+                    for (double value : chromaFrame.chroma) norm += value * value;
+                    norm = std::sqrt(norm);
+                    if (norm > 1.0e-12)
+                        for (double& value : chromaFrame.chroma) value /= norm;
+                }
+                for (double& value : chromaFrame.chroma) value *= chromaFrame.weight;
+                if (bassPeak != nullptr)
+                {
+                    const double midi = 69.0 + 12.0 * std::log2(bassPeak->frequency / 440.0)
+                                        - tuningCents / 100.0;
+                    const double nearest = std::round(midi);
+                    const double deviation = midi - nearest;
+                    const double kernel = std::exp(-0.5 * (deviation / chromaKernelSigma)
+                                                   * (deviation / chromaKernelSigma));
+                    int pitchClass = ((int) nearest % pitchClassCount + pitchClassCount)
+                                     % pitchClassCount;
+                    const double relative = frameMaximum > 0.0
+                                                ? bassPeak->magnitude / frameMaximum : 0.0;
+                    bassChroma[(size_t) pitchClass] += std::pow(relative,
+                                                                options.magnitudePower)
+                                                       * kernel * chromaFrame.weight;
                 }
             }
         }
@@ -270,7 +301,7 @@ std::vector<ChromaFrame> buildChroma(const std::vector<Frame>& frames, double tu
     return out;
 }
 
-std::vector<KeyScore> scoreKeys(const Chroma& chroma)
+std::vector<KeyScore> scoreKeys(const Chroma& chroma, const Chroma& bassChroma, double bassWeight)
 {
     std::vector<KeyScore> scores;
     scores.reserve(24);
@@ -289,7 +320,8 @@ std::vector<KeyScore> scoreKeys(const Chroma& chroma)
             KeyScore score;
             score.krumhansl = pearson(chroma, krumhansl);
             score.temperley = pearson(chroma, temperley);
-            score.score = 0.5 * (score.krumhansl + score.temperley);
+            score.score = 0.5 * (score.krumhansl + score.temperley)
+                          + bassWeight * bassChroma[(size_t) tonic];
             score.tonic = tonic;
             score.mode = major ? "major" : "minor";
             scores.push_back(score);
@@ -628,10 +660,12 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
     }
 
     result.tuningCents = estimateTuningCents(frames, options);
-    const auto chromaFrames = buildChroma(frames, result.tuningCents, options);
+    Chroma bassChroma {};
+    const auto chromaFrames = buildChroma(frames, result.tuningCents, options, bassChroma);
     if (chromaFrames.empty()) return result;
 
     const int frameCount = (int) chromaFrames.size();
+    const int radius = std::max(0, options.medianFrames);
     Chroma summed {};
     double rawEnergy = 0.0, medianEnergy = 0.0, weightSum = 0.0;
     int audibleFrames = 0;
@@ -648,8 +682,8 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
         for (int index = 0; index < frameCount; ++index)
         {
             window.clear();
-            const int low = std::max(0, index - medianRadius);
-            const int high = std::min(frameCount - 1, index + medianRadius);
+            const int low = std::max(0, index - radius);
+            const int high = std::min(frameCount - 1, index + radius);
             for (int j = low; j <= high; ++j)
                 window.push_back(chromaFrames[(size_t) j].chroma[(size_t) pitchClass]);
             const auto middle = window.begin() + (std::ptrdiff_t) (window.size() / 2);
@@ -673,7 +707,15 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
     }
     for (double& value : summed) value /= norm;
 
-    const auto scores = scoreKeys(summed);
+    double bassNorm = 0.0;
+    for (double value : bassChroma) bassNorm += value * value;
+    bassNorm = std::sqrt(bassNorm);
+    if (bassNorm > 1.0e-12)
+        for (double& value : bassChroma) value /= bassNorm;
+
+    result.chroma = summed;
+    result.bassChroma = bassChroma;
+    const auto scores = scoreKeys(summed, bassChroma, options.bassWeight);
     const auto best = *std::max_element(scores.begin(), scores.end(),
         [](const KeyScore& a, const KeyScore& b) { return a.score < b.score; });
     const KeyScore* runnerUp = nullptr;
@@ -716,6 +758,25 @@ KeyAnalysis TonalAnalyzer::analyzeKey(const juce::AudioBuffer<float>& audio, dou
     if (tonicMargin < options.minTonicMargin)
     {
         result.explanation = explanation + " (tonic dispute)";
+        return result;
+    }
+    // A relative major/minor pair shares every scale degree; the profiles cannot settle the tonic
+    // without a clear margin. Below it the honest answer is "no key", not an invented tonic.
+    const KeyScore* relativeRunner = nullptr;
+    for (const auto& score : scores)
+    {
+        if (score.tonic == best.tonic) continue;
+        const bool relative = (best.mode == "major" && score.mode == "minor"
+                               && (best.tonic + 9) % 12 == score.tonic)
+                           || (best.mode == "minor" && score.mode == "major"
+                               && (score.tonic + 9) % 12 == best.tonic);
+        if (relative && (relativeRunner == nullptr || score.score > relativeRunner->score))
+            relativeRunner = &score;
+    }
+    if (relativeRunner != nullptr
+        && best.score - relativeRunner->score < options.relativeMargin)
+    {
+        result.explanation = explanation + " (relative major/minor tonic dispute)";
         return result;
     }
     const double modeMargin = sameTonicOtherMode != nullptr

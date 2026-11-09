@@ -325,14 +325,15 @@ TEST_CASE("Rhythm analysis is requested only without a usable metadata tempo", "
     bpm.numericValue = 900.0;
     REQUIRE(needsRhythmAnalysis({ bpm }));
 }
-TEST_CASE("A metadata tempo suppresses the DSP pass", "[smart][service][dsp]")
+TEST_CASE("A metadata tempo suppresses the DSP rhythm pass", "[smart][service][dsp]")
 {
     TestDirectory t;
     auto wav = writeAcidClickWav(t, "drum_groove_metadata.wav", 120.0f, 120.0, 4.0);
     auto candidates = SmartAnalysisService::collectCandidates(recordFor(wav));
     REQUIRE(std::none_of(candidates.begin(), candidates.end(), [](const SmartCandidate& c)
     {
-        return c.source == "dsp";
+        return c.source == "dsp"
+            && (c.field == SmartField::Bpm || c.field == SmartField::Structure);
     }));
     auto result = resolveSmart(candidates);
     REQUIRE(result.bpm == Catch::Approx(120.0).epsilon(0.01));
