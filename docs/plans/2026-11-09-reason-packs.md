@@ -4,7 +4,7 @@
 - [x] Ограниченный парсер CMB/REPATCH и распознавание ReFill; синтетические тесты.
 - [x] Scanner, metadata-only indexing и однократное добавление Packs.
 - [x] Карточка Reason и прослушивание локальных ссылок без воспроизведения патча.
-- [ ] Полная проверка, обзор ветки, graphify, ff merge/push и перезапуск.
+- [x] Полная проверка, обзор ветки, graphify, ff merge/push и перезапуск.
 
 Спецификация: утверждённый план пользователя в сессии от 2026-11-09.
 Не декодировать ReFill; CMB не включать в Extract samples; не менять существующие форматы.
@@ -30,3 +30,4 @@ Final: fixed ложное исключение обычных Audio Previews р�
 Ruling: Reason CMB/REPATCH/RFL не получают full-file SHA, чтобы ограничение чтения действовало и при индексации; цена: эти metadata-карточки не участвуют в группировке байтовых дублей. Обычные аудиофайлы хешируются без изменений.
 Ruling: установленный абсолютный Packs-корень подтверждает контекст; у скопированных паков demo-папки исключаются только при наличии читаемого CMB/REPATCH в родительской папке (поиск глубиной 3, 2048 записей). Одних имён Packs/_samples недостаточно; цена: необычно вложенные/огромные скопированные паки могут сохранить демо в каталоге.
 Runtime acceptance: reasonPacksAdded=true, один Packs root, 1140 CMB / 10 REPATCH / 537 WAV / 136 RX2 / 7 AIF / 120 обычных MP3, 0 файлов из demo-папок. Первое автосканирование завершено без ошибок.
+Final integration: ff merge feature/reason-packs → main; сборка Sonicator/SonicatorTests и ctest на main passed (37.51 s), 465 test cases. graphify update . выполнен (AST-only). Приложение перезапущено из build/Sonicator_artefacts/Debug/SONICATOR.app (новый PID 35511). Deferred minors: none.
