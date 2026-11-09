@@ -296,6 +296,7 @@ TEST_CASE("SmartAnalysisService::collect extracts genre even on corrupted audio 
 {
     TestDirectory t;
     auto genreDir = t.dir.getChildFile("Techno");
+    genreDir.createDirectory();
     auto file = genreDir.getChildFile("corrupt.wav");
     file.replaceWithText("not real audio content");
 
