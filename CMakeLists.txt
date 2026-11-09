@@ -32,7 +32,7 @@ if(NOT MSVC)
 endif()
 add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/database/Database.cpp core/database/PathRelocation.cpp core/database/SearchSyntax.cpp core/database/SampleRepository.cpp core/settings/AppSettings.cpp
-    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/dsp/RhythmAnalyzer.cpp core/dsp/AnalysisAudio.cpp core/dsp/TonalAnalyzer.cpp core/dsp/AcousticFeatures.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/SampleAudition.cpp core/audio/ContainerValidation.cpp
+    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/dsp/RhythmAnalyzer.cpp core/dsp/AnalysisAudio.cpp core/dsp/TonalAnalyzer.cpp core/dsp/AcousticFeatures.cpp core/dsp/FastAcousticRules.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/SampleAudition.cpp core/audio/ContainerValidation.cpp
     core/export/AudioExporter.cpp core/export/SelectionExporter.cpp core/export/ExternalFileDrag.cpp
     core/extract/EmbeddedSamples.cpp core/extract/ExtractService.cpp
     core/indexing/IndexingService.cpp core/split/SplitService.cpp core/split/SilenceDetector.cpp
