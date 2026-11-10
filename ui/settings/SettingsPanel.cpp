@@ -111,9 +111,23 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     audio.onClick = [this] { if (onShowAudio) onShowAudio(); };
     close.onClick = [this]
     {
+        if (onClose) { onClose(); return; }
         if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
     };
     setSize(560,760);
+}
+void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
+{
+    pluginMode = shouldUsePluginMode;
+    const std::array<juce::Component*,14> hidden {
+        &scaleLabel, &scaleBox, &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
+        &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
+        &audioHeading, &audio, &contributeDataToggle };
+    for (auto* c : hidden)
+        c->setVisible(! pluginMode);
+    close.setVisible(pluginMode);
+    setSize(560, pluginMode ? 600 : 760);
+    resized();
 }
 void SettingsPanel::notifySettings()
 {
@@ -231,38 +245,45 @@ void SettingsPanel::resized()
     add(24, 0, false, [this](juce::Rectangle<int> area) { title.setBounds(area); });
     section(appearance, 12);
     row(themeLabel, themeBox, 4);
-    row(scaleLabel, scaleBox, 4);
+    if (scaleLabel.isVisible())
+        row(scaleLabel, scaleBox, 4);
     section(languageHeading, 14);
     row(languageLabel, languageBox, 4);
     add(30, 6, false, [this](juce::Rectangle<int> area) { languageNote.setBounds(area); });
 
-    section(libraryHeading, 14);
-    add(30, 4, false, [this](juce::Rectangle<int> area)
+    if (libraryHeading.isVisible())
     {
-        databaseKey.setBounds(area.removeFromLeft(140));
-        databaseFieldBounds = area;
-        databaseLabel.setBounds(area.reduced(0, 4));
-    });
-    add(30, 6, false, [this](juce::Rectangle<int> area)
-    {
-        auto right = area.withTrimmedLeft(140);
-        const auto width = (right.getWidth() - 16) / 3;
-        moveDatabase.setBounds(right.removeFromLeft(width));
-        right.removeFromLeft(8);
-        openDatabase.setBounds(right.removeFromLeft(width));
-        right.removeFromLeft(8);
-        relocateDatabase.setBounds(right);
-    });
-    add(30, 4, false, [this](juce::Rectangle<int> area)
-    {
-        backupDatabase.setBounds(area.withTrimmedLeft(140).removeFromLeft(180));
-    });
-    add(32, 6, false, [this](juce::Rectangle<int> area) { libraryNote.setBounds(area.withTrimmedLeft(140)); });
-    add(24, 4, false, [this](juce::Rectangle<int> area) { databaseStatus.setBounds(area.withTrimmedLeft(140)); });
-    add(26, 4, false, [this](juce::Rectangle<int> area) { contributeDataToggle.setBounds(area.withTrimmedLeft(140)); });
+        section(libraryHeading, 14);
+        add(30, 4, false, [this](juce::Rectangle<int> area)
+        {
+            databaseKey.setBounds(area.removeFromLeft(140));
+            databaseFieldBounds = area;
+            databaseLabel.setBounds(area.reduced(0, 4));
+        });
+        add(30, 6, false, [this](juce::Rectangle<int> area)
+        {
+            auto right = area.withTrimmedLeft(140);
+            const auto width = (right.getWidth() - 16) / 3;
+            moveDatabase.setBounds(right.removeFromLeft(width));
+            right.removeFromLeft(8);
+            openDatabase.setBounds(right.removeFromLeft(width));
+            right.removeFromLeft(8);
+            relocateDatabase.setBounds(right);
+        });
+        add(30, 4, false, [this](juce::Rectangle<int> area)
+        {
+            backupDatabase.setBounds(area.withTrimmedLeft(140).removeFromLeft(180));
+        });
+        add(32, 6, false, [this](juce::Rectangle<int> area) { libraryNote.setBounds(area.withTrimmedLeft(140)); });
+        add(24, 4, false, [this](juce::Rectangle<int> area) { databaseStatus.setBounds(area.withTrimmedLeft(140)); });
+        add(26, 4, false, [this](juce::Rectangle<int> area) { contributeDataToggle.setBounds(area.withTrimmedLeft(140)); });
+    }
 
-    section(audioHeading, 14);
-    add(30, 4, false, [this](juce::Rectangle<int> area) { audio.setBounds(area.withTrimmedLeft(140)); });
+    if (audioHeading.isVisible())
+    {
+        section(audioHeading, 14);
+        add(30, 4, false, [this](juce::Rectangle<int> area) { audio.setBounds(area.withTrimmedLeft(140)); });
+    }
 
     section(aboutHeading, 14);
     add(24, 2, false, [this](juce::Rectangle<int> area) { productLabel.setBounds(area); });
@@ -275,6 +296,8 @@ void SettingsPanel::resized()
     });
     add(24, 6, false, [this](juce::Rectangle<int> area) { supportLabel.setBounds(area); });
     add(20, 2, false, [this](juce::Rectangle<int> area) { kofi.setBounds(area); });
+    if (close.isVisible())
+        add(30, 12, false, [this](juce::Rectangle<int> area) { close.setBounds(area.removeFromRight(110)); });
 
     int fixedHeight = 0, stretchCount = 0;
     for (const auto& r : rows)

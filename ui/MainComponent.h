@@ -16,6 +16,7 @@
 namespace sonicator {
 class SplitDialog;
 class ExtractDialog;
+class SettingsPanel;
 class FavoritesSplitter final : public juce::Component
 {
 public:
@@ -38,10 +39,14 @@ class MainComponent final : public juce::Component,
 {
 public:
     static juce::File defaultDatabaseFile();
+    // hostEngine and embeddedUi are used by the DAW plugin: the processor owns the audio engine
+    // (no device is opened) and dialogs render inside the editor instead of separate windows.
     explicit MainComponent(const juce::File& databaseFile = defaultDatabaseFile(),
                            bool openDevice = true,
                            AppSettings initialSettings = {},
-                           juce::File settingsFile = {});
+                           juce::File settingsFile = {},
+                           AudioEngine* hostEngine = nullptr,
+                           bool embeddedUi = false);
     ~MainComponent() override;
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -77,7 +82,9 @@ private:
     AppSettings appSettings;
     SettingsStore settingsStore;
     bool brandedLogo = false;
-    AudioEngine engine;
+    AudioEngine ownedEngine;
+    AudioEngine& engine;
+    bool embeddedUi = false;
     PreviewPanel preview;
     FileListPanel library;
     FolderTree folders;
@@ -124,6 +131,8 @@ private:
     bool extractWasRunning = false;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog, autoTagDialog;
+    juce::Component::SafePointer<juce::Component> embeddedSettingsHost;
+    juce::Component::SafePointer<SettingsPanel> embeddedSettingsPanel;
     std::unique_ptr<DiscBrowserPanel> discBrowser;
     int pageOffset = 0, catalogCount = 0, pageSize = 10000;
     bool wasRunning = false, smartWasRunning = false, taggingWasRunning = false;
@@ -135,6 +144,8 @@ private:
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
     void timerCallback() override;
     void darkModeSettingChanged() override;
+    void showEmbeddedSettings();
+    void closeEmbeddedSettings();
     void chooseFolder();
     void requestScan(bool reanalyze);
     void scanRoots(bool force, bool newOnly = false);

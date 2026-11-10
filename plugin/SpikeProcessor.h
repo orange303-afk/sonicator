@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "core/audio/AudioEngine.h"
 
 namespace sonicator::spike {
 // Technical spike only: a silent instrument whose editor hosts the existing MainComponent.
@@ -8,6 +9,8 @@ class SpikeProcessor final : public juce::AudioProcessor
 {
 public:
     static constexpr const char* productName = "Sonicator Spike";
+    // The engine lives in the processor so preview audio and host MIDI survive editor closes.
+    sonicator::AudioEngine& engine() { return hostEngine; }
 
     SpikeProcessor();
     ~SpikeProcessor() override = default;
@@ -33,6 +36,7 @@ public:
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
 
 private:
+    sonicator::AudioEngine hostEngine { false };
     // Hosts that show both the parameter list and generic controls need a tree; the spike has
     // no parameters yet.
     juce::AudioProcessorValueTreeState parameters { *this, nullptr, "Parameters", {} };

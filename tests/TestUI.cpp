@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "ui/MainComponent.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/library/SearchField.h"
 #include "ui/preview/PreviewPanel.h"
@@ -677,4 +678,46 @@ TEST_CASE("Extract tuning is only offered when a module is selected", "[ui][extr
     REQUIRE(enabled->isEnabled());
     REQUIRE(enabled->getToggleState());
     REQUIRE(modules.currentOptions().tuneToSong);
+}
+TEST_CASE("Embedded settings stay inside the editor and survive a theme change", "[ui][plugin]")
+{
+    TestDirectory t;
+    const auto dbPath = t.dir.getChildFile("plugin.sqlite");
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        repo.createTables();
+    }
+    AudioEngine engine(false);
+    MainComponent app(dbPath, false, {}, t.dir.getChildFile("settings.json"), &engine, true);
+    app.setSize(1180, 720);
+    app.resized();
+
+    juce::Button* settingsButton = nullptr;
+    for (int i = 0; i < app.getNumChildComponents() && settingsButton == nullptr; ++i)
+        if (auto* button = dynamic_cast<juce::TextButton*>(app.getChildComponent(i)))
+            if (button->getButtonText() == "Settings")
+                settingsButton = button;
+    REQUIRE(settingsButton != nullptr);
+    settingsButton->onClick();
+
+    // The plugin must not open a top-level modal window: hosts dismiss those on the first click.
+    auto* overlay = app.findChildWithID("settingsOverlay");
+    REQUIRE(overlay != nullptr);
+    auto* panel = dynamic_cast<SettingsPanel*>(overlay->findChildWithID("settingsPanel"));
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->getTopLevelComponent() == &app);
+
+    auto* theme = dynamic_cast<juce::ComboBox*>(panel->findChildWithID("settingsTheme"));
+    REQUIRE(theme != nullptr);
+    theme->setSelectedId(2, juce::sendNotificationSync);
+    REQUIRE(theme->getSelectedId() == 2);
+    REQUIRE(app.findChildWithID("settingsOverlay") != nullptr);
+    REQUIRE(dynamic_cast<SettingsPanel*>(overlay->findChildWithID("settingsPanel")) != nullptr);
+    REQUIRE(panel->getTopLevelComponent() == &app);
+
+    // The host owns audio and the catalog, so those controls are not offered in the plugin.
+    for (int i = 0; i < panel->getNumChildComponents(); ++i)
+        if (auto* button = dynamic_cast<juce::TextButton*>(panel->getChildComponent(i)))
+            CHECK_FALSE((button->getButtonText() == "Audio/MIDI Settings" && button->isVisible()));
 }

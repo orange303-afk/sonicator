@@ -135,6 +135,14 @@ public:
     juce::String error() const { return lastError; }
     juce::AudioTransportSource& transport() { return source; }
     juce::AudioDeviceManager& deviceManager() { return devices; }
+    // Host mode: a plugin processor owns the audio path instead of an AudioDeviceManager. The
+    // engine never opens a device; startHostAudio() is called from prepareToPlay() and
+    // processHostBlock() from processBlock(), so preview audio and host MIDI follow the host
+    // sample rate and run only while the host renders.
+    void startHostAudio(double sampleRate, int maximumBlockSize);
+    void stopHostAudio();
+    void processHostBlock(juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi);
+    bool isHostAudio() const { return hostMode; }
     // Offline render of the same PreviewOutput used by the device callback. Tests use it to
     // verify the complete MIDI -> sampler -> mix path without an audio device.
     void preparePreviewBlock(int blockSize);
@@ -145,6 +153,10 @@ private:
     bool reasonMode = false;
     int reasonReference = -1;
     bool deviceMode, looping = false;
+    bool hostMode = false, hostRenderAttached = false;
+    double hostSampleRate = 44100.0;
+    int hostBlockSize = 256;
+    std::atomic<juce::uint32> lastHostBlockMs { 0 };
     bool skipSilence = false, startAtNextPlay = true, midiInputsConnected = false;
     double audibleStart = -1;
     double midiSelectionStart = 0, midiSelectionEnd = 0;
@@ -186,6 +198,9 @@ private:
     PreviewOutput output {source,sampler,sf2Sampler,rexSampler,sf2Audition,externalSampler,trackerSong,sampleVoices};
     juce::AudioSourcePlayer player;
     void attach();
+    void detachRender();
+    void attachRender();
+    bool stopTransport();
     void clearContainers();
     void applyMidiSelection();
     bool refreshSoundFontSamples(bool selectFirstPlayable);

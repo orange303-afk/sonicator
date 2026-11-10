@@ -8,14 +8,24 @@ SpikeProcessor::SpikeProcessor()
     setPlayConfigDetails(0, 2, 44100.0, 512);
 }
 
-void SpikeProcessor::prepareToPlay(double, int) {}
+void SpikeProcessor::prepareToPlay(double sampleRate, int maximumExpectedSamplesPerBlock)
+{
+    setRateAndBufferSizeDetails(sampleRate, maximumExpectedSamplesPerBlock);
+    hostEngine.startHostAudio(sampleRate, maximumExpectedSamplesPerBlock);
+}
 
-void SpikeProcessor::releaseResources() {}
+void SpikeProcessor::releaseResources()
+{
+    hostEngine.stopHostAudio();
+}
 
-void SpikeProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void SpikeProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
-    buffer.clear();
+    // Preview audio and host MIDI go through the same path the standalone app feeds from an
+    // audio device: the host supplies the sample rate, block size, clock and keyboard.
+    hostEngine.processHostBlock(buffer, midiMessages);
+    midiMessages.clear();
 }
 
 juce::AudioProcessorEditor* SpikeProcessor::createEditor()

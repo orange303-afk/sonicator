@@ -79,6 +79,45 @@ juce::Image starMenuImage()
     g.setColour(theme::text); g.fillPath(path);
     return image;
 }
+// Renders a dialog inside the editor instead of as a separate window. Plugin hosts do not
+// reliably keep top-level modal windows from a plugin, and a modal window that dismisses on
+// "input outside" closes on the first click inside a DAW.
+class EmbeddedDialogOverlay final : public juce::Component
+{
+public:
+    explicit EmbeddedDialogOverlay(std::unique_ptr<juce::Component> contentToOwn)
+        : content(std::move(contentToOwn))
+    {
+        addAndMakeVisible(*content);
+        setWantsKeyboardFocus(true);
+    }
+    std::function<void()> onDismiss;
+    void paint(juce::Graphics& g) override
+    {
+        g.fillAll(juce::Colours::black.withAlpha(0.6f));
+    }
+    bool keyPressed(const juce::KeyPress& key) override
+    {
+        if (key == juce::KeyPress::escapeKey && onDismiss != nullptr) { onDismiss(); return true; }
+        return false;
+    }
+    void resized() override
+    {
+        if (content == nullptr || getWidth() <= 0 || getHeight() <= 0) return;
+        const auto available = getLocalBounds().reduced(24);
+        const auto width = (float) content->getWidth();
+        const auto height = (float) content->getHeight();
+        if (width <= 0 || height <= 0) return;
+        const auto scale = juce::jmin(1.0f, juce::jmin((float) available.getWidth() / width,
+                                                       (float) available.getHeight() / height));
+        content->setTransform(juce::AffineTransform::scale(scale));
+        const auto target = available.withSizeKeepingCentre(juce::roundToInt(width * scale),
+                                                            juce::roundToInt(height * scale));
+        content->setBounds(target.getX(), target.getY(), juce::roundToInt(width), juce::roundToInt(height));
+    }
+private:
+    std::unique_ptr<juce::Component> content;
+};
 // A modal Settings window that dismisses itself when the user clicks anywhere outside it.
 class SettingsDialogWindow final : public juce::DialogWindow
 {
@@ -150,10 +189,14 @@ juce::File MainComponent::defaultDatabaseFile()
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
         .getChildFile("Sonicator/sonicator.sqlite");
 }
-MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppSettings initialSettings,juce::File settingsFile)
+MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppSettings initialSettings,
+                             juce::File settingsFile,AudioEngine* hostEngine,bool embeddedUiMode)
     : dbPath(databaseFile), appSettings(std::move(initialSettings)),
       settingsStore(settingsFile != juce::File() ? std::move(settingsFile) : AppSettings::defaultSettingsFile()),
-      engine(openDevice), preview(engine,dbPath.getParentDirectory().getChildFile("cache"))
+      ownedEngine(openDevice && hostEngine == nullptr),
+      engine(hostEngine != nullptr ? *hostEngine : ownedEngine),
+      embeddedUi(embeddedUiMode),
+      preview(engine,dbPath.getParentDirectory().getChildFile("cache"))
 {
     theme::apply(appSettings.theme);
     persistSessionState = juce::JUCEApplicationBase::getInstance() != nullptr;
@@ -571,6 +614,8 @@ MainComponent::~MainComponent()
     removeKeyListener(&enterKeyListener);
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
     stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
+    embeddedSettingsPanel = nullptr;
+    embeddedSettingsHost.deleteAndZero();
     settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
     if (splitDialog != nullptr)
     {
@@ -3137,8 +3182,11 @@ void MainComponent::applySettings(const AppSettings& next)
     appSettings.scalePercent = AppSettings::clampScale(next.scalePercent);
     appSettings.language = next.language;
     refreshTheme();
-    juce::Desktop::getInstance().setGlobalScaleFactor(
-        juce::jlimit(0.75f, 2.0f, appSettings.scalePercent / 100.0f));
+    // The global scale factor belongs to the whole process: inside a DAW it would resize the
+    // host's own windows. The plugin follows the host's scaling instead.
+    if (! embeddedUi)
+        juce::Desktop::getInstance().setGlobalScaleFactor(
+            juce::jlimit(0.75f, 2.0f, appSettings.scalePercent / 100.0f));
     try
     {
         settingsStore.update([this](AppSettings& saved)
@@ -3153,8 +3201,48 @@ void MainComponent::applySettings(const AppSettings& next)
         status.setText("Settings applied but not saved: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification);
     }
 }
+void MainComponent::showEmbeddedSettings()
+{
+    if (embeddedSettingsHost != nullptr) { embeddedSettingsHost->toFront(true); return; }
+    auto panel = std::make_unique<SettingsPanel>(appSettings,dbPath,indexer && indexer->progress().running);
+    panel->setComponentID("settingsPanel");
+    panel->onSettingsChanged = [this](AppSettings next) { applySettings(next); };
+    panel->setLookAndFeel(&look);
+    panel->setPluginMode(true);
+    panel->onClose = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr) safe->closeEmbeddedSettings();
+    };
+    auto overlay = std::make_unique<EmbeddedDialogOverlay>(std::move(panel));
+    overlay->setComponentID("settingsOverlay");
+    overlay->onDismiss = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr) safe->closeEmbeddedSettings();
+    };
+    addAndMakeVisible(*overlay);
+    overlay->setBounds(getLocalBounds());
+    embeddedSettingsPanel = dynamic_cast<SettingsPanel*>(overlay->getChildComponent(0));
+    embeddedSettingsHost = overlay.get();
+    overlay.release()->toFront(true);
+}
+void MainComponent::closeEmbeddedSettings()
+{
+    embeddedSettingsPanel = nullptr;
+    auto* host = embeddedSettingsHost.getComponent();
+    embeddedSettingsHost = nullptr;
+    resized();
+    if (host == nullptr) return;
+    // The close button runs inside its own click callback: delete the overlay after the event
+    // finishes dispatching, and only while it is still alive.
+    juce::Component::SafePointer<juce::Component> safeHost(host);
+    juce::MessageManager::callAsync([safeHost]() mutable
+    {
+        if (safeHost != nullptr) delete safeHost.getComponent();
+    });
+}
 void MainComponent::showSettings()
 {
+    if (embeddedUi) { showEmbeddedSettings(); return; }
     if (settingsDialog != nullptr) { settingsDialog->toFront(true); return; }
     const bool indexing = indexer && indexer->progress().running;
     auto* panel = new SettingsPanel(appSettings,dbPath,indexing);
@@ -3328,6 +3416,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
 }
 void MainComponent::showAudioSettings()
 {
+    if (embeddedUi) return; // the host owns the audio and MIDI devices
     if (audioDialog != nullptr) { audioDialog->toFront(true); return; }
     auto* selector = new juce::AudioDeviceSelectorComponent(engine.deviceManager(),0,0,0,2,true,false,true,false);
     selector->setLookAndFeel(&look);
@@ -3351,6 +3440,8 @@ void MainComponent::paint(juce::Graphics& g)
 }
 void MainComponent::resized()
 {
+    if (embeddedSettingsHost != nullptr)
+        embeddedSettingsHost->setBounds(getLocalBounds());
     auto r = getLocalBounds(); headerBounds = r.removeFromTop(86);
     auto header = headerBounds.reduced(16,14);
     auto branding = header.removeFromLeft(310); header.removeFromLeft(32);

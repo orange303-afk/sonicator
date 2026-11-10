@@ -45,8 +45,11 @@ SpikeEditor::SpikeEditor(SpikeProcessor& processor)
     if (database.existsAsFile())
     {
         const auto started = juce::Time::getMillisecondCounterHiRes();
+        sonicator::AppSettings initial;
+        // A DAW keyboard plays the selected sample without the user enabling MIDI preview.
+        initial.midiPreview = true;
         main = std::make_unique<sonicator::MainComponent>(
-            database, false, sonicator::AppSettings {}, settings);
+            database, false, initial, settings, &processor.engine(), true);
         addAndMakeVisible(*main);
         const auto elapsed = juce::Time::getMillisecondCounterHiRes() - started;
         logEvent("editor-open ready db=" + database.getFullPathName()

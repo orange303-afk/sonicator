@@ -4,6 +4,8 @@
 #include "core/audio/MidiSampler.h"
 #include "Sf2TestBank.h"
 #include "TestHelpers.h"
+#include <atomic>
+#include <thread>
 using namespace sonicator;
 TEST_CASE("Oversized output callbacks chunk the transport as well as MIDI", "[audio][auto-preview]")
 {
@@ -347,4 +349,76 @@ TEST_CASE("Enabling MIDI preview does not boost ordinary transport", "[audio][mi
         REQUIRE(actual.getSample(0, i) == Catch::Approx(expected.getSample(0, i)).margin(0.00001f));
     output.releaseResources(); reference.releaseResources();
     transport.setSource(nullptr); reference.setSource(nullptr);
+}
+TEST_CASE("Host audio renders the preview from processHostBlock", "[audio][host]")
+{
+    TestDirectory t; auto file = t.wave("preview.wav", 440.0, 2, 44100);
+    AudioEngine engine(false);
+    REQUIRE_FALSE(engine.isHostAudio());
+    engine.startHostAudio(48000, 256);
+    REQUIRE(engine.isHostAudio());
+    REQUIRE(engine.loadFile(file));
+    engine.play();
+    juce::AudioBuffer<float> buffer(2, 256);
+    juce::MidiBuffer midi;
+    float peak = 0.0f;
+    for (int block = 0; block < 4; ++block)
+    {
+        buffer.clear();
+        engine.processHostBlock(buffer, midi);
+        peak = juce::jmax(peak, buffer.getMagnitude(0, 256));
+    }
+    REQUIRE(peak > 0.01f);
+    engine.stopHostAudio();
+    REQUIRE_FALSE(engine.isHostAudio());
+}
+TEST_CASE("Host MIDI from processHostBlock reaches the sampler", "[audio][host]")
+{
+    TestDirectory t; auto file = t.wave("midi.wav", 220.0, 1, 44100);
+    AudioEngine engine(false);
+    engine.startHostAudio(44100, 256);
+    REQUIRE(engine.loadFile(file));
+    REQUIRE(engine.setMidiPreview(true));
+    juce::AudioBuffer<float> buffer(2, 256);
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0);
+    for (int block = 0; block < 4; ++block)
+    {
+        buffer.clear();
+        engine.processHostBlock(buffer, midi);
+        midi.clear();
+    }
+    REQUIRE(engine.outputPeak() > 0.01f);
+    engine.stopHostAudio();
+}
+TEST_CASE("Host transport stop is acknowledged instead of timing out", "[audio][host]")
+{
+    TestDirectory t; auto file = t.wave("stop.wav", 440.0, 2, 44100 * 4);
+    AudioEngine engine(false);
+    engine.startHostAudio(48000, 256);
+    REQUIRE(engine.loadFile(file));
+    engine.play();
+    // The host callback keeps running on another thread, exactly as a DAW does while a user
+    // changes the selection.
+    std::atomic<bool> rendering { true };
+    std::thread host([&engine, &rendering]
+    {
+        juce::AudioBuffer<float> block(2, 256);
+        juce::MidiBuffer midi;
+        while (rendering.load())
+        {
+            block.clear();
+            engine.processHostBlock(block, midi);
+            juce::Thread::sleep(2);
+        }
+    });
+    juce::Thread::sleep(20);
+    const auto started = juce::Time::getMillisecondCounterHiRes();
+    engine.stop();
+    const auto elapsed = juce::Time::getMillisecondCounterHiRes() - started;
+    rendering.store(false);
+    host.join();
+    INFO("stop took " << elapsed << " ms");
+    REQUIRE(elapsed < 200.0);
+    engine.stopHostAudio();
 }

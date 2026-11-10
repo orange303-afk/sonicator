@@ -32,11 +32,82 @@ AudioEngine::~AudioEngine()
 {
     devices.removeMidiInputDeviceCallback({},&output.collector);
     devices.removeAudioCallback(&player);
+    detachRender();
     player.setSource(nullptr);
     source.setSource(nullptr);
     reader.reset();
     readAhead.stopThread(-1);
     devices.closeAudioDevice();
+}
+void AudioEngine::startHostAudio(double sampleRate, int maximumBlockSize)
+{
+    const auto rate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    const auto blockSize = juce::jmax(1, maximumBlockSize);
+    if (hostMode)
+    {
+        // The host may change the session sample rate or block size without recreating the
+        // plugin; re-prepare so preview audio follows the new rate.
+        if (rate == hostSampleRate && blockSize == hostBlockSize) return;
+        hostSampleRate = rate;
+        hostBlockSize = blockSize;
+        output.prepareToPlay(blockSize, rate);
+        return;
+    }
+    hostMode = true;
+    hostSampleRate = rate;
+    hostBlockSize = blockSize;
+    hostRenderAttached = true;
+    if (! readAhead.isThreadRunning()) readAhead.startThread();
+    output.prepareToPlay(blockSize, hostSampleRate);
+}
+void AudioEngine::stopHostAudio()
+{
+    if (! hostMode) return;
+    stopTransport();
+    detachRender();
+    hostMode = false;
+    hostRenderAttached = false;
+    source.setSource(nullptr);
+    readAhead.stopThread(2000);
+}
+void AudioEngine::processHostBlock(juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi)
+{
+    lastHostBlockMs.store(juce::Time::getMillisecondCounter());
+    const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+    if (! hostMode || ! hostRenderAttached)
+    {
+        buffer.clear();
+        return;
+    }
+    for (const auto metadata : midi)
+        output.collector.push(metadata.getMessage());
+    output.getNextAudioBlock({ &buffer, 0, buffer.getNumSamples() });
+}
+void AudioEngine::detachRender()
+{
+    if (deviceMode) { player.setSource(nullptr); return; }
+    if (! hostMode) return;
+    const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+    hostRenderAttached = false;
+}
+void AudioEngine::attachRender()
+{
+    if (deviceMode) { player.setSource(&output); return; }
+    if (! hostMode) return;
+    const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+    hostRenderAttached = true;
+}
+bool AudioEngine::stopTransport()
+{
+    // AudioTransportSource::stop() waits up to a second for the audio callback to set its
+    // "stopped" flag. With neither a device nor a host block arriving there is nobody to answer,
+    // so detach the source instead of paying that timeout on the message thread.
+    const bool callbackAcknowledges = deviceMode
+        || (hostMode && juce::Time::getMillisecondCounter() - lastHostBlockMs.load() < 250);
+    if (callbackAcknowledges) { source.stop(); return false; }
+    source.setSource(nullptr);
+    if (reader != nullptr) attach(); // a stopped transport on the same reader, without the wait
+    return true;
 }
 void AudioEngine::preparePreviewBlock(int blockSize)
 {
@@ -48,14 +119,15 @@ void AudioEngine::renderPreviewBlock(juce::AudioBuffer<float>& buffer, int numSa
 }
 void AudioEngine::attach()
 {
-    source.setSource(reader.get(), deviceMode ? 32768 : 0, deviceMode ? &readAhead : nullptr, inputRate);
+    const bool streaming = deviceMode || hostMode;
+    source.setSource(reader.get(), streaming ? 32768 : 0, streaming ? &readAhead : nullptr, inputRate);
 }
 bool AudioEngine::loadFile(const juce::File& file)
 {
     const bool midi = isMidiPreview();
     // Transport stop needs the still-connected callback to acknowledge its fade-out.
-    source.stop();
-    if (deviceMode) player.setSource(nullptr);
+    stopTransport();
+    detachRender();
     sampler.clear();
     clearContainers();
     loadedFile = juce::File(); audibleStart = -1; startAtNextPlay = true;
@@ -66,36 +138,36 @@ bool AudioEngine::loadFile(const juce::File& file)
         lastError=reasonMetadata.error;
         reasonMode=lastError.isEmpty();
         output.midi=false;
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return reasonMode;
     }
     lastError = validateContainer(file);
-    if (lastError.isNotEmpty()) { if (deviceMode) player.setSource(&output); return false; }
+    if (lastError.isNotEmpty()) { attachRender(); return false; }
     const auto extension = file.getFileExtension().toLowerCase();
     if (extension == ".sf2")
     {
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return previewSoundFont(file);
     }
     if (extension == ".rx2")
     {
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return previewRex2(file);
     }
     if (extension == ".exs" || extension == ".nki")
     {
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return previewFileInstrument(file);
     }
     if (isLegacyTrackerExtension(file))
     {
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return previewTracker(file);
     }
     std::unique_ptr<juce::AudioFormatReader> decoded(formats.createReaderFor(file));
     if (! decoded || decoded->sampleRate <= 0 || decoded->lengthInSamples <= 0)
     {
-        lastError = "Cannot decode " + file.getFileName(); if (deviceMode) player.setSource(&output); return false;
+        lastError = "Cannot decode " + file.getFileName(); attachRender(); return false;
     }
     inputRate = decoded->sampleRate;
     reader = std::make_unique<juce::AudioFormatReaderSource>(decoded.release(), true);
@@ -104,7 +176,7 @@ bool AudioEngine::loadFile(const juce::File& file)
     loadedFile = file;
     lastError.clear();
     if (midi) lastError = sampler.load(file);
-    if (deviceMode) player.setSource(&output);
+    attachRender();
     if (lastError.isNotEmpty()) return false;
     return true;
 }
@@ -116,10 +188,10 @@ void AudioEngine::play()
         // Restarting after the end flushes the renderer ring, so the consumer must be detached.
         if (trackerSong.isFinished())
         {
-            if (deviceMode) player.setSource(nullptr);
+            detachRender();
             trackerSong.stop();
             trackerSong.play();
-            if (deviceMode) player.setSource(&output);
+            attachRender();
         }
         else trackerSong.play();
         return;
@@ -198,6 +270,7 @@ void AudioEngine::setMidiSelection(double startSeconds, double endSeconds)
 }
 double AudioEngine::deviceSampleRate() const
 {
+    if (hostMode) return hostSampleRate;
     if (deviceMode)
         if (auto* device = devices.getCurrentAudioDevice())
             return device->getCurrentSampleRate();
@@ -212,7 +285,7 @@ juce::String AudioEngine::soundFontPresetLabel(int index) const
 bool AudioEngine::selectSoundFontPreset(int index)
 {
     if (! sf2Mode) return false;
-    if (deviceMode) player.setSource(nullptr);
+    detachRender();
     juce::String error;
     const bool ok = sf2Sampler.load(sf2Bank, index, error);
     if (! ok) lastError = error;
@@ -225,7 +298,7 @@ bool AudioEngine::selectSoundFontPreset(int index)
         sf2Sampler.setGeneration(sf2Generation);
         refreshSoundFontSamples(true);
     }
-    if (deviceMode) player.setSource(&output);
+    attachRender();
     return ok;
 }
 std::vector<SampleDescriptor> AudioEngine::soundFontSamples(juce::String& error) const
@@ -275,7 +348,7 @@ bool AudioEngine::selectSoundFontSample(SampleId id)
 }
 bool AudioEngine::previewFileInstrument(const juce::File& file)
 {
-    if (deviceMode) player.setSource(nullptr);
+    detachRender();
     clearContainers();
     const auto extension = file.getFileExtension().toLowerCase();
     const auto format = extension == ".exs" ? FileInstrumentFormat::exs24 : FileInstrumentFormat::nki;
@@ -284,14 +357,14 @@ bool AudioEngine::previewFileInstrument(const juce::File& file)
     {
         externalInstrument = {};
         lastError = error;
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return false;
     }
     if (! externalSampler.load(externalInstrument, error))
     {
         externalInstrument = {};
         lastError = error;
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return false;
     }
     externalSampler.prepare(deviceSampleRate());
@@ -303,7 +376,7 @@ bool AudioEngine::previewFileInstrument(const juce::File& file)
     lastError.clear();
     refreshExternalSamples(true);
     if (! isMidiPreview()) setMidiPreview(true);
-    if (deviceMode) player.setSource(&output);
+    attachRender();
     return true;
 }
 bool AudioEngine::refreshExternalSamples(bool selectFirstPlayable)
@@ -344,20 +417,20 @@ bool AudioEngine::selectExternalSample(SampleId id)
 }
 bool AudioEngine::previewTracker(const juce::File& file)
 {
-    if (deviceMode) player.setSource(nullptr);
+    detachRender();
     clearContainers();
     juce::String error;
     auto document = TrackerDocument::open(file, error);
     if (document == nullptr)
     {
         lastError = error.isNotEmpty() ? error : "Cannot open this tracker module";
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return false;
     }
     if (! trackerSong.load(file, deviceSampleRate(), error))
     {
         lastError = error.isNotEmpty() ? error : "Cannot start the tracker player";
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return false;
     }
     trackerDocument = std::move(document);
@@ -370,7 +443,7 @@ bool AudioEngine::previewTracker(const juce::File& file)
     ++trackerGenerationValue;
     loadedFile = file;
     lastError.clear();
-    if (deviceMode) player.setSource(&output);
+    attachRender();
     return true;
 }
 
@@ -452,7 +525,7 @@ bool AudioEngine::setDiscSample(const SampleAudioPtr& audio, bool looping, int64
         lastError = "The decoded disc sample is empty";
         return false;
     }
-    if (deviceMode) player.setSource(nullptr);
+    detachRender();
     clearContainers();
     {
         const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
@@ -466,13 +539,13 @@ bool AudioEngine::setDiscSample(const SampleAudioPtr& audio, bool looping, int64
     ++discGenerationValue;
     output.discMidi = true;
     lastError.clear();
-    if (deviceMode) player.setSource(&output);
+    attachRender();
     return true;
 }
 
 void AudioEngine::clearDiscSample()
 {
-    if (deviceMode) player.setSource(nullptr);
+    detachRender();
     {
         const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
         sf2Audition.stop();
@@ -485,18 +558,18 @@ void AudioEngine::clearDiscSample()
     discSample.reset();
     ++discGenerationValue;
     lastError.clear();
-    if (deviceMode) player.setSource(&output);
+    attachRender();
 }
 
 bool AudioEngine::previewRex2(const juce::File& file, int startNote)
 {
-    if (deviceMode) player.setSource(nullptr);
+    detachRender();
     clearContainers();
     juce::String error;
     if (! rexSampler.load(file, startNote, error))
     {
         lastError = error;
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return false;
     }
     rexSampler.prepare(deviceSampleRate());
@@ -505,18 +578,18 @@ bool AudioEngine::previewRex2(const juce::File& file, int startNote)
     loadedFile = file;
     lastError.clear();
     if (! isMidiPreview()) setMidiPreview(true);
-    if (deviceMode) player.setSource(&output);
+    attachRender();
     return true;
 }
 bool AudioEngine::previewSoundFont(const juce::File& file, int presetIndex)
 {
-    if (deviceMode) player.setSource(nullptr);
+    detachRender();
     clearContainers();
     juce::String error;
     if (! sf2Bank.load(file, error))
     {
         lastError = error;
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return false;
     }
     int index = presetIndex;
@@ -528,7 +601,7 @@ bool AudioEngine::previewSoundFont(const juce::File& file, int presetIndex)
     if (index >= (int) sf2Bank.presets().size() || ! sf2Sampler.load(sf2Bank, index, error))
     {
         lastError = error.isNotEmpty() ? error : "Cannot load SoundFont preset";
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return false;
     }
     sf2Sampler.prepare(deviceSampleRate());
@@ -540,7 +613,7 @@ bool AudioEngine::previewSoundFont(const juce::File& file, int presetIndex)
     lastError.clear();
     refreshSoundFontSamples(true);
     if (! isMidiPreview()) setMidiPreview(true);
-    if (deviceMode) player.setSource(&output);
+    attachRender();
     return true;
 }
 void AudioEngine::pause()
@@ -553,15 +626,19 @@ void AudioEngine::pause()
     }
     if (auditionMode()) { sf2Audition.pause(); return; }
     if (rexMode) { rexSampler.pauseAudition(); return; }
-    source.stop();
+    // Pause keeps the position. Without a running callback stopTransport() rebuilds the
+    // transport instead of waiting for an acknowledgement, which rewinds it.
+    const auto positionBefore = position();
+    if (stopTransport() && reader != nullptr)
+        source.setPosition(positionBefore);
 }
 void AudioEngine::stop()
 {
     if (auditionMode()) sf2Audition.stop();
     if (rexMode) rexSampler.stopAudition();
     if (trackerMode && trackerSampleChosen) sf2Audition.stop();
-    source.stop(); source.setPosition(0); startAtNextPlay = true;
-    if (deviceMode) player.setSource(nullptr);
+    stopTransport(); source.setPosition(0); startAtNextPlay = true;
+    detachRender();
     sampler.reset();
     sf2Sampler.reset();
     externalSampler.reset();
@@ -569,7 +646,7 @@ void AudioEngine::stop()
     sampleVoices.reset();
     // Stop always returns the composition to its beginning, including when a sample is selected.
     if (trackerMode) trackerSong.stop();
-    if (deviceMode) player.setSource(&output);
+    attachRender();
 }
 void AudioEngine::seek(double seconds)
 {
@@ -579,9 +656,9 @@ void AudioEngine::seek(double seconds)
         if (trackerSampleChosen) { sf2Audition.seek(juce::jlimit(0.0, length(), seconds)); return; }
         const double target = juce::jlimit(0.0, length(), seconds);
         // The renderer flushes its ring, so the consumer must be detached while it happens.
-        if (deviceMode) player.setSource(nullptr);
+        detachRender();
         trackerSong.seek(target);
-        if (deviceMode) player.setSource(&output);
+        attachRender();
         return;
     }
     if (auditionMode()) { sf2Audition.seek(juce::jlimit(0.0, length(), seconds)); return; }
@@ -609,7 +686,7 @@ void AudioEngine::setLooping(bool enabled)
     if (rexMode) { rexSampler.setAuditionLoop(enabled); return; }
     if (! reader) return;
     auto positionBefore = position(); bool resume = isPlaying();
-    source.stop(); source.setSource(nullptr);
+    stopTransport(); source.setSource(nullptr);
     reader->setLooping(looping); // read-ahead is detached before mutating its source.
     attach(); seek(positionBefore);
     if (resume) play();
@@ -617,8 +694,8 @@ void AudioEngine::setLooping(bool enabled)
 bool AudioEngine::setMidiPreview(bool enabled)
 {
     if (enabled == isMidiPreview()) return true;
-    source.stop(); startAtNextPlay = true;
-    if (deviceMode) player.setSource(nullptr);
+    stopTransport(); startAtNextPlay = true;
+    detachRender();
     sampler.clear(); sampleVoices.reset(); lastError.clear();
     if (enabled && loadedFile != juce::File() && ! sf2Mode && ! externalMode && ! rexMode
         && ! trackerMode && ! discMode) lastError = sampler.load(loadedFile);
@@ -634,6 +711,7 @@ bool AudioEngine::setMidiPreview(bool enabled)
         }
         player.setSource(&output);
     }
+    attachRender(); // re-attach after detachRender() also in host mode
     return lastError.isEmpty();
 }
 }

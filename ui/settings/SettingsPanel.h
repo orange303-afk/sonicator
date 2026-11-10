@@ -12,6 +12,10 @@ public:
     void lookAndFeelChanged() override;
     void setDatabaseFile(juce::File);
     void setDatabaseStatus(const juce::String&, bool error);
+    // Plugin mode: the host owns audio and the catalog, so those sections are hidden and the
+    // panel gets its own Close button instead of relying on a dialog title bar.
+    void setPluginMode(bool pluginMode);
+    std::function<void()> onClose;
     std::function<void(const AppSettings&)> onSettingsChanged;
     std::function<void(const juce::File&, bool moveCurrent)> onDatabaseChosen;
     std::function<void()> onRelocateRequested;
@@ -22,7 +26,7 @@ public:
 private:
     AppSettings current;
     juce::File database;
-    bool indexing = false, statusError = false;
+    bool indexing = false, statusError = false, pluginMode = false;
     juce::Label title, appearance, themeLabel, scaleLabel, languageHeading, languageLabel,
                  languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
                  audioHeading, aboutHeading, productLabel, authorLabel, supportLabel;
