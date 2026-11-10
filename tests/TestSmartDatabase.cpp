@@ -138,3 +138,35 @@ TEST_CASE("Deleting a sample removes its smart rows", "[smart][database]")
     REQUIRE_FALSE(repo.smartResult(id).has_value());
     file.deleteFile();
 }
+
+TEST_CASE("SampleRepository custom types and ml feedback storage", "[smart][database]")
+{
+    auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
+        .getNonexistentChildFile("sonicator-custom-types-test", ".sqlite");
+    {
+        Database db(file);
+        SampleRepository repo(db);
+        repo.createTables();
+
+        CHECK(repo.customTypes().empty());
+        CHECK(repo.addCustomType("Sub-Drop"));
+        CHECK(repo.addCustomType("Glitch"));
+        CHECK_FALSE(repo.addCustomType("sub-drop")); // duplicate case-insensitive
+        auto types = repo.customTypes();
+        CHECK(types.size() == 2);
+
+        std::vector<float> features(14, 0.5f);
+        repo.recordFeedback(101, "Sub-Drop", {"bass", "heavy"}, features);
+        auto all = repo.allFeedback();
+        REQUIRE(all.size() == 1);
+        CHECK(all[0].sampleId == 101);
+        CHECK(all[0].targetType == "Sub-Drop");
+        CHECK(all[0].tags.size() == 2);
+        CHECK(all[0].features.size() == 14);
+
+        repo.removeFeedback(101);
+        CHECK(repo.allFeedback().empty());
+    }
+    file.deleteFile();
+}
+

@@ -213,6 +213,24 @@ public:
     void setSmartInputs(int64_t sampleId, const std::vector<SmartInput>&);
     std::vector<SmartInput> smartInputs(int64_t sampleId) const;
     std::optional<SampleRecord> findById(int64_t) const;
+
+    // Custom types & ML feedback prototypes
+    struct FeedbackRecord
+    {
+        int64_t sampleId = 0;
+        juce::String fileHash;
+        juce::String targetType;
+        juce::StringArray tags;
+        std::vector<float> features;
+        int64_t updatedAt = 0;
+    };
+    std::vector<juce::String> customTypes() const;
+    bool addCustomType(const juce::String& name);
+    void recordFeedback(int64_t sampleId, const juce::String& targetType,
+                        const juce::StringArray& tags, const std::vector<float>& features);
+    void removeFeedback(int64_t sampleId);
+    std::vector<FeedbackRecord> allFeedback() const;
+
     // Identity of the catalog this repository writes to. A background job captures it at start
     // and refuses to publish into a different catalog.
     juce::String catalogPath() const { return db.file().getFullPathName(); }

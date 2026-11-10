@@ -567,7 +567,14 @@ void SampleRepository::createTables()
             "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE,"
             "representative_id INTEGER NOT NULL, partner_id INTEGER NOT NULL,"
             "is_representative INTEGER NOT NULL DEFAULT 0);"
-            "CREATE INDEX IF NOT EXISTS stereo_pairs_rep ON stereo_pairs(representative_id);");
+            "CREATE INDEX IF NOT EXISTS stereo_pairs_rep ON stereo_pairs(representative_id);"
+            "CREATE TABLE IF NOT EXISTS custom_types ("
+            "name TEXT PRIMARY KEY NOT NULL COLLATE NOCASE, created_at INTEGER NOT NULL);"
+            "CREATE TABLE IF NOT EXISTS ml_feedback_samples ("
+            "sample_id INTEGER PRIMARY KEY, file_hash TEXT NOT NULL,"
+            "target_type TEXT NOT NULL COLLATE NOCASE, tags TEXT NOT NULL DEFAULT '',"
+            "features BLOB NOT NULL, updated_at INTEGER NOT NULL);"
+            "CREATE INDEX IF NOT EXISTS idx_ml_feedback_type ON ml_feedback_samples(target_type);");
         // Databases created before schema 3 predate the folded search column.
         bool hasSearchKey = false, hasStarred = false;
         {
@@ -2669,6 +2676,110 @@ std::vector<int64_t> SampleRepository::samplesWithSmartResultAfterId(int64_t aft
     s.integer(2, limit);
     std::vector<int64_t> out;
     while (s.step()) out.push_back(s.integer(0));
+    return out;
+}
+
+std::vector<juce::String> SampleRepository::customTypes() const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "SELECT name FROM custom_types ORDER BY name COLLATE NOCASE");
+    std::vector<juce::String> out;
+    while (s.step()) out.push_back(s.text(0));
+    return out;
+}
+
+bool SampleRepository::addCustomType(const juce::String& name)
+{
+    const auto trimmed = name.trim();
+    if (trimmed.isEmpty()) return false;
+    std::lock_guard lock(db.mutex);
+    try
+    {
+        detail::Statement s(db.handle, "INSERT INTO custom_types (name, created_at) VALUES (?, ?)");
+        s.text(1, trimmed);
+        s.integer(2, juce::Time::currentTimeMillis());
+        s.step();
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targetType,
+                                      const juce::StringArray& tags, const std::vector<float>& features)
+{
+    std::lock_guard lock(db.mutex);
+    juce::String hash;
+    {
+        detail::Statement s(db.handle, "SELECT hash FROM samples WHERE id=?");
+        s.integer(1, sampleId);
+        if (s.step()) hash = s.text(0);
+    }
+    const auto tagsStr = tags.joinIntoString(",");
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement s(db.handle,
+            "INSERT INTO ml_feedback_samples (sample_id, file_hash, target_type, tags, features, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(sample_id) DO UPDATE SET "
+            "file_hash=excluded.file_hash, target_type=excluded.target_type, tags=excluded.tags, "
+            "features=excluded.features, updated_at=excluded.updated_at");
+        s.integer(1, sampleId);
+        s.text(2, hash);
+        s.text(3, targetType.trim());
+        s.text(4, tagsStr);
+        s.blob(5, features.data(), static_cast<int>(features.size() * sizeof(float)));
+        s.integer(6, juce::Time::currentTimeMillis());
+        s.step();
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+
+void SampleRepository::removeFeedback(int64_t sampleId)
+{
+    std::lock_guard lock(db.mutex);
+    try
+    {
+        detail::Statement s(db.handle, "DELETE FROM ml_feedback_samples WHERE sample_id=?");
+        s.integer(1, sampleId);
+        s.step();
+    }
+    catch (...) {}
+}
+
+std::vector<SampleRepository::FeedbackRecord> SampleRepository::allFeedback() const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT sample_id, file_hash, target_type, tags, features, updated_at FROM ml_feedback_samples ORDER BY sample_id");
+    std::vector<FeedbackRecord> out;
+    while (s.step())
+    {
+        FeedbackRecord r;
+        r.sampleId = s.integer(0);
+        r.fileHash = s.text(1);
+        r.targetType = s.text(2);
+        r.tags.addTokens(s.text(3), ",", "");
+        r.tags.trim();
+        r.tags.removeEmptyStrings();
+        const auto* blobData = reinterpret_cast<const float*>(s.blob(4));
+        const int numBytes = s.bytes(4);
+        if (blobData != nullptr && numBytes > 0)
+        {
+            const size_t numFloats = numBytes / sizeof(float);
+            r.features.assign(blobData, blobData + numFloats);
+        }
+        r.updatedAt = s.integer(5);
+        out.push_back(std::move(r));
+    }
     return out;
 }
 } // namespace sonicator

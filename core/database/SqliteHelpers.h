@@ -20,6 +20,7 @@ public:
     void text(int i, const juce::String& v) { check(sqlite3_bind_text(s, i, v.toRawUTF8(), -1, SQLITE_TRANSIENT)); }
     void integer(int i, int64_t v) { check(sqlite3_bind_int64(s, i, v)); }
     void real(int i, double v) { check(sqlite3_bind_double(s, i, v)); }
+    void blob(int i, const void* data, int size) { check(sqlite3_bind_blob(s, i, data, size, SQLITE_TRANSIENT)); }
     void reset() { sqlite3_reset(s); sqlite3_clear_bindings(s); }
     bool step()
     {
@@ -30,6 +31,8 @@ public:
     juce::String text(int i) const { return juce::String::fromUTF8(reinterpret_cast<const char*>(sqlite3_column_text(s, i))); }
     int64_t integer(int i) const { return sqlite3_column_int64(s, i); }
     double real(int i) const { return sqlite3_column_double(s, i); }
+    const void* blob(int i) const { return sqlite3_column_blob(s, i); }
+    int bytes(int i) const { return sqlite3_column_bytes(s, i); }
 private:
     void check(int rc) { if (rc != SQLITE_OK) throw std::runtime_error(sqlite3_errmsg(db)); }
     sqlite3* db;
