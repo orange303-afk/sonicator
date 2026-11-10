@@ -130,3 +130,17 @@ TEST_CASE("AutoTagRules evaluates acoustic candidate directly when unnamed and n
     REQUIRE(decision.proposal->rule == AutoTagRule::SmartType);
     REQUIRE(decision.proposal->source == "dsp_acoustic");
 }
+
+TEST_CASE("SmartResolver gives user_adaptive candidate priority over generic ml", "[smart][resolver][acoustic]")
+{
+    SmartCandidate mlCand = makeCandidate(SmartField::Type, "ml_classifier", "Lead");
+    mlCand.numericValue = 0.70;
+
+    SmartCandidate adaptiveCand = makeCandidate(SmartField::Type, "user_adaptive", "Pad");
+    adaptiveCand.numericValue = 0.88;
+
+    auto result = resolveSmart({ mlCand, adaptiveCand });
+    CHECK(result.type == "Pad");
+    CHECK(result.typeSource == "user_adaptive");
+}
+

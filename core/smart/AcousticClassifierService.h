@@ -3,6 +3,7 @@
 #include "core/smart/SmartTypes.h"
 #include "core/scanner/FileScanner.h"
 #include "core/ml/OnnxAudioClassifier.h"
+#include "core/ml/AdaptiveClassifier.h"
 #include <juce_core/juce_core.h>
 #include <vector>
 
@@ -32,6 +33,7 @@ public:
     );
 
     static OnnxAudioClassifier& getSharedClassifier();
+    static AdaptiveClassifier& getSharedAdaptiveClassifier();
 };
 
 } // namespace sonicator

@@ -39,6 +39,12 @@ OnnxAudioClassifier& AcousticClassifierService::getSharedClassifier()
     return classifier;
 }
 
+AdaptiveClassifier& AcousticClassifierService::getSharedAdaptiveClassifier()
+{
+    static AdaptiveClassifier classifier;
+    return classifier;
+}
+
 std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
     const juce::AudioBuffer<float>& buffer,
     double sampleRate,
@@ -49,6 +55,28 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
 
     if (buffer.getNumSamples() > 0 && sampleRate > 0.0)
     {
+        auto& adaptive = getSharedAdaptiveClassifier();
+        if (adaptive.hasPrototypes())
+        {
+            const auto features = AdaptiveClassifier::extractFeatures(buffer, sampleRate);
+            const auto preds = adaptive.predictType(features, 1);
+            if (! preds.empty() && preds.front().score >= 0.80f)
+            {
+                SmartCandidate c;
+                c.field = SmartField::Type;
+                c.source = "user_adaptive";
+                c.textValue = preds.front().label;
+                c.detail = "adaptive_sim=" + juce::String(preds.front().score, 2);
+                c.numericValue = preds.front().score;
+                c.status = CandidateStatus::Valid;
+                c.extractorId = "dsp";
+                c.extractorVersion = smartDspVersion;
+                c.rawValue = preds.front().label;
+                c.limitation = "type learned from user feedback prototype";
+                candidates.push_back(std::move(c));
+            }
+        }
+
         const double duration = static_cast<double>(buffer.getNumSamples()) / sampleRate;
         const auto desc = AcousticFeatures::extract(buffer, sampleRate);
         const auto fastDecision = FastAcousticRules::evaluate(desc, duration);
