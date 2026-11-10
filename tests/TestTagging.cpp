@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/tagging/TaggingService.h"
+#include "core/ml/AdaptiveClassifier.h"
 #include "TestHelpers.h"
 using namespace sonicator;
 namespace {
@@ -182,3 +183,19 @@ TEST_CASE("Selected tag jobs skip ignored rows", "[tagging][ignore]")
     REQUIRE(repo.tagsForSample(keep).size() == 1);
     REQUIRE(repo.tagsForSample(hidden).empty());
 }
+
+TEST_CASE("AutoTag incorporates learned tags from adaptive prototypes", "[tagging][adaptive]")
+{
+    AdaptiveClassifier classifier;
+    std::vector<float> features(14, 0.3f);
+    classifier.updatePrototype(50, "Lead", {"vintage", "analog"}, features);
+
+    auto suggested = classifier.predictTags(features, 2);
+    REQUIRE(suggested.size() >= 2);
+    juce::StringArray labels;
+    for (const auto& s : suggested) labels.add(s.label);
+    CHECK(labels.contains("vintage"));
+    CHECK(labels.contains("analog"));
+    CHECK(suggested[0].score > 0.9f);
+}
+

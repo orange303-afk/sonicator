@@ -230,7 +230,7 @@ AutoTagDecision AutoTagRules::evaluate(const AutoTagInput& in, const AutoTagOpti
             folderProvenance = true;
             continue;
         }
-        const bool isAcoustic = (candidate.source == "dsp_acoustic" || candidate.source == "ml_classifier");
+        const bool isAcoustic = (candidate.source == "dsp_acoustic" || candidate.source == "ml_classifier" || candidate.source == "user_adaptive");
         const bool versionOk = isAcoustic
             ? (candidate.extractorVersion == options.extractorVersion
                || candidate.extractorVersion == options.dspVersion
