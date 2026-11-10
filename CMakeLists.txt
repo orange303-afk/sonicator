@@ -110,6 +110,11 @@ else()
     target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.cpp)
 endif()
 target_link_libraries(SonicatorUI PUBLIC SonicatorCore PRIVATE SonicatorAssets)
+# Technical spike for the VST3/AU plugin: off by default, no effect on the application build.
+option(SONICATOR_BUILD_PLUGIN_SPIKE "Build the VST3/AU plugin spike" OFF)
+if(SONICATOR_BUILD_PLUGIN_SPIKE)
+    add_subdirectory(plugin)
+endif()
 juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
     BUNDLE_ID "com.sonicator.browser" MICROPHONE_PERMISSION_ENABLED FALSE
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/icon-glossy-chevron-1024.png")
