@@ -244,3 +244,19 @@ TEST_CASE("Extract defaults persist", "[settings][extract]")
     REQUIRE_FALSE(loaded.extractTuneToSong);
     REQUIRE(loaded.extractOutputFolder == "/tmp/extract-out");
 }
+
+TEST_CASE("AppSettings contributeTrainingData persistence", "[settings]")
+{
+    AppSettings s;
+    CHECK_FALSE(s.contributeTrainingData); // default false for privacy
+    s.contributeTrainingData = true;
+
+    auto file = juce::File::createTempFile("sonicator_settings_test");
+    SettingsStore store(file);
+    store.save(s);
+
+    auto loaded = store.load();
+    CHECK(loaded.contributeTrainingData);
+    file.deleteFile();
+}
+

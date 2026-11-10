@@ -38,6 +38,7 @@ struct AppSettings
     bool autoPreview = true;
     bool loopPreview = false;
     bool rexGate = true;
+    bool contributeTrainingData = false;
     int windowX = 0, windowY = 0, windowWidth = 0, windowHeight = 0;
     bool hasWindowBounds() const { return windowWidth > 0 && windowHeight > 0; }
     static juce::File defaultSettingsFile();

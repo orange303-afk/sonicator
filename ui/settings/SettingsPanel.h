@@ -27,6 +27,7 @@ private:
                  languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
                  audioHeading, aboutHeading, productLabel, authorLabel, supportLabel;
     juce::ComboBox themeBox, scaleBox, languageBox;
+    juce::ToggleButton contributeDataToggle;
     juce::TextButton moveDatabase { "Move catalog..." }, openDatabase { "Open catalog..." },
                      relocateDatabase { "Relocate folders..." }, backupDatabase { "Backup database" },
                      audio { "Audio/MIDI Settings" }, close { "Close" };

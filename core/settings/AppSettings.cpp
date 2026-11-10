@@ -76,6 +76,7 @@ AppSettings SettingsStore::load() const
     settings.autoPreview = readBool("autoPreview", settings.autoPreview);
     settings.loopPreview = readBool("loopPreview", settings.loopPreview);
     settings.rexGate = readBool("rexGate", settings.rexGate);
+    settings.contributeTrainingData = readBool("contributeTrainingData", settings.contributeTrainingData);
     if (const auto* history = object->getProperty("searchHistory").getArray())
         for (const auto& entry : *history)
             if (settings.searchHistory.size() < 10)
@@ -136,6 +137,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("autoPreview", settings.autoPreview);
     object->setProperty("loopPreview", settings.loopPreview);
     object->setProperty("rexGate", settings.rexGate);
+    object->setProperty("contributeTrainingData", settings.contributeTrainingData);
     juce::Array<juce::var> history;
     for (int i = 0; i < juce::jmin(10, settings.searchHistory.size()); ++i)
         history.add(settings.searchHistory[i]);

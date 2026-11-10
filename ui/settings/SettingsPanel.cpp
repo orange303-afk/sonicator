@@ -24,6 +24,14 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         addAndMakeVisible(c);
     for (auto* c : std::array<juce::Component*,8>{&openDatabase,&backupDatabase,&audio,&close,&gumroad,&bandcamp,&naukograd,&kofi})
         addAndMakeVisible(c);
+    addAndMakeVisible(contributeDataToggle);
+    contributeDataToggle.setButtonText("Contribute anonymous feedback to improve classification models");
+    contributeDataToggle.setToggleState(initial.contributeTrainingData, juce::dontSendNotification);
+    contributeDataToggle.onClick = [this]
+    {
+        current.contributeTrainingData = contributeDataToggle.getToggleState();
+        notifySettings();
+    };
 
     title.setText("Settings",juce::dontSendNotification);
     title.setFont(juce::FontOptions(20,juce::Font::bold));
@@ -158,6 +166,8 @@ void SettingsPanel::lookAndFeelChanged()
     libraryNote.setColour(juce::Label::textColourId,theme::muted);
     databaseStatus.setColour(juce::Label::textColourId,statusError
         ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e)) : theme::muted);
+    contributeDataToggle.setColour(juce::ToggleButton::textColourId, theme::text);
+    contributeDataToggle.setColour(juce::ToggleButton::tickColourId, theme::accent);
     authorLabel.setColour(juce::Label::textColourId,theme::muted);
     supportLabel.setColour(juce::Label::textColourId,theme::muted);
     for (auto* link : std::array<juce::HyperlinkButton*,4>{&gumroad,&bandcamp,&naukograd,&kofi})
@@ -249,6 +259,7 @@ void SettingsPanel::resized()
     });
     add(32, 6, false, [this](juce::Rectangle<int> area) { libraryNote.setBounds(area.withTrimmedLeft(140)); });
     add(24, 4, false, [this](juce::Rectangle<int> area) { databaseStatus.setBounds(area.withTrimmedLeft(140)); });
+    add(26, 4, false, [this](juce::Rectangle<int> area) { contributeDataToggle.setBounds(area.withTrimmedLeft(140)); });
 
     section(audioHeading, 14);
     add(30, 4, false, [this](juce::Rectangle<int> area) { audio.setBounds(area.withTrimmedLeft(140)); });
