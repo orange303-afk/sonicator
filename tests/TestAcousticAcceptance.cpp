@@ -524,7 +524,12 @@ TEST_CASE("Acoustic classification benchmark speed is under 3.0 ms per buffer", 
     const double totalElapsedMs = endMs - startMs;
     const double avgMs = totalElapsedMs / 100.0;
 
-    const double limitMs = JUCE_DEBUG ? 8.0 : 3.0;
+    // JUCE_DEBUG is only defined in debug configurations, so this must stay preprocessor.
+#if JUCE_DEBUG
+    const double limitMs = 8.0;
+#else
+    const double limitMs = 3.0;
+#endif
     REQUIRE(avgMs < limitMs);
 }
 

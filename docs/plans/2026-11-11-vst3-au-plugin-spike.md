@@ -198,3 +198,17 @@ panelAfterTheme=open`. Повторный замер выделения на ф�
 Плагин пересобран, установлен, `auval` PASS, подпись валидна.
 Not fixed in B: Split, Extract, Relocate, AutoTag и алерты в плагине по-прежнему открываются как
 отдельные окна `DialogWindow`; их поведение в хосте не проверялось.
+Owner confirmation (2026-11-11): после итерации B всё работает в Cubase — превью звучит, MIDI-клавиатура
+играет выбранный сэмпл, переключение сэмплов быстрое, настройки открываются и тема переключается,
+drag на таймлайн создаёт клип. Остальные хосты из чек-листа U1 владельцем не проверялись.
+Final fix: `tests/TestAcousticAcceptance.cpp` использовал `JUCE_DEBUG` как обычное выражение, из-за
+чего Release-сборка с тестами не компилировалась; условие переведено в препроцессор.
+Final integration: ff merge `spike/vst3-au-plugin` → `main` (1c58528), ctest на main passed (26.77 s),
+push в origin выполнен, feature-ветка удалена.
+Release build: `build-universal` (Release, `x86_64;arm64`), сборка целиком прошла, ctest Release
+passed (61.46 s), `lipo -archs` = `x86_64 arm64`, версия 0.1.0, бандл 37 MB, приложение запущено.
+Ruling: `codesign --verify` на бандле в `~/Documents` ругается на `com.apple.FinderInfo`, который
+iCloud возвращает после подписи; подпись при этом валидна — проверено на копии в `/tmp`, а `xattr -cr`
+возвращает валидность и на месте. Цена: после каждой сборки в `~/Documents` атрибуты нужно чистить.
+Плагин остаётся arm64 Release из `~/Library/Caches/sonicator-plugin-spike`; universal-сборка
+плагина и его настоящие идентификаторы — этап 7.
