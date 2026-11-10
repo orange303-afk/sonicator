@@ -571,10 +571,9 @@ void SampleRepository::createTables()
             "CREATE TABLE IF NOT EXISTS custom_types ("
             "name TEXT PRIMARY KEY NOT NULL COLLATE NOCASE, created_at INTEGER NOT NULL);"
             "CREATE TABLE IF NOT EXISTS ml_feedback_samples ("
-            "sample_id INTEGER PRIMARY KEY, file_hash TEXT NOT NULL,"
+            "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE, file_hash TEXT NOT NULL,"
             "target_type TEXT NOT NULL COLLATE NOCASE, tags TEXT NOT NULL DEFAULT '',"
-            "features BLOB NOT NULL, updated_at INTEGER NOT NULL);"
-            "CREATE INDEX IF NOT EXISTS idx_ml_feedback_type ON ml_feedback_samples(target_type);");
+            "features BLOB NOT NULL, updated_at INTEGER NOT NULL);");
         // Databases created before schema 3 predate the folded search column.
         bool hasSearchKey = false, hasStarred = false;
         {

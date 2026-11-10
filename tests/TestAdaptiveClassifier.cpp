@@ -21,3 +21,31 @@ TEST_CASE("AdaptiveClassifier prototype learning and dual-prediction", "[ml][ada
     REQUIRE_FALSE(tagPreds.empty());
     CHECK(tagPreds[0].label == "cymbal");
 }
+
+TEST_CASE("AdaptiveClassifier silence extraction produces empty features", "[ml][adaptive]")
+{
+    juce::AudioBuffer<float> silent(2, 44100);
+    silent.clear();
+    auto features = AdaptiveClassifier::extractFeatures(silent, 44100.0);
+    CHECK(features.empty());
+}
+
+TEST_CASE("AdaptiveClassifier case-insensitive label aggregation", "[ml][adaptive]")
+{
+    AdaptiveClassifier classifier;
+    std::vector<float> f1 = {0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f};
+    std::vector<float> f2 = {0.11f, 0.21f, 0.31f, 0.41f, 0.51f, 0.61f, 0.71f, 0.81f, 0.91f, 0.11f, 0.21f, 0.31f, 0.41f, 0.51f};
+
+    classifier.updatePrototype(1, "Synth", {"analog"}, f1);
+    classifier.updatePrototype(2, "synth", {"Analog"}, f2);
+
+    auto typePreds = classifier.predictType(f1, 5);
+    // Should aggregate into a single canonical class rather than returning two duplicates
+    CHECK(typePreds.size() == 1);
+    CHECK(typePreds[0].label.equalsIgnoreCase("Synth"));
+
+    auto tagPreds = classifier.predictTags(f1, 5);
+    CHECK(tagPreds.size() == 1);
+    CHECK(tagPreds[0].label.equalsIgnoreCase("analog"));
+}
+

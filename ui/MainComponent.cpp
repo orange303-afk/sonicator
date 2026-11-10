@@ -584,6 +584,8 @@ MainComponent::~MainComponent()
     }
     if (splitter) { splitter->cancel(); splitter->waitUntilFinished(-1); }
     if (extractor) { extractor->cancel(); extractor->waitUntilFinished(-1); }
+    cancelFeedback = true;
+    if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
     smart.reset(); indexer.reset(); tagging.reset(); autoTag.reset(); splitter.reset(); extractor.reset();
     setLookAndFeel(nullptr);
 }
@@ -2531,6 +2533,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         "FX", "Riser", "Drop", "Texture", "Atmosphere"
     };
     juce::String commonType;
+    bool hasFirst = false;
     bool uniformType = true;
     bool anyTypeOverride = false;
     const auto displays = readRepo->smartDisplays(ids);
@@ -2541,8 +2544,11 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         {
             if (it->second.typeOverride != OverrideState::None)
                 anyTypeOverride = true;
-            if (i == 0)
+            if (! hasFirst)
+            {
                 commonType = it->second.type;
+                hasFirst = true;
+            }
             else if (! commonType.equalsIgnoreCase(it->second.type))
                 uniformType = false;
         }
@@ -2616,6 +2622,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
             {
                 if (result == 9020)
                 {
+                    safe->cancelFeedback = true;
+                    if (safe->typeFeedbackWorker && safe->typeFeedbackWorker->joinable())
+                        safe->typeFeedbackWorker->join();
+                    safe->cancelFeedback = false;
                     for (auto id : ids)
                     {
                         safe->writeRepo->clearSmartOverride(id, SmartField::Type);
@@ -2631,6 +2641,14 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     {
                         if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr) return;
                         name = name.trim();
+                        for (const auto& st : standardTypes)
+                        {
+                            if (st.equalsIgnoreCase(name))
+                            {
+                                safe->applyTypeOverride(ids, files, st);
+                                return;
+                            }
+                        }
                         safe->writeRepo->addCustomType(name);
                         safe->applyTypeOverride(ids, files, name);
                     });
@@ -2809,26 +2827,40 @@ void MainComponent::applyTypeOverride(const std::vector<int64_t>& ids,
     reloadLibrary();
     status.setText("Set type to " + type + " for " + juce::String(ids.size()) + " sample(s)", juce::dontSendNotification);
 
-    std::thread([files, type, repo = writeRepo.get()]()
+    cancelFeedback = true;
+    if (typeFeedbackWorker && typeFeedbackWorker->joinable())
+        typeFeedbackWorker->join();
+    cancelFeedback = false;
+
+    typeFeedbackWorker = std::make_unique<std::thread>([this, files, type, repo = writeRepo.get()]()
     {
         if (repo == nullptr) return;
         for (const auto& r : files)
         {
+            if (cancelFeedback.load()) break;
             const juce::File f(r.filePath);
             if (! f.existsAsFile()) continue;
+
+            const auto currentOverrides = repo->smartOverrides(r.id);
+            const auto it = currentOverrides.find(SmartField::Type);
+            if (it == currentOverrides.end() || ! it->second.textValue.equalsIgnoreCase(type))
+                continue;
+
             AnalysisAudioOptions opts;
             opts.maxSeconds = 30.0;
             const auto audio = readAnalysisAudio(f, opts);
             if (audio.buffer.getNumSamples() == 0 || audio.sampleRate <= 0.0) continue;
             const auto features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
             if (features.empty()) continue;
+            if (cancelFeedback.load()) break;
+
             const auto sampleTags = repo->tagsForSample(r.id);
             juce::StringArray tagNames;
             for (const auto& t : sampleTags) tagNames.add(t.name);
             repo->recordFeedback(r.id, type, tagNames, features);
             AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(r.id, type, tagNames, features);
         }
-    }).detach();
+    });
 }
 void MainComponent::timerCallback()
 {
@@ -3180,6 +3212,9 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     if (tagging) { tagging->cancel(); tagging->waitUntilFinished(-1); tagging.reset(); }
     if (smart) { smart->cancel(); smart->waitUntilFinished(-1); smart.reset(); }
     if (indexer) { indexer->cancel(); indexer->waitUntilFinished(-1); indexer.reset(); }
+    cancelFeedback = true;
+    if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
+    cancelFeedback = false;
     writeRepo.reset(); writeDb.reset(); readRepo.reset(); readDb.reset();
     writeDb = std::move(newWriteDb); writeRepo = std::move(newWriteRepo);
     readDb = std::move(newReadDb); readRepo = std::move(newReadRepo);

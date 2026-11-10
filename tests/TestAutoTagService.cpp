@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/tagging/AutoTagService.h"
+#include "core/smart/AcousticClassifierService.h"
 #include "TestHelpers.h"
 using namespace sonicator;
 namespace {
@@ -238,3 +239,31 @@ TEST_CASE("AutoTag writes Crash rather than Percussion for a crash file", "[auto
     REQUIRE(f.tagged(crash, crashTag) == 1);
     REQUIRE(f.tagged(crash, percussionTag) == 0);
 }
+
+TEST_CASE("AutoTag proposes learned prototype tag when adaptive classifier matches", "[autotag][service][adaptive]")
+{
+    AutoFixture f;
+    const auto unnamed = f.add("Samples/synth_sound.wav");
+    const auto padTag = f.tag("Pad");
+    REQUIRE(padTag > 0);
+
+    // Register prototype with "Pad" tag
+    std::vector<float> features(14, 0.5f);
+    AcousticClassifierService::getSharedAdaptiveClassifier().clear();
+    AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(999, "Pad", { "Pad" }, features);
+
+    // Give unnamed sample similar prototype features via feedback recording
+    f.repo->recordFeedback(unnamed, "Pad", { "Pad" }, features);
+
+    AutoTagService service(*f.repo);
+    REQUIRE(service.startSelected({ unnamed }));
+    REQUIRE(service.waitUntilFinished(20000));
+    AutoTagResult result;
+    REQUIRE(service.takeResult(result));
+    REQUIRE(result.proposals.size() == 1);
+    CHECK(result.proposals.front().canonicalType == "Pad");
+    CHECK(result.proposals.front().tagId == padTag);
+
+    AcousticClassifierService::getSharedAdaptiveClassifier().clear();
+}
+

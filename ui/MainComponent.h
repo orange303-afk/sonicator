@@ -198,5 +198,7 @@ private:
                            const juce::String& type);
     static bool contains(const std::vector<int64_t>& values, int64_t id);
     static void toggle(std::vector<int64_t>& values, int64_t id);
+    std::unique_ptr<std::thread> typeFeedbackWorker;
+    std::atomic<bool> cancelFeedback{ false };
 };
 } // namespace sonicator

@@ -155,16 +155,22 @@ TEST_CASE("SampleRepository custom types and ml feedback storage", "[smart][data
         auto types = repo.customTypes();
         CHECK(types.size() == 2);
 
+        SampleRecord r;
+        r.filePath = "/lib/sample101.wav";
+        r.fileName = "sample101.wav";
+        r.fileHash = "h101";
+        const auto id = repo.upsert(r);
+
         std::vector<float> features(14, 0.5f);
-        repo.recordFeedback(101, "Sub-Drop", {"bass", "heavy"}, features);
+        repo.recordFeedback(id, "Sub-Drop", {"bass", "heavy"}, features);
         auto all = repo.allFeedback();
         REQUIRE(all.size() == 1);
-        CHECK(all[0].sampleId == 101);
+        CHECK(all[0].sampleId == id);
         CHECK(all[0].targetType == "Sub-Drop");
         CHECK(all[0].tags.size() == 2);
         CHECK(all[0].features.size() == 14);
 
-        repo.removeFeedback(101);
+        repo.removeFeedback(id);
         CHECK(repo.allFeedback().empty());
     }
     file.deleteFile();

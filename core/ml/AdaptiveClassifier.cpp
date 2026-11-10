@@ -119,26 +119,28 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictType(
     std::lock_guard lock(impl->mutex);
     if (impl->prototypes.empty()) return {};
 
-    struct ScoredType {
-        juce::String type;
+    struct LabelAgg {
+        juce::String display;
         float score = 0.0f;
     };
-    std::map<juce::String, float> typeBestScore;
+    std::map<juce::String, LabelAgg> typeBestScore;
 
     for (const auto& p : impl->prototypes)
     {
         if (p.targetType.isEmpty() || p.features.empty()) continue;
         const float sim = computeCosineSimilarity(features, p.features);
         if (sim <= 0.0f) continue;
-        auto& best = typeBestScore[p.targetType];
-        if (sim > best) best = sim;
+        const auto key = p.targetType.toLowerCase();
+        auto& agg = typeBestScore[key];
+        if (agg.display.isEmpty()) agg.display = p.targetType;
+        if (sim > agg.score) agg.score = sim;
     }
 
     std::vector<Prediction> results;
     results.reserve(typeBestScore.size());
     for (const auto& pair : typeBestScore)
     {
-        results.push_back({ pair.first, pair.second });
+        results.push_back({ pair.second.display, pair.second.score });
     }
 
     std::sort(results.begin(), results.end(), [](const Prediction& a, const Prediction& b) {
@@ -158,7 +160,11 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictTags(
     std::lock_guard lock(impl->mutex);
     if (impl->prototypes.empty()) return {};
 
-    std::map<juce::String, float> tagBestScore;
+    struct LabelAgg {
+        juce::String display;
+        float score = 0.0f;
+    };
+    std::map<juce::String, LabelAgg> tagBestScore;
 
     for (const auto& p : impl->prototypes)
     {
@@ -167,9 +173,12 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictTags(
         if (sim <= 0.0f) continue;
         for (const auto& tag : p.tags)
         {
-            if (tag.trim().isEmpty()) continue;
-            auto& best = tagBestScore[tag];
-            if (sim > best) best = sim;
+            const auto trimmed = tag.trim();
+            if (trimmed.isEmpty()) continue;
+            const auto key = trimmed.toLowerCase();
+            auto& agg = tagBestScore[key];
+            if (agg.display.isEmpty()) agg.display = trimmed;
+            if (sim > agg.score) agg.score = sim;
         }
     }
 
@@ -177,7 +186,7 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictTags(
     results.reserve(tagBestScore.size());
     for (const auto& pair : tagBestScore)
     {
-        results.push_back({ pair.first, pair.second });
+        results.push_back({ pair.second.display, pair.second.score });
     }
 
     std::sort(results.begin(), results.end(), [](const Prediction& a, const Prediction& b) {
@@ -194,29 +203,41 @@ std::vector<float> AdaptiveClassifier::extractFeatures(const juce::AudioBuffer<f
 {
     if (buffer.getNumSamples() == 0 || sampleRate <= 0.0) return {};
 
-    const auto desc = AcousticFeatures::extract(buffer, sampleRate);
-    const double duration = static_cast<double>(buffer.getNumSamples()) / sampleRate;
-
     float rms = 0.0f;
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
         rms = std::max(rms, buffer.getRMSLevel(ch, 0, buffer.getNumSamples()));
 
+    if (rms < 1e-4f) return {};
+
+    const auto desc = AcousticFeatures::extract(buffer, sampleRate);
+    const double duration = static_cast<double>(buffer.getNumSamples()) / sampleRate;
+
+    // Normalize feature dimensions into comparable ranges around [0..1]
+    const float normAttack = static_cast<float>(std::clamp((desc.logAttackTime + 4.0) / 4.0, 0.0, 1.0));
+    const float normDecay = static_cast<float>(std::clamp(desc.decayRate / 500.0, 0.0, 1.0));
+    const float normCrest = static_cast<float>(std::clamp(std::log1p(desc.crestFactor) / 4.0, 0.0, 1.0));
+    const float normTemporal = static_cast<float>(std::clamp(desc.temporalCentroid, 0.0, 1.0));
+    const float normZcr = static_cast<float>(std::clamp(desc.zeroCrossingRate / 10000.0, 0.0, 1.0));
+    const float normFlux = static_cast<float>(std::clamp(desc.spectralFlux / 100.0, 0.0, 1.0));
+    const float normClarity = static_cast<float>(std::clamp(desc.pitchClarity, 0.0, 1.0));
+    const float normDuration = static_cast<float>(std::clamp(duration / 30.0, 0.0, 1.0));
+
     std::vector<float> vec;
     vec.reserve(14);
-    vec.push_back(static_cast<float>(desc.logAttackTime));
-    vec.push_back(static_cast<float>(desc.decayRate));
-    vec.push_back(static_cast<float>(desc.crestFactor));
-    vec.push_back(static_cast<float>(desc.temporalCentroid));
+    vec.push_back(normAttack);
+    vec.push_back(normDecay);
+    vec.push_back(normCrest);
+    vec.push_back(normTemporal);
     vec.push_back(static_cast<float>(desc.subBandEnergy[0]));
     vec.push_back(static_cast<float>(desc.subBandEnergy[1]));
     vec.push_back(static_cast<float>(desc.subBandEnergy[2]));
     vec.push_back(static_cast<float>(desc.subBandEnergy[3]));
     vec.push_back(static_cast<float>(desc.subBandEnergy[4]));
-    vec.push_back(static_cast<float>(desc.zeroCrossingRate));
-    vec.push_back(static_cast<float>(desc.spectralFlux));
-    vec.push_back(static_cast<float>(desc.pitchClarity));
-    vec.push_back(static_cast<float>(duration));
-    vec.push_back(rms);
+    vec.push_back(normZcr);
+    vec.push_back(normFlux);
+    vec.push_back(normClarity);
+    vec.push_back(normDuration);
+    vec.push_back(std::min(1.0f, rms * 2.0f));
 
     return vec;
 }

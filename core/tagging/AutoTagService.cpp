@@ -1,4 +1,6 @@
 #include "AutoTagService.h"
+#include "core/smart/AcousticClassifierService.h"
+#include "core/dsp/AnalysisAudio.h"
 #include <algorithm>
 #include <set>
 namespace sonicator {
@@ -10,14 +12,9 @@ AutoTagOptions optionsFromRepository(SampleRepository& repo)
 {
     AutoTagOptions options;
     const auto tags = repo.tags();
-    for (const auto& type : AutoTagRules::supportedTypes())
+    for (const auto& tag : tags)
     {
-        for (const auto& tag : tags)
-            if (tag.name.equalsIgnoreCase(type))
-            {
-                options.tagIds[type] = tag.id;
-                break;
-            }
+        options.tagIds[tag.name] = tag.id;
     }
     return options;
 }
@@ -225,18 +222,84 @@ void AutoTagService::prepare()
                     result.proposals.push_back(std::move(proposal));
                 }
             }
-            else if (decision.skip.has_value())
+            else
             {
-                if (decision.skip->code == "no-evidence")
+                bool adaptiveProposed = false;
+                auto& adaptive = AcousticClassifierService::getSharedAdaptiveClassifier();
+                if (adaptive.hasPrototypes())
                 {
-                    ++result.noEvidence;
+                    std::vector<float> features;
+                    auto allFb = repo.allFeedback();
+                    for (const auto& fb : allFb)
+                    {
+                        if (fb.sampleId == id) { features = fb.features; break; }
+                    }
+                    if (features.empty())
+                    {
+                        const juce::File file(record->filePath);
+                        if (file.existsAsFile())
+                        {
+                            AnalysisAudioOptions opts;
+                            opts.maxSeconds = 30.0;
+                            const auto audio = readAnalysisAudio(file, opts);
+                            if (audio.buffer.getNumSamples() > 0 && audio.sampleRate > 0.0)
+                                features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+                        }
+                    }
+                    if (! features.empty())
+                    {
+                        auto tagPreds = adaptive.predictTags(features, 1);
+                        if (! tagPreds.empty() && tagPreds.front().score >= 0.80f)
+                        {
+                            const auto tagLabel = tagPreds.front().label;
+                            int64_t targetTagId = 0;
+                            for (const auto& pair : options.tagIds)
+                            {
+                                if (pair.first.equalsIgnoreCase(tagLabel))
+                                {
+                                    targetTagId = pair.second;
+                                    break;
+                                }
+                            }
+                            if (targetTagId > 0)
+                            {
+                                const juce::File file(record->filePath);
+                                AutoTagProposal prop;
+                                prop.sampleId = id;
+                                prop.filePath = record->filePath;
+                                prop.fileName = record->fileName;
+                                prop.canonicalType = tagLabel;
+                                prop.tagId = targetTagId;
+                                prop.rule = AutoTagRule::SmartType;
+                                prop.source = "user_adaptive";
+                                prop.reason = "learned from acoustically similar prototypes";
+                                prop.fileSize = file.getSize();
+                                prop.fileModified = fileModified(file);
+                                for (const auto& assigned : repo.tagsForSample(id))
+                                {
+                                    if (assigned.id == targetTagId) { prop.alreadyAssigned = true; break; }
+                                }
+                                if (prop.alreadyAssigned) ++result.alreadyAssigned;
+                                else ++result.newAssignments;
+                                result.proposals.push_back(std::move(prop));
+                                adaptiveProposed = true;
+                            }
+                        }
+                    }
                 }
-                else
+                if (! adaptiveProposed && decision.skip.has_value())
                 {
-                    if (result.skipped.size() < maxSkippedRows) result.skipped.push_back(*decision.skip);
-                    ++result.skippedCount;
-                    std::lock_guard lock(stateMutex);
-                    ++state.skipped;
+                    if (decision.skip->code == "no-evidence")
+                    {
+                        ++result.noEvidence;
+                    }
+                    else
+                    {
+                        if (result.skipped.size() < maxSkippedRows) result.skipped.push_back(*decision.skip);
+                        ++result.skippedCount;
+                        std::lock_guard lock(stateMutex);
+                        ++state.skipped;
+                    }
                 }
             }
             ++result.checked;
