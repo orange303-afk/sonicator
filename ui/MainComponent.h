@@ -192,6 +192,10 @@ private:
     void requestCloseExtract();
     bool isExtractRunning() const { return extractor != nullptr && extractor->progress().running; }
     void promptTagName(const juce::String& title, const juce::String& initial, std::function<void(juce::String)> onAccept);
+    void promptCustomType(std::function<void(juce::String)> onAccept);
+    void applyTypeOverride(const std::vector<int64_t>& ids,
+                           const std::vector<SampleRecord>& files,
+                           const juce::String& type);
     static bool contains(const std::vector<int64_t>& values, int64_t id);
     static void toggle(std::vector<int64_t>& values, int64_t id);
 };

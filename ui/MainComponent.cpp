@@ -12,10 +12,14 @@
 #include "ui/settings/SettingsPanel.h"
 #include "ui/shell/ThemedDialogs.h"
 #include "ui/platform/FileClipboard.h"
+#include "core/dsp/AnalysisAudio.h"
+#include "core/smart/AcousticClassifierService.h"
+#include "core/ml/AdaptiveClassifier.h"
 #include <algorithm>
 #include <cmath>
 #include <iterator>
 #include <map>
+#include <thread>
 namespace sonicator {
 namespace {
 bool isDiscImageFormat(const juce::String& format)
@@ -470,6 +474,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         purgeUnsupportedRows(*writeRepo);
         writeRepo->refreshDuplicates();
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
+        AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
         indexer = std::make_unique<IndexingService>(*writeRepo);
         // Only a real application startup may register the user's system pack folders.
         if (persistSessionState)
@@ -2517,6 +2522,56 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     if (! allTags.empty()) tagsMenu.addSeparator();
     tagsMenu.addItem(9003, "New tag...");
     menu.addSubMenu("Tag", tagsMenu);
+
+    juce::PopupMenu typeMenu;
+    static const juce::StringArray standardTypes = {
+        "Kick", "Snare", "Hat", "Clap", "Percussion", "Cymbal", "Tom",
+        "Bass", "Sub", "Lead", "Pad", "Pluck", "Chord",
+        "Guitar", "Piano", "Strings", "Brass", "Vocal",
+        "FX", "Riser", "Drop", "Texture", "Atmosphere"
+    };
+    juce::String commonType;
+    bool uniformType = true;
+    bool anyTypeOverride = false;
+    const auto displays = readRepo->smartDisplays(ids);
+    for (size_t i = 0; i < ids.size(); ++i)
+    {
+        const auto it = displays.find(ids[i]);
+        if (it != displays.end())
+        {
+            if (it->second.typeOverride != OverrideState::None)
+                anyTypeOverride = true;
+            if (i == 0)
+                commonType = it->second.type;
+            else if (! commonType.equalsIgnoreCase(it->second.type))
+                uniformType = false;
+        }
+    }
+
+    for (int i = 0; i < standardTypes.size(); ++i)
+    {
+        const auto& t = standardTypes[i];
+        const bool isChecked = uniformType && commonType.equalsIgnoreCase(t);
+        typeMenu.addItem(30000 + i, t, true, isChecked);
+    }
+
+    const auto customList = readRepo->customTypes();
+    if (! customList.empty())
+    {
+        typeMenu.addSeparator();
+        for (int i = 0; i < (int) customList.size(); ++i)
+        {
+            const auto& t = customList[(size_t) i];
+            const bool isChecked = uniformType && commonType.equalsIgnoreCase(t);
+            typeMenu.addItem(40000 + i, t, true, isChecked);
+        }
+    }
+
+    typeMenu.addSeparator();
+    typeMenu.addItem(9021, "+ Custom type...");
+    typeMenu.addItem(9020, "Reset type override", anyTypeOverride);
+    menu.addSubMenu("Type", typeMenu);
+
     menu.addItem(9001, allStarred ? "Unstar" : "Star", true, false, starMenuImage());
     const bool smartAvailable = smart != nullptr && ! (indexer && indexer->progress().running);
     menu.addItem(9005, selection.size() > 1 ? "Analyze selected (" + juce::String(selection.size()) + ")"
@@ -2548,7 +2603,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
-         ignoredPaths, allIgnored, anyInherited, splitCandidates, extractCandidates](int result)
+         ignoredPaths, allIgnored, anyInherited, splitCandidates, extractCandidates, customList](int result)
         {
             if (safe == nullptr || result == 0) return;
             if ((safe->isSplitRunning() || safe->isExtractRunning())
@@ -2559,7 +2614,40 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
             }
             try
             {
-                if (result >= 20000)
+                if (result == 9020)
+                {
+                    for (auto id : ids)
+                    {
+                        safe->writeRepo->clearSmartOverride(id, SmartField::Type);
+                        safe->writeRepo->removeFeedback(id);
+                        AcousticClassifierService::getSharedAdaptiveClassifier().removePrototype(id);
+                    }
+                    safe->reloadLibrary();
+                    safe->status.setText("Reset type override for " + juce::String(ids.size()) + " sample(s)", juce::dontSendNotification);
+                }
+                else if (result == 9021)
+                {
+                    safe->promptCustomType([safe, ids, files](juce::String name)
+                    {
+                        if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr) return;
+                        name = name.trim();
+                        safe->writeRepo->addCustomType(name);
+                        safe->applyTypeOverride(ids, files, name);
+                    });
+                }
+                else if (result >= 40000)
+                {
+                    const size_t index = (size_t) (result - 40000);
+                    if (index < customList.size())
+                        safe->applyTypeOverride(ids, files, customList[index]);
+                }
+                else if (result >= 30000)
+                {
+                    const size_t index = (size_t) (result - 30000);
+                    if (index < (size_t) standardTypes.size())
+                        safe->applyTypeOverride(ids, files, standardTypes[(int) index]);
+                }
+                else if (result >= 20000)
                 {
                     const size_t index = (size_t) (result - 20000);
                     if (index >= recent.size()) return;
@@ -2702,6 +2790,45 @@ void MainComponent::promptTagName(const juce::String& title, const juce::String&
                                   std::function<void(juce::String)> onAccept)
 {
     dialogs::showPrompt(*this, title, "Tag name:", initial, std::move(onAccept));
+}
+void MainComponent::promptCustomType(std::function<void(juce::String)> onAccept)
+{
+    dialogs::showPrompt(*this, "New custom type", "Type name:", {}, std::move(onAccept));
+}
+void MainComponent::applyTypeOverride(const std::vector<int64_t>& ids,
+                                      const std::vector<SampleRecord>& files,
+                                      const juce::String& type)
+{
+    if (ids.empty() || writeRepo == nullptr) return;
+    SmartOverride val;
+    val.textValue = type;
+    for (auto id : ids)
+    {
+        writeRepo->setSmartOverride(id, SmartField::Type, val);
+    }
+    reloadLibrary();
+    status.setText("Set type to " + type + " for " + juce::String(ids.size()) + " sample(s)", juce::dontSendNotification);
+
+    std::thread([files, type, repo = writeRepo.get()]()
+    {
+        if (repo == nullptr) return;
+        for (const auto& r : files)
+        {
+            const juce::File f(r.filePath);
+            if (! f.existsAsFile()) continue;
+            AnalysisAudioOptions opts;
+            opts.maxSeconds = 30.0;
+            const auto audio = readAnalysisAudio(f, opts);
+            if (audio.buffer.getNumSamples() == 0 || audio.sampleRate <= 0.0) continue;
+            const auto features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+            if (features.empty()) continue;
+            const auto sampleTags = repo->tagsForSample(r.id);
+            juce::StringArray tagNames;
+            for (const auto& t : sampleTags) tagNames.add(t.name);
+            repo->recordFeedback(r.id, type, tagNames, features);
+            AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(r.id, type, tagNames, features);
+        }
+    }).detach();
 }
 void MainComponent::timerCallback()
 {
@@ -3056,6 +3183,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     writeRepo.reset(); writeDb.reset(); readRepo.reset(); readDb.reset();
     writeDb = std::move(newWriteDb); writeRepo = std::move(newWriteRepo);
     readDb = std::move(newReadDb); readRepo = std::move(newReadRepo);
+    AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
     indexer = std::make_unique<IndexingService>(*writeRepo);
     smart = std::make_unique<SmartAnalysisService>(*writeRepo);
     tagging = std::make_unique<TaggingService>(*writeRepo);
