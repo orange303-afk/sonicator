@@ -471,8 +471,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         writeDb = std::make_unique<Database>(dbPath); writeRepo = std::make_unique<SampleRepository>(*writeDb);
         writeRepo->createTables();
         // Formats this build no longer indexes leave the catalog; the files stay on disk.
-        purgeUnsupportedRows(*writeRepo);
-        writeRepo->refreshDuplicates();
+        if (purgeUnsupportedRows(*writeRepo) > 0)
+            writeRepo->refreshDuplicates();
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
         indexer = std::make_unique<IndexingService>(*writeRepo);
@@ -1410,7 +1410,7 @@ void MainComponent::showTagFilterMenu()
     menu.addSeparator();
     menu.addItem(3010, "New tag...");
     if (! allTags.empty()) menu.addSubMenu("Manage tags", manage);
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&tagFilter),
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&tagFilter).withMaximumNumColumns(1),
         [safe = juce::Component::SafePointer<MainComponent>(this)](int result)
         {
             if (safe == nullptr || result == 0) return;
@@ -1505,7 +1505,11 @@ int MainComponent::assignTagAndRemember(const std::vector<int64_t>& sampleIds, i
     const auto visible = writeRepo->visibleIds(sampleIds);
     if (visible.empty()) return 0;
     const int added = writeRepo->assignTag(visible, tagId);
-    if (added > 0) writeRepo->recordRecentTag(tagId);
+    if (added > 0)
+    {
+        writeRepo->recordRecentTag(tagId);
+        triggerAdaptiveLearning(visible);
+    }
     return added;
 }
 void MainComponent::showEditTagsMenu()
@@ -1525,7 +1529,7 @@ void MainComponent::showEditTagsMenu()
     if (allTags.empty()) menu.addSectionHeader("No tags yet");
     menu.addSeparator();
     menu.addItem(6999, "New tag...");
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&editTags),
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&editTags).withMaximumNumColumns(1),
         [safe = juce::Component::SafePointer<MainComponent>(this), sampleId](int result)
         {
             if (safe == nullptr || result == 0 || safe->writeRepo == nullptr) return;
@@ -1586,9 +1590,12 @@ void MainComponent::saveSessionState()
 void MainComponent::refreshFavorites()
 {
     if (readRepo == nullptr) return;
-    try { favorites.refresh(*readRepo, appSettings.favoriteFolders, false, filter.showIgnored); }
-    catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
     const bool hasFavorites = ! appSettings.favoriteFolders.isEmpty();
+    if (hasFavorites)
+    {
+        try { favorites.refresh(*readRepo, appSettings.favoriteFolders, false, filter.showIgnored); }
+        catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+    }
     favoritesLabel.setVisible(hasFavorites);
     favorites.setVisible(hasFavorites);
     favoritesSplitter.setVisible(hasFavorites);
@@ -1658,6 +1665,7 @@ void MainComponent::showFavoriteContextMenu(const juce::String& path, juce::Poin
     menu.addItem(7202, "Rename folder...");
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&favorites).withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 })
+                           .withMaximumNumColumns(1)
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), path](int result)
         {
@@ -2307,6 +2315,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     const juce::String folderPath = path;
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&folders).withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 })
+                           .withMaximumNumColumns(1)
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued, exactIgnore](int result)
         {
@@ -2328,7 +2337,6 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                     if (safe->writeRepo == nullptr) return;
                     if (exactIgnore) safe->writeRepo->unignorePath(folderPath);
                     else safe->writeRepo->ignorePath(folderPath, true);
-                    safe->writeRepo->refreshDuplicates();
                     safe->ensureSelectedFolderVisible();
                     safe->reloadLibrary();
                     safe->folders.refresh(*safe->readRepo, safe->readRepo->roots(), true,
@@ -2527,10 +2535,12 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
 
     juce::PopupMenu typeMenu;
     static const juce::StringArray standardTypes = {
-        "Kick", "Snare", "Hat", "Clap", "Percussion", "Cymbal", "Tom",
-        "Bass", "Sub", "Lead", "Pad", "Pluck", "Chord",
-        "Guitar", "Piano", "Strings", "Brass", "Vocal",
-        "FX", "Riser", "Drop", "Texture", "Atmosphere"
+        "808", "Acid", "Agogo", "Arp", "Atmosphere", "Bass", "Blip", "Bongo", "Brass",
+        "Chord", "Clap", "Clave", "Click", "Conga", "Cowbell", "Crash", "Cymbal",
+        "Djembe", "Downfilter", "Drone", "Drop", "Foley", "FX", "Glitch", "Guitar",
+        "Hat", "Impact", "Keys", "Kick", "Lead", "Pad", "Percussion", "Piano", "Pluck",
+        "Reese", "Ride", "Rim", "Riser", "Shaker", "Snare", "Snap", "Stab", "Strings",
+        "Sub", "Tabla", "Tamb", "Texture", "Timbale", "Tom", "Triangle", "Vocal", "Zap"
     };
     juce::String commonType;
     bool hasFirst = false;
@@ -2561,7 +2571,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         typeMenu.addItem(30000 + i, t, true, isChecked);
     }
 
-    const auto customList = readRepo->customTypes();
+    auto customList = readRepo->customTypes();
+    std::sort(customList.begin(), customList.end(), [](const juce::String& a, const juce::String& b) {
+        return a.compareIgnoreCase(b) < 0;
+    });
     if (! customList.empty())
     {
         typeMenu.addSeparator();
@@ -2606,6 +2619,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         menu.addItem(9004, "Show all " + juce::String(duplicate->groupSize) + " copies");
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&library).withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 })
+                           .withMaximumNumColumns(1)
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
@@ -2701,30 +2715,45 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     int changed = 0;
                     if (allIgnored)
                     {
+                        std::vector<juce::String> pathsToUnignore;
                         for (const auto& record : files)
                             if (safe->readRepo->hasExactIgnore(record.filePath))
-                            { safe->writeRepo->unignorePath(record.filePath); ++changed; }
+                                pathsToUnignore.push_back(record.filePath);
+                        changed = safe->writeRepo->unignorePaths(pathsToUnignore);
                     }
                     else
                     {
+                        std::vector<juce::String> pathsToIgnore;
                         for (const auto& record : files)
                             if (! isPathIgnored(record.filePath, ignoredPaths))
-                            { safe->writeRepo->ignorePath(record.filePath, false); ++changed; }
+                                pathsToIgnore.push_back(record.filePath);
+                        changed = safe->writeRepo->ignorePaths(pathsToIgnore, false);
                     }
-                    safe->writeRepo->refreshDuplicates();
+                    const auto updatedIgnored = safe->readRepo->ignoredPaths();
+                    safe->library.setIgnoredPaths(updatedIgnored);
+                    safe->folders.setIgnoredPaths(updatedIgnored, safe->filter.showIgnored);
+                    safe->favorites.setIgnoredPaths(updatedIgnored, safe->filter.showIgnored);
                     safe->ensureSelectedFolderVisible();
                     safe->reloadLibrary();
-                    safe->folders.refresh(*safe->readRepo, safe->readRepo->roots(), true,
-                                          safe->filter.showIgnored);
-                    safe->refreshFavorites();
                     safe->status.setText((allIgnored ? "Stopped ignoring " : "Ignoring ")
                         + juce::String(changed) + " file(s)", juce::dontSendNotification);
                 }
                 else if (result == 9001)
                 {
                     safe->writeRepo->setStarred(ids, ! allStarred);
-                    safe->writeRepo->refreshDuplicates();
-                    safe->reloadLibrary();
+                    if (safe->filter.starredOnly)
+                    {
+                        safe->reloadLibrary();
+                    }
+                    else
+                    {
+                        safe->library.setStarredInPlace(ids, ! allStarred);
+                        if (safe->selectedSampleId > 0 && std::find(ids.begin(), ids.end(), safe->selectedSampleId) != ids.end())
+                        {
+                            if (auto selected = safe->readRepo->findById(safe->selectedSampleId))
+                                safe->updateSelectionStatus(*selected);
+                        }
+                    }
                 }
                 else if (result == 9002)
                 {
@@ -2797,7 +2826,11 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     const auto state = allHave.find(tag.id);
                     const bool assign = state == allHave.end() || ! state->second;
                     if (assign) safe->assignTagAndRemember(ids, tag.id);
-                    else safe->writeRepo->setSampleTag(ids, tag.id, false);
+                    else
+                    {
+                        safe->writeRepo->setSampleTag(ids, tag.id, false);
+                        safe->triggerAdaptiveLearning(ids);
+                    }
                     safe->reloadLibrary();
                 }
             }
@@ -2827,38 +2860,67 @@ void MainComponent::applyTypeOverride(const std::vector<int64_t>& ids,
     reloadLibrary();
     status.setText("Set type to " + type + " for " + juce::String(ids.size()) + " sample(s)", juce::dontSendNotification);
 
+    triggerAdaptiveLearning(ids);
+    juce::ignoreUnused(files);
+}
+void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
+{
+    if (ids.empty() || writeRepo == nullptr) return;
+
     cancelFeedback = true;
     if (typeFeedbackWorker && typeFeedbackWorker->joinable())
         typeFeedbackWorker->join();
     cancelFeedback = false;
 
-    typeFeedbackWorker = std::make_unique<std::thread>([this, files, type, repo = writeRepo.get()]()
+    typeFeedbackWorker = std::make_unique<std::thread>([this, sampleIds = ids, repo = writeRepo.get()]()
     {
         if (repo == nullptr) return;
-        for (const auto& r : files)
+        for (auto id : sampleIds)
         {
             if (cancelFeedback.load()) break;
-            const juce::File f(r.filePath);
+            const auto record = repo->findById(id);
+            if (! record) continue;
+            const juce::File f(record->filePath);
             if (! f.existsAsFile()) continue;
 
-            const auto currentOverrides = repo->smartOverrides(r.id);
-            const auto it = currentOverrides.find(SmartField::Type);
-            if (it == currentOverrides.end() || ! it->second.textValue.equalsIgnoreCase(type))
-                continue;
-
-            AnalysisAudioOptions opts;
-            opts.maxSeconds = 30.0;
-            const auto audio = readAnalysisAudio(f, opts);
-            if (audio.buffer.getNumSamples() == 0 || audio.sampleRate <= 0.0) continue;
-            const auto features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+            std::vector<float> features;
+            for (const auto& fb : repo->allFeedback())
+            {
+                if (fb.sampleId == id) { features = fb.features; break; }
+            }
+            if (features.empty())
+            {
+                AnalysisAudioOptions opts;
+                opts.maxSeconds = 30.0;
+                const auto audio = readAnalysisAudio(f, opts);
+                if (audio.buffer.getNumSamples() == 0 || audio.sampleRate <= 0.0) continue;
+                features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+            }
             if (features.empty()) continue;
             if (cancelFeedback.load()) break;
 
-            const auto sampleTags = repo->tagsForSample(r.id);
+            const auto sampleTags = repo->tagsForSample(id);
             juce::StringArray tagNames;
             for (const auto& t : sampleTags) tagNames.add(t.name);
-            repo->recordFeedback(r.id, type, tagNames, features);
-            AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(r.id, type, tagNames, features);
+
+            juce::String type;
+            const auto currentOverrides = repo->smartOverrides(id);
+            const auto it = currentOverrides.find(SmartField::Type);
+            if (it != currentOverrides.end() && ! it->second.cleared && ! it->second.notApplicable)
+                type = it->second.textValue;
+            else if (const auto res = repo->smartResult(id))
+                type = res->type;
+
+            if (tagNames.isEmpty() && type.isEmpty())
+            {
+                repo->removeFeedback(id);
+                AcousticClassifierService::getSharedAdaptiveClassifier().removePrototype(id);
+            }
+            else
+            {
+                repo->recordFeedback(id, type, tagNames, features);
+                AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
+            }
         }
     });
 }

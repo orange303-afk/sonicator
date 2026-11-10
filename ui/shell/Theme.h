@@ -135,6 +135,55 @@ public:
     }
     int getAlertWindowButtonHeight() override { return 32; }
 
+    void drawAlertBox(juce::Graphics& g, juce::AlertWindow& alert,
+                      const juce::Rectangle<int>&, juce::TextLayout& textLayout) override
+    {
+        const float cornerSize = 8.0f;
+        const auto bounds = alert.getLocalBounds().toFloat();
+
+        g.setColour(theme::panel);
+        g.fillRoundedRectangle(bounds, cornerSize);
+        g.setColour(theme::line);
+        g.drawRoundedRectangle(bounds.reduced(0.5f), cornerSize, 1.0f);
+
+        int iconSpaceUsed = 0;
+        if (alert.getAlertType() != juce::MessageBoxIconType::NoIcon)
+        {
+            const auto iconBounds = juce::Rectangle<float>(20.0f, 22.0f, 32.0f, 32.0f);
+            juce::Colour iconColour = theme::accent;
+            juce::String symbol = "?";
+
+            if (alert.getAlertType() == juce::MessageBoxIconType::WarningIcon)
+            {
+                iconColour = theme::isDark ? juce::Colour(0xffe05a5a) : juce::Colour(0xffb3261e);
+                symbol = "!";
+            }
+            else if (alert.getAlertType() == juce::MessageBoxIconType::InfoIcon)
+            {
+                iconColour = theme::accent;
+                symbol = "i";
+            }
+
+            g.setColour(iconColour.withAlpha(theme::isDark ? 0.18f : 0.12f));
+            g.fillEllipse(iconBounds);
+            g.setColour(iconColour);
+            g.drawEllipse(iconBounds, 1.5f);
+            g.setFont(juce::Font(juce::FontOptions(17.0f, juce::Font::bold)));
+            g.drawText(symbol, iconBounds, juce::Justification::centred, false);
+
+            iconSpaceUsed = 44;
+        }
+
+        g.setColour(theme::text);
+        const auto textBounds = juce::Rectangle<float>(
+            (float) (20 + iconSpaceUsed),
+            20.0f,
+            (float) (alert.getWidth() - (36 + iconSpaceUsed)),
+            (float) (alert.getHeight() - getAlertWindowButtonHeight() - 28)
+        );
+        textLayout.draw(g, textBounds);
+    }
+
     class DocumentButton final : public juce::Button
     {
     public:

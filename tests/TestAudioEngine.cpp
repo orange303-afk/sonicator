@@ -26,7 +26,7 @@ TEST_CASE("Oversized output callbacks chunk the transport as well as MIDI", "[au
     REQUIRE(buffer.getSample(0,0) == 0.123f);
     output.releaseResources(); transport.setSource(nullptr);
 }
-TEST_CASE("MIDI output mixes ordinary preview instead of silencing it", "[audio][auto-preview]")
+TEST_CASE("MIDI note starts interrupt auto preview", "[audio][auto-preview]")
 {
     TestDirectory t; auto file = t.wave();
     juce::AudioFormatManager formats; formats.registerBasicFormats();
@@ -40,7 +40,7 @@ TEST_CASE("MIDI output mixes ordinary preview instead of silencing it", "[audio]
     REQUIRE(transport.getCurrentPosition() > 0.01);
     output.collector.push(juce::MidiMessage::noteOn(1,72,1.0f));
     output.getNextAudioBlock({&buffer,0,512}); REQUIRE(sampler.activeVoices() == 1);
-    REQUIRE(transport.getCurrentPosition() > 0.02);
+    REQUIRE_FALSE(transport.isPlaying());
     output.releaseResources(); transport.setSource(nullptr);
 }
 TEST_CASE("MIDI input rejects SysEx and bounds overflow without stuck notes", "[audio][midi]")
@@ -282,7 +282,7 @@ TEST_CASE("MIDI preview gain is 20 percent louder without boosting audition", "[
         REQUIRE(actual.getSample(0, 0) == 0.123f);
         for (int i : { 100, 200, 400, 511 })
             REQUIRE(actual.getSample(0, 16 + i)
-                == Catch::Approx((reference.getSample(0, i) * 1.2f + 0.1f) * 0.5f).margin(0.00001f));
+                == Catch::Approx((reference.getSample(0, i) * 3.5f + 0.1f) * 0.5f).margin(0.00001f));
         output.prepareToPlay(128, 44100);
         audition.setAudio(held); audition.play(false);
         output.getNextAudioBlock({ &actual, 16, 512 });

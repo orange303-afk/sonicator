@@ -772,6 +772,7 @@ void PreviewPanel::selectionChanged(selection::Range range)
     // MIDI Preview follows the same range: new voices start at its beginning and stop (or loop)
     // at its end, exactly like ordinary Play.
     engine.setMidiSelection(range.start, range.end);
+    applyTransportLooping();
     clearSelectionButton.setVisible(true);
     selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
     if (engine.isTrackerMode())
@@ -888,9 +889,11 @@ void PreviewPanel::togglePlayback()
 }
 void PreviewPanel::applyTransportLooping()
 {
+    const bool loopEnabled = loop.getToggleState();
+    engine.setMidiLooping(loopEnabled);
     // Whole-file looping would wrap at EOF before the timer can see the selection boundary.
     // A selection owns its own loop; the transport loop is restored when it is cleared.
-    const bool wanted = loop.getToggleState() && ! waveform.selection().valid();
+    const bool wanted = loopEnabled && ! waveform.selection().valid();
     if (engine.isLooping() != wanted) engine.setLooping(wanted);
 }
 void PreviewPanel::updateSelectionPlayback()

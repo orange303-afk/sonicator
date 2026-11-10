@@ -14,14 +14,79 @@ juce::String globToLike(const juce::String& mask)
     }
     return out;
 }
+namespace {
+std::vector<juce::String> tokenizeQuery(const juce::String& query)
+{
+    std::vector<juce::String> tokens;
+    juce::String current;
+    bool inQuotes = false;
+    juce::juce_wchar quoteChar = 0;
+
+    for (int i = 0; i < query.length(); ++i)
+    {
+        const auto c = query[i];
+        if (! inQuotes && (c == '"' || c == '\''))
+        {
+            inQuotes = true;
+            quoteChar = c;
+            current += c;
+        }
+        else if (inQuotes && c == quoteChar)
+        {
+            inQuotes = false;
+            current += c;
+        }
+        else if (! inQuotes && (c == ' ' || c == '\t' || c == '\r' || c == '\n'))
+        {
+            if (current.isNotEmpty())
+            {
+                tokens.push_back(current);
+                current.clear();
+            }
+        }
+        else
+        {
+            current += c;
+        }
+    }
+    if (current.isNotEmpty()) tokens.push_back(current);
+    return tokens;
+}
+} // namespace
+
 std::vector<SearchTerm> parseSearchTerms(const juce::String& query)
 {
     std::vector<SearchTerm> terms;
-    for (const auto& raw : juce::StringArray::fromTokens(query.trim(), " \t\r\n", ""))
+    for (auto raw : tokenizeQuery(query.trim()))
     {
         if (raw.isEmpty()) continue;
-        const auto lower = raw.toLowerCase();
+        bool negated = false;
+        if (raw.startsWithChar('-') && raw.length() > 1)
+        {
+            negated = true;
+            raw = raw.substring(1);
+        }
+        if (raw.isEmpty()) continue;
+
         SearchTerm term;
+        term.negated = negated;
+
+        // Quoted strings: "rimshot" -> whole word, "deep house" -> exact phrase
+        if ((raw.startsWithChar('"') && raw.endsWithChar('"') && raw.length() >= 2)
+            || (raw.startsWithChar('\'') && raw.endsWithChar('\'') && raw.length() >= 2))
+        {
+            auto inner = raw.substring(1, raw.length() - 1).trim();
+            if (inner.isEmpty()) continue;
+            if (inner.containsChar(' '))
+                term.kind = SearchKind::ExactPhrase;
+            else
+                term.kind = SearchKind::ExactWord;
+            term.text = inner;
+            terms.push_back(std::move(term));
+            continue;
+        }
+
+        const auto lower = raw.toLowerCase();
         auto formatValue = [](juce::String value)
         {
             value = value.trim().toLowerCase();
@@ -45,6 +110,7 @@ std::vector<SearchTerm> parseSearchTerms(const juce::String& query)
             const auto canonical = canonicalSmartTypeToken(value);
             term.kind = SearchKind::TypeOnly;
             term.text = canonical.isNotEmpty() ? canonical : value;
+            term.typeValue = term.text;
         }
         else if (lower.startsWith("key:"))
         {
@@ -111,7 +177,9 @@ std::vector<SearchTerm> parseSearchTerms(const juce::String& query)
         }
         else if (auto type = canonicalSmartTypeToken(raw); type.isNotEmpty())
         {
-            term.kind = SearchKind::TypeOrText; term.text = type;
+            term.kind = SearchKind::TypeOrText;
+            term.text = raw;
+            term.typeValue = type;
         }
         else if (raw.length() >= 2)
         {

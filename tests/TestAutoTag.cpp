@@ -204,3 +204,35 @@ TEST_CASE("AutoTag gives crash and the new instrument classes their own tags", "
     candidate.candidates.push_back(typeCandidate("filename", "percussion"));
     REQUIRE(proposalType(candidate) == "Tom");
 }
+
+TEST_CASE("AutoTag multi-tagging proposes Instrument, Gear, and Genre across folder and filename", "[autotag][rules][multitag]")
+{
+    // File with bd02 in filename inside House folder:
+    const auto houseKick = AutoTagRules::evaluate(input("/samples/House/AKAI/Kick/cw_minimal_bd02.wav"), options());
+    REQUIRE(houseKick.proposal.has_value());
+    REQUIRE(houseKick.proposals.size() >= 2);
+
+    std::vector<juce::String> tags;
+    for (const auto& p : houseKick.proposals) tags.push_back(p.canonicalType);
+    REQUIRE(std::find(tags.begin(), tags.end(), "Kick") != tags.end());
+    REQUIRE(std::find(tags.begin(), tags.end(), "House") != tags.end());
+
+    // File with gear (MPC60, 909) and kick in filename inside Techno folder:
+    const auto technoGear = AutoTagRules::evaluate(input("/samples/Techno/MPC60 909 kick 07.wav"), options());
+    REQUIRE(technoGear.proposal.has_value());
+    REQUIRE(technoGear.proposals.size() >= 4);
+
+    std::vector<juce::String> gearTags;
+    for (const auto& p : technoGear.proposals) gearTags.push_back(p.canonicalType);
+    REQUIRE(std::find(gearTags.begin(), gearTags.end(), "Kick") != gearTags.end());
+    REQUIRE(std::find(gearTags.begin(), gearTags.end(), "909") != gearTags.end());
+    REQUIRE(std::find(gearTags.begin(), gearTags.end(), "MPC") != gearTags.end());
+    REQUIRE(std::find(gearTags.begin(), gearTags.end(), "Techno") != gearTags.end());
+
+    // Acoustic heuristic should not veto explicit filename token:
+    auto kickWithAcousticPad = input("/samples/kick 01.wav");
+    kickWithAcousticPad.candidates.push_back(typeCandidate("dsp_acoustic", "pad"));
+    const auto decision = AutoTagRules::evaluate(kickWithAcousticPad, options());
+    REQUIRE(decision.proposal.has_value());
+    REQUIRE(decision.proposal->canonicalType == "Kick");
+}

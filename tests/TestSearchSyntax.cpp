@@ -110,3 +110,60 @@ TEST_CASE("Manual overrides are the effective type and key in search", "[search]
     repo.setSmartOverride(sample, SmartField::Type, unknownType);
     REQUIRE(count(repo, "type:pad") == 0);
 }
+
+TEST_CASE("Search terms parse quotes and negations correctly", "[search][syntax][advanced]")
+{
+    auto terms = parseSearchTerms("\"rimshot\" -909 -ext:wav \"deep house\" -\"snare drum\" -type:pad");
+    REQUIRE(terms.size() == 6);
+
+    REQUIRE(terms[0].kind == SearchKind::ExactWord);
+    REQUIRE(terms[0].text == "rimshot");
+    REQUIRE_FALSE(terms[0].negated);
+
+    REQUIRE(terms[1].kind == SearchKind::Text);
+    REQUIRE(terms[1].text == "909");
+    REQUIRE(terms[1].negated);
+
+    REQUIRE(terms[2].kind == SearchKind::Format);
+    REQUIRE(terms[2].text == "wav");
+    REQUIRE(terms[2].negated);
+
+    REQUIRE(terms[3].kind == SearchKind::ExactPhrase);
+    REQUIRE(terms[3].text == "deep house");
+    REQUIRE_FALSE(terms[3].negated);
+
+    REQUIRE(terms[4].kind == SearchKind::ExactPhrase);
+    REQUIRE(terms[4].text == "snare drum");
+    REQUIRE(terms[4].negated);
+
+    REQUIRE(terms[5].kind == SearchKind::TypeOnly);
+    REQUIRE(terms[5].text == "pad");
+    REQUIRE(terms[5].negated);
+}
+
+TEST_CASE("Exact word in quotes and negations filter database queries", "[search][database][advanced]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("search-advanced.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+
+    addSample(repo, "rimshot.wav", "WAV");
+    addSample(repo, "snare_rimshot_01.wav", "WAV");
+    addSample(repo, "rimshots.wav", "WAV");
+    addSample(repo, "SD_01.wav", "WAV");
+    addSample(repo, "909_kick.wav", "WAV");
+    addSample(repo, "808_kick.wav", "WAV");
+
+    // "rimshot" in quotes matches only the whole word rimshot, not rimshots or SD_01:
+    REQUIRE(count(repo, "\"rimshot\"") == 2);
+
+    // Bare rimshot substring matches rimshot, snare_rimshot_01, rimshots, but NOT unrelated SD_01:
+    REQUIRE(count(repo, "rimshot") == 3);
+
+    // Negation excludes matches:
+    REQUIRE(count(repo, "-909") == 5);
+    REQUIRE(count(repo, "kick -909") == 1);
+    REQUIRE(count(repo, "kick -808") == 1);
+
+    // Negated format:
+    REQUIRE(count(repo, "-ext:wav") == 0);
+}

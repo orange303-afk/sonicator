@@ -138,6 +138,12 @@ void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPa
         for (int i = roots.size(); --i >= 0;)
             if (isPathIgnored(roots[i], ignoredEntries)) roots.remove(i);
     tree.setRootItemVisible(showAllSamples);
+    if (roots.isEmpty())
+    {
+        root = std::make_unique<Item>(*this,juce::String(),showAllSamples);
+        tree.setRootItem(root.get()); root->setOpen(true);
+        return;
+    }
     std::set<juce::String> visitedFolders;
     int64_t last = 0;
     for (;;)
@@ -177,6 +183,12 @@ void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPa
     root = std::make_unique<Item>(*this,juce::String(),showAllSamples);
     tree.setRootItem(root.get()); root->setOpen(true);
     if (openness) tree.restoreOpennessState(*openness,true);
+}
+void FolderTree::setIgnoredPaths(const std::vector<IgnoredPath>& entries, bool revealIgnored)
+{
+    ignoredEntries = entries;
+    showIgnored = revealIgnored;
+    tree.repaint();
 }
 void FolderTree::setDiscFolders(const juce::String& image, DiscEntryId rootId, const std::vector<DiscEntry>& entries)
 {

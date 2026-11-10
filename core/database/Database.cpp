@@ -15,7 +15,8 @@ Database::Database(const juce::File& f) : path(f)
     try
     {
         sqlite3_busy_timeout(handle, 5000);
-        detail::exec(handle, "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+        detail::exec(handle, "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; "
+                             "PRAGMA synchronous=NORMAL; PRAGMA cache_size=-64000; PRAGMA temp_store=MEMORY;");
     }
     catch (...) { sqlite3_close(handle); handle = nullptr; throw; }
 }

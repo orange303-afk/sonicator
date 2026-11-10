@@ -213,13 +213,56 @@ FilterSql buildFilterSql(const LibraryFilter& filter, const std::vector<IgnoredP
     for (const auto& term : parseSearchTerms(filter.text))
     {
         auto like = [&](const juce::String& value) { return "%" + escapeLike(foldForSearch(value)) + "%"; };
+        auto escapeGlob = [](const juce::String& value)
+        {
+            juce::String out;
+            for (auto c : value)
+            {
+                if (c == '*' || c == '?' || c == '[')
+                    out += "[" + juce::String::charToString(c) + "]";
+                else
+                    out += juce::String::charToString(c);
+            }
+            return out;
+        };
+
         switch (term.kind)
         {
             case SearchKind::Text:
-                addText(" AND samples.search_key LIKE ? ESCAPE '\\'", like(term.text));
+                if (term.negated)
+                    addText(" AND samples.search_key NOT LIKE ? ESCAPE '\\'", like(term.text));
+                else
+                    addText(" AND samples.search_key LIKE ? ESCAPE '\\'", like(term.text));
                 break;
+            case SearchKind::ExactPhrase:
+                if (term.negated)
+                    addText(" AND samples.search_key NOT LIKE ? ESCAPE '\\'", like(term.text));
+                else
+                    addText(" AND samples.search_key LIKE ? ESCAPE '\\'", like(term.text));
+                break;
+            case SearchKind::ExactWord:
+            {
+                const auto escaped = escapeGlob(term.text.toLowerCase());
+                juce::String cond =
+                    "(lower(samples.name) GLOB ('*[^a-zA-Z0-9]' || ? || '[^a-zA-Z0-9]*')"
+                    " OR lower(samples.name) GLOB (? || '[^a-zA-Z0-9]*')"
+                    " OR lower(samples.name) GLOB ('*[^a-zA-Z0-9]' || ?)"
+                    " OR lower(samples.name) GLOB ?)";
+                if (term.negated)
+                    sql.where += " AND NOT " + cond;
+                else
+                    sql.where += " AND " + cond;
+                sql.params.emplace_back(escaped);
+                sql.params.emplace_back(escaped);
+                sql.params.emplace_back(escaped);
+                sql.params.emplace_back(escaped);
+                break;
+            }
             case SearchKind::Glob:
-                addText(" AND samples.name LIKE ? ESCAPE '\\'", globToLike(term.text));
+                if (term.negated)
+                    addText(" AND samples.name NOT LIKE ? ESCAPE '\\'", globToLike(term.text));
+                else
+                    addText(" AND samples.name LIKE ? ESCAPE '\\'", globToLike(term.text));
                 break;
             case SearchKind::Format:
             case SearchKind::GlobOr:
@@ -234,7 +277,10 @@ FilterSql buildFilterSql(const LibraryFilter& filter, const std::vector<IgnoredP
                         condition += "samples.name LIKE ? ESCAPE '\\'";
                 }
                 if (condition.isEmpty()) break;
-                sql.where += " AND (" + condition + ")";
+                if (term.negated)
+                    sql.where += " AND NOT (" + condition + ")";
+                else
+                    sql.where += " AND (" + condition + ")";
                 for (const auto& value : term.values)
                 {
                     if (term.kind == SearchKind::Format) sql.params.emplace_back(value);
@@ -244,25 +290,42 @@ FilterSql buildFilterSql(const LibraryFilter& filter, const std::vector<IgnoredP
                 break;
             }
             case SearchKind::TypeOnly:
+            {
                 // A manual type is the effective type, so it must win over the automatic one.
-                addText(" AND (EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
-                        " AND so.field='type' AND so.cleared=0 AND so.text_value=? COLLATE NOCASE)"
-                        " OR (NOT EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
-                        " AND so.field='type') AND EXISTS(SELECT 1 FROM smart_results sr"
-                        " WHERE sr.sample_id=samples.id AND sr.type=? COLLATE NOCASE)))", term.text);
-                sql.params.emplace_back(term.text);
+                juce::String cond =
+                    "(EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                    " AND so.field='type' AND so.cleared=0 AND so.text_value=? COLLATE NOCASE)"
+                    " OR (NOT EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                    " AND so.field='type') AND EXISTS(SELECT 1 FROM smart_results sr"
+                    " WHERE sr.sample_id=samples.id AND sr.type=? COLLATE NOCASE)))";
+                const auto tVal = term.typeValue.isNotEmpty() ? term.typeValue : term.text;
+                if (term.negated)
+                    sql.where += " AND NOT " + cond;
+                else
+                    sql.where += " AND " + cond;
+                sql.params.emplace_back(tVal);
+                sql.params.emplace_back(tVal);
                 break;
+            }
             case SearchKind::TypeOrText:
-                sql.where += " AND ((EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
-                             " AND so.field='type' AND so.cleared=0 AND so.text_value=? COLLATE NOCASE)"
-                             " OR (NOT EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
-                             " AND so.field='type') AND EXISTS(SELECT 1 FROM smart_results sr"
-                             " WHERE sr.sample_id=samples.id AND sr.type=? COLLATE NOCASE)))"
-                             " OR samples.search_key LIKE ? ESCAPE '\\')";
-                sql.params.emplace_back(term.text);
-                sql.params.emplace_back(term.text);
+            {
+                juce::String cond =
+                    "((EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                    " AND so.field='type' AND so.cleared=0 AND so.text_value=? COLLATE NOCASE)"
+                    " OR (NOT EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+                    " AND so.field='type') AND EXISTS(SELECT 1 FROM smart_results sr"
+                    " WHERE sr.sample_id=samples.id AND sr.type=? COLLATE NOCASE)))"
+                    " OR samples.search_key LIKE ? ESCAPE '\\')";
+                const auto tVal = term.typeValue.isNotEmpty() ? term.typeValue : term.text;
+                if (term.negated)
+                    sql.where += " AND NOT (" + cond + ")";
+                else
+                    sql.where += " AND " + cond;
+                sql.params.emplace_back(tVal);
+                sql.params.emplace_back(tVal);
                 sql.params.emplace_back(like(term.text));
                 break;
+            }
             case SearchKind::KeyOnly:
             case SearchKind::KeyOrText:
             {
@@ -645,6 +708,9 @@ void SampleRepository::createTables()
         ensureColumn(db.handle, "smart_overrides", "aux_text", "TEXT NOT NULL DEFAULT ''");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS smart_results_pipeline"
                                 " ON smart_results(pipeline_state, sample_id);");
+        detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_pair_key ON samples(pair_key) WHERE pair_key != '';");
+        detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_ignored ON samples(ignored);");
+        detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_starred ON samples(starred) WHERE starred = 1;");
         // Rows written by schema 6 predate pipeline_state and versions. Their values are still
         // useful provenance, so they are marked stale (visible, not current) instead of
         // "not analyzed", which would hide data the user already has.
@@ -892,6 +958,78 @@ void SampleRepository::unignorePath(const juce::String& path)
         try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
         throw;
     }
+}
+int SampleRepository::ignorePaths(const std::vector<juce::String>& paths, bool folder)
+{
+    if (paths.empty()) return 0;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    int changed = 0;
+    try
+    {
+        detail::Statement s(db.handle,
+            "INSERT OR REPLACE INTO ignored_paths(path,is_folder,created_at) VALUES(?,?,?)");
+        const auto now = juce::Time::currentTimeMillis();
+        std::unique_ptr<detail::Statement> uFolder, uFile;
+        if (folder)
+            uFolder = std::make_unique<detail::Statement>(db.handle,
+                "UPDATE samples SET ignored=1 WHERE path>=? AND path<?");
+        else
+            uFile = std::make_unique<detail::Statement>(db.handle,
+                "UPDATE samples SET ignored=1 WHERE path=? OR container_path=?");
+
+        for (const auto& path : paths)
+        {
+            if (path.isEmpty()) continue;
+            s.reset();
+            s.text(1, path);
+            s.integer(2, folder ? 1 : 0);
+            s.integer(3, now);
+            s.step();
+            if (folder)
+            {
+                auto [lower, upper] = folderRange(path);
+                uFolder->reset();
+                uFolder->text(1, lower); uFolder->text(2, upper); uFolder->step();
+            }
+            else
+            {
+                uFile->reset();
+                uFile->text(1, path); uFile->text(2, path); uFile->step();
+            }
+            ++changed;
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+    return changed;
+}
+int SampleRepository::unignorePaths(const std::vector<juce::String>& paths)
+{
+    if (paths.empty()) return 0;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    int changed = 0;
+    try
+    {
+        for (const auto& path : paths)
+        {
+            if (path.isEmpty()) continue;
+            unignorePathLocked(path);
+            ++changed;
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+    return changed;
 }
 int SampleRepository::unignoreCoveringFolders(const juce::String& path)
 {
@@ -1848,6 +1986,81 @@ int SampleRepository::countWithTagInFolder(const juce::String& folder, int64_t t
     bindFilter(s, parts);
     return s.step() ? (int) s.integer(0) : 0;
 }
+void SampleRepository::updateDuplicateRepresentativesLocked(const std::vector<int64_t>& sampleIds)
+{
+    if (sampleIds.empty()) return;
+    std::set<juce::String> affectedHashes;
+    detail::Statement hashStmt(db.handle, "SELECT group_hash FROM duplicates WHERE sample_id=?");
+    for (auto id : sampleIds)
+    {
+        hashStmt.integer(1, id);
+        if (hashStmt.step())
+        {
+            auto h = hashStmt.text(0);
+            if (h.isNotEmpty()) affectedHashes.insert(h);
+        }
+        hashStmt.reset();
+    }
+    if (affectedHashes.empty()) return;
+
+    struct Member { int64_t id = 0; bool starred = false, missing = false; bool failed = false; int pathLength = 0; };
+    detail::Statement select(db.handle,
+        "SELECT id,path,starred,missing,error FROM samples WHERE hash=? AND ignored=0"
+        " AND id NOT IN (SELECT sample_id FROM stereo_pairs WHERE is_representative=0)");
+    detail::Statement insert(db.handle,
+        "INSERT OR REPLACE INTO duplicates(sample_id,representative_id,group_hash,group_size,is_representative)"
+        " VALUES(?,?,?,?,?)");
+    detail::Statement del(db.handle, "DELETE FROM duplicates WHERE group_hash=?");
+
+    for (const auto& hash : affectedHashes)
+    {
+        select.reset(); select.text(1, hash);
+        std::vector<Member> members;
+        while (select.step())
+            members.push_back({ select.integer(0), select.integer(2) != 0, select.integer(3) != 0,
+                                ! select.text(4).isEmpty(), select.text(1).length() });
+        if (members.size() < 2)
+        {
+            del.reset(); del.text(1, hash); del.step();
+            continue;
+        }
+        const auto better = [](const Member& a, const Member& b)
+        {
+            if (a.starred != b.starred) return a.starred;
+            if (a.missing != b.missing) return ! a.missing;
+            if (a.failed != b.failed) return ! a.failed;
+            if (a.pathLength != b.pathLength) return a.pathLength < b.pathLength;
+            return a.id < b.id;
+        };
+        const auto representative = std::min_element(members.begin(), members.end(), better);
+        const auto groupSize = (int) members.size();
+        for (const auto& member : members)
+        {
+            insert.reset(); insert.integer(1, member.id); insert.integer(2, representative->id);
+            insert.text(3, hash); insert.integer(4, groupSize);
+            insert.integer(5, member.id == representative->id ? 1 : 0); insert.step();
+        }
+    }
+}
+void SampleRepository::updateDuplicateRepresentative(int64_t sampleId)
+{
+    updateDuplicateRepresentatives({ sampleId });
+}
+void SampleRepository::updateDuplicateRepresentatives(const std::vector<int64_t>& sampleIds)
+{
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        updateDuplicateRepresentativesLocked(sampleIds);
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
 void SampleRepository::setStarred(const std::vector<int64_t>& sampleIds, bool starred)
 {
     if (sampleIds.empty()) return;
@@ -1860,6 +2073,7 @@ void SampleRepository::setStarred(const std::vector<int64_t>& sampleIds, bool st
         {
             s.integer(1, starred ? 1 : 0); s.integer(2, id); s.step(); s.reset();
         }
+        updateDuplicateRepresentativesLocked(sampleIds);
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)

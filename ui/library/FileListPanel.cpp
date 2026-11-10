@@ -343,6 +343,14 @@ void FileListPanel::setIgnoredPaths(std::vector<IgnoredPath> paths)
     ignoredPaths = std::move(paths);
     table.repaint();
 }
+void FileListPanel::setStarredInPlace(const std::vector<int64_t>& ids, bool starred)
+{
+    const std::set<int64_t> idSet(ids.begin(), ids.end());
+    for (auto& r : all) if (idSet.count(r.id)) r.starred = starred;
+    for (auto& r : visible) if (idSet.count(r.id)) r.starred = starred;
+    for (auto& [row, r] : virtualRows) if (idSet.count(r.id)) r.starred = starred;
+    table.repaint();
+}
 void FileListPanel::setSearchText(const juce::String& text)
 {
     if (virtualMode) return; // whole-catalog search is executed in SQL by the owner

@@ -5,6 +5,8 @@ namespace sonicator {
 enum class SearchKind
 {
     Text,             // plain substring in folded name + path
+    ExactWord,        // whole-word match in quotes ("rimshot")
+    ExactPhrase,      // exact phrase in quotes ("deep house")
     Glob,             // file-name mask with * and ?
     GlobOr,           // several masks written with |
     Format,           // ext:rx2 / format:wav
@@ -17,10 +19,12 @@ enum class SearchKind
 struct SearchTerm
 {
     SearchKind kind = SearchKind::Text;
-    juce::String text;   // folded or original value, depending on kind
-    int tonic = -1;      // 0 = C .. 11 = B for key/note terms
-    int midi = -1;       // MIDI note for NoteOnly
-    juce::String mode;   // major/minor when the user named one
+    bool negated = false;
+    juce::String text;        // folded or original value, depending on kind
+    juce::String typeValue;   // canonical type for TypeOrText / TypeOnly
+    int tonic = -1;           // 0 = C .. 11 = B for key/note terms
+    int midi = -1;            // MIDI note for NoteOnly
+    juce::String mode;        // major/minor when the user named one
     juce::StringArray values; // formats or masks when the term carries several alternatives
 };
 // Splits a query into terms. Plain words keep the existing "all tokens must match" behaviour.

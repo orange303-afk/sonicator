@@ -25,6 +25,27 @@ float computeCosineSimilarity(const std::vector<float>& a, const std::vector<flo
     return std::max(0.0f, std::min(1.0f, sim));
 }
 
+bool isPlausibleAdaptiveTag(const juce::String& tag, const std::vector<float>& features)
+{
+    if (features.size() < 13) return true;
+    const float normAttack = features[0];
+    const float normDuration = features[12]; // duration / 30.0
+    const auto lower = tag.toLowerCase();
+
+    // A Pad must have sustained duration (> 0.75s) and slow attack
+    if (lower == "pad" || lower == "pads" || lower == "atmos" || lower == "atmosphere" || lower == "drone" || lower == "ambient")
+    {
+        if (normDuration < 0.025f) return false;
+        if (normAttack < 0.05f && normDuration < 0.05f) return false;
+    }
+    // A Loop must have sustained duration (> 1.2s)
+    if (lower == "loop" || lower == "loops")
+    {
+        if (normDuration < 0.04f) return false;
+    }
+    return true;
+}
+
 } // namespace
 
 struct Prototype {
@@ -128,6 +149,7 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictType(
     for (const auto& p : impl->prototypes)
     {
         if (p.targetType.isEmpty() || p.features.empty()) continue;
+        if (! isPlausibleAdaptiveTag(p.targetType, features)) continue;
         const float sim = computeCosineSimilarity(features, p.features);
         if (sim <= 0.0f) continue;
         const auto key = p.targetType.toLowerCase();
@@ -175,6 +197,7 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictTags(
         {
             const auto trimmed = tag.trim();
             if (trimmed.isEmpty()) continue;
+            if (! isPlausibleAdaptiveTag(trimmed, features)) continue;
             const auto key = trimmed.toLowerCase();
             auto& agg = tagBestScore[key];
             if (agg.display.isEmpty()) agg.display = trimmed;

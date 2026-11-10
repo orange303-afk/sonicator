@@ -188,9 +188,12 @@ void AutoTagService::prepare()
             if (const auto found = overrides.find(SmartField::Type); found != overrides.end())
                 input.typeOverride = found->second;
             const auto decision = AutoTagRules::evaluate(input, options);
-            if (decision.proposal.has_value())
+            std::vector<AutoTagProposal> proposalsToProcess = decision.proposals;
+            if (proposalsToProcess.empty() && decision.proposal.has_value())
+                proposalsToProcess.push_back(*decision.proposal);
+
+            if (! proposalsToProcess.empty())
             {
-                auto proposal = *decision.proposal;
                 const juce::File file(record->filePath);
                 const auto size = file.getSize();
                 const auto modified = fileModified(file);
@@ -212,77 +215,97 @@ void AutoTagService::prepare()
                 }
                 else
                 {
-                    proposal.fileSize = size;
-                    proposal.fileModified = modified;
-                    if (result.proposals.size() >= maxProposals)
+                    for (auto& proposal : proposalsToProcess)
                     {
-                        result.truncated = true;
-                        break;
+                        proposal.fileSize = size;
+                        proposal.fileModified = modified;
+                        if (result.proposals.size() < maxProposals)
+                            result.proposals.push_back(std::move(proposal));
+                        else
+                            result.truncated = true;
                     }
-                    result.proposals.push_back(std::move(proposal));
                 }
             }
             else
             {
+                const bool skipHasConflict = decision.skip.has_value()
+                    && (decision.skip->code == "conflicting-types" || decision.skip->code == "override-conflict");
+
                 bool adaptiveProposed = false;
-                auto& adaptive = AcousticClassifierService::getSharedAdaptiveClassifier();
-                if (adaptive.hasPrototypes())
+                if (! skipHasConflict)
                 {
-                    std::vector<float> features;
-                    auto allFb = repo.allFeedback();
-                    for (const auto& fb : allFb)
+                    auto& adaptive = AcousticClassifierService::getSharedAdaptiveClassifier();
+                    if (adaptive.hasPrototypes())
                     {
-                        if (fb.sampleId == id) { features = fb.features; break; }
-                    }
-                    if (features.empty())
-                    {
-                        const juce::File file(record->filePath);
-                        if (file.existsAsFile())
+                        std::vector<float> features;
+                        auto allFb = repo.allFeedback();
+                        for (const auto& fb : allFb)
                         {
-                            AnalysisAudioOptions opts;
-                            opts.maxSeconds = 30.0;
-                            const auto audio = readAnalysisAudio(file, opts);
-                            if (audio.buffer.getNumSamples() > 0 && audio.sampleRate > 0.0)
-                                features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+                            if (fb.sampleId == id) { features = fb.features; break; }
                         }
-                    }
-                    if (! features.empty())
-                    {
-                        auto tagPreds = adaptive.predictTags(features, 1);
-                        if (! tagPreds.empty() && tagPreds.front().score >= 0.80f)
+                        if (features.empty())
                         {
-                            const auto tagLabel = tagPreds.front().label;
-                            int64_t targetTagId = 0;
-                            for (const auto& pair : options.tagIds)
+                            const juce::File file(record->filePath);
+                            if (file.existsAsFile())
                             {
-                                if (pair.first.equalsIgnoreCase(tagLabel))
-                                {
-                                    targetTagId = pair.second;
-                                    break;
-                                }
+                                AnalysisAudioOptions opts;
+                                opts.maxSeconds = 30.0;
+                                const auto audio = readAnalysisAudio(file, opts);
+                                if (audio.buffer.getNumSamples() > 0 && audio.sampleRate > 0.0)
+                                    features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
                             }
-                            if (targetTagId > 0)
+                        }
+                        if (! features.empty())
+                        {
+                            auto tagPreds = adaptive.predictTags(features, 1);
+                            if (! tagPreds.empty() && tagPreds.front().score >= 0.85f)
                             {
-                                const juce::File file(record->filePath);
-                                AutoTagProposal prop;
-                                prop.sampleId = id;
-                                prop.filePath = record->filePath;
-                                prop.fileName = record->fileName;
-                                prop.canonicalType = tagLabel;
-                                prop.tagId = targetTagId;
-                                prop.rule = AutoTagRule::SmartType;
-                                prop.source = "user_adaptive";
-                                prop.reason = "learned from acoustically similar prototypes";
-                                prop.fileSize = file.getSize();
-                                prop.fileModified = fileModified(file);
-                                for (const auto& assigned : repo.tagsForSample(id))
+                                const auto tagLabel = tagPreds.front().label;
+                                const auto lower = tagLabel.toLowerCase();
+                                bool plausible = true;
+                                if (features.size() >= 13)
                                 {
-                                    if (assigned.id == targetTagId) { prop.alreadyAssigned = true; break; }
+                                    const float duration = features[12]; // duration / 30.0
+                                    if ((lower == "pad" || lower == "pads" || lower == "ambient") && duration < 0.025f)
+                                        plausible = false;
+                                    if ((lower == "loop" || lower == "loops") && duration < 0.04f)
+                                        plausible = false;
                                 }
-                                if (prop.alreadyAssigned) ++result.alreadyAssigned;
-                                else ++result.newAssignments;
-                                result.proposals.push_back(std::move(prop));
-                                adaptiveProposed = true;
+                                if (plausible)
+                                {
+                                    int64_t targetTagId = 0;
+                                    for (const auto& pair : options.tagIds)
+                                    {
+                                        if (pair.first.equalsIgnoreCase(tagLabel))
+                                        {
+                                            targetTagId = pair.second;
+                                            break;
+                                        }
+                                    }
+                                    if (targetTagId > 0)
+                                    {
+                                        const juce::File file(record->filePath);
+                                        AutoTagProposal prop;
+                                        prop.sampleId = id;
+                                        prop.filePath = record->filePath;
+                                        prop.fileName = record->fileName;
+                                        prop.canonicalType = tagLabel;
+                                        prop.tagId = targetTagId;
+                                        prop.rule = AutoTagRule::SmartType;
+                                        prop.source = "user_adaptive";
+                                        prop.reason = "learned from acoustically similar prototypes";
+                                        prop.fileSize = file.getSize();
+                                        prop.fileModified = fileModified(file);
+                                        for (const auto& assigned : repo.tagsForSample(id))
+                                        {
+                                            if (assigned.id == targetTagId) { prop.alreadyAssigned = true; break; }
+                                        }
+                                        if (prop.alreadyAssigned) ++result.alreadyAssigned;
+                                        else ++result.newAssignments;
+                                        result.proposals.push_back(std::move(prop));
+                                        adaptiveProposed = true;
+                                    }
+                                }
                             }
                         }
                     }
@@ -332,7 +355,8 @@ void AutoTagService::prepare()
             const auto found = assigned.find(proposal.sampleId);
             if (found == assigned.end()) continue;
             for (const auto& tag : found->second)
-                if (tag.id == proposal.tagId) { proposal.alreadyAssigned = true; break; }
+                if (tag.id == proposal.tagId || (proposal.tagId <= 0 && tag.name.equalsIgnoreCase(proposal.canonicalType)))
+                { proposal.alreadyAssigned = true; break; }
             proposal.included = ! proposal.alreadyAssigned;
             if (proposal.alreadyAssigned) ++result.alreadyAssigned;
         }
@@ -365,6 +389,33 @@ void AutoTagService::apply()
 {
     std::set<int64_t> liveTags;
     for (const auto& tag : repo.tags()) liveTags.insert(tag.id);
+
+    constexpr uint32_t autoTagColours[] = {
+        0xffe05a5a, 0xffe08a45, 0xffe0b84a, 0xffd7dd6a, 0xff8fd06a,
+        0xff4fb8c8, 0xff4f8fd0, 0xff7a6aea, 0xffa96ae0, 0xffd06ab8
+    };
+
+    for (auto& proposal : toApply)
+    {
+        if (proposal.tagId <= 0 && proposal.canonicalType.isNotEmpty())
+        {
+            int64_t tagId = 0;
+            for (const auto& t : repo.tags())
+                if (t.name.equalsIgnoreCase(proposal.canonicalType)) { tagId = t.id; break; }
+            if (tagId == 0)
+            {
+                const auto colour = autoTagColours[repo.tags().size() % std::size(autoTagColours)];
+                try { tagId = repo.createTag(proposal.canonicalType, colour); }
+                catch (...) {}
+            }
+            if (tagId > 0)
+            {
+                proposal.tagId = tagId;
+                liveTags.insert(tagId);
+            }
+        }
+    }
+
     AutoTagApplyResult result;
     for (size_t start = 0; start < toApply.size(); start += (size_t) batchSize)
     {
@@ -444,6 +495,53 @@ void AutoTagService::apply()
         if (onApplyBatch) onApplyBatch(snapshot);
     }
     result.errors += result.rejected;
+    if (result.applied > 0)
+    {
+        std::vector<int64_t> appliedIds;
+        for (const auto& p : toApply)
+            if (p.sampleId > 0) appliedIds.push_back(p.sampleId);
+        std::sort(appliedIds.begin(), appliedIds.end());
+        appliedIds.erase(std::unique(appliedIds.begin(), appliedIds.end()), appliedIds.end());
+
+        for (auto id : appliedIds)
+        {
+            if (cancelled) break;
+            const auto record = repo.findById(id);
+            if (! record) continue;
+            const juce::File f(record->filePath);
+            if (! f.existsAsFile()) continue;
+
+            std::vector<float> features;
+            for (const auto& fb : repo.allFeedback())
+            {
+                if (fb.sampleId == id) { features = fb.features; break; }
+            }
+            if (features.empty())
+            {
+                AnalysisAudioOptions opts;
+                opts.maxSeconds = 30.0;
+                const auto audio = readAnalysisAudio(f, opts);
+                if (audio.buffer.getNumSamples() > 0 && audio.sampleRate > 0.0)
+                    features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+            }
+            if (features.empty()) continue;
+
+            const auto sampleTags = repo.tagsForSample(id);
+            juce::StringArray tagNames;
+            for (const auto& t : sampleTags) tagNames.add(t.name);
+
+            juce::String type;
+            const auto currentOverrides = repo.smartOverrides(id);
+            const auto it = currentOverrides.find(SmartField::Type);
+            if (it != currentOverrides.end() && ! it->second.cleared && ! it->second.notApplicable)
+                type = it->second.textValue;
+            else if (const auto res = repo.smartResult(id))
+                type = res->type;
+
+            repo.recordFeedback(id, type, tagNames, features);
+            AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
+        }
+    }
     result.message = result.cancelled
         ? "Cancelled; " + juce::String(result.applied) + " assignment(s) kept"
         : "Applied " + juce::String(result.applied) + " assignment(s)";

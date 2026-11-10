@@ -200,7 +200,7 @@ void PreviewOutput::prepareToPlay(int blockSize,double rate)
 }
 void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 {
-    constexpr float midiPreviewGain = 1.2f;
+    constexpr float midiPreviewGain = 3.5f;
     messages.clear();
     if (collector.drain(messages))
     {
@@ -212,6 +212,18 @@ void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             messages.addEvent(juce::MidiMessage::allSoundOff(channel),0);
     }
     const bool midiEnabled = midi.load();
+    if (midiEnabled)
+    {
+        for (const auto meta : messages)
+        {
+            const auto msg = meta.getMessage();
+            if (msg.isNoteOn() && msg.getVelocity() > 0)
+            {
+                if (transport.isPlaying()) transport.stop();
+                break;
+            }
+        }
+    }
     const bool trackerSong = trackerSongMode.load() && tracker.hasModule();
     const bool trackerMidi = trackerSampleMidi.load() && midiEnabled;
     const bool discMidi = this->discMidi.load() && midiEnabled;

@@ -16,6 +16,7 @@ public:
     // hidden and the supplied folders appear as top-level expandable entries.
     void refresh(SampleRepository&, const juce::StringArray& rootPaths, bool showAllSamples,
                  bool showIgnored = false);
+    void setIgnoredPaths(const std::vector<IgnoredPath>& entries, bool revealIgnored);
     void resized() override;
     void clearSelection();
     // Opens the ancestors and selects a folder path. Returns false when it is not in the tree.

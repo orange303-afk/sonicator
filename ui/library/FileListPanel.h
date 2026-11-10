@@ -37,6 +37,7 @@ public:
     void setSmartDisplays(std::map<int64_t, SmartDisplay>);
     void setStereoPairs(std::map<int64_t, juce::String> partnerPaths);
     void setIgnoredPaths(std::vector<IgnoredPath>);
+    void setStarredInPlace(const std::vector<int64_t>& ids, bool starred);
     void setSearchText(const juce::String&);
     void selectRow(int row) { table.selectRow(row); }
     void selectRows(const std::vector<int>& rows);

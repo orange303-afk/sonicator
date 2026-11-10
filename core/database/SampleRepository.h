@@ -77,6 +77,8 @@ public:
     bool hasExactIgnore(const juce::String& path) const;
     void ignorePath(const juce::String& path, bool folder);
     void unignorePath(const juce::String& path);
+    int ignorePaths(const std::vector<juce::String>& paths, bool folder = false);
+    int unignorePaths(const std::vector<juce::String>& paths);
     // Clears every folder ignore that covers this path (the path itself or an ancestor). Used when
     // the user explicitly adds a folder that a previous Remove had kept out of parent scans.
     int unignoreCoveringFolders(const juce::String& path);
@@ -170,6 +172,8 @@ public:
     void setStarred(const std::vector<int64_t>& sampleIds, bool starred);
     // Rebuilds the byte-identical duplicate groups (same full SHA-256 and size).
     void refreshDuplicates();
+    void updateDuplicateRepresentative(int64_t sampleId);
+    void updateDuplicateRepresentatives(const std::vector<int64_t>& sampleIds);
     std::map<int64_t,int> duplicateCounts(const std::vector<int64_t>& sampleIds) const;
     struct DuplicateInfo { int groupSize = 0; int64_t representativeId = 0; juce::String representativePath; };
     std::optional<DuplicateInfo> duplicateInfo(int64_t sampleId) const;
@@ -238,6 +242,7 @@ private:
     std::vector<IgnoredPath> ignoredPathsLocked() const;
     // Caller holds db.mutex and an open transaction.
     void unignorePathLocked(const juce::String& path);
+    void updateDuplicateRepresentativesLocked(const std::vector<int64_t>& sampleIds);
     int64_t upsertLocked(const SampleRecord&, const std::vector<IgnoredPath>* ignoredEntries = nullptr);
     std::vector<juce::String> discPathsLocked(const juce::String& imagePath) const;
     Database& db;

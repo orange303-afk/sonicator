@@ -121,6 +121,7 @@ public:
     std::vector<int> rexActiveSlices() const { return rexSampler.activeSlices(); }
     void setRexGateMode(bool enabled) { rexSampler.setGateMode(enabled); }
     bool isMidiPreview() const { return output.midi.load(); }
+    void setMidiLooping(bool enabled) { sampler.loop = enabled; sampleVoices.setLooping(enabled); }
     void setSkipSilence(bool enabled) { skipSilence = enabled; sampler.skipSilence = enabled; }
     bool isSkipSilence() const { return skipSilence; }
     bool isPlaying() const { if (trackerMode) return trackerSampleChosen ? sf2Audition.isPlaying() : trackerSong.isPlaying();
