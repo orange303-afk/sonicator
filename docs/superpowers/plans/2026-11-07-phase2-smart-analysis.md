@@ -8,7 +8,7 @@
 
 **Tech Stack:** C++20, JUCE 9.0.5, bundled SQLite, Catch2 3.7.1.
 
-**Spec:** `docs/superpowers/specs/2026-11-07-phase2-metadata-spike.md` and the Phase 2 TZ in `/Users/ilyaorange/.opencode/plan/2026-11-07-sonicator-phase2-smart-analysis.md`.
+**Spec:** `docs/superpowers/specs/2026-11-07-phase2-metadata-spike.md` and the Phase 2 TZ in `~/.opencode/plan/2026-11-07-sonicator-phase2-smart-analysis.md`.
 
 ## Status (2026-11-07)
 

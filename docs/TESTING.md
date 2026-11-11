@@ -1,4 +1,33 @@
-# Phase 1 verification
+# Verification
+
+## Stage 0: hygiene, licence and CI preparation (2026-11-11)
+
+- Branch `chore/stage0-hygiene` from `main` `72f6387`. No product code changed: the only source edit is
+  the licence line in the About block of `ui/settings/SettingsPanel.cpp` plus its test.
+- Builds moved out of iCloud. `CMakePresets.json` puts the local build in
+  `~/Library/Caches/sonicator-build/<preset>`. Reason, measured on this machine: the old `build/` tree in
+  `~/Documents` had 472 files marked `dataless` by the file provider, and compilers blocked in `pread`
+  for minutes at 0 % CPU; `git log` and tree-wide searches also stalled. In the new location a Debug
+  build compiles at ~94 % CPU.
+- macOS Debug, Ninja, Command Line Tools: build passed, `ctest --preset debug` passed in **26.10 s**;
+  the test binary reports **651 cases / 10,549 assertions**.
+- macOS Release, Ninja, Command Line Tools: build passed, `ctest --preset release` passed in **22.48 s**;
+  **651 cases / 10,551 assertions**. The small difference comes from configuration-dependent guards.
+- Bundle signature checked on the freshly built Debug bundle in its build directory, with no `xattr`
+  cleanup and no copy: `codesign --verify --deep --strict` reports `valid on disk` and
+  `satisfies its Designated Requirement`. The `com.apple.FinderInfo` problem of builds inside
+  `~/Documents` does not appear outside it.
+- Licence and notices: `LICENSE` (verbatim GNU AGPL v3 from gnu.org), `THIRD_PARTY_NOTICES.md`, and a
+  rewritten `docs/DEPENDENCIES.md`. About now prints `Licensed under AGPL-3.0-or-later.`
+- The About panel was rendered at 560×800 in both themes. The new test asserts the licence text is
+  present and that the credits block is tall enough for four lines; a pre-existing defect was found and
+  fixed, where the panel title and the product name stayed white after switching to the light theme
+  because `Label::textColourId` was never set for them.
+- Local validation artifacts (`build/manual-validation/`, 11 files, 54 MB) were copied to
+  `~/Library/SonicatorDev/manual-validation/` and compared file-by-file before the old build trees were
+  removed.
+- Not verified in this stage: the `universal` preset, Windows (no build exists yet; see
+  `docs/WINDOWS_PORT.md`), the VST3/AU spike built with the new presets, and CI itself.
 
 ## Disc images, incompatible-asset badge and double-click selection (2026-11-08)
 

@@ -1,35 +1,42 @@
-# SONICATOR — Core Browser
+# SONICATOR — Sample Browser
 
-Phase 1 of the Intelligent Sample Explorer: a real local audio browser, not an ML/map mockup.
+A local sample library browser and explorer for macOS and Windows: indexing, search, tags, smart
+metadata, waveform preview and drag-and-drop into a DAW, without a cloud account or a network
+dependency. This is a real working application, not an ML/map mockup.
 
 ## Build
 
 Requirements: CMake >=3.22, Git, C++20 compiler, macOS Command Line Tools/Xcode or Visual Studio 2022 with Desktop C++ workload and Windows SDK.
 The first configure downloads pinned JUCE 9.0.5 and Catch2 3.7.1; subsequent application use is offline.
-SQLite 3.47.2 is bundled. See [dependency/licensing notes](docs/DEPENDENCIES.md) before distribution.
+SQLite 3.47.2 is bundled. See [dependency/licensing notes](docs/DEPENDENCIES.md) and the
+[third-party notices](THIRD_PARTY_NOTICES.md) before distribution.
 
 ### macOS
 
+Build outside `~/Documents`: when that folder is synchronised by iCloud, the file provider turns the
+build tree into placeholder files and compilers stall on reads. `CMakePresets.json` keeps the build in
+`~/Library/Caches/sonicator-build/<preset>` for exactly that reason.
+
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --parallel 6
-ctest --test-dir build --output-on-failure
-open build/Sonicator_artefacts/Debug/SONICATOR.app
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
+open ~/Library/Caches/sonicator-build/debug/Sonicator_artefacts/Debug/SONICATOR.app
 ```
 
-Ninja is optional: omit `-G Ninja` to use the default generator.
-For Release, use a separate `build-release` directory and `-DCMAKE_BUILD_TYPE=Release`.
-For Intel + Apple Silicon, configure a separate directory with `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"`.
-The local verification run is native Apple Silicon; universal binaries and Windows must be verified separately.
+Use `release` for an optimised build with tests, and `universal` for a Release build of both
+architectures. A catalog with 300k rows takes several gigabytes in Debug; `release` is enough for daily
+use.
 
-### Windows (Developer PowerShell)
+Ninja is the preset generator; Ninja 1.13 or newer is recommended. For a one-off configure without
+presets, any generator works, but choose a binary directory outside iCloud:
+`cmake -S . -B <dir> -G Ninja -DCMAKE_BUILD_TYPE=Debug`.
 
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Debug --parallel 6
-ctest --test-dir build -C Debug --output-on-failure
-& .\build\Sonicator_artefacts\Debug\SONICATOR.exe
-```
+### Windows
+
+Windows is built in CI, and its current state is recorded in `docs/WINDOWS_PORT.md`. A local build needs
+Visual Studio 2022 with the Desktop C++ workload, zlib (for example through vcpkg) and the ONNX Runtime
+DLL next to the executable.
 
 macOS builds receive a local ad-hoc bundle signature. This is not Developer ID signing, a Windows signature, an installer or a notarized release.
 
@@ -90,27 +97,43 @@ Each playable entry becomes a metadata-only catalog row whose synthetic path is 
 
 ```text
 app/Main.cpp                 application lifecycle and window
-core/database/               RAII SQLite connection, prepared queries, schema version
+plugin/                      VST3/AU plugin hosting MainComponent (off by default)
+core/database/               SQLite connection, schema migrations, repository, path relocation, search syntax
 core/scanner/                recursive discovery and cancellable full-file SHA-256
-core/dsp/                    chunked audio decoding and measured descriptors
-core/audio/                  preview transport, sample-rate conversion, read-ahead, selection boundaries
+core/indexing/               background import, pause/cancel, incremental updates
+core/dsp/                    chunked decode, measured descriptors, rhythm, key, pitch, acoustic features
+core/audio/                  transport, read-ahead, MIDI voices, stereo-pair grouping
+core/smart/                  metadata extractors, resolver, background smart-analysis service
+core/ml/                     mel spectrogram, ONNX classifier wrapper, adaptive prototypes
+core/tagging/                tag storage, AutoTag rules and batches
+core/split/                  silence detection and WAV splitting
+core/extract/                embedded sample extraction from containers
+core/export/                 selection WAV export, background preparation, external file drag
+core/sf2/                    SoundFont 2 parsing and kit sampler
+core/rex/                    REX2 DWOP decoding and slice player
+core/sampler/                EXS24 and Kontakt (NKI) instrument readers
 core/tracker/                MOD/XM/S3M document parsing, source PCM and whole-song rendering
 core/legacy/                 content-based tracker recognition
-core/reason/                 bounded patch metadata, local references and one-time Packs registration
-core/ableton/                Ableton preview naming, protected-sample probe and one-time Packs registration
 core/disc/                   read-only image probing, filesystems, decoding and content indexing
-core/export/                 selection WAV export, background preparation, external file drag
-core/indexing/               background import, pause/cancel, incremental updates
+core/reason/                 bounded patch metadata and one-time Packs registration
+core/ableton/                Ableton preview naming, protected-sample probe and one-time Packs registration
 core/settings/               persisted application settings
-ui/shell/                    shared dark theme
-ui/library/                  global search, tags, paged/virtualized library and original-file row drag
+ui/shell/                    theme, window geometry and themed dialogs
+ui/library/                  global search, tags, folder tree, paged/virtualized library, row drag
 ui/waveform/                 asynchronous thumbnail, bounded disk cache and range selection
-ui/preview/                  transport and keyboard controls
-ui/settings/                 Settings dialog, catalogue switching and About links
+ui/preview/                  transport, keyboard controls and song progress
+ui/settings/                 Settings panel, catalog switching, relocation and About links
+ui/tagging/                  AutoTag review dialog
+ui/split/                    split dialog
+ui/extract/                  extract-samples dialog
+ui/disc/                     disc browser panel
 ui/platform/                 native file clipboard (macOS) with a text-path fallback
 ui/MainComponent.*           orchestration, inspector, device settings
 resources/sqlite/            official SQLite amalgamation
+resources/branding/          application icon and wordmark (originals included)
+cmake/                       macOS bundle signing
 tests/                       core, audio-render, UI and integration tests
+docs/                        architecture, testing evidence and stage plans
 ```
 
 Architectural details and numerical conventions: [ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -118,11 +141,14 @@ Architectural details and numerical conventions: [ARCHITECTURE.md](docs/ARCHITEC
 ## Tests
 
 ```sh
-cmake --build build --parallel 6
-ctest --test-dir build --output-on-failure
-build/tests/SonicatorTests '[.benchmark]'
-build/tests/SonicatorTests '[.large-file]'
+cmake --build --preset debug
+ctest --preset debug
+~/Library/Caches/sonicator-build/debug/tests/SonicatorTests '[.benchmark]'
+~/Library/Caches/sonicator-build/debug/tests/SonicatorTests '[.large-file]'
 ```
+
+`ctest --preset release` runs the same suite against the optimised build; both configurations are
+checked, because a Release-only compile error has happened before.
 
 The optional benchmark creates/imports/reopens/rescans 10,000 actual short synthetic WAV files in a temporary directory. Its timings do not predict a real mixed-format library's analysis time.
 All test audio is synthetic. Fixtures for WAV/AIFF/FLAC/MP3 are checked in; FFmpeg is not needed to build/run tests.
@@ -130,20 +156,20 @@ All test audio is synthetic. Fixtures for WAV/AIFF/FLAC/MP3 are checked in; FFmp
 Opt-in real-library tests are separate from the synthetic suite:
 
 ```sh
-SONICATOR_EXTERNAL_ROOT=/Volumes/1TBSSD/samples build/tests/SonicatorTests '[.external-scan]'
+SONICATOR_EXTERNAL_ROOT=/Volumes/1TBSSD/samples ~/Library/Caches/sonicator-build/debug/tests/SonicatorTests '[.external-scan]'
 SONICATOR_EXTERNAL_MANIFEST=/absolute/path/to/selection.json \
 SONICATOR_EXTERNAL_OUTPUT=/absolute/path/to/separate/output \
-build/tests/SonicatorTests '[.external]'
+~/Library/Caches/sonicator-build/debug/tests/SonicatorTests '[.external]'
 ```
 
-The selection manifest is a JSON array of objects with absolute `path` strings. The external test reads those originals, checks unchanged size/mtime/full SHA-256, limits each analysis to 10 seconds, and writes a separate SQLite database and JSON report to the output directory. Never choose an output directory inside the sample library. Local validation artifacts are ignored under `build/manual-validation/`.
+The selection manifest is a JSON array of objects with absolute `path` strings. The external test reads those originals, checks unchanged size/mtime/full SHA-256, limits each analysis to 10 seconds, and writes a separate SQLite database and JSON report to the output directory. Never choose an output directory inside the sample library. Local validation artifacts are kept outside the build tree, in `~/Library/SonicatorDev/manual-validation/`, and are not committed.
 The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancels; it verifies bounded/cancellable access, **not** full-length analysis of a real 1.2 GB recording.
 
-## Limits / next stage
+## Limits and open work
 
 - Preview toggles (**Auto Preview**, **MIDI Preview**, **Skip Silence**, **Loop**, **Gate**) persist in `settings.json` together with **Hide empty**.
-- Phase 2 metadata extraction (Type/BPM/Key candidates from WAV/AIFF/ASD/REX2 chunks and names) is implemented in `core/smart`. The current slice adds versioned extractors/resolver, atomic publication, structured failures, sidecar fingerprint verification, a background **Smart metadata** job, Type/BPM/Key library columns with whole-catalog sorting, and a bottom selection bar with the full path, metadata and resolved Pitch. Values are stored with provenance and are usable by `type:`, `key:` and `note:` search. One bounded PCM decode feeds a rhythm fallback (structure/BPM) and a tonal pass: key from a chromagram with tuning, percussion suppression and 24 profiles, and one-shot pitch from YIN with MIDI and cents. Drums, non-harmonic hits, chords and relative-key disputes stay unknown. The inspector, manual override editing UI and global metadata filters are not wired yet. See `docs/SMART_ANALYSIS.md` and `docs/key-pitch-accuracy.md`.
-- Measured Phase 1 DSP: duration, sample rate, applicable bit depth, channels, linear peak/RMS, power spectral centroid, 85% power rolloff and power spectral flatness. The smart DSP pass adds offline rhythm structure, key and one-shot pitch. Not LUFS, spectral density/bands, attack/decay or a perceptual similarity model.
+- Smart metadata (Type/BPM/Key candidates from WAV/AIFF/ASD/REX2 chunks and names) lives in `core/smart`, with versioned extractors, a resolver, atomic publication, structured failures, sidecar fingerprint verification, a background **Smart metadata** job, Type/BPM/Key library columns with whole-catalog sorting, and a selection bar with the full path, metadata and resolved Pitch. Values keep their provenance and are usable by `type:`, `key:` and `note:` search. One bounded PCM decode feeds a rhythm fallback (structure/BPM) and a tonal pass: key from a chromagram with tuning, percussion suppression and 24 profiles, and one-shot pitch from YIN with MIDI and cents. Drums, non-harmonic hits, chords and relative-key disputes stay unknown. Type can be set by hand from the row context menu (**Type ▶**), which also stores the edit as a learned prototype. There is no single inspector panel and no global metadata filter bar yet. See `docs/SMART_ANALYSIS.md` and `docs/key-pitch-accuracy.md`.
+- Measured DSP: duration, sample rate, applicable bit depth, channels, linear peak/RMS, power spectral centroid, 85% power rolloff and power spectral flatness, plus offline rhythm structure, key, one-shot pitch and the acoustic descriptor vector. Not LUFS, spectral density/bands or a perceptual similarity model.
 - FFT size 2048, Hann window, non-overlapping frames. These are engineering descriptors, not calibrated semantic labels or a perceptual similarity model.
 - Analysis supports up to 64 channels; preview uses the first two channels, not a surround downmix. Compressed bit depth can be unavailable.
 - Tracker support covers MOD (15- and 31-sample, M.K./M!K!/FLT/multichannel signatures), XM and S3M for whole-song playback and per-sample PCM export. Playback uses libxmp; PCM extraction is a separate bounded reader, so a format can play without every variant being extractable. AdLib/FM S3M instruments, packed S3M samples, stereo XM samples and unsupported variants keep an explicit status. There is no song overview waveform yet, no tracker editing, no stems and no MT2/IT/MDX; see `docs/PREVIEW.md`.
@@ -163,5 +189,15 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.
 - Windows, Intel macOS, physical listening/latency and release packaging still need platform/user verification. External file drag (library rows and selection WAVs) is verified on macOS only; Windows uses the same JUCE file-URL path and must be checked separately.
+- The VST3/AU target builds and loads in Cubase; the other hosts in its acceptance checklist, the shared catalog with the application, and Match BPM / Match Scale are not done. See `docs/plans/2026-11-11-vst3-au-plugin-spike.md`.
 
-Phase 2: independently versioned classification/BPM/pitch/key modules, ONNX/model licence review, manually labelled evaluation data, confidence calibration and separate user overrides. Do not begin until the Phase 1 baseline is accepted.
+## License
+
+SONICATOR is free and open source under the **GNU Affero General Public License v3.0 or later**
+(AGPL-3.0-or-later); see [LICENSE](LICENSE). Copyright (C) 2026 Ilya Orange.
+
+The licence follows the JUCE dependency: this project uses JUCE under its open-source option, which
+requires a combined work to be released under AGPL. The components compiled into the binary and their
+licences are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Roadmap and open feature work: [docs/BACKLOG.md](docs/BACKLOG.md).

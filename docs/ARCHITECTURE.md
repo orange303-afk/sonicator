@@ -1,4 +1,4 @@
-# Phase 1 architecture
+# Architecture
 
 ## Boundaries
 
@@ -19,7 +19,20 @@ Shutdown stops the UI timer, cancels/joins indexing without force-killing a thre
 
 ## Storage
 
-Schema `user_version=7`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, feature-set version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten. Version 2 adds `samples_name_id`, an index on `(name COLLATE NOCASE, id)` that matches the UI sort, so paged reads no longer build a temporary B-tree. Version 3 adds `samples.search_key` (Unicode-folded name + path for whole-catalog text search), `tags` and `sample_tags`. Version 4 adds `samples.starred`, a user favourite flag; analysis upserts deliberately do not update it, so a rescan can never clear a star. Version 5 adds the `duplicates` table: `(sample_id, representative_id, group_hash, group_size, is_representative)` with indexes on the group hash and representative. It is derived data, rebuilt from the catalog; the audio rows themselves are not rewritten. Version 6 adds the smart-analysis tables `smart_candidates`, `smart_results`, `smart_overrides` and `smart_inputs`. They are independent of measured features: `basicFeaturesVersion` stays 1, a rescan never clears tags, stars or overrides, and a reanalysed audio row deletes only its derived `smart_results` row so the background job rebuilds it. Candidates keep field, source, status, raw detail and numeric/text value; overrides are stored separately and can express an explicit unknown. `smart_inputs` records the size and modification time of the audio and its `<audio>.asd` sidecar so a changed sidecar is detectable even when the audio did not change. Version 7 hardens that storage: `smart_candidates` carries extractor id/version, raw value, source file, dependency fingerprint, limitation and a variable-tempo flag; `smart_results` carries per-field sources and override states, separate Pitch fields, revision, generation, pipeline state, the three analyzer versions and structured error fields; `smart_extractions` records that each source ran (including "absent"); `smart_failures` keeps code, message and attempts; `smart_meta` holds the monotonic generation counter. A reanalysed audio row now marks its smart result `stale` instead of deleting it, so the last completed values stay inspectable but are never presented as current. Publishing candidates, extractions, fingerprints and the resolved result happens in one `BEGIN IMMEDIATE` transaction guarded by the expected revision and the catalog identity. A job that read an older revision, or an override edit that happened meanwhile, is never overwritten. Each result also stores the extractor, resolver and DSP versions independently; a version mismatch makes it a candidate for the next pass without re-hashing audio or recomputing measured features. Standard tags are seeded only when the tag table is created, so a rename is not undone; sample IDs are stable across upserts, so assignments survive rescan and reanalysis. Upgrading first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages. A user-triggered backup uses the same API into `Sonicator/backups/sonicator-<timestamp>.sqlite` and refuses to overwrite an existing file or the live database. Settings updates load-modify-save only the fields they own, so window geometry and theme/catalog writers do not overwrite each other. Saved window bounds are validated against connected displays and clamped to a minimum size and the current work area.
+Schema `user_version=12`. Stable numeric ID, unique path, full SHA-256, file size/time, format metadata, all implemented DSP values, feature-set version, error and missing flag. Root folders persist separately. Schema versions newer than the application are rejected, not overwritten. Version 2 adds `samples_name_id`, an index on `(name COLLATE NOCASE, id)` that matches the UI sort, so paged reads no longer build a temporary B-tree. Version 3 adds `samples.search_key` (Unicode-folded name + path for whole-catalog text search), `tags` and `sample_tags`. Version 4 adds `samples.starred`, a user favourite flag; analysis upserts deliberately do not update it, so a rescan can never clear a star. Version 5 adds the `duplicates` table: `(sample_id, representative_id, group_hash, group_size, is_representative)` with indexes on the group hash and representative. It is derived data, rebuilt from the catalog; the audio rows themselves are not rewritten. Version 6 adds the smart-analysis tables `smart_candidates`, `smart_results`, `smart_overrides` and `smart_inputs`. They are independent of measured features: `basicFeaturesVersion` stays 1, a rescan never clears tags, stars or overrides, and a reanalysed audio row deletes only its derived `smart_results` row so the background job rebuilds it. Candidates keep field, source, status, raw detail and numeric/text value; overrides are stored separately and can express an explicit unknown. `smart_inputs` records the size and modification time of the audio and its `<audio>.asd` sidecar so a changed sidecar is detectable even when the audio did not change. Version 7 hardens that storage: `smart_candidates` carries extractor id/version, raw value, source file, dependency fingerprint, limitation and a variable-tempo flag; `smart_results` carries per-field sources and override states, separate Pitch fields, revision, generation, pipeline state, the three analyzer versions and structured error fields; `smart_extractions` records that each source ran (including "absent"); `smart_failures` keeps code, message and attempts; `smart_meta` holds the monotonic generation counter. Version 8 adds `recent_tags`, the five-entry
+recently-used tag history. Version 9 seeds the extended built-in tag set (Crash, Ride, Tom, Rim, Fill,
+Riser, Downfilter, Upfilter, Snap, Shaker, Tamb) without touching user tags. Version 10 adds
+`samples.compatibility`, the stored reason a container cannot be opened (`unknown` for legacy rows,
+missing files and transient I/O); an incompatible row is never hidden by a guess. Version 11 adds
+`ignored_paths` as the single source of truth for ignored files and folders, the cached `samples.ignored`
+column derived from it, the stereo-pair grouping (`stereo_pairs`, `samples.pair_key`,
+`samples.pair_side`), and the `custom_types` and `ml_feedback_samples` tables used by adaptive learning.
+Version 12 adds the disc-image columns on `samples` (`container_path`, `disc_entry`, `disc_parent`,
+`disc_partner`, `disc_path`) and `disc_index`, which records each image's size and modification time so an
+unchanged image is not walked again. Every step is cumulative: statements use `CREATE TABLE IF NOT
+EXISTS` and `ensureColumn`, so a database created by any older build reaches version 12 with its rows,
+tags, stars, overrides and measured features intact.
+A reanalysed audio row now marks its smart result `stale` instead of deleting it, so the last completed values stay inspectable but are never presented as current. Publishing candidates, extractions, fingerprints and the resolved result happens in one `BEGIN IMMEDIATE` transaction guarded by the expected revision and the catalog identity. A job that read an older revision, or an override edit that happened meanwhile, is never overwritten. Each result also stores the extractor, resolver and DSP versions independently; a version mismatch makes it a candidate for the next pass without re-hashing audio or recomputing measured features. Standard tags are seeded only when the tag table is created, so a rename is not undone; sample IDs are stable across upserts, so assignments survive rescan and reanalysis. Upgrading first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages. A user-triggered backup uses the same API into `Sonicator/backups/sonicator-<timestamp>.sqlite` and refuses to overwrite an existing file or the live database. Settings updates load-modify-save only the fields they own, so window geometry and theme/catalog writers do not overwrite each other. Saved window bounds are validated against connected displays and clamped to a minimum size and the current work area.
 
 Catalog portability: when a catalog's stored roots do not exist on this computer, the UI offers to relocate them. `SampleRepository::relocateRoots` streams the sample rows once inside one transaction, picks the longest matching old root for each path, and rewrites `path` plus `search_key` through the pure `pathrelocation` helpers. Both `/` and `\` are treated as separators on input and `File::getSeparatorChar()` is written on output, so macOS and Windows catalogs work in both directions. IDs, tags, stars, hashes and measured features are untouched; `missing` is not changed and Rescan remains the reconciliation authority. A target-path collision merges the relocated row's tags and star into the existing row and deletes the duplicate. Before applying, the UI writes `<name>.relocate-<timestamp>.sqlite` with the SQLite backup API.
 
@@ -115,6 +128,50 @@ For each channel/frame: zero-pad final partial frame; apply non-normalized Hann 
 
 The smart DSP stage decodes a bounded prefix once (`core/dsp/AnalysisAudio`) and feeds both `RhythmAnalyzer` and `TonalAnalyzer`. Key uses an 8192-point chromagram with a circular tuning estimate, transient/flatness weighting, a chroma median filter and 24 Krumhansl–Kessler/Temperley profiles plus a low-frequency bass prior. Pitch uses FFT-accelerated YIN over the most stable segment of a one-shot, with clarity, stability and harmonicity gates. Both are pure, bounded, read-only functions called from the smart worker; nothing runs on the audio callback. `smartDspVersion` is 2. See `docs/SMART_ANALYSIS.md`.
 
+## Plugin (VST3 and AU)
+
+`plugin/` builds a VST3 and an AudioUnit around the same `MainComponent`. It compiles only with
+`-DSONICATOR_BUILD_PLUGIN_SPIKE=ON`; without the option the targets and the application build are
+unchanged. The processor opens no device: `processBlock` renders through the `AudioEngine` host mode
+(`startHostAudio`, `processHostBlock`, `stopHostAudio`), which takes sample rate and block size from the
+host, routes host MIDI into the same `MidiEventQueue` the application uses, and renders under the audio
+callback lock. `MainComponent` accepts an external `AudioEngine*` and an `embeddedUi` flag; in a plugin
+the settings, tag, split, extract and relocation dialogs are drawn inside the editor, because hosts close
+or steal focus from separate `DialogWindow`s. The editor owns the `MainComponent` and creates it only
+when the catalog file exists. `Desktop::setGlobalScaleFactor` is not applied in a plugin, since it is
+process-wide. Product and manufacturer identifiers, plugin codes and the data directory are temporary
+spike values; see `docs/plans/2026-11-11-vst3-au-plugin-spike.md`.
+
+## Tags, AutoTag and sample types
+
+`core/tagging` owns tag definitions, assignments, the recent-tag history and the rule engine. AutoTag
+proposes tags from file and folder names, embedded metadata and resolved smart candidates, then applies
+them in background batches that roll back an unfinished batch on cancellation. A rule maps onto an
+existing tag name, so renaming a built-in tag makes its rule report `tag-missing`. When a user sets a type
+or assigns tags, `ml_feedback_samples` stores the acoustic descriptor vector alongside the confirmed
+label; `core/ml/AdaptiveClassifier` ranks the nearest stored prototypes and publishes them as a
+`user_adaptive` source, which AutoTag can turn into suggestions. See `docs/TAGGING.md`.
+
+## Acoustic classification
+
+`core/dsp/AcousticFeatures` extracts a descriptor vector from one bounded decode. `FastAcousticRules`
+answers drums and sub-bass from cheap features, and `core/smart/AcousticClassifierService` publishes the
+result as Type candidates that `SmartResolver` weighs against metadata and path evidence; a genre or
+instrument name in the path is arbitrated rather than accepted blindly. An ONNX classifier exists behind
+`OnnxAudioClassifier`, but no model file ships and nothing in the application calls `loadModel`, so that
+branch is inactive in the shipped build. Nothing here runs on the audio thread.
+
+## Disc images
+
+`core/disc` reads ISO/IMG/BIN/CUE images and raw Akai volumes read-only through bounded byte/block
+sources, so a 600 MB image is never loaded whole. Only entries this build can open become catalog rows:
+audio files inside ISO-9660 and Akai sample records, with a synthetic path `<image>::<internal path>`.
+They are metadata-only rows (`version = -1`); PCM is decoded on selection, never during indexing. Every
+partition owns its own volume table and FAT with partition-relative start blocks, the FAT fields are
+big-endian while the file fields are little-endian, and a `.bin` with a sibling `.cue` is represented by
+the cue once. `disc_index` stores each image's identity so an unchanged image is skipped. See
+`docs/DISC_IMAGES.md`.
+
 ## Deliberate changes from the initial chat plan
 
 - Full hashing, not prefix hashing; equal-hash files are not silently dropped.
@@ -122,6 +179,6 @@ The smart DSP stage decodes a bounded prefix once (`core/dsp/AnalysisAudio`) and
 - Persist every implemented descriptor, including rolloff and flatness.
 - Polling progress instead of one callAsync per file; separate read/write connections.
 - Persistent roots, missing markers, analysis/schema versions, 10k-row paging and no device dependency in offline audio tests.
-- Standalone GUI target only, no unnecessary plugin/APVTS scaffold.
+- Standalone GUI target first; the VST3/AU plugin hosts the same `MainComponent` behind an off-by-default CMake option, with no APVTS or plugin parameters.
 
 See `phase1-progress.md` for execution evidence and decisions.

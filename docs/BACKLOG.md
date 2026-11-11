@@ -1,33 +1,39 @@
 # Sonicator Feature Backlog
 
-The primary source of truth for Sonicator feature backlog and roadmap ideas is located at:
-`/Users/ilyaorange/Documents/orange303/Sonicator Features.md`
+The source of truth for roadmap items is the owner's external list:
+`~/Documents/orange303/Sonicator Features.md`.
 
-## Summary of Active Roadmap Items
+This file only tracks state, so the two lists cannot drift apart. Item numbers match the external list.
+When an item is finished, record the commit or document here and append `✅` to the external line.
 
-1. **Crash Reporting**:
-   - Automatic crash log transmission to GitHub issues, grouping duplicates into existing issues.
-2. **In-App "Report" in Settings**:
-   - Report a bug, request a feature, or request sample/bank format support (with sample attachment).
-3. **Ecosystem Integration**:
-   - Integration with Sample Dicer, Loop Dicer, Drum Dicer (e.g., "Send kit to Drum Dicer", "Send loop to Loop Dicer").
-4. **Interactive Tag Cloud**:
-   - Tab with visual color-coded tag cloud, audio audition on mouse hover, click-free scrubbing.
-5. **DAW Drag-and-Drop Metadata**:
-   - Pass key, pitch, and BPM metadata when dragging audio files into DAWs.
-6. **Extensible Plugin System**:
-   - Support user-written plugins for exotic sample formats and external network/AI services.
-7. **AI-Agent Assistance**:
-   - Connection of AI agents to organize and catalog user sample libraries.
-8. **DAW Panel Integration**:
-   - Native DAW browser integration tab (similar to Splice in Studio One).
-9. **VST3 & AU Plugin Versions**:
-   - Full drag-and-drop plugin versions with Match BPM and Match Scale modes.
-10. **Multi-Format Converter**:
-    - Batch conversion between formats (WAV, MP3, FLAC, AIFF, OGG, and legacy formats).
-11. **Smart Content Classification**:
-    - AI-assisted sample classification (instruments, textures, pads, leads, shots, risers). *(Stage 1 hybrid implemented)*
-12. **Opt-in Model Training / Personalization**:
-    - Settings toggle to optionally contribute tags/metadata to refine local classification models.
-13. **Credits in About Dialog**:
-    - Display open-source frameworks, libraries, and model credits.
+## Status
+
+| № | Item | State |
+|---|---|---|
+| 1 | Crash reporting: log to GitHub, group similar crashes into one issue | Not started |
+| 2 | **Report** in Settings: bug, feature request, or format/bank support with a sample file | Not started |
+| 3 | Integration with Sample Dicer, Loop Dicer, Drum Dicer (engine selection, Send to …) | Not started |
+| 4 | Tag-cloud tab: every file a point coloured by its tag, audition on hover, click-free stop | Not started |
+| 5 | Key and BPM passed to the DAW on drag | Not started |
+| 6 | Plugin system for new formats and network services | Not started |
+| 7 | AI agents for library organisation | Not started |
+| 8 | DAW panel integration (a tab like Splice in Studio One) | Research not started |
+| 9 | VST3 and AU with full drag-and-drop, Match BPM, Match Scale | Partly: VST3/AU build, host audio and MIDI, embedded dialogs; Cubase accepted. Other hosts, shared catalog, Match BPM/Scale open. `docs/plans/2026-11-11-vst3-au-plugin-spike.md` |
+| 10 | Multi-format converter with settings | Not started; only selection export to WAV exists |
+| 11 | Smart AI content-type detection | Stage 1: hybrid metadata + acoustic rules + adaptive prototypes. `docs/SMART_ANALYSIS.md` |
+| 12 | Training on user libraries, opt-in at first run and in Settings | Local adaptive learning and the `contributeTrainingData` toggle exist; upload, first-run consent and a privacy note do not. `docs/superpowers/specs/2026-11-10-sample-type-editing-and-adaptive-learning-design.md` |
+| 13 | Collect custom tags and sample types into later builds as built-in | Storage exists (`custom_types`, user tags); the collection step into a build does not |
+| 14 | Credits in About | Done: frameworks, libraries, decoders. `ui/settings/SettingsPanel.cpp` |
+| 15 | Boosty donation link | Done: Settings → About. `ui/settings/SettingsPanel.cpp` |
+| 16 | Move a waveform selection while playing; wheel changes its size | Done: dragging publishes the live selection and the wheel scales it around its centre (`72f6387`) |
+| 17 | Turning on MIDI preview temporarily silences playback | Done (`72f6387`) |
+
+## Open owner decisions
+
+- **ONNX Runtime** is linked into every build (tens of megabytes), but no model file ships and nothing
+  calls `loadModel`, so the classifier branch is inactive; Type comes from DSP rules and learned
+  prototypes. Keep the library for a future model, drop it, or ship a model — the owner decides.
+  Recorded in `docs/DEPENDENCIES.md`.
+- **Repository location:** the checkout lives in `~/Documents`, which iCloud synchronises. Builds inside
+  it stall on evicted files and git operations that walk the history take minutes. Moving the checkout
+  outside iCloud is recommended and not yet done.
