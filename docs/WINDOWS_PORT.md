@@ -15,15 +15,16 @@ First run with a completed build: `CI` workflow, 2026-11-11.
 | zlib | Found through the platform build; when absent, `CMakeLists.txt` fetches zlib 1.3.1 and links the static target |
 | `onnxruntime.dll` next to the executables | Copied by a POST_BUILD step under `if(WIN32)`; the tests start and load the runtime |
 | `SonicatorCore`, `SonicatorUI`, `SonicatorTests`, `SONICATOR.exe` | Built |
-| Tests | Run: 650 cases, 624 passed, 22 failed, 4 skipped (93 s) |
+| Tests | Run: 656 cases, 629 passed, 23 failed, 4 skipped (about 2 minutes) |
 
 So the source tree compiles with MSVC without edits. The first build needed only build-system changes:
 the zlib fallback and the runtime DLL copy.
 
 ## Failing tests
 
-All 22 failures are assertions, not crashes, and they cluster around path separators and one colour
-check. The list below is the exact set from that run; each failed on the first assertion of its case.
+All 23 failures are assertions, not crashes, and they cluster around path separators and two playback
+and drawing checks. The list below is the exact set from the latest run; each failed on the first
+assertion of its case.
 
 ### Folder scoping, ignore lists and stereo pairs (path separators)
 
@@ -77,6 +78,10 @@ repository normalises separators inside all queries, or every caller is required
 - `Long exports run in bounded chunks and cancel cleanly`: asserts that no `.part` file survives a
   cancellation. Either cleanup ordering differs on Windows (an open handle blocks deletion) or the check
   runs before the worker's cleanup.
+- `Changing image sample stops old playback before the new decode completes`: the test waits up to two
+  seconds for the transport to start (the wait is condition-driven, not a fixed sleep), and on Windows
+  the button never shows "Pause". This is not slowness: disc-image preview does not start playing on
+  Windows in this environment, which is a real difference to investigate, not a test tolerance.
 
 ## What is not done
 
