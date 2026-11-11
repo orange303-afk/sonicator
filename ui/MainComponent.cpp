@@ -14,6 +14,8 @@
 #include "ui/platform/FileClipboard.h"
 #include "core/dsp/AnalysisAudio.h"
 #include "core/smart/AcousticClassifierService.h"
+#include "core/smart/NameHeuristics.h"
+#include "core/Version.h"
 #include "core/ml/AdaptiveClassifier.h"
 #include <algorithm>
 #include <cmath>
@@ -606,6 +608,18 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     addKeyListener(&enterKeyListener);
     startTimerHz(10);
     juce::Desktop::getInstance().addDarkModeSettingListener(this);
+    if (persistSessionState && ! embeddedUi)
+    {
+        startContribution();
+        if (! contributionConsentCurrent())
+        {
+            juce::Component::SafePointer<MainComponent> safe(this);
+            juce::MessageManager::callAsync([safe]() mutable
+            {
+                if (safe != nullptr) safe->askContributionConsent();
+            });
+        }
+    }
 }
 MainComponent::~MainComponent()
 {
@@ -629,6 +643,12 @@ MainComponent::~MainComponent()
     }
     if (splitter) { splitter->cancel(); splitter->waitUntilFinished(-1); }
     if (extractor) { extractor->cancel(); extractor->waitUntilFinished(-1); }
+    if (contributionScheduler != nullptr)
+    {
+        contributionScheduler->stop();
+        contributionScheduler.reset();
+    }
+    contributionUploader.reset();
     cancelFeedback = true;
     if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
     smart.reset(); indexer.reset(); tagging.reset(); autoTag.reset(); splitter.reset(); extractor.reset();
@@ -2912,6 +2932,12 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
 {
     if (ids.empty() || writeRepo == nullptr) return;
 
+    if (contributionScheduler != nullptr)
+    {
+        contributionScheduler->stop();
+        contributionScheduler.reset();
+    }
+    contributionUploader.reset();
     cancelFeedback = true;
     if (typeFeedbackWorker && typeFeedbackWorker->joinable())
         typeFeedbackWorker->join();
@@ -3173,6 +3199,228 @@ void MainComponent::refreshTheme()
     sendLookAndFeelChange();
     repaint();
 }
+bool MainComponent::contributionConsentCurrent() const
+{
+    return appSettings.contributionConsentVersion >= AppSettings::currentContributionConsentVersion;
+}
+
+void MainComponent::startContribution()
+{
+    if (contributionUploader != nullptr || writeRepo == nullptr) return;
+    contribute::Uploader::Source source;
+    juce::Component::SafePointer<MainComponent> safe(this);
+    source.allowed = [safe]()
+    {
+        auto* self = safe.getComponent();
+        if (self == nullptr) return false;
+        const juce::ScopedLock lock(self->contributionLock);
+        return self->persistSessionState && ! self->embeddedUi
+            && self->appSettings.contributeTrainingData && self->contributionConsentCurrent()
+            && self->appSettings.contributionInstallId.isNotEmpty();
+    };
+    source.installId = [safe]()
+    {
+        if (safe == nullptr) return juce::String();
+        const juce::ScopedLock lock(safe->contributionLock);
+        return safe->appSettings.contributionInstallId;
+    };
+    source.storeInstallId = [safe](const juce::String& id)
+    {
+        if (safe == nullptr) return;
+        {
+            const juce::ScopedLock lock(safe->contributionLock);
+            safe->appSettings.contributionInstallId = id;
+        }
+        try { safe->settingsStore.update([&id](AppSettings& saved) { saved.contributionInstallId = id; }); }
+        catch (...) {}
+    };
+    source.endpoint = [safe]()
+    {
+        if (safe == nullptr) return AppSettings::defaultContributionEndpoint();
+        return safe->appSettings.contributionEndpoint.isNotEmpty()
+            ? safe->appSettings.contributionEndpoint : AppSettings::defaultContributionEndpoint();
+    };
+    source.watermark = [safe]()
+    {
+        if (safe == nullptr || safe->writeRepo == nullptr) return (int64_t) 0;
+        try { return safe->writeRepo->contributionWatermark(); } catch (...) { return (int64_t) 0; }
+    };
+    source.commitWatermark = [safe](int64_t value)
+    {
+        if (safe == nullptr || safe->writeRepo == nullptr) return;
+        try { safe->writeRepo->setContributionWatermark(value); } catch (...) {}
+    };
+    source.fetch = [safe](int64_t after, int limit)
+    {
+        if (safe == nullptr || safe->writeRepo == nullptr) return std::vector<contribute::Record>();
+        std::vector<contribute::Record> out;
+        try
+        {
+            for (auto& row : safe->writeRepo->contributionRecords(after, limit))
+            {
+                contribute::Record record;
+                record.recordId = row.recordId;
+                record.type = row.targetType;
+                record.tags = row.tags;
+                record.features = row.features;
+                record.key = row.key;
+                record.bpm = row.bpm;
+                record.hasBpm = row.hasBpm;
+                record.updatedAt = row.updatedAt;
+                out.push_back(std::move(record));
+            }
+        }
+        catch (...) {}
+        return out;
+    };
+    source.vocabulary = [safe]()
+    {
+        contribute::Vocabulary vocabulary;
+        vocabulary.types = canonicalSmartTypeNames();
+        vocabulary.tags = {};
+        if (safe != nullptr && safe->readRepo != nullptr)
+        {
+            try
+            {
+                for (const auto& custom : safe->readRepo->customTypes())
+                    vocabulary.types.addIfNotAlreadyThere(custom);
+                vocabulary.tags = safe->readRepo->builtinTagNames();
+            }
+            catch (...) {}
+        }
+        return vocabulary;
+    };
+   #if JUCE_WINDOWS
+    const juce::String osName = "win";
+   #else
+    const juce::String osName = "mac";
+   #endif
+    contributionUploader = std::make_shared<contribute::Uploader>(
+        std::make_unique<contribute::WebTransport>(), std::move(source), version(), osName);
+    contributionScheduler = std::make_unique<contribute::Scheduler>(
+        *contributionUploader, [safe]()
+        {
+            auto* self = safe.getComponent();
+            return self != nullptr && self->appSettings.contributeTrainingData
+                && self->contributionConsentCurrent() && self->appSettings.contributionInstallId.isNotEmpty();
+        });
+    contributionScheduler->start();
+}
+
+void MainComponent::askContributionConsent()
+{
+    if (contributionConsentCurrent()) return;
+    const auto message = juce::String(
+        "Sonicator can send anonymous training data: the confirmed type, tags, tempo and key of a sample, "
+        "plus 14 acoustic measurements as plain numbers. Audio, file names, folder names and paths are "
+        "never sent, and nothing identifies you or your computer.\n\n"
+        "Confirmations you made before today are included. You can review the exact data, stop at any "
+        "time and delete what was sent in Settings > Library.\n\n"
+        "Participate in training data collection?");
+    juce::Component::SafePointer<MainComponent> safe(this);
+    dialogs::showAlert(*this, "Help train the model", message,
+        {{ "Not now", 0 }, { "Participate", 1 }},
+        [safe](int result)
+        {
+            if (safe == nullptr) return;
+            const bool accepted = result == 1;
+            auto& settings = safe->appSettings;
+            settings.contributionConsentVersion = AppSettings::currentContributionConsentVersion;
+            settings.contributeTrainingData = accepted;
+            if (accepted && settings.contributionInstallId.isEmpty())
+                settings.contributionInstallId = contribute::Uploader::makeUuid();
+            try
+            {
+                safe->settingsStore.update([&settings](AppSettings& saved)
+                {
+                    saved.contributionConsentVersion = settings.contributionConsentVersion;
+                    saved.contributeTrainingData = settings.contributeTrainingData;
+                    saved.contributionInstallId = settings.contributionInstallId;
+                });
+            }
+            catch (...) {}
+        });
+}
+
+void MainComponent::setContributionEnabledFromPanel(bool wanted,
+                                                    juce::Component::SafePointer<SettingsPanel> panel)
+{
+    if (wanted && ! contributionConsentCurrent())
+    {
+        askContributionConsent();
+        if (panel != nullptr) panel->setContributionEnabled(appSettings.contributeTrainingData);
+        return;
+    }
+    appSettings.contributeTrainingData = wanted;
+    if (wanted && appSettings.contributionInstallId.isEmpty())
+        appSettings.contributionInstallId = contribute::Uploader::makeUuid();
+    try
+    {
+        settingsStore.update([this](AppSettings& saved)
+        {
+            saved.contributeTrainingData = appSettings.contributeTrainingData;
+            saved.contributionInstallId = appSettings.contributionInstallId;
+        });
+    }
+    catch (...) {}
+    if (panel != nullptr) panel->setContributionEnabled(appSettings.contributeTrainingData);
+}
+
+void MainComponent::deleteContributionData(std::function<void(bool, juce::String)> done)
+{
+    if (contributionUploader == nullptr)
+    {
+        if (done) done(false, "Contribution is not available.");
+        return;
+    }
+    auto uploader = contributionUploader;
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::Thread::launch([uploader, safe, done]() mutable
+    {
+        const auto outcome = uploader->deleteMine();
+        const bool ok = outcome.sent;
+        const auto error = outcome.error;
+        juce::MessageManager::callAsync([safe, ok, error, done]() mutable
+        {
+            if (safe != nullptr && ok)
+            {
+                {
+                    const juce::ScopedLock lock(safe->contributionLock);
+                    safe->appSettings.contributeTrainingData = false;
+                    safe->appSettings.contributionInstallId =
+                        safe->settingsStore.load().contributionInstallId;
+                }
+                try { safe->settingsStore.update([](AppSettings& saved) { saved.contributeTrainingData = false; }); }
+                catch (...) {}
+            }
+            if (done) done(ok, error);
+        });
+    });
+}
+
+void MainComponent::wireContributionPanel(SettingsPanel& panel)
+{
+    juce::Component::SafePointer<SettingsPanel> safePanel(&panel);
+    panel.setContributionEnabled(appSettings.contributeTrainingData && contributionConsentCurrent());
+    panel.onContributionToggle = [this, safePanel](bool wanted)
+    {
+        setContributionEnabledFromPanel(wanted, safePanel);
+    };
+    panel.onContributionPreview = [this]()
+    {
+        if (contributionUploader == nullptr) startContribution();
+        return contributionUploader != nullptr ? contributionUploader->previewJson() : juce::String("{}");
+    };
+    panel.onContributionDelete = [this, safePanel](std::function<void(bool, juce::String)> done)
+    {
+        deleteContributionData([safePanel, done](bool ok, juce::String error)
+        {
+            if (safePanel != nullptr) safePanel->setContributionEnabled(false);
+            if (done) done(ok, error);
+        });
+    };
+}
+
 void MainComponent::applySettings(const AppSettings& next)
 {
     // The settings dialog edits theme, scale and language only. Other fields (catalog path,
@@ -3207,6 +3455,7 @@ void MainComponent::showEmbeddedSettings()
     auto panel = std::make_unique<SettingsPanel>(appSettings,dbPath,indexer && indexer->progress().running);
     panel->setComponentID("settingsPanel");
     panel->onSettingsChanged = [this](AppSettings next) { applySettings(next); };
+    wireContributionPanel(*panel);
     panel->setLookAndFeel(&look);
     panel->setPluginMode(true);
     panel->onClose = [safe = juce::Component::SafePointer<MainComponent>(this)]
@@ -3248,6 +3497,7 @@ void MainComponent::showSettings()
     auto* panel = new SettingsPanel(appSettings,dbPath,indexing);
     panel->onSettingsChanged = [this](AppSettings next) { applySettings(next); };
     panel->onShowAudio = [this] { showAudioSettings(); };
+    wireContributionPanel(*panel);
     panel->onBackupRequested = [this](juce::String& error) -> juce::File
     {
         try { return backupCatalog(); }
@@ -3362,6 +3612,12 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     if (tagging) { tagging->cancel(); tagging->waitUntilFinished(-1); tagging.reset(); }
     if (smart) { smart->cancel(); smart->waitUntilFinished(-1); smart.reset(); }
     if (indexer) { indexer->cancel(); indexer->waitUntilFinished(-1); indexer.reset(); }
+    if (contributionScheduler != nullptr)
+    {
+        contributionScheduler->stop();
+        contributionScheduler.reset();
+    }
+    contributionUploader.reset();
     cancelFeedback = true;
     if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
     cancelFeedback = false;

@@ -182,6 +182,12 @@ void collect(const juce::String& text, const juce::String& source, std::vector<S
 }
 } // namespace
 juce::String canonicalSmartTypeToken(const juce::String& token) { return typeForToken(token); }
+juce::StringArray canonicalSmartTypeNames()
+{
+    juce::StringArray out;
+    for (const auto& alias : typeAliases) out.addIfNotAlreadyThere(alias.canonical);
+    return out;
+}
 std::vector<SmartCandidate> extractNameCandidates(const juce::String& path)
 {
     std::vector<SmartCandidate> out;

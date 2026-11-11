@@ -228,7 +228,7 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
     for (auto* child : panel.getChildren())
         if (auto* label = dynamic_cast<juce::Label*>(child))
             credits = credits || (label->getText().contains("JUCE")
-                                  && label->getText().contains("No network"));
+                                  && label->getText().contains("No telemetry"));
     REQUIRE(credits);
     bool licence = false;
     for (auto* child : panel.getChildren())
@@ -241,6 +241,9 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
     REQUIRE(buttonText.count("Report a bug...") == 1);
     REQUIRE(buttonText.count("Request a feature...") == 1);
     REQUIRE(buttonText.count("Format support...") == 1);
+    REQUIRE(buttonText.count("Ask or discuss...") == 1);
+    REQUIRE(buttonText.count("What will be sent...") == 1);
+    REQUIRE(buttonText.count("Delete my contributed data...") == 1);
     panel.setBounds(0,0,560,panel.getHeight());
     // The credits block must still hold all four lines after the licence line was added.
     bool fits = false;

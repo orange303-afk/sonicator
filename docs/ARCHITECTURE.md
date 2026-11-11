@@ -152,6 +152,15 @@ or assigns tags, `ml_feedback_samples` stores the acoustic descriptor vector alo
 label; `core/ml/AdaptiveClassifier` ranks the nearest stored prototypes and publishes them as a
 `user_adaptive` source, which AutoTag can turn into suggestions. See `docs/TAGGING.md`.
 
+## Training-data contribution
+
+`core/contribute` turns rows of `ml_feedback_samples` into one JSON batch — features, labels, key
+and tempo, never a path, a hash or a sample id — and posts it to the Worker in
+`services/contribute-worker/`. `Uploader` owns one cycle and moves the catalog's watermark
+(`contribution_state`) only after a 2xx; `Scheduler` runs it on a background thread about once a
+day. Consent, the toggle, the preview and deletion live in Settings → Library and are gated in
+`MainComponent`; the plugin never sends, it only shares the catalog. See `docs/PRIVACY.md`.
+
 ## Acoustic classification
 
 `core/dsp/AcousticFeatures` extracts a descriptor vector from one bounded decode. `FastAcousticRules`

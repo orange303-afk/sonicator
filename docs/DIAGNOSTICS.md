@@ -52,8 +52,17 @@ File names inside the catalog therefore stay in the log tail. That is deliberate
 file name that failed is usually useless. The user sees the whole body in the browser and can edit or
 delete any line before submitting. The panel states that nothing is sent automatically.
 
-`contributeTrainingData` (Settings → Library) is a separate, opt-in switch and sends nothing today; it
-only records the choice for a future feature.
+## Training-data contribution
+
+The one network call the application makes on its own is the training-data upload described in
+`docs/PRIVACY.md`. It exists only when the user answered the consent question, the toggle in
+Settings → Library is on, and an installation id exists. It runs on a background thread about once
+a day, sends at most one batch per cycle to the Worker in `services/contribute-worker/`, and writes
+nothing from the payload to the log: only a record count and an HTTP status. A failure is silent
+and retried in the next cycle.
+
+The Worker has no secret of its own; the bucket is reached through an R2 binding. The user can
+preview the exact JSON and delete everything that was sent from the same Settings section.
 
 ## Tests
 

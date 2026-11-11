@@ -23,6 +23,12 @@ public:
     // Writes a consistent catalog copy and returns it; on failure returns an invalid file and
     // fills error.
     std::function<juce::File(juce::String& error)> onBackupRequested;
+    // Training-data contribution. The panel never persists anything itself: the owner decides
+    // whether consent is current, runs the request and writes the setting.
+    std::function<void(bool)> onContributionToggle;
+    std::function<juce::String()> onContributionPreview;   // returns the next batch as JSON
+    std::function<void(std::function<void(bool, juce::String)>)> onContributionDelete;
+    void setContributionEnabled(bool);
 private:
     AppSettings current;
     juce::File database;
@@ -33,17 +39,23 @@ private:
                  supportLabel, creditsLabel;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::ToggleButton contributeDataToggle;
+    juce::Label contributionNote;
+    juce::TextButton contributionPreview { "What will be sent..." },
+                     contributionDelete { "Delete my contributed data..." };
     juce::TextButton moveDatabase { "Move catalog..." }, openDatabase { "Open catalog..." },
                      relocateDatabase { "Relocate folders..." }, backupDatabase { "Backup database" },
                      audio { "Audio/MIDI Settings" },
                      reportBug { "Report a bug..." }, reportFeature { "Request a feature..." },
                      reportFormat { "Format support..." },
+                     reportDiscuss { "Ask or discuss..." },
                      close { "Close" };
     juce::HyperlinkButton gumroad, bandcamp, naukograd, kofi, boosty;
     std::unique_ptr<juce::FileChooser> chooser;
     std::vector<juce::Rectangle<float>> sectionRules;
     juce::Rectangle<int> databaseFieldBounds;
     void notifySettings();
+    void showContributionPreview();
+    void confirmContributionDelete();
     void chooseDatabase(bool moveCurrent);
 };
 } // namespace sonicator

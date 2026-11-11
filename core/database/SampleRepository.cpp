@@ -11,7 +11,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
-constexpr int schemaVersion = 12;
+constexpr int schemaVersion = 13;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -636,7 +636,10 @@ void SampleRepository::createTables()
             "CREATE TABLE IF NOT EXISTS ml_feedback_samples ("
             "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE, file_hash TEXT NOT NULL,"
             "target_type TEXT NOT NULL COLLATE NOCASE, tags TEXT NOT NULL DEFAULT '',"
-            "features BLOB NOT NULL, updated_at INTEGER NOT NULL);");
+            "features BLOB NOT NULL, updated_at INTEGER NOT NULL,"
+            "contribution_id TEXT NOT NULL DEFAULT '');"
+            "CREATE TABLE IF NOT EXISTS contribution_state ("
+            "key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;");
         // Databases created before schema 3 predate the folded search column.
         bool hasSearchKey = false, hasStarred = false;
         {
@@ -706,6 +709,9 @@ void SampleRepository::createTables()
         ensureColumn(db.handle, "smart_overrides", "not_applicable", "INTEGER NOT NULL DEFAULT 0");
         ensureColumn(db.handle, "smart_overrides", "aux_value", "REAL NOT NULL DEFAULT 0");
         ensureColumn(db.handle, "smart_overrides", "aux_text", "TEXT NOT NULL DEFAULT ''");
+        // Schema 13: a stable id per contributed record, so a later correction replaces the
+        // earlier label during export instead of becoming a second sample.
+        ensureColumn(db.handle, "ml_feedback_samples", "contribution_id", "TEXT NOT NULL DEFAULT ''");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS smart_results_pipeline"
                                 " ON smart_results(pipeline_state, sample_id);");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_pair_key ON samples(pair_key) WHERE pair_key != '';");
@@ -759,7 +765,28 @@ void SampleRepository::createTables()
                 insert.integer(2, (int64_t) tag.colour); insert.step();
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=12;");
+        {
+            // Rows written before schema 13 have no id; give each one now, once.
+            detail::Statement missing(db.handle,
+                "SELECT sample_id FROM ml_feedback_samples WHERE contribution_id='' LIMIT 500");
+            detail::Statement assign(db.handle,
+                "UPDATE ml_feedback_samples SET contribution_id=? WHERE sample_id=?");
+            for (;;)
+            {
+                std::vector<int64_t> ids;
+                missing.reset();
+                while (missing.step()) ids.push_back(missing.integer(0));
+                if (ids.empty()) break;
+                for (const auto id : ids)
+                {
+                    assign.reset();
+                    assign.text(1, juce::Uuid().toDashedString().toLowerCase());
+                    assign.integer(2, id);
+                    assign.step();
+                }
+            }
+        }
+        detail::exec(db.handle, "PRAGMA user_version=13;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -2935,8 +2962,8 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
     try
     {
         detail::Statement s(db.handle,
-            "INSERT INTO ml_feedback_samples (sample_id, file_hash, target_type, tags, features, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
+            "INSERT INTO ml_feedback_samples (sample_id, file_hash, target_type, tags, features, updated_at, contribution_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(sample_id) DO UPDATE SET "
             "file_hash=excluded.file_hash, target_type=excluded.target_type, tags=excluded.tags, "
             "features=excluded.features, updated_at=excluded.updated_at");
@@ -2946,6 +2973,7 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
         s.text(4, tagsStr);
         s.blob(5, features.data(), static_cast<int>(features.size() * sizeof(float)));
         s.integer(6, juce::Time::currentTimeMillis());
+        s.text(7, juce::Uuid().toDashedString().toLowerCase());
         s.step();
         detail::exec(db.handle, "COMMIT;");
     }
@@ -2993,6 +3021,70 @@ std::vector<SampleRepository::FeedbackRecord> SampleRepository::allFeedback() co
         r.updatedAt = s.integer(5);
         out.push_back(std::move(r));
     }
+    return out;
+}
+
+std::vector<SampleRepository::ContributionRecord> SampleRepository::contributionRecords(
+    int64_t afterUpdatedAt, int limit) const
+{
+    std::lock_guard lock(db.mutex);
+    // Only the fields the model uses. smart_results supplies the key and tempo the user saw.
+    detail::Statement s(db.handle,
+        "SELECT f.contribution_id, f.target_type, f.tags, f.features, f.updated_at,"
+        " r.key_tonic, r.key_mode, r.bpm, r.has_bpm"
+        " FROM ml_feedback_samples f LEFT JOIN smart_results r ON r.sample_id=f.sample_id"
+        " WHERE f.updated_at > ? ORDER BY f.updated_at, f.sample_id LIMIT ?");
+    s.integer(1, afterUpdatedAt);
+    s.integer(2, juce::jlimit(1, 5000, limit));
+    std::vector<ContributionRecord> out;
+    while (s.step())
+    {
+        ContributionRecord r;
+        r.recordId = s.text(0);
+        if (r.recordId.isEmpty()) continue;
+        r.targetType = s.text(1);
+        r.tags.addTokens(s.text(2), ",", "");
+        r.tags.trim();
+        r.tags.removeEmptyStrings();
+        const auto* blobData = reinterpret_cast<const float*>(s.blob(3));
+        const int numBytes = s.bytes(3);
+        if (blobData != nullptr && numBytes > 0)
+        {
+            const size_t numFloats = numBytes / sizeof(float);
+            r.features.assign(blobData, blobData + numFloats);
+        }
+        r.updatedAt = s.integer(4);
+        r.key = keyDisplayName((int) s.integer(5), s.text(6));
+        r.bpm = s.real(7);
+        r.hasBpm = s.integer(8) != 0 && r.bpm > 0.0;
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+int64_t SampleRepository::contributionWatermark() const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "SELECT value FROM contribution_state WHERE key='watermark'");
+    return s.step() ? s.integer(0) : 0;
+}
+
+void SampleRepository::setContributionWatermark(int64_t value)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "INSERT INTO contribution_state(key,value) VALUES('watermark',?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+    s.integer(1, value);
+    s.step();
+}
+
+juce::StringArray SampleRepository::builtinTagNames() const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "SELECT name FROM tags WHERE builtin=1");
+    juce::StringArray out;
+    while (s.step()) out.add(s.text(0));
     return out;
 }
 } // namespace sonicator

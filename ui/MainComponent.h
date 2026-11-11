@@ -13,6 +13,7 @@
 #include "core/split/SplitService.h"
 #include "core/extract/ExtractService.h"
 #include "core/settings/AppSettings.h"
+#include "core/contribute/ContributionUploader.h"
 namespace sonicator {
 class SplitDialog;
 class ExtractDialog;
@@ -118,6 +119,10 @@ private:
     std::unique_ptr<AutoTagService> autoTag;
     std::unique_ptr<SplitService> splitter;
     std::unique_ptr<ExtractService> extractor;
+    // Guards the contribution fields, which the scheduler reads off the message thread.
+    juce::CriticalSection contributionLock;
+    std::shared_ptr<contribute::Uploader> contributionUploader;
+    std::unique_ptr<contribute::Scheduler> contributionScheduler;
     juce::Component::SafePointer<juce::DialogWindow> splitDialog;
     juce::Component::SafePointer<SplitDialog> splitContent;
     juce::Component::SafePointer<juce::DialogWindow> extractDialog;
@@ -168,6 +173,14 @@ private:
     void showAudioSettings();
     void showSettings();
     void applySettings(const AppSettings&);
+    // Consent, sending and the two panel actions. Only the application sends; the plugin shares
+    // the catalog and its records leave on the next application launch.
+    void startContribution();
+    void askContributionConsent();
+    bool contributionConsentCurrent() const;
+    void setContributionEnabledFromPanel(bool wanted, juce::Component::SafePointer<SettingsPanel> panel);
+    void deleteContributionData(std::function<void(bool, juce::String)> done);
+    void wireContributionPanel(SettingsPanel&);
     void refreshTheme();
     void showTagFilterMenu();
     void showTagColourMenu(int64_t tagId);

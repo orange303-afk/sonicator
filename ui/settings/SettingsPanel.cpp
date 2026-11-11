@@ -2,6 +2,7 @@
 #include "ui/shell/Theme.h"
 #include "core/Version.h"
 #include "core/diagnostics/Diagnostics.h"
+#include "ui/shell/ThemedDialogs.h"
 namespace sonicator {
 namespace {
 juce::Font sectionFont()
@@ -25,8 +26,8 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
          &languageLabel,&languageNote,&libraryHeading,&databaseKey,&databaseLabel,&libraryNote,&databaseStatus,
          &audioHeading,&reportHeading,&reportNote,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&creditsLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
         addAndMakeVisible(c);
-    for (auto* c : std::array<juce::Component*,12>{&openDatabase,&backupDatabase,&audio,&reportBug,&reportFeature,
-         &reportFormat,&close,&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
+    for (auto* c : std::array<juce::Component*,13>{&openDatabase,&backupDatabase,&audio,&reportBug,&reportFeature,
+         &reportFormat,&reportDiscuss,&close,&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
         addAndMakeVisible(c);
 
     const auto pendingCrash = diagnostics::pendingCrash (diagnostics::defaultCrashMarker(), database);
@@ -50,14 +51,26 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     reportBug.onClick = [openReport] { openReport (diagnostics::ReportKind::bug); };
     reportFeature.onClick = [openReport] { openReport (diagnostics::ReportKind::feature); };
     reportFormat.onClick = [openReport] { openReport (diagnostics::ReportKind::formatSupport); };
+    reportDiscuss.onClick = []
+    {
+        juce::URL("https://github.com/orange303-afk/sonicator/discussions/new").launchInDefaultBrowser();
+    };
     addAndMakeVisible(contributeDataToggle);
     contributeDataToggle.setButtonText("Contribute anonymous feedback to improve classification models");
     contributeDataToggle.setToggleState(initial.contributeTrainingData, juce::dontSendNotification);
+    addAndMakeVisible(contributionNote);
+    addAndMakeVisible(contributionPreview);
+    addAndMakeVisible(contributionDelete);
+    contributionNote.setText("Sends confirmed types, tags, tempo and key plus acoustic numbers. No audio, "
+                           "file names or paths. Off by default.", juce::dontSendNotification);
+    contributionNote.setFont(noteFont());
+    contributionNote.setJustificationType(juce::Justification::centredLeft);
     contributeDataToggle.onClick = [this]
     {
-        current.contributeTrainingData = contributeDataToggle.getToggleState();
-        notifySettings();
+        if (onContributionToggle) onContributionToggle(contributeDataToggle.getToggleState());
     };
+    contributionPreview.onClick = [this] { showContributionPreview(); };
+    contributionDelete.onClick = [this] { confirmContributionDelete(); };
 
     title.setText("Settings",juce::dontSendNotification);
     title.setFont(juce::FontOptions(20,juce::Font::bold));
@@ -97,7 +110,8 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     creditsLabel.setText(juce::String::fromUTF8(
         "JUCE 9.0.5  ·  SQLite 3.47.2  ·  libxmp 4.6.2  ·  ONNX Runtime 1.20.1  ·  Catch2 (tests)\n"
         "Analysis: own DSP - YIN pitch, chroma key, spectral-flux rhythm, adaptive prototypes.\n"
-        "No network, no pretrained model weights. REX2 decoder based on VelociLoops (Unlicense).\n"
+        "No telemetry. Training data leaves only with your consent. No pretrained weights.\n"
+        "REX2 decoder based on VelociLoops (Unlicense).\n"
         "Licensed under AGPL-3.0-or-later."),
         juce::dontSendNotification);
     creditsLabel.setFont(juce::FontOptions(10.5f));
@@ -108,8 +122,9 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         link->setFont(juce::FontOptions(12),false);
         link->setJustificationType(juce::Justification::centredLeft);
     }
-    for (auto* button : std::array<juce::Button*,9>{&moveDatabase,&openDatabase,&relocateDatabase,&backupDatabase,
-                                                    &audio,&reportBug,&reportFeature,&reportFormat,&close})
+    for (auto* button : std::array<juce::Button*,12>{&moveDatabase,&openDatabase,&relocateDatabase,&backupDatabase,
+                                                    &audio,&reportBug,&reportFeature,&reportFormat,&reportDiscuss,
+                                                    &close,&contributionPreview,&contributionDelete})
     {
         button->setWantsKeyboardFocus(false);
         button->setMouseClickGrabsKeyboardFocus(false);
@@ -150,19 +165,20 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         if (onClose) { onClose(); return; }
         if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
     };
-    setSize(560,866);
+    setSize(560,1040);
 }
 void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
 {
     pluginMode = shouldUsePluginMode;
-    const std::array<juce::Component*,14> hidden {
+    const std::array<juce::Component*,17> hidden {
         &scaleLabel, &scaleBox, &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
         &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
-        &audioHeading, &audio, &contributeDataToggle };
+        &audioHeading, &audio, &contributeDataToggle, &contributionNote,
+        &contributionPreview, &contributionDelete };
     for (auto* c : hidden)
         c->setVisible(! pluginMode);
     close.setVisible(pluginMode);
-    setSize(560, pluginMode ? 700 : 866);
+    setSize(560, pluginMode ? 700 : 1040);
     resized();
 }
 void SettingsPanel::notifySettings()
@@ -217,6 +233,7 @@ void SettingsPanel::lookAndFeelChanged()
     databaseStatus.setColour(juce::Label::textColourId,statusError
         ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e)) : theme::muted);
     contributeDataToggle.setColour(juce::ToggleButton::textColourId, theme::text);
+    contributionNote.setColour(juce::Label::textColourId, theme::muted);
     contributeDataToggle.setColour(juce::ToggleButton::tickColourId, theme::accent);
     authorLabel.setColour(juce::Label::textColourId,theme::muted);
     productLabel.setColour(juce::Label::textColourId,theme::text);
@@ -244,6 +261,56 @@ void SettingsPanel::paint(juce::Graphics& g)
     for (const auto& rule : sectionRules)
         g.fillRect(rule);
 }
+void SettingsPanel::setContributionEnabled(bool enabled)
+{
+    contributeDataToggle.setToggleState(enabled, juce::dontSendNotification);
+}
+
+void SettingsPanel::showContributionPreview()
+{
+    juce::AlertWindow window("What will be sent",
+        "This is the exact request the next contribution would make. Nothing has been sent.",
+        juce::MessageBoxIconType::NoIcon);
+    window.setLookAndFeel(&getLookAndFeel());
+    window.addTextEditor("json", onContributionPreview ? onContributionPreview() : juce::String("{}"), {}, true);
+    if (auto* editor = window.getTextEditor("json"))
+    {
+        editor->setMultiLine(true, true);
+        editor->setReadOnly(true);
+        editor->setScrollbarsShown(true);
+    }
+    window.addButton("Close", 1, juce::KeyPress(juce::KeyPress::escapeKey));
+    window.setSize(600, 440);
+    window.centreAroundComponent(this, window.getWidth(), window.getHeight());
+    window.enterModalState(true, nullptr, true);
+}
+
+void SettingsPanel::confirmContributionDelete()
+{
+    juce::Component::SafePointer<SettingsPanel> safe(this);
+    dialogs::showAlert(*this, "Delete contributed data?",
+        "Removes every batch this installation sent and issues a new anonymous id. Data already "
+        "included in a released dataset or model cannot be recalled. Contribution is turned off.",
+        {{ "Cancel", 0 }, { "Delete", 1 }},
+        [safe](int result)
+        {
+            if (safe == nullptr || result != 1) return;
+            safe->contributionDelete.setEnabled(false);
+            safe->contributionDelete.setButtonText("Deleting...");
+            auto finish = [safe](bool ok, juce::String error)
+            {
+                if (safe == nullptr) return;
+                safe->contributionDelete.setEnabled(true);
+                safe->contributionDelete.setButtonText("Delete my contributed data...");
+                dialogs::showAlert(*safe, ok ? "Data deleted" : "Could not delete",
+                    ok ? "The batches are gone and a new id was issued. Contribution is off."
+                       : "Nothing was changed: " + (error.isNotEmpty() ? error : juce::String("no response")),
+                    {{ "OK", 1 }}, {});
+            };
+            if (safe->onContributionDelete) safe->onContributionDelete(finish);
+        });
+}
+
 void SettingsPanel::resized()
 {
     sectionRules.clear();
@@ -318,6 +385,15 @@ void SettingsPanel::resized()
         add(32, 6, false, [this](juce::Rectangle<int> area) { libraryNote.setBounds(area.withTrimmedLeft(140)); });
         add(24, 4, false, [this](juce::Rectangle<int> area) { databaseStatus.setBounds(area.withTrimmedLeft(140)); });
         add(26, 4, false, [this](juce::Rectangle<int> area) { contributeDataToggle.setBounds(area.withTrimmedLeft(140)); });
+        add(34, 2, false, [this](juce::Rectangle<int> area) { contributionNote.setBounds(area.withTrimmedLeft(140)); });
+        add(28, 6, false, [this](juce::Rectangle<int> area)
+        {
+            auto right = area.withTrimmedLeft(140);
+            const auto width = (right.getWidth() - 8) / 2;
+            contributionPreview.setBounds(right.removeFromLeft(width));
+            right.removeFromLeft(8);
+            contributionDelete.setBounds(right);
+        });
     }
 
     if (audioHeading.isVisible())
@@ -330,12 +406,14 @@ void SettingsPanel::resized()
     add(28, 4, false, [this](juce::Rectangle<int> area)
     {
         auto right = area.withTrimmedLeft(140);
-        const auto width = (right.getWidth() - 16) / 3;
+        const auto width = (right.getWidth() - 24) / 4;
         reportBug.setBounds(right.removeFromLeft(width));
         right.removeFromLeft(8);
         reportFeature.setBounds(right.removeFromLeft(width));
         right.removeFromLeft(8);
-        reportFormat.setBounds(right);
+        reportFormat.setBounds(right.removeFromLeft(width));
+        right.removeFromLeft(8);
+        reportDiscuss.setBounds(right);
     });
     add(40, 6, false, [this](juce::Rectangle<int> area) { reportNote.setBounds(area.withTrimmedLeft(140)); });
 
@@ -355,7 +433,7 @@ void SettingsPanel::resized()
         kofi.setBounds(left);
         boosty.setBounds(area);
     });
-    add(58, 10, false, [this](juce::Rectangle<int> area) { creditsLabel.setBounds(area); });
+    add(86, 10, false, [this](juce::Rectangle<int> area) { creditsLabel.setBounds(area); });
     if (close.isVisible())
         add(30, 12, false, [this](juce::Rectangle<int> area) { close.setBounds(area.removeFromRight(110)); });
 

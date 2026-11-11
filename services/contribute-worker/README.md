@@ -26,13 +26,20 @@ There is no secret in the Worker: the bucket is reached through the `CONTRIBUTE`
 CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... npx wrangler deploy
 ```
 
-The first deploy needs the bucket to exist and the `workers.dev` route to be enabled for the
-script:
+The public address is `https://contribute.sampledicer.pro`, served by a Worker route on that zone
+with a proxied CNAME. `*.workers.dev` also works but is blocked by HTTP/2 on some networks (including
+the development machine), so the app uses the custom domain.
+
+The first deploy needs the bucket to exist and the route to be enabled for the script:
 
 ```sh
 curl -X PUT "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/r2/buckets/sonicator-contribute" ...
-curl -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts/sonicator-contribute/subdomain" \
-  -H "authorization: Bearer $TOKEN" -H "content-type: application/json" --data '{"enabled":true}'
+curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE/dns_records" \
+  -H "authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  --data '{"type":"CNAME","name":"contribute","content":"sonicator-contribute.orange303.workers.dev","proxied":true}'
+curl -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE/workers/routes" \
+  -H "authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  --data '{"pattern":"contribute.sampledicer.pro/*","script":"sonicator-contribute"}'
 ```
 
 ## Export for training

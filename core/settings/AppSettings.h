@@ -39,8 +39,16 @@ struct AppSettings
     bool loopPreview = false;
     bool rexGate = true;
     bool contributeTrainingData = false;
+    // Consent to the contribution text above. Sending needs both the toggle and this version:
+    // an earlier build promised it sent nothing, so a stored `true` alone is not consent.
+    int contributionConsentVersion = 0;
+    juce::String contributionInstallId;     // random UUID, created when contribution is enabled
+    juce::String contributionEndpoint;      // empty means the built-in intake address
     int windowX = 0, windowY = 0, windowWidth = 0, windowHeight = 0;
     bool hasWindowBounds() const { return windowWidth > 0 && windowHeight > 0; }
+    // Bump when the consent text or the payload changes in a way the user should see again.
+    static constexpr int currentContributionConsentVersion = 1;
+    static juce::String defaultContributionEndpoint();
     static juce::File defaultSettingsFile();
     static juce::String themeToString(ThemeMode);
     static ThemeMode themeFromString(const juce::String&);

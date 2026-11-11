@@ -1,0 +1,295 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include "core/contribute/ContributionUploader.h"
+#include "core/database/SampleRepository.h"
+#include "core/settings/AppSettings.h"
+#include "TestHelpers.h"
+using namespace sonicator;
+using namespace sonicator::contribute;
+
+namespace {
+std::vector<Record> oneRecord()
+{
+    Record record;
+    record.recordId = "1c4e7a90-5d2b-4f68-b3a1-8e0f2d7c9b45";
+    record.type = "kick";
+    record.tags.addArray({ "acoustic", "mytag" });
+    record.features.assign(14, 0.5f);
+    record.features[0] = 0.12345f;
+    record.features[1] = 2.0f;      // clamped
+    record.key = "A minor";
+    record.bpm = 128.04;
+    record.hasBpm = true;
+    record.updatedAt = 1700000000000LL;
+    return { record };
+}
+
+Vocabulary vocabulary()
+{
+    Vocabulary out;
+    out.types.addArray({ "kick", "snare" });
+    out.tags.addArray({ "acoustic" });
+    return out;
+}
+class FakeTransport final : public Transport
+{
+public:
+    Response postResult { 204, {} }, removeResult { 204, {} };
+    int posts = 0, removes = 0;
+    juce::String lastUrl, lastBody;
+    Response post(const juce::String& url, const juce::String& body) override
+    {
+        ++posts;
+        lastUrl = url;
+        lastBody = body;
+        return postResult;
+    }
+    Response remove(const juce::String& url) override
+    {
+        ++removes;
+        lastUrl = url;
+        return removeResult;
+    }
+};
+struct Harness
+{
+    FakeTransport* transport = nullptr;
+    bool allowed = true;
+    juce::String installId = "3f2a8c1e-7b4d-4a9e-9c2f-1d6b8a0e5f31";
+    juce::String stored;
+    int64_t watermark = 0;
+    int64_t committed = -1;
+    std::vector<Record> records = oneRecord();
+
+    Uploader make()
+    {
+        auto fake = std::make_unique<FakeTransport>();
+        transport = fake.get();
+        Uploader::Source source;
+        source.allowed = [this] { return allowed; };
+        source.installId = [this] { return installId; };
+        source.storeInstallId = [this](const juce::String& id) { installId = id; stored = id; };
+        source.endpoint = [] { return juce::String("https://intake.test"); };
+        source.watermark = [this] { return watermark; };
+        source.commitWatermark = [this](int64_t value) { watermark = value; committed = value; };
+        source.fetch = [this](int64_t after, int limit)
+        {
+            std::vector<Record> out;
+            for (const auto& record : records)
+                if (record.updatedAt > after && (int) out.size() < limit) out.push_back(record);
+            return out;
+        };
+        source.vocabulary = [] { return vocabulary(); };
+        return Uploader(std::move(fake), std::move(source), "0.4.2", "mac");
+    }
+};
+} // namespace
+
+TEST_CASE("Contribution batch carries numbers and labels only", "[contribute]")
+{
+    const auto batch = buildBatch(oneRecord(), vocabulary(),
+        "3f2a8c1e-7b4d-4a9e-9c2f-1d6b8a0e5f31", "9b1d6c33-2e58-4f07-8a41-0c7d5e9b2a64",
+        "0.4.2", "mac", juce::Time(2026, 11, 11, 10, 0, 0));
+    REQUIRE(batch.recordCount == 1);
+    CHECK(batch.watermark == 1700000000000LL);
+
+    auto parsed = juce::JSON::parse(batch.json);
+    auto* object = parsed.getDynamicObject();
+    REQUIRE(object != nullptr);
+    CHECK(object->getProperty("schema").toString() == "contribute.v1");
+    CHECK(object->getProperty("os").toString() == "mac");
+
+    auto* records = object->getProperty("records").getArray();
+    REQUIRE(records != nullptr);
+    REQUIRE(records->size() == 1);
+    auto* record = (*records)[0].getDynamicObject();
+    REQUIRE(record != nullptr);
+    CHECK(record->getProperty("type").toString() == "kick");
+    CHECK_FALSE((bool) record->getProperty("typeIsCustom"));
+    CHECK(record->getProperty("key").toString() == "A minor");
+    CHECK((double) record->getProperty("bpm") == Catch::Approx(128.0));
+
+    auto* features = record->getProperty("features").getArray();
+    REQUIRE(features != nullptr);
+    CHECK(features->size() == 14);
+    CHECK((double) (*features)[0] == Catch::Approx(0.123));
+    CHECK((double) (*features)[1] == Catch::Approx(1.0));
+
+    auto* tags = record->getProperty("tags").getArray();
+    REQUIRE(tags != nullptr);
+    REQUIRE(tags->size() == 2);
+    CHECK_FALSE((bool) (*tags)[0].getDynamicObject()->getProperty("custom"));
+    CHECK((bool) (*tags)[1].getDynamicObject()->getProperty("custom"));
+
+    // Nothing that could identify a person or a file is in the batch.
+    for (const auto* forbidden : { "/Users/", "fileHash", "sampleId", "path", "\\", "@" })
+        CHECK(batch.json.contains(forbidden) == false);
+}
+
+TEST_CASE("Contribution batch drops unsafe labels and malformed records", "[contribute]")
+{
+    auto records = oneRecord();
+    records[0].tags.addArray({ "/Users/me/pack", "me@example.com", juce::String::repeatedString("x", 40) });
+    Record broken;
+    broken.recordId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    broken.type = "snare";
+    broken.features.assign(3, 0.5f);     // wrong length
+    records.push_back(broken);
+
+    const auto batch = buildBatch(records, vocabulary(),
+        "3f2a8c1e-7b4d-4a9e-9c2f-1d6b8a0e5f31", "9b1d6c33-2e58-4f07-8a41-0c7d5e9b2a64",
+        "0.4.2", "mac", juce::Time::getCurrentTime());
+    CHECK(batch.recordCount == 1);
+    CHECK(batch.json.contains("me@example.com") == false);
+    CHECK(batch.json.contains("/Users/me/pack") == false);
+    CHECK(batch.json.contains(juce::String::repeatedString("x", 40)) == false);
+}
+
+TEST_CASE("Contribution uploader obeys consent and moves the watermark only on success", "[contribute]")
+{
+    Harness harness;
+    auto uploader = harness.make();
+
+    harness.allowed = false;
+    auto blocked = uploader.uploadOnce();
+    CHECK_FALSE(blocked.sent);
+    CHECK(harness.transport->posts == 0);
+
+    harness.allowed = true;
+    harness.transport->postResult = { 500, "boom" };
+    auto failed = uploader.uploadOnce();
+    CHECK_FALSE(failed.sent);
+    CHECK(harness.committed == -1);
+
+    harness.transport->postResult = { 204, {} };
+    auto sent = uploader.uploadOnce();
+    CHECK(sent.sent);
+    CHECK(sent.recordCount == 1);
+    CHECK(harness.committed == 1700000000000LL);
+    CHECK(harness.transport->lastUrl == "https://intake.test/v1/contribute");
+    CHECK(harness.transport->lastBody.contains("contribute.v1"));
+}
+
+TEST_CASE("Contribution uploader replaces a deleted install id", "[contribute]")
+{
+    Harness harness;
+    auto uploader = harness.make();
+    const auto before = harness.installId;
+    harness.transport->postResult = { 410, "install id was deleted" };
+
+    const auto outcome = uploader.uploadOnce();
+    CHECK_FALSE(outcome.sent);
+    CHECK(outcome.replacedId);
+    CHECK(harness.stored != before);
+    CHECK(harness.stored.length() == 36);
+    CHECK(harness.committed == 0);
+}
+
+TEST_CASE("Contribution deletion removes the prefix and issues a new id", "[contribute]")
+{
+    Harness harness;
+    auto uploader = harness.make();
+    const auto before = harness.installId;
+
+    const auto outcome = uploader.deleteMine();
+    CHECK(outcome.sent);
+    CHECK(harness.transport->removes == 1);
+    CHECK(harness.transport->lastUrl == "https://intake.test/v1/contributions/" + before);
+    CHECK(harness.installId != before);
+    CHECK(harness.committed == 0);
+
+    harness.transport->removeResult = { 500, "no" };
+    CHECK_FALSE(uploader.deleteMine().sent);
+}
+
+TEST_CASE("Contribution preview builds a batch and sends nothing", "[contribute]")
+{
+    Harness harness;
+    auto uploader = harness.make();
+    const auto json = uploader.previewJson();
+    CHECK(json.contains("contribute.v1"));
+    CHECK(harness.transport->posts == 0);
+    CHECK(harness.committed == -1);
+}
+
+TEST_CASE("Repository stores a stable contribution id and a per-catalog watermark", "[contribute][database]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("contribute.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+
+    SampleRecord sample;
+    sample.filePath = "/library/kick.wav";
+    sample.fileName = "kick.wav";
+    sample.fileHash = "hash-of-the-file";
+    const auto id = repo.upsert(sample);
+
+    const std::vector<float> features { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f };
+    repo.recordFeedback(id, "kick", { "acoustic" }, features);
+
+    auto rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].recordId.length() == 36);
+    CHECK(rows[0].targetType == "kick");
+    CHECK(rows[0].tags.contains("acoustic"));
+    CHECK(rows[0].features.size() == 14);
+    CHECK(rows[0].updatedAt > 0);
+
+    // A correction keeps the same record id, so the export can replace the earlier label.
+    const auto firstId = rows[0].recordId;
+    repo.recordFeedback(id, "snare", { "acoustic" }, features);
+    rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].recordId == firstId);
+    CHECK(rows[0].targetType == "snare");
+
+    CHECK(repo.contributionWatermark() == 0);
+    repo.setContributionWatermark(rows[0].updatedAt);
+    CHECK(repo.contributionWatermark() == rows[0].updatedAt);
+    CHECK(repo.contributionRecords(rows[0].updatedAt, 10).empty());
+}
+
+TEST_CASE("Contribution settings persist and default to off", "[contribute][settings]")
+{
+    AppSettings s;
+    CHECK_FALSE(s.contributeTrainingData);
+    CHECK(s.contributionConsentVersion == 0);
+    CHECK(s.contributionInstallId.isEmpty());
+    CHECK(s.contributionEndpoint.isEmpty()); // the default address is applied on load
+
+    s.contributeTrainingData = true;
+    s.contributionConsentVersion = AppSettings::currentContributionConsentVersion;
+    s.contributionInstallId = "3f2a8c1e-7b4d-4a9e-9c2f-1d6b8a0e5f31";
+
+    auto file = juce::File::createTempFile("sonicator_contribution_settings");
+    SettingsStore store(file);
+    store.save(s);
+
+    const auto loaded = store.load();
+    CHECK(loaded.contributeTrainingData);
+    CHECK(loaded.contributionConsentVersion == AppSettings::currentContributionConsentVersion);
+    CHECK(loaded.contributionInstallId == s.contributionInstallId);
+    CHECK(loaded.contributionEndpoint == AppSettings::defaultContributionEndpoint());
+    file.deleteFile();
+}
+
+TEST_CASE("Live intake accepts a batch and deletes it", "[contribute][integration]")
+{
+    // Opt-in so the ordinary suite and CI never touch the network.
+    if (juce::SystemStats::getEnvironmentVariable("SONICATOR_CONTRIBUTE_LIVE", {}) != "1")
+    {
+        SUCCEED("live intake test skipped");
+        return;
+    }
+    WebTransport transport;
+    const auto installId = Uploader::makeUuid();
+    const auto batch = buildBatch(oneRecord(), vocabulary(), installId, Uploader::makeUuid(),
+                                  "0.4.2", "mac", juce::Time::getCurrentTime());
+    const auto post = transport.post("https://contribute.sampledicer.pro/v1/contribute",
+                                     batch.json);
+    CHECK(post.status == 204);
+    const auto remove = transport.remove(
+        "https://contribute.sampledicer.pro/v1/contributions/" + installId);
+    CHECK(remove.status == 204);
+}

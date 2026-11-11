@@ -6,4 +6,6 @@ namespace sonicator {
 std::vector<SmartCandidate> extractNameCandidates(const juce::String& path);
 // Canonical type for a single token ("kick", "kicks", "hihat"), or an empty string.
 juce::String canonicalSmartTypeToken(const juce::String& token);
+// Every type name the heuristics know. A user type outside this list is "custom" for the intake.
+juce::StringArray canonicalSmartTypeNames();
 } // namespace sonicator

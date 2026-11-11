@@ -1,0 +1,129 @@
+#include "ContributionPayload.h"
+#include <cmath>
+
+namespace sonicator::contribute {
+namespace {
+juce::String cleanLabel(const juce::String& text)
+{
+    const auto trimmed = text.trim();
+    if (trimmed.isEmpty() || trimmed.length() > maxTextLength) return {};
+    if (! isSafeLabel(trimmed)) return {};
+    return trimmed;
+}
+
+float cleanFeature(float value)
+{
+    if (! std::isfinite(value)) return 0.0f;
+    return quantize(juce::jlimit(0.0f, 1.0f, value));
+}
+} // namespace
+
+float quantize(float value)
+{
+    if (! std::isfinite(value)) return 0.0f;
+    const double scaled = std::round((double) value * 1000.0) / 1000.0;
+    return (float) juce::jlimit(0.0, 1.0, scaled);
+}
+
+bool isSafeLabel(const juce::String& text)
+{
+    if (text.isEmpty()) return false;
+    if (text.containsAnyOf("/\\@")) return false;
+    if (text.contains("://")) return false;
+    return true;
+}
+
+Batch buildBatch(const std::vector<Record>& records, const Vocabulary& vocabulary,
+                 const juce::String& installId, const juce::String& batchId,
+                 const juce::String& appVersion, const juce::String& os, juce::Time sentAt)
+{
+    juce::Array<juce::var> out;
+    int64_t watermark = 0;
+    for (const auto& record : records)
+    {
+        if (out.size() >= maxRecordsPerBatch) break;
+        if (record.recordId.isEmpty()) continue;
+        if ((int) record.features.size() != featureCount) continue;
+        const auto type = cleanLabel(record.type);
+        if (type.isEmpty()) continue;
+
+        auto* entry = new juce::DynamicObject();
+        entry->setProperty("recordId", record.recordId.toLowerCase());
+
+        juce::Array<juce::var> features;
+        for (const auto value : record.features) features.add((double) cleanFeature(value));
+        entry->setProperty("features", features);
+        entry->setProperty("featureSchema", featureSchemaVersion);
+
+        entry->setProperty("type", type);
+        entry->setProperty("typeIsCustom", ! vocabulary.types.contains(type, true));
+
+        juce::Array<juce::var> tags;
+        int emitted = 0;
+        for (const auto& raw : record.tags)
+        {
+            if (emitted >= 12) break;
+            const auto name = cleanLabel(raw);
+            if (name.isEmpty()) continue;
+            auto* tag = new juce::DynamicObject();
+            tag->setProperty("name", name);
+            tag->setProperty("custom", ! vocabulary.tags.contains(name, true));
+            tags.add(juce::var(tag));
+            ++emitted;
+        }
+        entry->setProperty("tags", tags);
+
+        const auto key = cleanLabel(record.key);
+        if (key.isNotEmpty()) entry->setProperty("key", key);
+        if (record.hasBpm && record.bpm > 0.0 && record.bpm <= 1000.0)
+            entry->setProperty("bpm", std::round(record.bpm * 10.0) / 10.0);
+
+        out.add(juce::var(entry));
+        watermark = juce::jmax(watermark, record.updatedAt);
+    }
+
+    auto* batch = new juce::DynamicObject();
+    batch->setProperty("schema", "contribute.v1");
+    batch->setProperty("installId", installId.toLowerCase());
+    batch->setProperty("batchId", batchId.toLowerCase());
+    batch->setProperty("appVersion", appVersion);
+    batch->setProperty("os", os);
+    batch->setProperty("sentAt", sentAt.toISO8601(true));
+    batch->setProperty("records", out);
+
+    Batch result;
+    result.json = juce::JSON::toString(juce::var(batch), false);
+    result.recordCount = out.size();
+    result.watermark = watermark;
+    return result;
+}
+
+Response WebTransport::post(const juce::String& url, const juce::String& body)
+{
+    return send(juce::URL(url).withPOSTData(body), "POST");
+}
+
+Response WebTransport::remove(const juce::String& url)
+{
+    return send(juce::URL(url), "DELETE");
+}
+
+Response WebTransport::send(const juce::URL& url, const juce::String& method)
+{
+    auto options = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                       .withHttpRequestCmd(method)
+                       .withConnectionTimeoutMs(20000)
+                       .withNumRedirectsToFollow(2)
+                       .withExtraHeaders("Content-Type: application/json\r\nAccept: text/plain");
+    auto stream = url.createInputStream(options);
+    if (stream == nullptr) return { 0, "no connection" };
+    Response response;
+    // URL::createInputStream returns the web stream behind an InputStream, so ask it for the code.
+    if (auto* web = dynamic_cast<juce::WebInputStream*>(stream.get()))
+        response.status = web->getStatusCode();
+    if (response.status < 200 || response.status >= 300)
+        response.error = stream->readEntireStreamAsString().substring(0, 200);
+    return response;
+}
+
+} // namespace sonicator::contribute

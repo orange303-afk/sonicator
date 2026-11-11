@@ -235,6 +235,26 @@ public:
     void removeFeedback(int64_t sampleId);
     std::vector<FeedbackRecord> allFeedback() const;
 
+    // A confirmed sample shaped for the contribution intake: no path, no file hash and no
+    // sample id, only what the model learns from.
+    struct ContributionRecord
+    {
+        juce::String recordId;       // stable per row; a correction reuses it
+        juce::String targetType;
+        juce::StringArray tags;
+        std::vector<float> features;
+        juce::String key;            // empty when unknown
+        double bpm = 0.0;
+        bool hasBpm = false;
+        int64_t updatedAt = 0;
+    };
+    // Confirmed samples whose feedback changed after `afterUpdatedAt`, oldest first.
+    std::vector<ContributionRecord> contributionRecords(int64_t afterUpdatedAt, int limit) const;
+    // Per-catalog marker: the highest updatedAt already accepted by the intake, or 0.
+    int64_t contributionWatermark() const;
+    void setContributionWatermark(int64_t);
+    juce::StringArray builtinTagNames() const;
+
     // Identity of the catalog this repository writes to. A background job captures it at start
     // and refuses to publish into a different catalog.
     juce::String catalogPath() const { return db.file().getFullPathName(); }

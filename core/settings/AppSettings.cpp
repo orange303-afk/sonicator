@@ -6,6 +6,10 @@ juce::File AppSettings::defaultSettingsFile()
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
         .getChildFile("Sonicator/settings.json");
 }
+juce::String AppSettings::defaultContributionEndpoint()
+{
+    return "https://contribute.sampledicer.pro";
+}
 juce::String AppSettings::themeToString(ThemeMode theme)
 {
     switch (theme)
@@ -77,6 +81,12 @@ AppSettings SettingsStore::load() const
     settings.loopPreview = readBool("loopPreview", settings.loopPreview);
     settings.rexGate = readBool("rexGate", settings.rexGate);
     settings.contributeTrainingData = readBool("contributeTrainingData", settings.contributeTrainingData);
+    settings.contributionConsentVersion = (int) juce::jlimit(0.0, 100.0,
+        readNumber("contributionConsentVersion", (double) settings.contributionConsentVersion));
+    settings.contributionInstallId = object->getProperty("contributionInstallId").toString().trim();
+    settings.contributionEndpoint = object->getProperty("contributionEndpoint").toString().trim();
+    if (! settings.contributionEndpoint.startsWith("https://"))
+        settings.contributionEndpoint = AppSettings::defaultContributionEndpoint();
     if (const auto* history = object->getProperty("searchHistory").getArray())
         for (const auto& entry : *history)
             if (settings.searchHistory.size() < 10)
@@ -138,6 +148,9 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("loopPreview", settings.loopPreview);
     object->setProperty("rexGate", settings.rexGate);
     object->setProperty("contributeTrainingData", settings.contributeTrainingData);
+    object->setProperty("contributionConsentVersion", settings.contributionConsentVersion);
+    object->setProperty("contributionInstallId", settings.contributionInstallId);
+    object->setProperty("contributionEndpoint", settings.contributionEndpoint);
     juce::Array<juce::var> history;
     for (int i = 0; i < juce::jmin(10, settings.searchHistory.size()); ++i)
         history.add(settings.searchHistory[i]);
