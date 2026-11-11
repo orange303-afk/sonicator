@@ -157,20 +157,30 @@ publishes them as a `user_adaptive` source, which AutoTag can turn into suggesti
 ## Training and shipped prototypes
 
 `ml_feedback_samples.origin` keeps the app's own guesses out of the dataset: only `user` rows leave
-the machine, and only through `contributionRecords`. `services/contribute-worker/scripts/export.mjs`
-turns the bucket into `contribute.jsonl` plus `report.md`, refusing an unknown feature schema or a
-value outside 0..1. `services/training/` builds `resources/ml/global_prototypes.json` with up to eight
-medoids per label, a label needing three installs and ten records, and at most twenty records per
-install per label; the output is deterministic and committed, so a build never downloads a model.
-`evaluate.mjs` scores the change leave-one-install-out against local-only behaviour.
+the machine, and only through `contributionRecords`. A machine write never replaces a person's row.
+A tag action exports the tags only; the type is exported when the person set it themselves
+(`smart_overrides`), so the app's resolved type is not presented as a confirmation.
+`services/contribute-worker/scripts/export.mjs` turns the bucket into `contribute.jsonl` plus
+`report.md`, refusing an unknown feature schema or a value outside 0..1. `services/training/` builds
+`resources/ml/global_prototypes.json` with up to eight medoids per label, a label needing three
+installs and ten records, and at most twenty records per install per label; custom types are left
+out of the shipped labels and stay a manual promotion. The output is deterministic and committed,
+so a build never downloads a model. `evaluate.mjs` scores the change leave-one-install-out against
+local-only behaviour.
 
 The application loads the file from `BinaryData` after `loadFromRepository` and keeps local
 prototypes ahead of global ones: a global score is multiplied by 0.95 before the acceptance
 threshold, and a local label wins within 0.02. A global type arrives as the `global_adaptive`
-source, ranked immediately below `user_adaptive`. Global tags are in the file for a later stage and
-are deliberately not loaded, so `hasPrototypes()` stays local and AutoTag does not start tagging
-from other libraries. The empty shipped file (no labels) leaves today's behaviour unchanged; the
-About section shows its date and label count.
+source, ranked immediately below `user_adaptive`, and only when no other type candidate exists, so
+it is a fallback rather than a second opinion that turns a confident type into "ambiguous". Global
+tags are in the file for a later stage and are deliberately not loaded, so `hasPrototypes()` stays
+local and AutoTag does not start tagging from other libraries. The empty shipped file (no labels)
+leaves today's behaviour unchanged; the About section shows its date and label count.
+
+The prototype file does not change the analysis version. Files analysed before a build with a
+non-empty file keep their stored result until they are analysed again; the release that first ships
+labels either accepts that or bumps `smartDspVersion` deliberately, at the cost of decoding every
+file once.
 
 ## Training-data contribution
 

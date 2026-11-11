@@ -2610,14 +2610,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     menu.addSubMenu("Tag", tagsMenu);
 
     juce::PopupMenu typeMenu;
-    static const juce::StringArray standardTypes = {
-        "808", "Acid", "Agogo", "Arp", "Atmosphere", "Bass", "Blip", "Bongo", "Brass",
-        "Chord", "Clap", "Clave", "Click", "Conga", "Cowbell", "Crash", "Cymbal",
-        "Djembe", "Downfilter", "Drone", "Drop", "Foley", "FX", "Glitch", "Guitar",
-        "Hat", "Impact", "Keys", "Kick", "Lead", "Pad", "Percussion", "Piano", "Pluck",
-        "Reese", "Ride", "Rim", "Riser", "Shaker", "Snare", "Snap", "Stab", "Strings",
-        "Sub", "Tabla", "Tamb", "Texture", "Timbale", "Tom", "Triangle", "Vocal", "Zap"
-    };
+    const auto standardTypes = standardSampleTypeNames();
     juce::String commonType;
     bool hasFirst = false;
     bool uniformType = true;
@@ -2699,7 +2692,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
-         ignoredPaths, allIgnored, anyInherited, splitCandidates, extractCandidates, customList](int result)
+         ignoredPaths, allIgnored, anyInherited, splitCandidates, extractCandidates, customList,
+         standardTypes](int result)
         {
             if (safe == nullptr || result == 0) return;
             if ((safe->isSplitRunning() || safe->isExtractRunning())
@@ -2727,7 +2721,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                 }
                 else if (result == 9021)
                 {
-                    safe->promptCustomType([safe, ids, files](juce::String name)
+                    safe->promptCustomType([safe, ids, files, standardTypes](juce::String name)
                     {
                         if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr) return;
                         name = name.trim();
@@ -3273,6 +3267,7 @@ void MainComponent::startContribution()
                 contribute::Record record;
                 record.recordId = row.recordId;
                 record.type = row.targetType;
+                record.typeConfirmed = row.typeConfirmed;
                 record.tags = row.tags;
                 record.features = row.features;
                 record.key = row.key;
@@ -3290,7 +3285,7 @@ void MainComponent::startContribution()
         contribute::Vocabulary vocabulary;
         // Only names that ship with the app count as standard. A user's custom type must be
         // reported as custom, even though the repository knows it.
-        vocabulary.types = canonicalSmartTypeNames();
+        vocabulary.types = standardSampleTypeNames();
         vocabulary.tags = {};
         if (safe != nullptr && safe->readRepo != nullptr)
         {
@@ -3326,7 +3321,8 @@ void MainComponent::askContributionConsent()
         "Sonicator can send anonymous training data: the confirmed type, tags, tempo and key of a sample, "
         "plus 14 acoustic measurements as plain numbers. Audio, file names, folder names and paths are "
         "never sent, and nothing identifies you or your computer.\n\n"
-        "Confirmations you made before today are included. You can review the exact data, stop at any "
+        "Confirmations you make from now on are included. Confirmations from older versions have "
+        "unknown origin and stay on your computer. You can review the exact data, stop at any "
         "time and delete what was sent in Settings > Library.\n\n"
         "Participate in training data collection?");
     juce::Component::SafePointer<MainComponent> safe(this);
@@ -3637,7 +3633,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     writeDb = std::move(newWriteDb); writeRepo = std::move(newWriteRepo);
     readDb = std::move(newReadDb); readRepo = std::move(newReadRepo);
     AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
-        loadShippedGlobalPrototypes();
+    loadShippedGlobalPrototypes();
     indexer = std::make_unique<IndexingService>(*writeRepo);
     smart = std::make_unique<SmartAnalysisService>(*writeRepo);
     tagging = std::make_unique<TaggingService>(*writeRepo);

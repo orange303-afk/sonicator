@@ -23,16 +23,19 @@ What one example contains:
 | Sent | Not sent, ever |
 |---|---|
 | 14 acoustic measurements of the sample, rounded to 0.001 | the audio, or any part of it |
-| the confirmed type and tags, and whether each is one of ours or yours | the file path, file name, folder name or pack name |
+| the type you set, and the tags you assign, and whether each is one of ours or yours | the file path, file name, folder name or pack name |
 | key and tempo, when known | the file hash (it would reveal which files you own) |
 | a random record id, the app version and `mac`/`win` | your name, computer name, e-mail or address |
 | a random installation id, created when you opt in | your IP address (it is used for rate limiting and never stored) |
 
 Only rows recorded from your own action are sent. A type or tag that AutoTag applied is marked
 `auto` locally, and rows written before the origin column existed are `legacy`; both stay on your
-computer and never enter a batch. The preview shows exactly what a `user` row produces.
+computer and never enter a batch. If you assign a tag without setting the type yourself, the record
+carries the tags only; the app's own type guess is not sent as your confirmation. The preview shows
+exactly what a `user` row produces.
 
-Confirmations you made before opting in are included, and the consent question says so. A custom
+Confirmations you make after opting in are included. Rows written by older versions of the app
+have unknown origin and stay on your computer. A custom
 tag is text you typed, so it is the one field that could carry something personal by accident: tags
 that look like a path, an address or a URL are dropped, and tags are limited to 32 characters.
 
@@ -57,11 +60,13 @@ somebody already downloaded cannot be recalled.
 
 The dataset stays in the private bucket. A build ships only `resources/ml/global_prototypes.json`:
 up to eight short vectors of 14 numbers per label, plus how many records and distinct installs
-confirmed that label. The file carries no installation id, record id, path or file name, and only
-labels confirmed by at least three installs and ten records are included, so one installation cannot
-put a label there. Settings → About shows the date and label count of the file in the build. Because
-the file is rebuilt from the bucket before each release, deleting your contribution removes it from
-the next build; a copy already shipped cannot be recalled.
+confirmed that label, and the label names themselves (a type or tag string, including a custom tag
+someone typed). The file carries no installation id, record id, path or file name, and only labels
+confirmed by at least three installs and ten records are included, so one installation cannot put a
+label there. A custom type is not shipped this way; custom types are promoted only by the manual
+process in `docs/TAG_PROMOTION.md`. Settings → About shows the date and label count of the file in
+the build. Because the file is rebuilt from the bucket before each release, deleting your
+contribution removes it from the next build; a copy already shipped cannot be recalled.
 
 ## Residual risk, stated plainly
 

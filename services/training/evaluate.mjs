@@ -56,26 +56,31 @@ export function evaluate(records) {
     for (const record of heldOut) {
       const localIndex = buildIndex(
         localRecords.filter((entry) => entry.recordId !== record.recordId),
-        { minInstalls: 1, minSupport: 1 },
+        { minInstalls: 1, minSupport: 1, includeCustomTypes: true },
       );
-      const truthType = record.type.toLowerCase();
-      const beforeType = predictType(record.features, localIndex, emptyIndex);
-      const afterType = predictType(record.features, localIndex, globalIndex);
-      result.type.records += 1;
-      if (beforeType?.label.toLowerCase() === truthType) result.type.before += 1;
-      if (afterType?.label.toLowerCase() === truthType) result.type.after += 1;
+      // A custom type is the person's own name, not a label the shipped model carries; it still
+      // trains the local prototype exactly as the app does, so only its accuracy is left out.
+      const hasType = Boolean(record.type) && !record.typeIsCustom;
+      if (hasType) {
+        const truthType = record.type.toLowerCase();
+        const beforeType = predictType(record.features, localIndex, emptyIndex);
+        const afterType = predictType(record.features, localIndex, globalIndex);
+        result.type.records += 1;
+        if (beforeType?.label.toLowerCase() === truthType) result.type.before += 1;
+        if (afterType?.label.toLowerCase() === truthType) result.type.after += 1;
 
-      const group = groupForType(record.type);
-      const entry = result.type.groups.get(group) ?? { records: 0, before: 0, after: 0 };
-      entry.records += 1;
-      if (beforeType?.label.toLowerCase() === truthType) entry.before += 1;
-      if (afterType?.label.toLowerCase() === truthType) entry.after += 1;
-      result.type.groups.set(group, entry);
+        const group = groupForType(record.type);
+        const entry = result.type.groups.get(group) ?? { records: 0, before: 0, after: 0 };
+        entry.records += 1;
+        if (beforeType?.label.toLowerCase() === truthType) entry.before += 1;
+        if (afterType?.label.toLowerCase() === truthType) entry.after += 1;
+        result.type.groups.set(group, entry);
 
-      const label = result.labels.get(truthType) ?? { label: record.type, records: 0, after: 0 };
-      label.records += 1;
-      if (afterType?.label.toLowerCase() === truthType) label.after += 1;
-      result.labels.set(truthType, label);
+        const label = result.labels.get(truthType) ?? { label: record.type, records: 0, after: 0 };
+        label.records += 1;
+        if (afterType?.label.toLowerCase() === truthType) label.after += 1;
+        result.labels.set(truthType, label);
+      }
 
       const truthTags = new Set(tagNames(record).map((tag) => tag.toLowerCase()));
       const beforeTags = predictTags(record.features, localIndex, emptyIndex);
@@ -150,6 +155,7 @@ Generated: ${generatedAt ?? "unknown"}
 
 - Installs held out in turn: ${summary.installs}
 - Records evaluated: ${summary.records}
+- Records with a standard type: ${summary.type.records}
 - Type acceptance threshold: ${summary.type.thresholdUsed}; tag threshold: ${summary.type.tagThresholdUsed}
 
 ## Type, top-1
@@ -175,6 +181,9 @@ ${groupRows.join("\n")}
 ${worstRows.length > 0 ? worstRows.join("\n") : "| (no label with at least 5 records) | | |"}
 
 ## Tags, top-3 micro
+
+Global tag prototypes are in the file but this build does not load them, so the "after" column is a
+preview for a later stage, not behaviour a user gets today.
 
 | | Precision | Recall |
 |---|---|---|

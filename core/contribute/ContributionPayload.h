@@ -19,7 +19,8 @@ inline constexpr int maxTextLength = 32;
 struct Record
 {
     juce::String recordId;     // stable id of the row in ml_feedback_samples
-    juce::String type;
+    juce::String type;         // empty when the person never confirmed a type
+    bool typeConfirmed = true; // false when `type` is just what the app resolved
     juce::StringArray tags;
     std::vector<float> features;
     juce::String key;          // empty when unknown

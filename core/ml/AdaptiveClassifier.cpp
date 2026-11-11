@@ -104,37 +104,38 @@ bool AdaptiveClassifier::loadGlobalPrototypes(const juce::String& json)
     std::vector<Prototype> loaded;
     int64_t syntheticId = -1;
     int labelCount = 0;
-    if (auto* labels = document->getProperty("labels").getArray())
+    const auto labelsValue = document->getProperty("labels");
+    auto* labels = labelsValue.getArray();
+    if (labels == nullptr) return false;
+    for (const auto& labelValue : *labels)
     {
-        for (const auto& labelValue : *labels)
+        auto* label = labelValue.getDynamicObject();
+        if (label == nullptr) return false;
+        ++labelCount;
+        // Tags are kept in the file for a later stage, but never loaded here: AutoTag must
+        // not start tagging from other people's libraries in this build.
+        if (label->getProperty("kind").toString() != "type") continue;
+        const auto name = label->getProperty("label").toString().trim();
+        if (name.isEmpty()) return false;
+        const auto vectorsValue = label->getProperty("prototypes");
+        auto* vectors = vectorsValue.getArray();
+        if (vectors == nullptr) return false;
+        for (const auto& vectorValue : *vectors)
         {
-            auto* label = labelValue.getDynamicObject();
-            if (label == nullptr) continue;
-            ++labelCount;
-            // Tags are kept in the file for a later stage, but never loaded here: AutoTag must
-            // not start tagging from other people's libraries in this build.
-            if (label->getProperty("kind").toString() != "type") continue;
-            const auto name = label->getProperty("label").toString().trim();
-            if (name.isEmpty()) return false;
-            auto* vectors = label->getProperty("prototypes").getArray();
-            if (vectors == nullptr) return false;
-            for (const auto& vectorValue : *vectors)
+            auto* values = vectorValue.getArray();
+            if (values == nullptr || values->size() != contribute::featureCount) return false;
+            Prototype prototype;
+            prototype.sampleId = syntheticId--;
+            prototype.targetType = name;
+            prototype.features.reserve(contribute::featureCount);
+            for (const auto& value : *values)
             {
-                auto* values = vectorValue.getArray();
-                if (values == nullptr || values->size() != contribute::featureCount) return false;
-                Prototype prototype;
-                prototype.sampleId = syntheticId--;
-                prototype.targetType = name;
-                prototype.features.reserve(contribute::featureCount);
-                for (const auto& value : *values)
-                {
-                    if (! value.isInt() && ! value.isDouble()) return false;
-                    const auto number = (float) (double) value;
-                    if (! std::isfinite(number) || number < 0.0f || number > 1.0f) return false;
-                    prototype.features.push_back(number);
-                }
-                loaded.push_back(std::move(prototype));
+                if (! value.isInt() && ! value.isDouble()) return false;
+                const auto number = (float) (double) value;
+                if (! std::isfinite(number) || number < 0.0f || number > 1.0f) return false;
+                prototype.features.push_back(number);
             }
+            loaded.push_back(std::move(prototype));
         }
     }
 

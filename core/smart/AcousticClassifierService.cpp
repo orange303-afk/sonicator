@@ -55,6 +55,7 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
 
     if (buffer.getNumSamples() > 0 && sampleRate > 0.0)
     {
+        std::optional<SmartCandidate> adaptiveCandidate;
         auto& adaptive = getSharedAdaptiveClassifier();
         if (adaptive.hasTypePrototypes())
         {
@@ -75,7 +76,7 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
                 c.rawValue = preds.front().label;
                 c.limitation = global ? "type inferred from global prototypes"
                                       : "type learned from user feedback prototype";
-                candidates.push_back(std::move(c));
+                adaptiveCandidate = std::move(c);
             }
         }
 
@@ -121,6 +122,21 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
                     candidates.push_back(std::move(c));
                 }
             }
+        }
+
+        // A global prototype is a fallback, not a second opinion: adding it beside a filename or
+        // DSP type would turn a confident answer into "ambiguous" for no gain.
+        if (adaptiveCandidate)
+        {
+            bool otherType = false;
+            for (const auto& candidate : candidates)
+                if (candidate.field == SmartField::Type && candidate.textValue.isNotEmpty())
+                    otherType = true;
+            for (const auto& candidate : existingCandidates)
+                if (candidate.field == SmartField::Type && candidate.textValue.isNotEmpty())
+                    otherType = true;
+            if (adaptiveCandidate->source != "global_adaptive" || ! otherType)
+                candidates.push_back(std::move(*adaptiveCandidate));
         }
     }
 

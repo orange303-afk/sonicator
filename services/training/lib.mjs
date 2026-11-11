@@ -50,15 +50,21 @@ export function validateRecord(record, where = "record") {
   for (const value of record.features)
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)
       throw new Error(`${where}: feature ${value} is outside 0..1`);
-  if (typeof record.type !== "string" || record.type.trim().length === 0)
-    throw new Error(`${where}: missing type`);
+  if (record.type !== undefined && (typeof record.type !== "string" || record.type.trim().length === 0))
+    throw new Error(`${where}: empty type`);
   if (record.tags !== undefined && !Array.isArray(record.tags))
     throw new Error(`${where}: tags is not an array`);
+  if (record.type === undefined && (record.tags ?? []).length === 0)
+    throw new Error(`${where}: no type and no tags`);
+}
+
+export function compareText(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 export function normalizeRecords(records) {
   const byId = new Map();
-  for (const record of [...records].sort((a, b) => a.recordId.localeCompare(b.recordId)))
+  for (const record of [...records].sort((a, b) => compareText(a.recordId, b.recordId)))
     if (!byId.has(record.recordId)) byId.set(record.recordId, record);
   return [...byId.values()];
 }
@@ -89,11 +95,12 @@ export function distance(a, b) {
 }
 
 // One entry per label with every record that carries it, sorted by recordId.
-export function collectLabels(records) {
+export function collectLabels(records, { includeCustomTypes = false } = {}) {
   const labels = new Map();
   for (const record of normalizeRecords(records)) {
+    const typeAllowed = record.type && (includeCustomTypes || !record.typeIsCustom);
     const entries = [
-      { kind: "type", name: record.type },
+      ...(typeAllowed ? [{ kind: "type", name: record.type }] : []),
       ...tagNames(record).map((name) => ({ kind: "tag", name })),
     ];
     const seen = new Set();
@@ -201,7 +208,7 @@ export function buildPrototypes(records, options = {}) {
   const minSupport = options.minSupport ?? MIN_SUPPORT;
   const generatedAt = options.generatedAt ?? defaultGeneratedAt(normalized);
 
-  const labels = collectLabels(normalized)
+  const labels = collectLabels(normalized, { includeCustomTypes: options.includeCustomTypes ?? false })
     .filter((label) => label.installSupport >= minInstalls && label.support >= minSupport)
     .map((label) => ({
       label: label.label,
@@ -222,10 +229,10 @@ export function buildPrototypes(records, options = {}) {
     const list = (byKind.get(kind) ?? []).sort((a, b) =>
       b.installSupport - a.installSupport
       || b.support - a.support
-      || a.label.localeCompare(b.label));
+      || compareText(a.label, b.label));
     capped.push(...list.slice(0, options.maxLabelsPerKind ?? MAX_LABELS_PER_KIND));
   }
-  capped.sort((a, b) => a.kind.localeCompare(b.kind) || a.label.localeCompare(b.label));
+  capped.sort((a, b) => compareText(a.kind, b.kind) || compareText(a.label, b.label));
 
   return {
     schema: PROTOTYPE_SCHEMA,
@@ -241,7 +248,17 @@ function defaultGeneratedAt(records) {
   let latest = 0;
   for (const record of records)
     if (typeof record.updatedAt === "number" && record.updatedAt > latest) latest = record.updatedAt;
-  return latest > 0 ? new Date(latest).toISOString() : "1970-01-01T00:00:00.000Z";
+  if (latest > 0) return new Date(latest).toISOString();
+  // The export does not carry updatedAt; sentAt identifies when the record was last received,
+  // which is deterministic for a given dataset and still meaningful in the report.
+  let latestSent = "";
+  for (const record of records)
+    if (typeof record.sentAt === "string" && record.sentAt > latestSent) latestSent = record.sentAt;
+  if (latestSent !== "") {
+    const parsed = new Date(latestSent);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+  return "1970-01-01T00:00:00.000Z";
 }
 
 export function serializePrototypes(file) {
@@ -326,6 +343,6 @@ export function predictTags(features, localIndex, globalIndex, topK = 3) {
   return out;
 }
 
-export function buildIndex(records, { minInstalls = MIN_INSTALLS, minSupport = MIN_SUPPORT } = {}) {
-  return indexPrototypes(buildPrototypes(records, { minInstalls, minSupport }));
+export function buildIndex(records, { minInstalls = MIN_INSTALLS, minSupport = MIN_SUPPORT, includeCustomTypes = false } = {}) {
+  return indexPrototypes(buildPrototypes(records, { minInstalls, minSupport, includeCustomTypes }));
 }

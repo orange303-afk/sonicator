@@ -2983,7 +2983,10 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(sample_id) DO UPDATE SET "
             "file_hash=excluded.file_hash, target_type=excluded.target_type, tags=excluded.tags, "
-            "features=excluded.features, updated_at=excluded.updated_at, origin=excluded.origin");
+            "features=excluded.features, updated_at=excluded.updated_at, origin=excluded.origin "
+            // A person's confirmation is never replaced by a machine guess, even when AutoTag runs
+            // again over a sample the person already labelled. A later user correction still wins.
+            "WHERE ml_feedback_samples.origin != 'user' OR excluded.origin = 'user'");
         s.integer(1, sampleId);
         s.text(2, hash);
         s.text(3, targetType.trim());
@@ -3000,6 +3003,15 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
         try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
         throw;
     }
+}
+
+bool SampleRepository::hasUserFeedback(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT 1 FROM ml_feedback_samples WHERE sample_id=? AND origin='user'");
+    s.integer(1, sampleId);
+    return s.step();
 }
 
 void SampleRepository::removeFeedback(int64_t sampleId)
@@ -3049,7 +3061,9 @@ std::vector<SampleRepository::ContributionRecord> SampleRepository::contribution
     // Only the fields the model uses. smart_results supplies the key and tempo the user saw.
     detail::Statement s(db.handle,
         "SELECT f.contribution_id, f.target_type, f.tags, f.features, f.updated_at,"
-        " r.key_tonic, r.key_mode, r.bpm, r.has_bpm"
+        " r.key_tonic, r.key_mode, r.bpm, r.has_bpm,"
+        " EXISTS(SELECT 1 FROM smart_overrides o WHERE o.sample_id=f.sample_id"
+        " AND o.field='type' AND o.cleared=0 AND o.not_applicable=0 AND o.text_value != '')"
         " FROM ml_feedback_samples f LEFT JOIN smart_results r ON r.sample_id=f.sample_id"
         " WHERE f.updated_at > ? AND f.origin='user' ORDER BY f.updated_at, f.sample_id LIMIT ?");
     s.integer(1, afterUpdatedAt);
@@ -3072,6 +3086,7 @@ std::vector<SampleRepository::ContributionRecord> SampleRepository::contribution
             r.features.assign(blobData, blobData + numFloats);
         }
         r.updatedAt = s.integer(4);
+        r.typeConfirmed = s.integer(9) != 0;
         r.key = keyDisplayName((int) s.integer(5), s.text(6));
         r.bpm = s.real(7);
         r.hasBpm = s.integer(8) != 0 && r.bpm > 0.0;

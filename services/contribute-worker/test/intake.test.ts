@@ -74,6 +74,12 @@ describe("intake", () => {
     expect((await call(batch({ records: [record({ fileHash: "abc" })] }))).status).toBe(400);
   });
 
+  it("accepts a tag-only record", async () => {
+    const tagOnly = record({ type: undefined, typeIsCustom: undefined, tags: [{ name: "warm", custom: false }] });
+    expect((await call(batch({ records: [tagOnly] }))).status).toBe(204);
+    expect((await call(batch({ records: [record({ type: undefined, typeIsCustom: undefined, tags: [] })] }))).status).toBe(400);
+  });
+
   it("rejects a wrong feature count, NaN and out-of-range values", async () => {
     expect((await call(batch({ records: [record({ features: [0.1, 0.2] })] }))).status).toBe(400);
     const nan = record();

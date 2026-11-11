@@ -57,6 +57,8 @@ export function assertValid(records) {
     const where = `record ${record.recordId} from install ${record.installId}`;
     if (typeof record.recordId !== "string" || record.recordId.length === 0)
       throw new Error("a record has no recordId");
+    if (typeof record.installId !== "string" || record.installId.length === 0)
+      throw new Error(`${where}: missing installId`);
     if (record.featureSchema !== FEATURE_SCHEMA)
       throw new Error(`${where}: featureSchema ${record.featureSchema} is not ${FEATURE_SCHEMA}`);
     if (!Array.isArray(record.features) || record.features.length !== FEATURE_COUNT)
@@ -64,13 +66,15 @@ export function assertValid(records) {
     for (const value of record.features)
       if (!isFiniteFeature(value))
         throw new Error(`${where}: feature ${value} is outside 0..1`);
-    if (typeof record.type !== "string" || record.type.trim().length === 0)
+    if (record.type !== undefined && (typeof record.type !== "string" || record.type.trim().length === 0))
       throw new Error(`${where}: empty type`);
     if (record.tags !== undefined && !Array.isArray(record.tags))
       throw new Error(`${where}: tags is not an array`);
     for (const tag of record.tags ?? [])
       if (typeof tag?.name !== "string" || tag.name.trim().length === 0)
         throw new Error(`${where}: empty tag name`);
+    if (record.type === undefined && (record.tags ?? []).length === 0)
+      throw new Error(`${where}: no type and no tags`);
   }
 }
 
@@ -103,7 +107,8 @@ function countLabels(records, labelsOf) {
 
 export function summarize(records, minInstalls = DEFAULT_MIN_INSTALLS) {
   const installs = new Set(records.map(installOf));
-  const types = countLabels(records, (record) => [{ name: record.type, custom: record.typeIsCustom }]);
+  const types = countLabels(records, (record) =>
+    record.type ? [{ name: record.type, custom: record.typeIsCustom }] : []);
   const tags = countLabels(records, (record) =>
     (record.tags ?? []).map((tag) => ({ name: tag.name, custom: tag.custom })));
   const enough = (label) => label.installSupport >= minInstalls;
@@ -169,7 +174,7 @@ export async function writeExport(records, out, { minInstalls = DEFAULT_MIN_INST
   await mkdir(dirname(out), { recursive: true });
   await writeFile(out, lines.length > 0 ? `${lines.join("\n")}\n` : "");
   const report = join(dirname(out), "report.md");
-  await writeFile(report, renderReport(summary, { generatedAt }));
+  await writeFile(report, renderReport(summary, { generatedAt: generatedAt ?? new Date().toISOString() }));
   return { summary, report };
 }
 

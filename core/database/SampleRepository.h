@@ -236,6 +236,8 @@ public:
     void recordFeedback(int64_t sampleId, const juce::String& targetType,
                         const juce::StringArray& tags, const std::vector<float>& features,
                         FeedbackOrigin origin);
+    // True when the row was written by a person; a later machine write leaves it untouched.
+    bool hasUserFeedback(int64_t sampleId) const;
     void removeFeedback(int64_t sampleId);
     std::vector<FeedbackRecord> allFeedback() const;
 
@@ -245,6 +247,7 @@ public:
     {
         juce::String recordId;       // stable per row; a correction reuses it
         juce::String targetType;
+        bool typeConfirmed = false;  // true only when a person set the type
         juce::StringArray tags;
         std::vector<float> features;
         juce::String key;            // empty when unknown

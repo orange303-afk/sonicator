@@ -131,20 +131,49 @@ TEST_CASE("Smart analysis reports where an adaptive type came from", "[contribut
 
     auto& shared = AcousticClassifierService::getSharedAdaptiveClassifier();
     shared.clear();
-    REQUIRE(shared.loadGlobalPrototypes(prototypeDocument("Zap", features)));
+    shared.updatePrototype(1, "Zap", {}, features);
 
     const auto candidates = AcousticClassifierService::analyzeBuffer(buffer, 44100.0, {}, {});
     bool found = false;
     for (const auto& candidate : candidates)
     {
         if (candidate.field != SmartField::Type) continue;
-        if (candidate.source == "global_adaptive")
+        if (candidate.source == "user_adaptive")
         {
             found = true;
             CHECK(candidate.textValue == "Zap");
-            CHECK(candidate.limitation.contains("global"));
+            CHECK(candidate.limitation.contains("user feedback"));
         }
     }
+    CHECK(found);
+    shared.clear();
+}
+
+TEST_CASE("A global type does not compete with an existing metadata type", "[contribute][training]")
+{
+    juce::AudioBuffer<float> buffer(1, 44100);
+    for (int i = 0; i < buffer.getNumSamples(); ++i)
+        buffer.setSample(0, i, 0.5f * std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * i / 44100.0));
+    const auto features = AdaptiveClassifier::extractFeatures(buffer, 44100.0);
+    REQUIRE(features.size() == 14);
+
+    SmartCandidate filename;
+    filename.field = SmartField::Type;
+    filename.source = "filename";
+    filename.textValue = "Kick";
+    filename.status = CandidateStatus::Valid;
+
+    auto& shared = AcousticClassifierService::getSharedAdaptiveClassifier();
+    shared.clear();
+    REQUIRE(shared.loadGlobalPrototypes(prototypeDocument("Zap", features)));
+    for (const auto& candidate : AcousticClassifierService::analyzeBuffer(buffer, 44100.0, {}, { filename }))
+        CHECK(candidate.source != "global_adaptive");
+
+    // The person's own prototype is not a fallback, so it still competes with the name.
+    shared.updatePrototype(1, "Zap", {}, features);
+    bool found = false;
+    for (const auto& candidate : AcousticClassifierService::analyzeBuffer(buffer, 44100.0, {}, { filename }))
+        if (candidate.source == "user_adaptive") found = true;
     CHECK(found);
     shared.clear();
 }

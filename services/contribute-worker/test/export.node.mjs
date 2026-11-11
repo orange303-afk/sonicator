@@ -86,11 +86,23 @@ test("the report hides a label that fewer installs confirmed", () => {
 });
 
 test("out-of-range features and an unknown schema stop the export", () => {
-  assert.throws(() => assertValid([record({ features: [0.5, 1.5] })]), /14 features/);
+  assert.throws(() => assertValid([{ ...record({ features: [0.5, 1.5] }), installId: A }]), /14 features/);
   const bad = record();
   bad.features[3] = Number.NaN;
-  assert.throws(() => assertValid([bad]), /outside 0\.\.1/);
-  assert.throws(() => assertValid([record({ featureSchema: 2 })]), /featureSchema/);
+  assert.throws(() => assertValid([{ ...bad, installId: A }]), /outside 0\.\.1/);
+  assert.throws(() => assertValid([{ ...record({ featureSchema: 2 }), installId: A }]), /featureSchema/);
+});
+
+test("a tag-only record is valid and contributes tags, not a type", () => {
+  const tagOnly = record({ type: undefined, typeIsCustom: undefined, tags: [{ name: "warm", custom: false }] });
+  assertValid([{ ...tagOnly, installId: A }]);
+  const summary = summarize([{ ...tagOnly, installId: A }], 1);
+  assert.equal(summary.types.length, 0);
+  assert.equal(summary.tags.length, 1);
+  assert.throws(
+    () => assertValid([{ ...record({ type: undefined, typeIsCustom: undefined, tags: [] }), installId: A }]),
+    /no type and no tags/,
+  );
 });
 
 test("the same records produce the same bytes and a report beside the dataset", async () => {

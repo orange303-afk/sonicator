@@ -538,6 +538,9 @@ void AutoTagService::apply()
             else if (const auto res = repo.smartResult(id))
                 type = res->type;
 
+            // A row a person wrote is their confirmation; AutoTag must not overwrite it, nor the
+            // prototype the classifier already learned from it.
+            if (repo.hasUserFeedback(id)) continue;
             repo.recordFeedback(id, type, tagNames, features, SampleRepository::FeedbackOrigin::autoTag);
             AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
         }

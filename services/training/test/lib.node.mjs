@@ -109,6 +109,33 @@ test("tags are ranked top-3 and the global penalty is applied", () => {
   assert.ok(tags.length <= 3);
 });
 
+test("the model date comes from sentAt when the export has no updatedAt", () => {
+  const records = dataset(["a", "b", "c"], 4).map((entry) => ({
+    ...entry,
+    updatedAt: undefined,
+    sentAt: "2026-11-11T10:00:00.000Z",
+  }));
+  assert.equal(buildPrototypes(records).generatedAt, "2026-11-11T10:00:00.000Z");
+});
+
+test("a custom type stays out of the shipped file but trains the local model", () => {
+  const records = dataset(["a", "b", "c"], 4, { type: "MyLayer", typeIsCustom: true, tags: [] });
+  const shipped = buildPrototypes(records);
+  assert.equal(shipped.labels.filter((label) => label.kind === "type").length, 0);
+  const local = indexPrototypes(buildPrototypes(records, { minInstalls: 1, minSupport: 1, includeCustomTypes: true }));
+  assert.ok(local.get("type").has("mylayer"));
+});
+
+test("a tag-only record contributes tags and no type", () => {
+  const records = dataset(["a", "b", "c"], 4, {
+    type: undefined,
+    tags: [{ name: "warm", custom: false }],
+  });
+  const labels = buildPrototypes(records).labels;
+  assert.equal(labels.filter((label) => label.kind === "type").length, 0);
+  assert.equal(labels.filter((label) => label.kind === "tag").length, 1);
+});
+
 test("the dataset reader refuses a foreign feature schema", () => {
   assert.throws(
     () => parseDataset('{"recordId":"x","installId":"a","featureSchema":2,"features":[],"type":"kick"}'),

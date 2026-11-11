@@ -47,7 +47,9 @@ struct AppSettings
     int windowX = 0, windowY = 0, windowWidth = 0, windowHeight = 0;
     bool hasWindowBounds() const { return windowWidth > 0 && windowHeight > 0; }
     // Bump when the consent text or the payload changes in a way the user should see again.
-    static constexpr int currentContributionConsentVersion = 1;
+    // Version 2: only confirmations made from this version on can be exported; rows from older
+    // versions have unknown provenance and stay on the machine.
+    static constexpr int currentContributionConsentVersion = 2;
     static juce::String defaultContributionEndpoint();
     static juce::File defaultSettingsFile();
     static juce::String themeToString(ThemeMode);

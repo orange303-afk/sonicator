@@ -12,4 +12,7 @@ export const STANDARD_TYPES = [
   "djembe", "tabla", "tom", "crash", "ride", "cymbal", "percussion", "bass", "sub", "808",
   "reese", "acid", "lead", "pad", "keys", "synth", "guitar", "vocal", "fx", "foley", "riser",
   "drop", "brass", "strings",
+  // Offered by the Type menu beyond the name heuristics, so they are standard too.
+  "arp", "atmosphere", "chord", "downfilter", "drone", "impact", "piano", "pluck", "stab",
+  "texture",
 ];

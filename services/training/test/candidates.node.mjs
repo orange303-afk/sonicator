@@ -58,9 +58,9 @@ test("the standard lists stay in step with the application", async () => {
   const repository = fileURLToPath(new URL("../../../core/database/SampleRepository.cpp", import.meta.url));
   const heuristics = fileURLToPath(new URL("../../../core/smart/NameHeuristics.cpp", import.meta.url));
   const repositorySource = await readFile(repository, "utf8");
-  const heuristicSource = await readFile(heuristics, "utf8");
+  const heuristicSource = (await readFile(heuristics, "utf8")).toLowerCase();
   for (const tag of STANDARD_TAGS)
     assert.ok(repositorySource.includes(`{ "${tag}",`), `SampleRepository.cpp lost the tag ${tag}`);
   for (const type of STANDARD_TYPES)
-    assert.ok(heuristicSource.includes(`{ "${type}",`), `NameHeuristics.cpp lost the type ${type}`);
+    assert.ok(heuristicSource.includes(`"${type.toLowerCase()}"`), `NameHeuristics.cpp lost the type ${type}`);
 });

@@ -188,6 +188,26 @@ juce::StringArray canonicalSmartTypeNames()
     for (const auto& alias : typeAliases) out.addIfNotAlreadyThere(alias.canonical);
     return out;
 }
+juce::StringArray standardSampleTypeNames()
+{
+    // The Type menu offers these; most match a heuristic name, and a few are labels a file name
+    // cannot infer but a person can choose. Without the full list, picking "Piano" would be filed
+    // as a custom type and pollute the promotion report.
+    static const char* const menuNames[] = {
+        "808", "Acid", "Agogo", "Arp", "Atmosphere", "Bass", "Blip", "Bongo", "Brass",
+        "Chord", "Clap", "Clave", "Click", "Conga", "Cowbell", "Crash", "Cymbal",
+        "Djembe", "Downfilter", "Drone", "Drop", "Foley", "FX", "Glitch", "Guitar",
+        "Hat", "Impact", "Keys", "Kick", "Lead", "Pad", "Percussion", "Piano", "Pluck",
+        "Reese", "Ride", "Rim", "Riser", "Shaker", "Snare", "Snap", "Stab", "Strings",
+        "Sub", "Tabla", "Tamb", "Texture", "Timbale", "Tom", "Triangle", "Vocal", "Zap"
+    };
+    juce::StringArray out;
+    for (const auto* name : menuNames) out.addIfNotAlreadyThere(juce::String(name));
+    for (const auto& canonical : canonicalSmartTypeNames())
+        if (! out.contains(canonical, true)) out.add(canonical);
+    out.sort(true);
+    return out;
+}
 std::vector<SmartCandidate> extractNameCandidates(const juce::String& path)
 {
     std::vector<SmartCandidate> out;
