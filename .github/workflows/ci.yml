@@ -37,6 +37,15 @@ jobs:
           cmake --version
           ninja --version || brew install ninja
 
+      # The checkout lives in an iCloud-synchronised folder on the development machine, which
+      # occasionally creates "name 2.ext" conflict copies. They are never wanted in the tree.
+      - name: Reject iCloud conflict copies
+        run: |
+          if git ls-files | grep -E ' [0-9]+\.[A-Za-z0-9]+$'; then
+            echo "::error::conflict copies are tracked; remove them from the repository"
+            exit 1
+          fi
+
       # FetchContent sources dominate the first configure. The cache key follows the files that pin
       # those versions, so a dependency bump re-downloads once instead of on every run.
       - name: Cache fetched dependencies
