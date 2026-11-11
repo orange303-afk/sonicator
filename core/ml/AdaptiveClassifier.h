@@ -26,6 +26,9 @@ public:
     bool loadGlobalPrototypes(const juce::String& json);
     void updatePrototype(int64_t sampleId, const juce::String& targetType,
                          const juce::StringArray& tags, const std::vector<float>& features);
+    // Refreshes only the tag list of an existing prototype, so an accepted AutoTag tag is learned
+    // locally without replacing the type the person set.
+    void updatePrototypeTags(int64_t sampleId, const juce::StringArray& tags);
     void removePrototype(int64_t sampleId);
     void clear();
 

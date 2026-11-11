@@ -30,6 +30,25 @@ TEST_CASE("AdaptiveClassifier silence extraction produces empty features", "[ml]
     CHECK(features.empty());
 }
 
+TEST_CASE("Accepted AutoTag tags refresh tags without replacing the type", "[ml][adaptive]")
+{
+    AdaptiveClassifier classifier;
+    const std::vector<float> features = { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f };
+    classifier.updatePrototype(1, "Kick", { "old" }, features);
+    classifier.updatePrototypeTags(1, { "Punchy", "Kick" });
+
+    const auto types = classifier.predictType(features, 1);
+    REQUIRE(types.size() == 1);
+    CHECK(types[0].label == "Kick");
+
+    const auto tags = classifier.predictTags(features, 3);
+    REQUIRE_FALSE(tags.empty());
+    CHECK(tags[0].label.equalsIgnoreCase("Kick"));
+    bool punchy = false;
+    for (const auto& tag : tags) if (tag.label.equalsIgnoreCase("Punchy")) punchy = true;
+    CHECK(punchy);
+}
+
 TEST_CASE("AdaptiveClassifier case-insensitive label aggregation", "[ml][adaptive]")
 {
     AdaptiveClassifier classifier;

@@ -171,6 +171,17 @@ void AdaptiveClassifier::updatePrototype(int64_t sampleId, const juce::String& t
     impl->prototypes.push_back(std::move(p));
 }
 
+void AdaptiveClassifier::updatePrototypeTags(int64_t sampleId, const juce::StringArray& tags)
+{
+    std::lock_guard lock(impl->mutex);
+    for (auto& p : impl->prototypes)
+        if (p.sampleId == sampleId)
+        {
+            p.tags = tags;
+            return;
+        }
+}
+
 void AdaptiveClassifier::removePrototype(int64_t sampleId)
 {
     std::lock_guard lock(impl->mutex);

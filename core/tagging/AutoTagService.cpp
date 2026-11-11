@@ -543,7 +543,9 @@ void AutoTagService::apply()
             // only its tag list refreshes.
             const bool userRow = repo.hasUserFeedback(id);
             repo.recordFeedback(id, type, tagNames, features, SampleRepository::FeedbackOrigin::approved);
-            if (! userRow)
+            if (userRow)
+                AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototypeTags(id, tagNames);
+            else
                 AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
         }
     }
