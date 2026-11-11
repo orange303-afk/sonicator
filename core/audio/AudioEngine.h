@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "MidiSampler.h"
+#include "PreviewReaderSource.h"
 #include "SampleAudition.h"
 #include "core/sf2/Sf2Bank.h"
 #include "core/sf2/Sf2KitSampler.h"
@@ -29,6 +30,11 @@ public:
     void seek(double seconds);
     void setVolume(float);
     void setLooping(bool);
+    // Ordinary-file preview loops a waveform selection inside the transport instead of seeking from
+    // the 30 Hz UI timer. Enabling it rebuilds the source without read-ahead, because a buffered
+    // source would keep playing material from outside a range that is still being dragged; the
+    // range itself then updates live through atomics. Other preview kinds keep the timer.
+    void setSelectionLoop(bool enabled, double startSeconds, double endSeconds);
     bool setMidiPreview(bool);
     // A waveform selection restricts the next MIDI voices of an ordinary file or a selected
     // tracker/disc source to that range. Empty/invalid plays the whole source. SF2/EXS/NKI zone
@@ -158,6 +164,7 @@ private:
     int hostBlockSize = 256;
     std::atomic<juce::uint32> lastHostBlockMs { 0 };
     bool skipSilence = false, startAtNextPlay = true, midiInputsConnected = false;
+    bool readerRangeLoop = false;
     double audibleStart = -1;
     double midiSelectionStart = 0, midiSelectionEnd = 0;
     juce::File loadedFile;
@@ -166,7 +173,7 @@ private:
     juce::AudioFormatManager formats;
     juce::AudioDeviceManager devices;
     juce::TimeSliceThread readAhead { "Preview read-ahead" };
-    std::unique_ptr<juce::AudioFormatReaderSource> reader;
+    std::unique_ptr<PreviewReaderSource> reader;
     juce::AudioTransportSource source;
     MidiSampler sampler;
     Sf2KitSampler sf2Sampler;

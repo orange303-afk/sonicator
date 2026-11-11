@@ -8,7 +8,7 @@
 
 - Message thread: controls, device setup, file selection/reader replacement, debounced whole-catalog queries, user-triggered database backup, rendering. Search, sorting and tag filtering stay on this thread because the measured 300k-row query is below a perceptible hitch; no UI-queue callbacks are posted per keypress.
 - Indexing thread: directory enumeration, chunked analysis, full-file hashing, database writes, reconciliation of missing paths.
-- Dedicated preview read-ahead thread: JUCE buffering source, independent of the analyzer.
+- Dedicated preview read-ahead thread: JUCE buffering source, independent of the analyzer. While **Loop** is on with a waveform selection, the ordinary preview is re-attached without read-ahead so the range loop is sample-accurate and live edits are heard immediately; clearing the loop restores read-ahead.
 - Dedicated tracker render thread: libxmp decodes the whole module into a bounded preallocated ring; the device callback only copies stereo frames from that ring. Loading, seeking and source decoding run on the message thread while the output is detached, or on the render thread, never inside the device callback.
 - Dedicated thumbnail cache thread: waveform extraction, independent of preview.
 - Device callback: JUCE AudioSourcePlayer → AudioTransportSource → buffering/resampling source, or the tracker ring, or a preallocated MIDI voice bank. No project DB, FFT analysis, file scanning or ML runs here. JUCE transport internally locks; do not claim strict lock-free safety.

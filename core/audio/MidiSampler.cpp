@@ -48,7 +48,16 @@ int64_t firstAudibleFrame(juce::AudioFormatReader& reader)
 }
 juce::String MidiSampler::load(const juce::File& file)
 {
-    clear();
+    Decoded data;
+    const auto error = decode(file, data);
+    if (error.isNotEmpty()) { clear(); return error; }
+    adopt(std::move(data));
+    clearRange();
+    return {};
+}
+juce::String MidiSampler::decode(const juce::File& file, Decoded& decoded)
+{
+    decoded = {};
     auto error = validateContainer(file);
     if (error.isNotEmpty()) return error;
     juce::AudioFormatManager formats; formats.registerBasicFormats();
@@ -58,20 +67,40 @@ juce::String MidiSampler::load(const juce::File& file)
     constexpr int64_t maxBytes = 128 * 1024 * 1024;
     if (reader->lengthInSamples > maxBytes / (reader->numChannels * sizeof(float)))
         return "Sample exceeds 128 MiB decoded MIDI limit; use ordinary preview";
-    samples.setSize((int) reader->numChannels,(int) reader->lengthInSamples);
-    if (! reader->read(&samples,0,samples.getNumSamples(),0,true,true)) { clear(); return "Cannot read MIDI sample"; }
-    inputRate = reader->sampleRate;
+    decoded.samples.setSize((int) reader->numChannels,(int) reader->lengthInSamples);
+    if (! reader->read(&decoded.samples,0,decoded.samples.getNumSamples(),0,true,true))
+    { decoded = {}; return "Cannot read MIDI sample"; }
+    decoded.inputRate = reader->sampleRate;
     bool found = false;
+    auto& samples = decoded.samples;
     for (int i = 0; i < samples.getNumSamples(); ++i)
     {
         for (int ch = 0; ch < samples.getNumChannels(); ++ch)
         {
             float& value = samples.getWritePointer(ch)[i];
             if (! std::isfinite(value)) value = 0;
-            if (! found && value != 0) { onset = juce::jmax(0,i-1); found = true; }
+            if (! found && value != 0) { decoded.onset = juce::jmax(0,i-1); found = true; }
         }
     }
     return {};
+}
+void MidiSampler::adopt(Decoded&& data)
+{
+    samples = std::move(data.samples);
+    inputRate = std::isfinite(data.inputRate) && data.inputRate > 0 ? data.inputRate : 44100;
+    onset = data.onset;
+    reset();
+}
+MidiSampler::Decoded MidiSampler::release()
+{
+    Decoded moved;
+    moved.samples = std::move(samples);
+    moved.inputRate = inputRate;
+    moved.onset = onset;
+    samples.setSize(0,0);
+    onset = 0;
+    reset();
+    return moved;
 }
 void MidiSampler::clear() { reset(); samples.setSize(0,0); onset = 0; clearRange(); }
 void MidiSampler::clearRange()

@@ -190,6 +190,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     volume.setTooltip("Preview volume");
     volume.onValueChange = [this] { engine.setVolume((float) volume.getValue()); };
     waveform.onSeek = [this](double p) { engine.seek(p); };
+    waveform.onSelectionChanging = [this](selection::Range range) { selectionChanging(range); };
     waveform.onSelectionChanged = [this](selection::Range range) { selectionChanged(range); };
     waveform.onExternalDragRequested = [this] { beginExternalDrag(); };
     play.onClick = [this] { togglePlayback(); };
@@ -762,6 +763,8 @@ void PreviewPanel::selectionChanged(selection::Range range)
 {
     if (! range.valid())
     {
+        exportPending = false;
+        liveRange = {};
         engine.setMidiSelection(0.0, 0.0);
         clearSelectionButton.setVisible(false);
         selectionStatus.setText({},juce::dontSendNotification);
@@ -769,11 +772,46 @@ void PreviewPanel::selectionChanged(selection::Range range)
         applyTransportLooping();
         return;
     }
-    // MIDI Preview follows the same range: new voices start at its beginning and stop (or loop)
-    // at its end, exactly like ordinary Play.
+    selectionChanging(range);
+    exportPending = false;
+    prepareSelectionExport();
+    refreshSelectionStatus();
+}
+void PreviewPanel::selectionChanging(selection::Range range)
+{
+    if (! range.valid()) return;
+    // Dragging or resizing while audio runs keeps the playhead at the same relative point inside
+    // the window, so the material under it changes with the mouse instead of only at the edges.
+    followPlayheadInto(range);
     engine.setMidiSelection(range.start, range.end);
     applyTransportLooping();
+    liveRange = range;
     clearSelectionButton.setVisible(true);
+    selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
+    // Exporting on every mouse move would rewrite a WAV per pixel; the timer prepares the final
+    // range once the edit settles.
+    exportPending = true;
+    selectionEditedMs = juce::Time::getMillisecondCounter();
+}
+void PreviewPanel::followPlayheadInto(selection::Range range)
+{
+    if (! engine.isPlaying() || ! liveRange.valid() || liveRange.length() <= 0) return;
+    const auto positionBefore = engine.position();
+    if (! selection::contains(liveRange, positionBefore)) return;
+    const auto relative = (positionBefore - liveRange.start) / liveRange.length();
+    const auto target = range.start + relative * range.length();
+    if (std::abs(target - positionBefore) > 0.002) engine.seek(target);
+}
+bool PreviewPanel::selectionExportMatches(const SelectionExporter::State& state) const
+{
+    const auto range = waveform.selection();
+    return range.valid() && std::abs(state.start - range.start) < 1.0e-6
+        && std::abs(state.end - range.end) < 1.0e-6;
+}
+void PreviewPanel::prepareSelectionExport()
+{
+    const auto range = waveform.selection();
+    if (! range.valid()) return;
     selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
     if (engine.isTrackerMode())
     {
@@ -848,19 +886,41 @@ void PreviewPanel::refreshSelectionStatus()
     const auto range = waveform.selection();
     if (! range.valid()) return;
     const auto state = exporter.state();
-    if (state.status == SelectionExporter::Status::preparing)
+    if (exportPending || state.status == SelectionExporter::Status::preparing)
+    {
         selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
-    else if (state.status == SelectionExporter::Status::ready)
-        selectionStatus.setText("Ready - drag the selection into a DAW",juce::dontSendNotification);
+        return;
+    }
+    if (state.status == SelectionExporter::Status::idle)
+    {
+        selectionStatus.setText({},juce::dontSendNotification);
+        return;
+    }
+    if (! selectionExportMatches(state))
+    {
+        selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
+        return;
+    }
+    if (state.status == SelectionExporter::Status::ready)
+        selectionStatus.setText(loop.getToggleState()
+            ? "Ready - Cmd/Ctrl-drag the selection into a DAW"
+            : "Ready - drag the selection into a DAW",juce::dontSendNotification);
     else if (state.status == SelectionExporter::Status::failed)
         selectionStatus.setText(state.error,juce::dontSendNotification);
 }
 bool PreviewPanel::isSelectionReady() const
 {
-    return waveform.selection().valid() && exporter.state().isReady();
+    const auto state = exporter.state();
+    return waveform.selection().valid() && state.isReady() && selectionExportMatches(state);
 }
 bool PreviewPanel::waitForSelectionPreparation(int timeoutMs)
 {
+    // A live edit postpones the export until the range settles; an explicit wait asks for it now.
+    if (exportPending)
+    {
+        exportPending = false;
+        prepareSelectionExport();
+    }
     const bool finished = exporter.waitUntilFinished(timeoutMs);
     refreshSelectionStatus();
     return finished && exporter.state().status != SelectionExporter::Status::preparing;
@@ -869,8 +929,13 @@ void PreviewPanel::beginExternalDrag()
 {
     const auto range = waveform.selection();
     if (! range.valid()) return;
+    if (exportPending)
+    {
+        exportPending = false;
+        prepareSelectionExport();
+    }
     const auto state = exporter.state();
-    if (state.status != SelectionExporter::Status::ready || ! state.file.existsAsFile())
+    if (! state.isReady() || ! selectionExportMatches(state))
     {
         selectionStatus.setText(state.status == SelectionExporter::Status::failed
             ? state.error : juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
@@ -891,10 +956,21 @@ void PreviewPanel::applyTransportLooping()
 {
     const bool loopEnabled = loop.getToggleState();
     engine.setMidiLooping(loopEnabled);
-    // Whole-file looping would wrap at EOF before the timer can see the selection boundary.
-    // A selection owns its own loop; the transport loop is restored when it is cleared.
-    const bool wanted = loopEnabled && ! waveform.selection().valid();
-    if (engine.isLooping() != wanted) engine.setLooping(wanted);
+    waveform.setLoopArmed(loopEnabled);
+    const auto range = waveform.selection();
+    if (range.valid())
+    {
+        // Ordinary files loop the range inside the transport, sample-accurately and live. Whole-file
+        // looping stays off: it would wrap at EOF before the range end. Other preview kinds keep
+        // the timer boundary in updateSelectionPlayback().
+        engine.setSelectionLoop(loopEnabled, range.start, range.end);
+        if (engine.isLooping()) engine.setLooping(false);
+    }
+    else
+    {
+        engine.setSelectionLoop(false, 0.0, 0.0);
+        if (engine.isLooping() != loopEnabled) engine.setLooping(loopEnabled);
+    }
 }
 void PreviewPanel::updateSelectionPlayback()
 {
@@ -937,6 +1013,13 @@ void PreviewPanel::timerCallback()
 {
     refreshMidiFollow();
     updateSelectionPlayback();
+    // A drag or a wheel gesture publishes live ranges; the WAV export waits until the gesture
+    // stops, so a 200 ms drag does not queue hundreds of file writes.
+    if (exportPending && juce::Time::getMillisecondCounter() - selectionEditedMs >= 300)
+    {
+        exportPending = false;
+        prepareSelectionExport();
+    }
     refreshSelectionStatus();
     waveform.setPosition(engine.position());
     if (songProgress.isVisible())

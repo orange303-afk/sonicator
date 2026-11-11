@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <cmath>
 #include "ui/waveform/WaveformDisplay.h"
 #include "ui/waveform/WaveformSelection.h"
 #include "ui/preview/PreviewPanel.h"
@@ -136,6 +137,8 @@ TEST_CASE("Play with a selection starts at its beginning and stops at its end", 
     REQUIRE(preview.loadFile(file)); engine.stop();
     engine.transport().prepareToPlay(256, 44100);
     preview.selectRange(0.2, 0.35);
+    INFO("selection end " << preview.selectedRange().end);
+    REQUIRE(preview.selectedRange().end == Catch::Approx(0.35));
     engine.seek(1.5);
     REQUIRE(preview.keyPressed(juce::KeyPress(juce::KeyPress::spaceKey)));
     REQUIRE(engine.position() == Catch::Approx(0.2).margin(0.01));
@@ -148,7 +151,9 @@ TEST_CASE("Play with a selection starts at its beginning and stops at its end", 
         stopped = ! engine.isPlaying();
     }
     REQUIRE(stopped);
-    REQUIRE(engine.position() >= 0.35);
+    // pause() restores the position through seconds and truncates to a frame, so a stop exactly
+    // on the boundary can land one source frame (1/44100 s) before it.
+    REQUIRE(engine.position() >= 0.35 - 1.0 / 44100.0);
     REQUIRE(engine.position() <= 0.35 + 128.0 / 44100.0 + 0.05);
     engine.transport().releaseResources();
 }
@@ -230,6 +235,35 @@ TEST_CASE("A selection ending at EOF loops back without playing the file start",
     engine.transport().releaseResources();
 }
 
+TEST_CASE("A looped selection wraps inside its range in the transport", "[selection][audition]")
+{
+    TestDirectory t; AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("tight-loop.wav", 440, 1, 44100 * 2))); engine.stop();
+    engine.transport().prepareToPlay(256, 44100);
+    preview.selectRange(0.5, 0.6);
+    auto* loop = dynamic_cast<juce::ToggleButton*>(preview.findChildWithID("loop"));
+    REQUIRE(loop != nullptr);
+    loop->setToggleState(true, juce::sendNotificationSync);
+    REQUIRE(preview.keyPressed(juce::KeyPress(juce::KeyPress::spaceKey)));
+    juce::AudioBuffer<float> buffer(2, 128);
+    double previous = engine.position();
+    bool wrapped = false;
+    for (int i = 0; i < 240; ++i)
+    {
+        engine.transport().getNextAudioBlock({&buffer, 0, 128});
+        preview.updateSelectionPlayback();
+        const auto p = engine.position();
+        REQUIRE(p >= 0.5 - 1.0e-9);
+        REQUIRE(p <= 0.6 + 1.0e-6);
+        if (p < previous) wrapped = true;
+        previous = p;
+    }
+    REQUIRE(wrapped);
+    REQUIRE(engine.isPlaying());
+    engine.transport().releaseResources();
+}
+
 namespace
 {
 juce::MouseEvent waveformClick(WaveformDisplay& waveform, float x, int clicks,
@@ -245,6 +279,21 @@ void singleWaveformClick(WaveformDisplay& waveform, float x)
     const auto event = waveformClick(waveform, x, 1);
     waveform.mouseDown(event);
     waveform.mouseUp(event);
+}
+juce::MouseEvent waveformDrag(WaveformDisplay& waveform, juce::Point<float> start,
+                              juce::Point<float> end)
+{
+    const auto now = juce::Time::getCurrentTime();
+    return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(), end,
+                            juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier),
+                            1.0f, 0, 0, 0, 0, &waveform, &waveform, now, start, now, 1, true);
+}
+juce::MouseEvent waveformPress(WaveformDisplay& waveform, juce::Point<float> position)
+{
+    const auto now = juce::Time::getCurrentTime();
+    return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(), position,
+                            juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier),
+                            1.0f, 0, 0, 0, 0, &waveform, &waveform, now, position, now, 1, false);
 }
 } // namespace
 
@@ -372,6 +421,139 @@ TEST_CASE("Double-click then export covers the last frame of the source", "[sele
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(preview.preparedSelection()));
     REQUIRE(reader != nullptr);
     REQUIRE(reader->lengthInSamples == 10);
+}
+
+TEST_CASE("The wheel resizes a selection around its centre", "[selection][waveform][live]")
+{
+    TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(1000, 0.2f), 100, {});
+    waveform.setSelection({ 2.0, 4.0 });
+    int live = 0; selection::Range seen;
+    waveform.onSelectionChanging = [&](selection::Range r) { ++live; seen = r; };
+    juce::MouseWheelDetails wheel {};
+    wheel.deltaY = 0.1f;
+    waveform.mouseWheelMove(waveformClick(waveform, 122.0f, 1), wheel);
+    REQUIRE(live == 1);
+    REQUIRE(seen.length() > 2.0);
+    REQUIRE(seen.start < 2.0);
+    REQUIRE(seen.end > 4.0);
+    REQUIRE((seen.start + seen.end) * 0.5 == Catch::Approx(3.0).margin(0.01));
+    const auto grown = seen.length();
+    wheel.deltaY = -0.1f;
+    waveform.mouseWheelMove(waveformClick(waveform, 122.0f, 1), wheel);
+    REQUIRE(live == 2);
+    REQUIRE(seen.length() < grown);
+    REQUIRE(waveform.selection().start >= 0.0);
+    REQUIRE(waveform.selection().end <= 10.0);
+    waveform.clearSelection();
+    live = 0;
+    waveform.mouseWheelMove(waveformClick(waveform, 122.0f, 1), wheel);
+    REQUIRE(live == 0);
+}
+TEST_CASE("Dragging inside an armed loop moves it live and commits once", "[selection][waveform][live]")
+{
+    TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(1000, 0.2f), 100, {});
+    waveform.setSelection({ 2.0, 4.0 });
+    waveform.setLoopArmed(true);
+    int live = 0, commits = 0, external = 0; selection::Range committed;
+    waveform.onSelectionChanging = [&](selection::Range) { ++live; };
+    waveform.onSelectionChanged = [&](selection::Range r) { ++commits; committed = r; };
+    waveform.onExternalDragRequested = [&] { ++external; };
+    const juce::Point<float> press(122.4f, 30.0f), drag(161.2f, 30.0f);
+    waveform.mouseDown(waveformPress(waveform, press));
+    waveform.mouseDrag(waveformDrag(waveform, press, drag));
+    REQUIRE(live > 0);
+    REQUIRE(external == 0);
+    REQUIRE(waveform.selection().start == Catch::Approx(3.0).margin(0.02));
+    REQUIRE(waveform.selection().length() == Catch::Approx(2.0).margin(0.02));
+    REQUIRE(commits == 0);
+    waveform.mouseUp(waveformDrag(waveform, press, drag));
+    REQUIRE(commits == 1);
+    REQUIRE(committed.start == Catch::Approx(3.0).margin(0.02));
+    REQUIRE(committed.end == Catch::Approx(5.0).margin(0.02));
+}
+TEST_CASE("An armed loop edge resizes while the body moves", "[selection][waveform][live]")
+{
+    TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(1000, 0.2f), 100, {});
+    waveform.setSelection({ 2.0, 4.0 });
+    waveform.setLoopArmed(true);
+    int live = 0; waveform.onSelectionChanging = [&](selection::Range) { ++live; };
+    const juce::Point<float> press(161.2f, 30.0f), drag(200.0f, 30.0f);
+    waveform.mouseDown(waveformPress(waveform, press));
+    waveform.mouseDrag(waveformDrag(waveform, press, drag));
+    REQUIRE(live > 0);
+    REQUIRE(waveform.selection().start == Catch::Approx(2.0).margin(0.01));
+    REQUIRE(waveform.selection().end == Catch::Approx(5.0).margin(0.03));
+    waveform.mouseUp(waveformDrag(waveform, press, drag));
+}
+TEST_CASE("A wheel edit defers the WAV export until it settles", "[selection][preview][live]")
+{
+    TestDirectory t; AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("wheel.wav", 440, 1, 44100 * 2)));
+    engine.stop();
+    preview.setBounds(0, 0, 900, 156);
+    preview.resized();
+    const auto start = juce::Time::getMillisecondCounter();
+    while (preview.waveformLength() <= 0 && juce::Time::getMillisecondCounter() - start < 3000)
+        juce::Thread::sleep(5);
+    REQUIRE(preview.waveformLength() > 0);
+    preview.selectRange(0.2, 0.5);
+    REQUIRE(preview.waitForSelectionPreparation(5000));
+    REQUIRE(preview.isSelectionReady());
+    WaveformDisplay* waveform = nullptr;
+    for (auto* child : preview.getChildren())
+        if (auto* candidate = dynamic_cast<WaveformDisplay*>(child)) waveform = candidate;
+    REQUIRE(waveform != nullptr);
+    juce::MouseWheelDetails wheel {}; wheel.deltaY = 0.1f;
+    waveform->mouseWheelMove(waveformClick(*waveform, 100.0f, 1), wheel);
+    REQUIRE(preview.selectedRange().length() > 0.3);
+    REQUIRE_FALSE(preview.isSelectionReady()); // the old WAV no longer matches the range
+    REQUIRE(preview.waitForSelectionPreparation(5000));
+    REQUIRE(preview.isSelectionReady());
+    juce::AudioFormatManager formats; formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(preview.preparedSelection()));
+    REQUIRE(reader != nullptr);
+    const auto expected = (juce::int64) std::llround(preview.selectedRange().length() * 44100.0);
+    REQUIRE(std::abs(reader->lengthInSamples - expected) <= 2);
+}
+
+TEST_CASE("A live loop edit keeps the playhead at the same relative point", "[selection][preview][live]")
+{
+    TestDirectory t; AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("live-move.wav", 440, 1, 44100 * 4)));
+    engine.stop();
+    engine.transport().prepareToPlay(256, 44100);
+    preview.selectRange(1.0, 2.0);
+    auto* loop = dynamic_cast<juce::ToggleButton*>(preview.findChildWithID("loop"));
+    REQUIRE(loop != nullptr);
+    loop->setToggleState(true, juce::sendNotificationSync);
+    REQUIRE(preview.keyPressed(juce::KeyPress(juce::KeyPress::spaceKey)));
+    juce::AudioBuffer<float> buffer(2, 128);
+    for (int i = 0; i < 20; ++i) engine.transport().getNextAudioBlock({&buffer, 0, 128});
+    const auto before = engine.position();
+    REQUIRE(before > 1.0);
+    REQUIRE(before < 2.0);
+    const auto relative = (before - 1.0) / 1.0;
+    WaveformDisplay* waveform = nullptr;
+    for (auto* child : preview.getChildren())
+        if (auto* candidate = dynamic_cast<WaveformDisplay*>(child)) waveform = candidate;
+    REQUIRE(waveform != nullptr);
+    juce::MouseWheelDetails wheel {}; wheel.deltaY = 0.1f;
+    waveform->mouseWheelMove(waveformClick(*waveform, 100.0f, 1), wheel);
+    const auto range = preview.selectedRange();
+    REQUIRE(range.valid());
+    REQUIRE(range.length() > 1.0);
+    const auto expected = range.start + relative * range.length();
+    REQUIRE(engine.position() == Catch::Approx(expected).margin(0.02));
+    REQUIRE(engine.isPlaying());
+    engine.transport().releaseResources();
 }
 
 namespace

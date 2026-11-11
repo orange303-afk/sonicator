@@ -146,8 +146,15 @@ private:
     void timerCallback() override;
     void togglePlayback();
     void applyTransportLooping();
+    void selectionChanging(selection::Range);
     void selectionChanged(selection::Range);
+    void prepareSelectionExport();
+    void followPlayheadInto(selection::Range);
     void refreshSelectionStatus();
+    bool selectionExportMatches(const SelectionExporter::State&) const;
+    juce::uint32 selectionEditedMs = 0;
+    bool exportPending = false;
+    selection::Range liveRange;
     void beginExternalDrag();
     void refreshInstrumentSamples();
     bool applyInstrumentSample(SampleId, bool manual);

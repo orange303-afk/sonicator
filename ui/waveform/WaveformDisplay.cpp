@@ -110,8 +110,29 @@ void WaveformDisplay::notifySelection()
 }
 void WaveformDisplay::updateSelectionDuringDrag(double time)
 {
-    currentSelection = selection::orderedRange(dragAnchor, time, totalLength());
+    publishLiveSelection(selection::orderedRange(dragAnchor, time, totalLength()));
+}
+void WaveformDisplay::publishLiveSelection(selection::Range r)
+{
+    if (! r.valid() || sameRange(r, currentSelection)) return;
+    currentSelection = r;
     repaint();
+    notifySelectionChanging();
+}
+void WaveformDisplay::notifySelectionChanging()
+{
+    if (onSelectionChanging) onSelectionChanging(currentSelection);
+}
+double WaveformDisplay::secondsPerPixel() const
+{
+    const auto total = totalLength();
+    const double track = (double) getWidth() - 2.0 * selection::inset;
+    return track > 0 && total > 0 ? total / track : 0.0;
+}
+double WaveformDisplay::minimumSelectionLength() const
+{
+    const auto timePerPixel = secondsPerPixel();
+    return timePerPixel > 0 ? timePerPixel : 0.001;
 }
 void WaveformDisplay::paint(juce::Graphics& g)
 {
@@ -182,16 +203,50 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     pressInsideSelection = false;
     pressWasPrimary = ! e.mods.isPopupMenu() && ! e.mods.isMiddleButtonDown();
     dragOrigin = e.getPosition();
+    dragMode = DragMode::none;
     const auto total = totalLength();
     if (total <= 0) return;
     dragAnchor = selection::timeAtX(e.position.x, getWidth(), total);
     pressInsideSelection = selection::contains(currentSelection, dragAnchor);
+    if (! pressWasPrimary || ! loopArmed || ! currentSelection.valid()) return;
+    // Cmd/Ctrl-drag still starts the external file drag that plain dragging inside used to do.
+    if (pressInsideSelection && e.mods.isCommandDown()) return;
+    // Edges win over the body: a few pixels around either boundary resize, the rest moves the
+    // whole window. Both are live, so a playing loop follows the mouse.
+    const auto tolerance = 5.0 * secondsPerPixel();
+    if (std::abs(dragAnchor - currentSelection.start) <= tolerance) dragMode = DragMode::resizeStart;
+    else if (std::abs(dragAnchor - currentSelection.end) <= tolerance) dragMode = DragMode::resizeEnd;
+    else if (pressInsideSelection) dragMode = DragMode::move;
+    if (dragMode != DragMode::none) { dragStartRange = currentSelection; dragStartTime = dragAnchor; }
 }
 void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 {
     const auto total = totalLength();
     if (total <= 0) return;
     const auto delta = e.getPosition() - dragOrigin;
+    if (dragMode == DragMode::move)
+    {
+        if (! selection::exceedsDragThreshold(delta.x, delta.y)) return;
+        const double movedBy = selection::timeAtX(e.position.x, getWidth(), total) - dragStartTime;
+        const double length = dragStartRange.length();
+        const double start = juce::jlimit(0.0, juce::jmax(0.0, total - length),
+                                          dragStartRange.start + movedBy);
+        publishLiveSelection({ start, start + length });
+        return;
+    }
+    if (dragMode == DragMode::resizeStart || dragMode == DragMode::resizeEnd)
+    {
+        if (! selection::exceedsDragThreshold(delta.x, delta.y)) return;
+        const double time = selection::timeAtX(e.position.x, getWidth(), total);
+        const double minLength = minimumSelectionLength();
+        selection::Range r = dragStartRange;
+        if (dragMode == DragMode::resizeStart)
+            r.start = juce::jlimit(0.0, dragStartRange.end - minLength, time);
+        else
+            r.end = juce::jlimit(dragStartRange.start + minLength, total, time);
+        if (r.end > r.start) publishLiveSelection(r);
+        return;
+    }
     if (pressInsideSelection)
     {
         if (! externalDragTriggered && selection::exceedsDragThreshold(delta.x, delta.y))
@@ -205,6 +260,7 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
     {
         if (! selection::exceedsDragThreshold(delta.x, delta.y)) return;
         selectionDragActive = true;
+        dragMode = DragMode::select;
     }
     updateSelectionDuringDrag(selection::timeAtX(e.position.x, getWidth(), total));
 }
@@ -214,19 +270,60 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
     // JUCE delivers the second mouseUp of a double-click before mouseDoubleClick, with two clicks
     // recorded. That release must not seek or clear the range mouseDoubleClick is about to make.
     const bool completesDoubleClick = pressWasPrimary && e.getNumberOfClicks() >= 2;
-    if (total > 0 && ! completesDoubleClick && ! selectionDragActive && ! externalDragTriggered)
+    const bool editedRange = dragMode == DragMode::move || dragMode == DragMode::resizeStart
+        || dragMode == DragMode::resizeEnd;
+    if (total > 0 && ! completesDoubleClick && ! selectionDragActive && ! editedRange
+        && ! externalDragTriggered)
     {
         if (onSeek) onSeek(selection::timeAtX(e.position.x, getWidth(), total));
-        clearSelection();
+        // A click inside an armed loop seeks within it; dragging is how the range itself is moved.
+        if (! (loopArmed && pressInsideSelection)) clearSelection();
     }
-    if (selectionDragActive)
+    if (selectionDragActive || editedRange)
     {
         selectionDragActive = false;
         if (currentSelection.valid()) notifySelection();
         else clearSelection();
     }
+    dragMode = DragMode::none;
     pressInsideSelection = false;
     externalDragTriggered = false;
+}
+void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
+{
+    const auto total = totalLength();
+    if (total <= 0) { setMouseCursor(juce::MouseCursor::NormalCursor); return; }
+    updateCursorFor(selection::timeAtX(e.position.x, getWidth(), total));
+}
+void WaveformDisplay::updateCursorFor(double time)
+{
+    if (! loopArmed || ! currentSelection.valid())
+    {
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+        return;
+    }
+    const auto tolerance = 5.0 * secondsPerPixel();
+    if (std::abs(time - currentSelection.start) <= tolerance
+        || std::abs(time - currentSelection.end) <= tolerance)
+        setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+    else if (selection::contains(currentSelection, time))
+        setMouseCursor(juce::MouseCursor::DraggingHandCursor);
+    else
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+}
+void WaveformDisplay::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+{
+    const auto total = totalLength();
+    if (! (total > 0) || ! currentSelection.valid()) return;
+    const auto delta = wheel.deltaY != 0.0f ? wheel.deltaY : wheel.deltaX;
+    if (std::abs(delta) < 0.0001f) return;
+    // One notch is a moderate step; smooth trackpads send many small events, so the exponent keeps
+    // the gesture proportional instead of snapping the range to the whole file.
+    const auto factor = juce::jlimit(0.8, 1.25, std::pow(1.5, (double) delta));
+    const auto centre = (currentSelection.start + currentSelection.end) * 0.5;
+    const auto length = juce::jlimit(minimumSelectionLength(), total, currentSelection.length() * factor);
+    const auto start = juce::jlimit(0.0, juce::jmax(0.0, total - length), centre - length * 0.5);
+    publishLiveSelection({ start, start + length });
 }
 void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
 {

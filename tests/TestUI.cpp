@@ -223,7 +223,14 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
     REQUIRE(urls.count("https://ilyaorange.bandcamp.com") == 1);
     REQUIRE(urls.count("https://naukograd.bandcamp.com") == 1);
     REQUIRE(urls.count("https://ko-fi.com/ilyaorange") == 1);
-    panel.setBounds(0,0,560,700);
+    REQUIRE(urls.count("https://boosty.to/ilyaorange") == 1);
+    bool credits = false;
+    for (auto* child : panel.getChildren())
+        if (auto* label = dynamic_cast<juce::Label*>(child))
+            credits = credits || (label->getText().contains("JUCE")
+                                  && label->getText().contains("No network"));
+    REQUIRE(credits);
+    panel.setBounds(0,0,560,800);
     const auto image = panel.createComponentSnapshot(panel.getLocalBounds());
     REQUIRE(image.isValid());
     const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_SETTINGS_SCREENSHOT",{});

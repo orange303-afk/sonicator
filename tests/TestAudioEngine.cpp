@@ -391,6 +391,33 @@ TEST_CASE("Host MIDI from processHostBlock reaches the sampler", "[audio][host]"
     REQUIRE(engine.outputPeak() > 0.01f);
     engine.stopHostAudio();
 }
+TEST_CASE("Toggling MIDI Preview keeps an ordinary preview playing", "[audio][midi]")
+{
+    TestDirectory t; auto file = t.wave("midi-toggle.wav", 440.0, 2, 44100 * 2);
+    AudioEngine engine(false);
+    REQUIRE(engine.loadFile(file));
+    engine.preparePreviewBlock(256);
+    engine.play();
+    juce::AudioBuffer<float> buffer(2, 256);
+    for (int i = 0; i < 4; ++i) engine.renderPreviewBlock(buffer, 256);
+    const auto before = engine.position();
+    REQUIRE(before > 0.0);
+    REQUIRE(engine.setMidiPreview(true));
+    REQUIRE(engine.isPlaying());
+    REQUIRE(engine.position() == Catch::Approx(before).margin(0.01));
+    buffer.clear();
+    engine.renderPreviewBlock(buffer, 256);
+    REQUIRE(buffer.getMagnitude(0, 256) > 0.01f);
+    REQUIRE(engine.position() > before);
+    const auto afterEnable = engine.position();
+    REQUIRE(engine.setMidiPreview(false));
+    REQUIRE(engine.isPlaying());
+    REQUIRE(engine.position() == Catch::Approx(afterEnable).margin(0.01));
+    buffer.clear();
+    engine.renderPreviewBlock(buffer, 256);
+    REQUIRE(buffer.getMagnitude(0, 256) > 0.01f);
+    engine.stop();
+}
 TEST_CASE("Host transport stop is acknowledged instead of timing out", "[audio][host]")
 {
     TestDirectory t; auto file = t.wave("stop.wav", 440.0, 2, 44100 * 4);

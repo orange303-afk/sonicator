@@ -18,14 +18,21 @@ public:
     void setSelection(selection::Range);
     selection::Range selection() const { return currentSelection; }
     void clearSelection();
+    // While armed (Loop on), dragging inside the range moves it and dragging an edge resizes it,
+    // instead of starting the external DAW drag. The wheel always resizes the range around its
+    // centre. Live edits call onSelectionChanging; the final range calls onSelectionChanged.
+    void setLoopArmed(bool armed) { loopArmed = armed; }
     double totalLength() const { return customLength > 0 ? customLength : thumbnail.getTotalLength(); }
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
     void mouseDoubleClick(const juce::MouseEvent&) override;
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     std::function<void(double)> onSeek;
     std::function<void(selection::Range)> onSelectionChanged;
+    std::function<void(selection::Range)> onSelectionChanging;
     std::function<void()> onExternalDragRequested;
 private:
     juce::File cacheFile;
@@ -41,9 +48,18 @@ private:
     juce::Point<int> dragOrigin;
     double dragAnchor = 0;
     bool pressInsideSelection = false, selectionDragActive = false, externalDragTriggered = false;
-    bool pressWasPrimary = false;
+    bool pressWasPrimary = false, loopArmed = false;
+    enum class DragMode { none, select, move, resizeStart, resizeEnd };
+    DragMode dragMode = DragMode::none;
+    selection::Range dragStartRange;
+    double dragStartTime = 0;
     void updateSelectionDuringDrag(double time);
+    void publishLiveSelection(selection::Range);
     void notifySelection();
+    void notifySelectionChanging();
+    double secondsPerPixel() const;
+    double minimumSelectionLength() const;
+    void updateCursorFor(double time);
     void changeListenerCallback(juce::ChangeBroadcaster*) override { repaint(); }
 };
 } // namespace sonicator

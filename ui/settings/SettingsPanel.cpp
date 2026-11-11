@@ -16,13 +16,14 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
       gumroad("ilyaorange.gumroad.com", juce::URL("https://ilyaorange.gumroad.com")),
       bandcamp("ilyaorange.bandcamp.com", juce::URL("https://ilyaorange.bandcamp.com")),
       naukograd("naukograd.bandcamp.com", juce::URL("https://naukograd.bandcamp.com")),
-      kofi("ko-fi.com/ilyaorange", juce::URL("https://ko-fi.com/ilyaorange"))
+      kofi("ko-fi.com/ilyaorange", juce::URL("https://ko-fi.com/ilyaorange")),
+      boosty("boosty.to/ilyaorange", juce::URL("https://boosty.to/ilyaorange"))
 {
-    for (auto* c : std::array<juce::Component*,22>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
+    for (auto* c : std::array<juce::Component*,23>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
          &languageLabel,&languageNote,&libraryHeading,&databaseKey,&databaseLabel,&libraryNote,&databaseStatus,
-         &audioHeading,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
+         &audioHeading,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&creditsLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
         addAndMakeVisible(c);
-    for (auto* c : std::array<juce::Component*,8>{&openDatabase,&backupDatabase,&audio,&close,&gumroad,&bandcamp,&naukograd,&kofi})
+    for (auto* c : std::array<juce::Component*,9>{&openDatabase,&backupDatabase,&audio,&close,&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
         addAndMakeVisible(c);
     addAndMakeVisible(contributeDataToggle);
     contributeDataToggle.setButtonText("Contribute anonymous feedback to improve classification models");
@@ -68,7 +69,15 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     authorLabel.setText("by Ilya Orange",juce::dontSendNotification); authorLabel.setFont(juce::FontOptions(13));
     supportLabel.setText("Sonicator is free, but you can support further development:",juce::dontSendNotification);
     supportLabel.setFont(noteFont()); supportLabel.setJustificationType(juce::Justification::centredLeft);
-    for (auto* link : std::array<juce::HyperlinkButton*,4>{&gumroad,&bandcamp,&naukograd,&kofi})
+    creditsLabel.setText(juce::String::fromUTF8(
+        "JUCE 9.0.5  ·  SQLite 3.47.2  ·  libxmp 4.6.2  ·  ONNX Runtime 1.20.1  ·  Catch2 (tests)\n"
+        "Analysis: own DSP - YIN pitch, chroma key, spectral-flux rhythm, adaptive prototypes.\n"
+        "No network, no pretrained model weights. REX2 decoder based on VelociLoops (Unlicense)."),
+        juce::dontSendNotification);
+    creditsLabel.setFont(juce::FontOptions(10.5f));
+    creditsLabel.setJustificationType(juce::Justification::topLeft);
+    creditsLabel.setMinimumHorizontalScale(0.7f);
+    for (auto* link : std::array<juce::HyperlinkButton*,5>{&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
     {
         link->setFont(juce::FontOptions(12),false);
         link->setJustificationType(juce::Justification::centredLeft);
@@ -114,7 +123,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         if (onClose) { onClose(); return; }
         if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
     };
-    setSize(560,760);
+    setSize(560,776);
 }
 void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
 {
@@ -126,7 +135,7 @@ void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
     for (auto* c : hidden)
         c->setVisible(! pluginMode);
     close.setVisible(pluginMode);
-    setSize(560, pluginMode ? 600 : 760);
+    setSize(560, pluginMode ? 600 : 776);
     resized();
 }
 void SettingsPanel::notifySettings()
@@ -184,7 +193,8 @@ void SettingsPanel::lookAndFeelChanged()
     contributeDataToggle.setColour(juce::ToggleButton::tickColourId, theme::accent);
     authorLabel.setColour(juce::Label::textColourId,theme::muted);
     supportLabel.setColour(juce::Label::textColourId,theme::muted);
-    for (auto* link : std::array<juce::HyperlinkButton*,4>{&gumroad,&bandcamp,&naukograd,&kofi})
+    creditsLabel.setColour(juce::Label::textColourId,theme::muted);
+    for (auto* link : std::array<juce::HyperlinkButton*,5>{&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
         link->setColour(juce::HyperlinkButton::textColourId,theme::accent);
     repaint();
 }
@@ -295,7 +305,13 @@ void SettingsPanel::resized()
             link->setBounds(r.removeFromTop(20));
     });
     add(24, 6, false, [this](juce::Rectangle<int> area) { supportLabel.setBounds(area); });
-    add(20, 2, false, [this](juce::Rectangle<int> area) { kofi.setBounds(area); });
+    add(20, 2, false, [this](juce::Rectangle<int> area)
+    {
+        auto left = area.removeFromLeft(area.getWidth() / 2);
+        kofi.setBounds(left);
+        boosty.setBounds(area);
+    });
+    add(44, 10, false, [this](juce::Rectangle<int> area) { creditsLabel.setBounds(area); });
     if (close.isVisible())
         add(30, 12, false, [this](juce::Rectangle<int> area) { close.setBounds(area.removeFromRight(110)); });
 

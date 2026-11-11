@@ -26,11 +26,27 @@ private:
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
     std::atomic<bool> panic {false};
 };
-// Sample publication/load and reset require the output callback to be detached.
-// render() and voices are audio-thread only; scalar options are atomic snapshots per note.
+// Sample publication/load and reset are message-thread operations. load() and clear() require the
+// output callback to be detached; decode()+adopt()/release() let a caller prepare the PCM entirely
+// outside the lock and then swap it under the audio callback lock, so toggling MIDI Preview does
+// not stop ordinary playback. render() and voices are audio-thread only; scalar options are atomic
+// snapshots per note.
 class MidiSampler
 {
 public:
+    struct Decoded
+    {
+        juce::AudioBuffer<float> samples;
+        double inputRate = 44100;
+        int64_t onset = 0;
+    };
+    // Decodes one file without touching sampler state. Safe on the message thread while audio runs.
+    static juce::String decode(const juce::File&, Decoded&);
+    // Installs decoded PCM and resets voices. The caller must hold the audio callback lock.
+    void adopt(Decoded&&);
+    // Moves the installed PCM out and resets voices. The caller must hold the audio callback lock
+    // and should let the returned data die after releasing it, off the audio thread.
+    Decoded release();
     juce::String load(const juce::File&);
     void clear();
     void prepare(double rate);

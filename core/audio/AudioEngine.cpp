@@ -120,7 +120,11 @@ void AudioEngine::renderPreviewBlock(juce::AudioBuffer<float>& buffer, int numSa
 void AudioEngine::attach()
 {
     const bool streaming = deviceMode || hostMode;
-    source.setSource(reader.get(), streaming ? 32768 : 0, streaming ? &readAhead : nullptr, inputRate);
+    // A live range loop must read straight from the reader: the read-ahead buffer would replay
+    // material outside the range while the selection is being dragged. Everything else keeps it.
+    const int readAheadSamples = streaming && ! readerRangeLoop ? 32768 : 0;
+    source.setSource(reader.get(), readAheadSamples,
+                     readAheadSamples > 0 ? &readAhead : nullptr, inputRate);
 }
 bool AudioEngine::loadFile(const juce::File& file)
 {
@@ -131,7 +135,7 @@ bool AudioEngine::loadFile(const juce::File& file)
     sampler.clear();
     clearContainers();
     loadedFile = juce::File(); audibleStart = -1; startAtNextPlay = true;
-    source.setSource(nullptr); reader.reset();
+    source.setSource(nullptr); reader.reset(); readerRangeLoop = false;
     if (file.hasFileExtension("cmb;repatch;rfl"))
     {
         reasonMetadata=readReasonPatch(file);
@@ -170,7 +174,8 @@ bool AudioEngine::loadFile(const juce::File& file)
         lastError = "Cannot decode " + file.getFileName(); attachRender(); return false;
     }
     inputRate = decoded->sampleRate;
-    reader = std::make_unique<juce::AudioFormatReaderSource>(decoded.release(), true);
+    reader = std::make_unique<PreviewReaderSource>(
+        std::unique_ptr<juce::AudioFormatReader>(decoded.release()));
     reader->setLooping(looping);
     attach();
     loadedFile = file;
@@ -691,16 +696,45 @@ void AudioEngine::setLooping(bool enabled)
     attach(); seek(positionBefore);
     if (resume) play();
 }
+void AudioEngine::setSelectionLoop(bool enabled, double startSeconds, double endSeconds)
+{
+    if (reader == nullptr) return;
+    const bool valid = std::isfinite(startSeconds) && std::isfinite(endSeconds) && endSeconds > startSeconds;
+    const bool active = enabled && valid;
+    if (valid) reader->setLoopRange(startSeconds, endSeconds);
+    else reader->clearLoopRange();
+    reader->setRangeLooping(active);
+    if (active == readerRangeLoop) return;
+    // The read-ahead buffer is attached or removed here. Live range edits never rebuild: only the
+    // first and the last active edit do, so a mouse drag keeps producing continuous audio.
+    readerRangeLoop = active;
+    const double positionBefore = position();
+    const bool resume = isPlaying();
+    source.setSource(nullptr);
+    attach();
+    seek(positionBefore);
+    if (resume) play();
+}
 bool AudioEngine::setMidiPreview(bool enabled)
 {
     if (enabled == isMidiPreview()) return true;
-    stopTransport(); startAtNextPlay = true;
-    detachRender();
-    sampler.clear(); sampleVoices.reset(); lastError.clear();
-    if (enabled && loadedFile != juce::File() && ! sf2Mode && ! externalMode && ! rexMode
-        && ! trackerMode && ! discMode) lastError = sampler.load(loadedFile);
-    applyMidiSelection(); // a waveform selection survives a MIDI toggle
-    output.midi = enabled && lastError.isEmpty();
+    lastError.clear();
+    const bool wantsSample = enabled && loadedFile != juce::File() && ! sf2Mode && ! externalMode
+        && ! rexMode && ! trackerMode && ! discMode;
+    MidiSampler::Decoded decoded;
+    // The whole file is decoded before any state is touched, so ordinary preview continues to play
+    // while the MIDI sample is prepared. Only the buffer swap needs the callback lock.
+    if (wantsSample) lastError = MidiSampler::decode(loadedFile, decoded);
+    MidiSampler::Decoded previous;
+    {
+        const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        previous = sampler.release();
+        sampleVoices.reset();
+        if (wantsSample && lastError.isEmpty()) sampler.adopt(std::move(decoded));
+        applyMidiSelection(); // a waveform selection survives a MIDI toggle
+        output.midi = enabled && lastError.isEmpty();
+    }
+    previous = {}; // release the old decoded PCM only after the audio callback can run again
     if (deviceMode)
     {
         if (enabled && ! midiInputsConnected)
