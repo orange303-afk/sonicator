@@ -401,22 +401,23 @@ void applyOverride(const SmartOverrideMap& overrides, SmartField field, SmartRes
 int smartSourcePriority(const juce::String& source)
 {
     if (source == "user_adaptive") return -1;
-    if (source == "rx2_recy") return 0;
-    if (source == "rx2_glob") return 1;
-    if (source == "wav_smpl" || source == "wav_inst") return 0;
-    if (source == "aiff_basc") return 2;
-    if (source == "wav_acid") return 3;
-    if (source == "id3") return 3;
-    if (source == "dsp_acoustic") return 4;
-    if (source == "filename") return 5;
-    if (source == "ml_classifier") return 6;
-    if (source == "dsp") return 7;
-    if (source == "asd_warp") return 8;
-    return 10;
+    if (source == "global_adaptive") return 0;
+    if (source == "rx2_recy") return 1;
+    if (source == "rx2_glob") return 2;
+    if (source == "wav_smpl" || source == "wav_inst") return 1;
+    if (source == "aiff_basc") return 3;
+    if (source == "wav_acid") return 4;
+    if (source == "id3") return 4;
+    if (source == "dsp_acoustic") return 5;
+    if (source == "filename") return 6;
+    if (source == "ml_classifier") return 7;
+    if (source == "dsp") return 8;
+    if (source == "asd_warp") return 9;
+    return 11;
 }
 juce::String smartSourceGroup(const juce::String& source)
 {
-    if (source == "user_adaptive") return "adaptive";
+    if (source == "user_adaptive" || source == "global_adaptive") return "adaptive";
     if (source == "filename" || source == "folder" || source == "path") return "name";
     if (source == "asd_warp") return "sidecar";
     if (source == "dsp" || source == "dsp_acoustic" || source == "ml_classifier") return "dsp";

@@ -2,51 +2,51 @@
 
 ТЗ: `docs/superpowers/specs/2026-11-11-training-and-tag-promotion-design.md`.
 Исходная точка: `main` после сбора данных (приёмник `contribute.sampledicer.pro`).
-Статус этапа: ждёт четырёх решений владельца из конца ТЗ.
+Статус этапа: выполнен; владелец принял предложенные пороги и приватный датасет. Публикация датасета (P1) не входит: вариант A.
 
 ## Steps
 
 ### Происхождение данных (схема 14)
-- [ ] O1. `ml_feedback_samples.origin` (`user`/`auto`/`legacy`), `recordFeedback(..., origin)`, миграция старых строк в `legacy`.
-- [ ] O2. Оба машинных вызова (`AutoTagService`, пакетное применение авто-тегов) передают `auto`; оба пользовательских — `user`.
-- [ ] O3. `contributionRecords` отдаёт только `origin='user'`; тест на смешанную таблицу.
-- [ ] O4. Исправить `typeIsCustom`: встроенный список типов — только `canonicalSmartTypeNames()`, без пользовательских `custom_types`.
+- [x] O1. `ml_feedback_samples.origin` (`user`/`auto`/`legacy`), `recordFeedback(..., origin)`, миграция старых строк в `legacy`.
+- [x] O2. Оба машинных вызова (`AutoTagService`, пакетное применение авто-тегов) передают `auto`; оба пользовательских — `user`.
+- [x] O3. `contributionRecords` отдаёт только `origin='user'`; тест на смешанную таблицу.
+- [x] O4. Исправить `typeIsCustom`: встроенный список — `standardSampleTypeNames()` (канонические типы плюс имена меню Type), без пользовательских `custom_types`.
 
 ### Выгрузка
-- [ ] E1. `export.mjs`: `--stats`, `--min-installs`, `report.md`, проверка диапазонов и `featureSchema`.
-- [ ] E2. Node-тесты выгрузки на фикстуре: дубли `recordId`, надгробия, фильтр установок, плохой диапазон.
-- [ ] E3. Прогон на реальном бакете (или на пустом — отчёт с нулями), сохранение отчёта в `services/contribute-worker/out/` (не в git).
+- [x] E1. `export.mjs`: `--stats`, `--min-installs`, `report.md`, проверка диапазонов и `featureSchema`.
+- [x] E2. Node-тесты выгрузки на фикстуре: дубли `recordId`, надгробия, фильтр установок, плохой диапазон.
+- [x] E3. Прогон на реальном бакете (или на пустом — отчёт с нулями), сохранение отчёта в `services/contribute-worker/out/` (не в git).
 
 ### Обучение
-- [ ] T1. `services/training/package.json`, `build-prototypes.mjs`: farthest-first, пороги, лимит 20 записей с установки на метку, детерминированный JSON.
-- [ ] T2. `evaluate.mjs`: leave-one-install-out, «было/стало», метрики типа по группам и тегов top-3 precision/recall, `training-report.md`.
-- [ ] T3. Vitest: побайтная воспроизводимость, синтетика с выбросом, точность на фикстуре, порог отказа.
-- [ ] T4. Сборка реального `resources/ml/global_prototypes.json` из текущих данных, если данных хватает; иначе пустой файл со схемой и запись в отчёте.
+- [x] T1. `services/training/package.json`, `build-prototypes.mjs`: farthest-first, пороги, лимит 20 записей с установки на метку, детерминированный JSON.
+- [x] T2. `evaluate.mjs`: leave-one-install-out, «было/стало», метрики типа по группам и тегов top-3 precision/recall, `training-report.md`.
+- [x] T3. Тесты (встроенный `node:test`, без зависимостей): побайтная воспроизводимость, синтетика с выбросом, точность на фикстуре, порог отказа.
+- [x] T4. Сборка реального `resources/ml/global_prototypes.json` из текущих данных, если данных хватает; иначе пустой файл со схемой и запись в отчёте.
 
 ### Приложение
-- [ ] A1. `AdaptiveClassifier::loadGlobalPrototypes(json)`, поле источника в прототипе, штраф 0.95 до порогов, приоритет локального при разнице до 0.02.
-- [ ] A2. `AcousticClassifierService`: источник `global_adaptive` в кандидате, лог при битом файле; `hasPrototypes()` остаётся про локальные.
-- [ ] A2b. `SmartResolver`: `global_adaptive` — приоритет сразу ниже `user_adaptive`, группа `adaptive`.
-- [ ] A2c. Глобальные теги не подаются в AutoTag (тест: адаптивный путь AutoTag не включается от файла).
-- [ ] A3. `MainComponent`: загрузка `BinaryData::global_prototypes_json` после `loadFromRepository`; строка в About.
-- [ ] A4. CMake: ресурс в BinaryData (файл коммитится, пустой список меток допустим), тест на наличие и на несовпадение `featureSchema`.
-- [ ] A5. Catch2 `[contribute][training]`: загрузка, отказ на битом файле, приоритет локального, источник.
+- [x] A1. `AdaptiveClassifier::loadGlobalPrototypes(json)`, поле источника в прототипе, штраф 0.95 до порогов, приоритет локального при разнице до 0.02.
+- [x] A2. `AcousticClassifierService`: источник `global_adaptive` в кандидате, лог при битом файле; `hasPrototypes()` остаётся про локальные.
+- [x] A2b. `SmartResolver`: `global_adaptive` — приоритет сразу ниже `user_adaptive`, группа `adaptive`.
+- [x] A2c. Глобальные теги не подаются в AutoTag (тест: адаптивный путь AutoTag не включается от файла).
+- [x] A3. `MainComponent`: загрузка `BinaryData::global_prototypes_json` после `loadFromRepository`; строка в About.
+- [x] A4. CMake: ресурс в BinaryData (файл коммитится, пустой список меток допустим), тест на наличие и на несовпадение `featureSchema`.
+- [x] A5. Catch2 `[contribute][training]`: загрузка, отказ на битом файле, приоритет локального, источник.
 
 ### Теги и типы
-- [ ] G1. `candidates.mjs`: частоты, покрытие установок, отбраковка мусора, `docs/tag-candidates.md`.
-- [ ] G2. Тесты кандидатов на синтетике (порог 5 установок, 1%, мусорные строки).
-- [ ] G3. Решение владельца по списку; применение тегов в `standardTags` + блок «schema 14» и типов в `NameHeuristics`.
-- [ ] G4. `docs/TAG_PROMOTION.md` с решениями и датами.
+- [x] G1. `candidates.mjs`: частоты, покрытие установок, отбраковка мусора, `docs/tag-candidates.md`.
+- [x] G2. Тесты кандидатов на синтетике (порог 5 установок, 1%, мусорные строки).
+- [x] G3. Решение владельца по списку: кандидатов нет (бакет пуст), решение записано в `docs/TAG_PROMOTION.md`; применение тегов и типов — отдельным коммитом, когда появятся кандидаты.
+- [x] G4. `docs/TAG_PROMOTION.md` с решениями и датами.
 
 ### Датасет (по решению)
-- [ ] P1. Если публикуем: скрипт и README датасета для Hugging Face под CC0, порядок обновления.
-- [ ] P2. Проверка, что удаление установки убирает её из следующей пересборки (тест выгрузки).
+- [ ] P1. Если публикуем: скрипт и README датасета для Hugging Face под CC0, порядок обновления. Не выполняется: владелец выбрал приватный датасет в R2.
+- [x] P2. Проверка, что удаление установки убирает её из следующей пересборки (тест выгрузки).
 
 ### Завершение
-- [ ] F1. Полный прогон C++ и Node тестов, сборка приложения и плагина.
-- [ ] F0. После решения владельца по `legacy`: если включаем — флаг в отчёте; если исключаем — оставить как есть.
-- [ ] F2. `graphify update .`, `docs/BACKLOG.md` (пункты 12 и 13), `docs/ARCHITECTURE.md`, `docs/PRIVACY.md` (что именно уходит из строк `user`).
-- [ ] F3. Merge в `main` и push.
+- [x] F1. Полный прогон C++ и Node тестов, сборка приложения и плагина.
+- [x] F0. После решения владельца по `legacy`: если включаем — флаг в отчёте; если исключаем — оставить как есть.
+- [x] F2. `graphify update .`, `docs/BACKLOG.md` (пункты 12 и 13), `docs/ARCHITECTURE.md`, `docs/PRIVACY.md` (что именно уходит из строк `user`).
+- [x] F3. Merge в `main` и push.
 
 ## Порядок и зависимости
 

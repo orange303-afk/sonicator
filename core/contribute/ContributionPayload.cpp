@@ -44,19 +44,7 @@ Batch buildBatch(const std::vector<Record>& records, const Vocabulary& vocabular
         if (out.size() >= maxRecordsPerBatch) break;
         if (record.recordId.isEmpty()) continue;
         if ((int) record.features.size() != featureCount) continue;
-        const auto type = cleanLabel(record.type);
-        if (type.isEmpty()) continue;
-
-        auto* entry = new juce::DynamicObject();
-        entry->setProperty("recordId", record.recordId.toLowerCase());
-
-        juce::Array<juce::var> features;
-        for (const auto value : record.features) features.add((double) cleanFeature(value));
-        entry->setProperty("features", features);
-        entry->setProperty("featureSchema", featureSchemaVersion);
-
-        entry->setProperty("type", type);
-        entry->setProperty("typeIsCustom", ! vocabulary.types.contains(type, true));
+        const auto type = record.typeConfirmed ? cleanLabel(record.type) : juce::String();
 
         juce::Array<juce::var> tags;
         int emitted = 0;
@@ -70,6 +58,22 @@ Batch buildBatch(const std::vector<Record>& records, const Vocabulary& vocabular
             tag->setProperty("custom", ! vocabulary.tags.contains(name, true));
             tags.add(juce::var(tag));
             ++emitted;
+        }
+        // A tag action confirms tags, not the type the app resolved; that record carries tags only.
+        if (type.isEmpty() && emitted == 0) continue;
+
+        auto* entry = new juce::DynamicObject();
+        entry->setProperty("recordId", record.recordId.toLowerCase());
+
+        juce::Array<juce::var> features;
+        for (const auto value : record.features) features.add((double) cleanFeature(value));
+        entry->setProperty("features", features);
+        entry->setProperty("featureSchema", featureSchemaVersion);
+
+        if (type.isNotEmpty())
+        {
+            entry->setProperty("type", type);
+            entry->setProperty("typeIsCustom", ! vocabulary.types.contains(type, true));
         }
         entry->setProperty("tags", tags);
 

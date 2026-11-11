@@ -117,7 +117,8 @@ target_compile_definitions(SonicatorCore PUBLIC
 target_link_libraries(SonicatorCore PUBLIC
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib)
 juce_add_binary_data(SonicatorAssets SOURCES
-    resources/branding/logo-silver.png)
+    resources/branding/logo-silver.png
+    resources/ml/global_prototypes.json)
 add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/SongProgress.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/settings/SettingsPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp)
 if(APPLE)
     target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.mm)

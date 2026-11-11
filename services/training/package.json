@@ -1,0 +1,13 @@
+{
+  "name": "sonicator-training",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Builds global prototypes, evaluates them and reports standard-tag candidates from contributed data.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.node.mjs",
+    "build": "node build-prototypes.mjs",
+    "evaluate": "node evaluate.mjs",
+    "candidates": "node candidates.mjs"
+  }
+}

@@ -8,4 +8,7 @@ std::vector<SmartCandidate> extractNameCandidates(const juce::String& path);
 juce::String canonicalSmartTypeToken(const juce::String& token);
 // Every type name the heuristics know. A user type outside this list is "custom" for the intake.
 juce::StringArray canonicalSmartTypeNames();
+// Every type a person can pick in the Type menu, including labels that a file name cannot infer
+// (Piano, Pluck, Stab). This is the built-in vocabulary the intake reports as standard.
+juce::StringArray standardSampleTypeNames();
 } // namespace sonicator

@@ -26,8 +26,8 @@ interface BatchRecord {
   recordId: string;
   features: number[];
   featureSchema: number;
-  type: string;
-  typeIsCustom: boolean;
+  type?: string;
+  typeIsCustom?: boolean;
   tags: { name: string; custom: boolean }[];
   key?: string;
   bpm?: number;
@@ -96,9 +96,15 @@ function isRecord(value: unknown): value is BatchRecord {
   if (!record.features.every((item) => isFiniteNumber(item, 0, 1))) return false;
   if (!isFiniteNumber(record.featureSchema, 1, 10_000)) return false;
   if (!Number.isInteger(record.featureSchema)) return false;
-  if (!isLabel(record.type)) return false;
-  if (typeof record.typeIsCustom !== "boolean") return false;
+  const hasType = record.type !== undefined;
+  if (hasType)
+  {
+    if (!isLabel(record.type)) return false;
+    if (typeof record.typeIsCustom !== "boolean") return false;
+  }
+  else if (record.typeIsCustom !== undefined) return false;
   if (!Array.isArray(record.tags) || record.tags.length > 20) return false;
+  if (!hasType && record.tags.length === 0) return false;
   for (const tag of record.tags) {
     if (typeof tag !== "object" || tag === null) return false;
     const entry = tag as { name?: unknown; custom?: unknown };

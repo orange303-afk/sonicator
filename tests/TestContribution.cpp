@@ -3,11 +3,34 @@
 #include "core/contribute/ContributionUploader.h"
 #include "core/database/SampleRepository.h"
 #include "core/settings/AppSettings.h"
+#include "core/smart/SmartResolver.h"
+#include "core/smart/NameHeuristics.h"
 #include "TestHelpers.h"
+#include <sqlite3.h>
 using namespace sonicator;
 using namespace sonicator::contribute;
 
 namespace {
+using FeedbackOrigin = SampleRepository::FeedbackOrigin;
+void rawExec(const juce::File& file, const char* sql)
+{
+    sqlite3* db = nullptr;
+    REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &db) == SQLITE_OK);
+    REQUIRE(sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_close(db);
+}
+int rawScalar(const juce::File& file, const char* sql)
+{
+    sqlite3* db = nullptr;
+    REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &db) == SQLITE_OK);
+    sqlite3_stmt* s = nullptr;
+    REQUIRE(sqlite3_prepare_v2(db, sql, -1, &s, nullptr) == SQLITE_OK);
+    const int value = sqlite3_step(s) == SQLITE_ROW ? sqlite3_column_int(s, 0) : -1;
+    sqlite3_finalize(s);
+    sqlite3_close(db);
+    return value;
+}
+
 std::vector<Record> oneRecord()
 {
     Record record;
@@ -226,7 +249,7 @@ TEST_CASE("Repository stores a stable contribution id and a per-catalog watermar
     const auto id = repo.upsert(sample);
 
     const std::vector<float> features { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f };
-    repo.recordFeedback(id, "kick", { "acoustic" }, features);
+    repo.recordFeedback(id, "kick", { "acoustic" }, features, SampleRepository::FeedbackOrigin::user);
 
     auto rows = repo.contributionRecords(0, 10);
     REQUIRE(rows.size() == 1);
@@ -238,7 +261,7 @@ TEST_CASE("Repository stores a stable contribution id and a per-catalog watermar
 
     // A correction keeps the same record id, so the export can replace the earlier label.
     const auto firstId = rows[0].recordId;
-    repo.recordFeedback(id, "snare", { "acoustic" }, features);
+    repo.recordFeedback(id, "snare", { "acoustic" }, features, SampleRepository::FeedbackOrigin::user);
     rows = repo.contributionRecords(0, 10);
     REQUIRE(rows.size() == 1);
     CHECK(rows[0].recordId == firstId);
@@ -250,8 +273,178 @@ TEST_CASE("Repository stores a stable contribution id and a per-catalog watermar
     CHECK(repo.contributionRecords(rows[0].updatedAt, 10).empty());
 }
 
+TEST_CASE("Only user-origin feedback is eligible for contribution", "[contribute][database]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("origins.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+
+    SampleRecord first;
+    first.filePath = "/library/kick.wav";
+    first.fileName = "kick.wav";
+    first.fileHash = "hash-kick";
+    const auto userSample = repo.upsert(first);
+
+    SampleRecord second;
+    second.filePath = "/library/snare.wav";
+    second.fileName = "snare.wav";
+    second.fileHash = "hash-snare";
+    const auto machineSample = repo.upsert(second);
+
+    const std::vector<float> features(14, 0.25f);
+    repo.recordFeedback(userSample, "kick", { "acoustic" }, features, FeedbackOrigin::user);
+    repo.recordFeedback(machineSample, "snare", { "acoustic" }, features, FeedbackOrigin::autoTag);
+
+    // The local prototype store still sees both rows: the app keeps learning from its own tags.
+    CHECK(repo.allFeedback().size() == 2);
+
+    // Only a person's confirmation may leave the machine.
+    const auto rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].targetType == "kick");
+}
+
+TEST_CASE("Rows written before schema 14 count as legacy and are not contributed", "[contribute][database]")
+{
+    TestDirectory t;
+    const auto file = t.dir.getChildFile("legacy.sqlite");
+    {
+        Database db(file);
+        SampleRepository repo(db);
+        repo.createTables();
+        SampleRecord sample;
+        sample.filePath = "/library/pad.wav";
+        sample.fileName = "pad.wav";
+        sample.fileHash = "hash-pad";
+        const auto id = repo.upsert(sample);
+        repo.recordFeedback(id, "Pad", { "Pad" }, std::vector<float>(14, 0.4f),
+                            FeedbackOrigin::user);
+    }
+    // Shape of a catalog written by the build before the origin column existed.
+    rawExec(file,
+            "ALTER TABLE ml_feedback_samples DROP COLUMN origin; PRAGMA user_version=13;");
+
+    Database db(file);
+    SampleRepository repo(db);
+    repo.createTables();
+    CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 14);
+    CHECK(repo.allFeedback().size() == 1);            // legacy rows stay on disk
+    CHECK(repo.contributionRecords(0, 10).empty());   // and out of the dataset
+}
+
+TEST_CASE("A machine write never replaces a person's confirmation", "[contribute][database]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("no-downgrade.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+
+    SampleRecord sample;
+    sample.filePath = "/library/kick.wav";
+    sample.fileName = "kick.wav";
+    sample.fileHash = "hash-kick";
+    const auto id = repo.upsert(sample);
+
+    const std::vector<float> features(14, 0.3f);
+    repo.recordFeedback(id, "kick", { "acoustic" }, features, FeedbackOrigin::user);
+    CHECK(repo.hasUserFeedback(id));
+
+    // AutoTag later applies a tag and would have overwritten the row with its own guess.
+    repo.recordFeedback(id, "snare", { "acoustic", "punchy" }, features, FeedbackOrigin::autoTag);
+
+    const auto rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].targetType == "kick");
+    CHECK_FALSE(rows[0].tags.contains("punchy"));
+    REQUIRE(repo.allFeedback().size() == 1);
+    CHECK(repo.allFeedback()[0].targetType == "kick");
+}
+
+TEST_CASE("A tag action exports tags without claiming the resolved type", "[contribute][database]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("type-origin.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+
+    SampleRecord sample;
+    sample.filePath = "/library/pad.wav";
+    sample.fileName = "pad.wav";
+    sample.fileHash = "hash-pad";
+    const auto id = repo.upsert(sample);
+
+    const std::vector<float> features(14, 0.4f);
+    repo.recordFeedback(id, "Pad", { "warm" }, features, FeedbackOrigin::user);
+    auto rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 1);
+    CHECK_FALSE(rows[0].typeConfirmed);
+
+    SmartOverride overrideType;
+    overrideType.textValue = "Pad";
+    repo.setSmartOverride(id, SmartField::Type, overrideType);
+    rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].typeConfirmed);
+}
+
+TEST_CASE("A batch may carry tags without a type", "[contribute]")
+{
+    auto records = oneRecord();
+    records[0].typeConfirmed = false;
+    records[0].type = "Pad"; // what the app resolved, not what the person confirmed
+    const auto batch = buildBatch(records, vocabulary(),
+        "3f2a8c1e-7b4d-4a9e-9c2f-1d6b8a0e5f31", "9b1d6c33-2e58-4f07-8a41-0c7d5e9b2a64",
+        "0.4.2", "mac", juce::Time::getCurrentTime());
+    REQUIRE(batch.recordCount == 1);
+    auto parsed = juce::JSON::parse(batch.json);
+    const auto recordsValue = parsed.getDynamicObject()->getProperty("records");
+    auto* recordsArray = recordsValue.getArray();
+    REQUIRE(recordsArray != nullptr);
+    auto* record = (*recordsArray)[0].getDynamicObject();
+    REQUIRE(record != nullptr);
+    CHECK_FALSE(record->hasProperty("type"));
+    CHECK_FALSE(record->hasProperty("typeIsCustom"));
+    const auto tagsValue = record->getProperty("tags");
+    REQUIRE(tagsValue.getArray() != nullptr);
+    CHECK(tagsValue.getArray()->size() == 2);
+
+    // Without a type and without tags there is nothing to learn from.
+    auto empty = oneRecord();
+    empty[0].typeConfirmed = false;
+    empty[0].tags.clear();
+    const auto emptyBatch = buildBatch(empty, vocabulary(),
+        "3f2a8c1e-7b4d-4a9e-9c2f-1d6b8a0e5f31", "9b1d6c33-2e58-4f07-8a41-0c7d5e9b2a64",
+        "0.4.2", "mac", juce::Time::getCurrentTime());
+    CHECK(emptyBatch.recordCount == 0);
+}
+
+TEST_CASE("A type offered by the Type menu counts as standard", "[contribute]")
+{
+    CHECK(standardSampleTypeNames().contains("Piano", true));
+    CHECK_FALSE(canonicalSmartTypeNames().contains("Piano", true));
+
+    auto records = oneRecord();
+    records[0].type = "Piano";
+    Vocabulary shipped;
+    shipped.types = standardSampleTypeNames();
+    shipped.tags = vocabulary().tags;
+    const auto batch = buildBatch(records, shipped,
+        "3f2a8c1e-7b4d-4a9e-9c2f-1d6b8a0e5f31", "9b1d6c33-2e58-4f07-8a41-0c7d5e9b2a64",
+        "0.4.2", "mac", juce::Time::getCurrentTime());
+    auto parsed = juce::JSON::parse(batch.json);
+    const auto recordsValue = parsed.getDynamicObject()->getProperty("records");
+    auto* parsedRecords = recordsValue.getArray();
+    REQUIRE(parsedRecords != nullptr);
+    auto* record = (*parsedRecords)[0].getDynamicObject();
+    REQUIRE(record != nullptr);
+    CHECK_FALSE((bool) record->getProperty("typeIsCustom"));
+}
+
 TEST_CASE("Contribution settings persist and default to off", "[contribute][settings]")
 {
+    // Version 2 changed what is eligible: pre-schema-14 rows stay behind, so everyone re-consents.
+    CHECK(AppSettings::currentContributionConsentVersion >= 2);
     AppSettings s;
     CHECK_FALSE(s.contributeTrainingData);
     CHECK(s.contributionConsentVersion == 0);

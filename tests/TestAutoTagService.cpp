@@ -253,7 +253,7 @@ TEST_CASE("AutoTag proposes learned prototype tag when adaptive classifier match
     AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(999, "Pad", { "Pad" }, features);
 
     // Give unnamed sample similar prototype features via feedback recording
-    f.repo->recordFeedback(unnamed, "Pad", { "Pad" }, features);
+    f.repo->recordFeedback(unnamed, "Pad", { "Pad" }, features, SampleRepository::FeedbackOrigin::user);
 
     AutoTagService service(*f.repo);
     REQUIRE(service.startSelected({ unnamed }));

@@ -36,7 +36,7 @@ private:
     juce::Label title, appearance, themeLabel, scaleLabel, languageHeading, languageLabel,
                  languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
                  audioHeading, reportHeading, reportNote, aboutHeading, productLabel, authorLabel,
-                 supportLabel, creditsLabel;
+                 supportLabel, creditsLabel, prototypesLabel;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::ToggleButton contributeDataToggle;
     juce::Label contributionNote;
