@@ -19,4 +19,10 @@ target_sources(SonicatorTests PRIVATE TestAcousticAcceptance.cpp)
 target_sources(SonicatorTests PRIVATE TestAdaptiveClassifier.cpp)
 target_compile_definitions(SonicatorTests PRIVATE SONICATOR_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures" JUCE_MODAL_LOOPS_PERMITTED=1)
 set_target_properties(SonicatorTests PROPERTIES BUILD_RPATH "${onnxruntime_SOURCE_DIR}/lib")
+if(WIN32)
+    add_custom_command(TARGET SonicatorTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll" "$<TARGET_FILE_DIR:SonicatorTests>"
+        VERBATIM)
+endif()
 add_test(NAME SonicatorTests COMMAND SonicatorTests)

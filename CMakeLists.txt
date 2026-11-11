@@ -7,7 +7,20 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 include(FetchContent)
-find_package(ZLIB REQUIRED)
+# zlib is used by JUCE and by the NKI reader. macOS and Linux ship it with the SDK; Windows does not,
+# so the build fetches the upstream archive there instead of requiring vcpkg or a manual install.
+find_package(ZLIB)
+if(NOT ZLIB_FOUND)
+    FetchContent_Declare(zlib
+        URL "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz"
+        URL_HASH SHA256=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23)
+    set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(zlib)
+    if(NOT TARGET ZLIB::ZLIB)
+        add_library(ZLIB::ZLIB ALIAS zlibstatic)
+    endif()
+    message(STATUS "zlib: system copy not found, using the fetched static build")
+endif()
 FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
     GIT_TAG 9.0.5 GIT_SHALLOW TRUE)
@@ -121,6 +134,13 @@ juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
 target_sources(Sonicator PRIVATE app/Main.cpp)
 target_link_libraries(Sonicator PRIVATE SonicatorUI)
 set_target_properties(Sonicator PROPERTIES BUILD_RPATH "${onnxruntime_SOURCE_DIR}/lib")
+if(WIN32)
+    # BUILD_RPATH has no effect on Windows; the runtime DLL must sit next to the executable.
+    add_custom_command(TARGET Sonicator POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll" "$<TARGET_FILE_DIR:Sonicator>"
+        VERBATIM)
+endif()
 if(APPLE)
     # The linker's signature covers only the Mach-O; seal the complete local app bundle.
     # This is an ad-hoc development signature, not Developer ID signing/notarization.
