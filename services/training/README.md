@@ -54,6 +54,29 @@ Measured on the owner's export of 2026-11-11 (4526 records, 1 install, 13 types)
 The local path (every confirmed row of the person's own library is a prototype, no clustering) reaches
 80.5% on the same records, which is the ceiling the shipped file is compared against.
 
+## Dataset feature extraction
+
+The datasets and the app must produce the same numbers, so both use one implementation:
+`core/dsp/FeatureExtractorV2`. The tool is off by default:
+
+```bash
+cmake --preset release -DSONICATOR_BUILD_TRAINING_TOOLS=ON
+ninja -C ~/Library/Caches/sonicator-build/release sonicator-features
+~/Library/Caches/sonicator-build/release/tools/sonicator-features/sonicator-features_artefacts/Release/sonicator-features \
+    --in /Volumes/1TBSSD/Datasets/nsynth/audio --walk --out out/nsynth.jsonl
+```
+
+It writes one JSON line per file: `path`, `featureSchema` (2), `dimensions` (84), `sampleRate`,
+`durationSec`, `nyquistHz` (the file's limit, not the content's band), `inBandEnergyShare` (how much of
+the sound falls inside the 40–8000 Hz analysis band; near zero for a hi-hat that lives above 8 kHz) and
+`features`. Analysis uses the first 10 seconds (`readAnalysisAudio`),
+so a longer clip is represented by its start. Files that fail (missing, unreadable, non-finite samples)
+are reported on stderr and skipped.
+
+The layout, the 40 Hz–8 kHz analysis band and the known resolution limits are documented at the top of
+`core/dsp/FeatureExtractorV2.h`. Labels are not part of the line: they come from the dataset's own
+metadata, which the ingest step will read.
+
 ## Datasets and licences
 
 `datasets/manifest.json` lists every public dataset with its licence and a tier:
