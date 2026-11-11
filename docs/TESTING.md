@@ -42,9 +42,12 @@ Notes:
 - A Release-only flake was found here: `Changing image sample stops old playback before the new decode
   completes` waited a fixed 60 ms for the transport to start and failed on the slower runner. The wait
   is now bounded and condition-driven, and the assertion itself is unchanged.
-- The CI suite runs 651 cases; four real-library tests skip because Reason and Ableton packs are not
+- The CI suite runs 657 cases; four real-library tests skip because Reason and Ableton packs are not
   installed on the runners, which is why the CI assertion count is lower than a local run on a machine
   that has them.
+- The VST3/AU spike target is not part of CI. It was rebuilt separately against the new settings panel
+  and still succeeds (`.github` and `plugin/` stay in one repository, but the plugin job is a later
+  stage).
 
 ## Stage 0: hygiene, licence and CI preparation (2026-11-11)
 

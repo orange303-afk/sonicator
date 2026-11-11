@@ -132,7 +132,17 @@ Task C4: complete. `.github/ISSUE_TEMPLATE/`: `bug_report.md`, `feature_request.
 `format_support.md`. Выбраны markdown-шаблоны, а не issue forms, потому что только markdown принимает
 предзаполненный `body` в URL — на этом построена кнопка Report.
 
-Task F2: (заполняется после зелёного прогона на `main`).
+Task F2: complete. Прогон на `main` (push в `0fea3dd`) завершился успешно: macOS Debug и Release passed,
+Windows — informational failure с теми же 22 падениями. Merge части B в `main` сделан fast-forward,
+PR #1 помечен GitHub как merged, ветка `ci/github-actions` удаляется.
+
+Fact F2: плагин VST3/AU пересобирается с новым `SettingsPanel`: отдельный каталог
+`~/Library/Caches/sonicator-plugin-spike2` (старый `sonicator-plugin-spike` сломан — его кэш ссылается
+на удалённый `build/_deps`), сборка `SonicatorPluginSpike_VST3` и `_AU` проходит, подпись и манифест
+на месте.
+
+Fact F2: ярлыки `bug`, `enhancement` уже были в репозитории, `format-support` создан.
+
 
 
 Task D1: complete. Заголовок без «Phase 1»; схема `user_version=12` с описанием версий 8–12 по коду

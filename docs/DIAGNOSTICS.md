@@ -64,6 +64,8 @@ buttons exist and that the panel renders in both themes.
 
 ## Not implemented in this stage
 
+- The VST3/AU plugin does not install its own logger yet: opening Settings inside a plugin shows the
+  report buttons and the environment, but the log tail is usually empty there.
 - Automatic upload and duplicate grouping: both need a server holding a GitHub token, because a token
   shipped inside an open-source binary is public. Filed reports are grouped by hand for now.
 - Reading macOS `~/Library/Logs/DiagnosticReports`: the app's own marker is enough and needs no system
