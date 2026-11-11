@@ -72,7 +72,8 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     creditsLabel.setText(juce::String::fromUTF8(
         "JUCE 9.0.5  ·  SQLite 3.47.2  ·  libxmp 4.6.2  ·  ONNX Runtime 1.20.1  ·  Catch2 (tests)\n"
         "Analysis: own DSP - YIN pitch, chroma key, spectral-flux rhythm, adaptive prototypes.\n"
-        "No network, no pretrained model weights. REX2 decoder based on VelociLoops (Unlicense)."),
+        "No network, no pretrained model weights. REX2 decoder based on VelociLoops (Unlicense).\n"
+        "Licensed under AGPL-3.0-or-later."),
         juce::dontSendNotification);
     creditsLabel.setFont(juce::FontOptions(10.5f));
     creditsLabel.setJustificationType(juce::Justification::topLeft);
@@ -192,6 +193,8 @@ void SettingsPanel::lookAndFeelChanged()
     contributeDataToggle.setColour(juce::ToggleButton::textColourId, theme::text);
     contributeDataToggle.setColour(juce::ToggleButton::tickColourId, theme::accent);
     authorLabel.setColour(juce::Label::textColourId,theme::muted);
+    productLabel.setColour(juce::Label::textColourId,theme::text);
+    title.setColour(juce::Label::textColourId,theme::text);
     supportLabel.setColour(juce::Label::textColourId,theme::muted);
     creditsLabel.setColour(juce::Label::textColourId,theme::muted);
     for (auto* link : std::array<juce::HyperlinkButton*,5>{&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
@@ -311,7 +314,7 @@ void SettingsPanel::resized()
         kofi.setBounds(left);
         boosty.setBounds(area);
     });
-    add(44, 10, false, [this](juce::Rectangle<int> area) { creditsLabel.setBounds(area); });
+    add(58, 10, false, [this](juce::Rectangle<int> area) { creditsLabel.setBounds(area); });
     if (close.isVisible())
         add(30, 12, false, [this](juce::Rectangle<int> area) { close.setBounds(area.removeFromRight(110)); });
 

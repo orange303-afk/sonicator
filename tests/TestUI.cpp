@@ -230,7 +230,19 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
             credits = credits || (label->getText().contains("JUCE")
                                   && label->getText().contains("No network"));
     REQUIRE(credits);
+    bool licence = false;
+    for (auto* child : panel.getChildren())
+        if (auto* label = dynamic_cast<juce::Label*>(child))
+            licence = licence || label->getText().contains("AGPL-3.0-or-later");
+    REQUIRE(licence);
     panel.setBounds(0,0,560,800);
+    // The credits block must still hold all four lines after the licence line was added.
+    bool fits = false;
+    for (auto* child : panel.getChildren())
+        if (auto* label = dynamic_cast<juce::Label*>(child))
+            if (label->getText().contains("AGPL-3.0-or-later"))
+                fits = label->getHeight() >= juce::roundToInt(label->getFont().getHeight() * 4.0f);
+    REQUIRE(fits);
     const auto image = panel.createComponentSnapshot(panel.getLocalBounds());
     REQUIRE(image.isValid());
     const auto shot = juce::SystemStats::getEnvironmentVariable("SONICATOR_SETTINGS_SCREENSHOT",{});
@@ -239,6 +251,18 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
         auto stream = juce::File(shot).createOutputStream(); REQUIRE(stream != nullptr);
         juce::PNGImageFormat png; REQUIRE(png.writeImageToStream(image,*stream));
     }
+    theme::apply(ThemeMode::Light);
+    panel.sendLookAndFeelChange();
+    const auto lightImage = panel.createComponentSnapshot(panel.getLocalBounds());
+    REQUIRE(lightImage.isValid());
+    const auto lightShot = juce::SystemStats::getEnvironmentVariable("SONICATOR_SETTINGS_SCREENSHOT_LIGHT",{});
+    if (lightShot.isNotEmpty())
+    {
+        auto stream = juce::File(lightShot).createOutputStream(); REQUIRE(stream != nullptr);
+        juce::PNGImageFormat png; REQUIRE(png.writeImageToStream(lightImage,*stream));
+    }
+    theme::apply(ThemeMode::Dark);
+    panel.sendLookAndFeelChange();
 }
 
 TEST_CASE("Saved window geometry is clamped and off-screen bounds are recentred", "[ui][window]")
