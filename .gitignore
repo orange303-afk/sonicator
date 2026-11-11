@@ -1,4 +1,6 @@
 /build*/
 /.superpowers/
+/services/contribute-worker/out/
+/services/training/out/
 .DS_Store
 /graphify-out/
