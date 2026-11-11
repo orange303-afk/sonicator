@@ -8,6 +8,7 @@
     "test": "node --test test/*.node.mjs",
     "build": "node build-prototypes.mjs",
     "evaluate": "node evaluate.mjs",
-    "candidates": "node candidates.mjs"
+    "candidates": "node candidates.mjs",
+    "credits": "node generate-credits.mjs"
   }
 }

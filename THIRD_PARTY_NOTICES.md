@@ -71,3 +71,11 @@ used as references; they are not redistributed.
 
 All audio fixtures in `tests/fixtures/` are generated tones created for this project. The application
 icon and wordmark in `resources/branding/` are original artwork by the project author.
+
+## Training data
+
+The shipped global model is built from public audio datasets and from contributed records. Every
+dataset, its version, its licence and the attribution line the licence requires are listed in
+[docs/DATA_CREDITS.md](docs/DATA_CREDITS.md); that file is generated from
+`services/training/datasets/manifest.json`. No dataset audio is redistributed with this repository or
+with the application: only feature statistics derived from it.
