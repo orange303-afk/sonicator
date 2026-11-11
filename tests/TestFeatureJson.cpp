@@ -13,8 +13,9 @@ TEST_CASE("featureJsonLine is one deterministic JSON line", "[dsp][features][jso
     REQUIRE_FALSE(line.contains("\n"));
     REQUIRE(line.contains("\"featureSchema\":2"));
     REQUIRE(line.contains("\"dimensions\":84"));
-    REQUIRE(line.contains("\"durationSec\":1.5"));
-    REQUIRE(line.contains("\"bandwidthHz\":22050"));
+    REQUIRE(line.contains("\"durationSec\":1.500"));
+    REQUIRE(line.contains("\"nyquistHz\":22050"));
+    REQUIRE(line.contains("\"inBandEnergyShare\":"));
     REQUIRE(line == featureJsonLine(vector, "/tmp/a.wav", 44100.0, 1.5, 22050.0));
 }
 

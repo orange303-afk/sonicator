@@ -4,7 +4,7 @@
 namespace sonicator {
 
 juce::String featureJsonLine(const FeatureVectorV2& vector, const juce::String& path, double sampleRate,
-                             double durationSeconds, double bandwidthHz)
+                             double durationSeconds, double nyquistHz)
 {
     juce::String line;
     line << "{\"path\":" << juce::JSON::toString(juce::var(path), false)
@@ -12,7 +12,8 @@ juce::String featureJsonLine(const FeatureVectorV2& vector, const juce::String& 
          << ",\"dimensions\":" << FeatureExtractorV2::dimensions()
          << ",\"sampleRate\":" << juce::String(static_cast<int>(std::lround(sampleRate)))
          << ",\"durationSec\":" << juce::String(durationSeconds, 3)
-         << ",\"bandwidthHz\":" << juce::String(static_cast<int>(std::lround(bandwidthHz)))
+         << ",\"nyquistHz\":" << juce::String(static_cast<int>(std::lround(nyquistHz)))
+         << ",\"inBandEnergyShare\":" << juce::String(vector.inBandShare, 3)
          << ",\"features\":[";
     for (size_t i = 0; i < vector.values.size(); ++i)
     {

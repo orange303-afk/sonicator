@@ -6,12 +6,19 @@
 namespace sonicator {
 
 // A richer description of one sound than the schema-1 vector: spectral shape, band contrast, MFCC,
-// per-band envelopes, harmonic/percussive balance, modulation and stereo. Every value is in 0..1 and
-// every value is defined for any sample rate, because the analysis is limited to 40..8000 Hz.
+// per-band envelopes, harmonic/percussive balance, modulation and stereo. Every value is in 0..1.
+// The new groups are limited to 40..8000 Hz, so they mean the same thing for a 16 kHz source and a
+// 44.1 kHz one; the schema-1 block (0..13) comes from AcousticFeatures, which still sees the whole
+// band, so attack, decay, crest, zero-crossing rate, flux and pitch clarity do depend on the source
+// rate and on content above 8 kHz.
 struct FeatureVectorV2
 {
     std::vector<float> values;
     juce::String error;
+    // Share of the sound's total spectral energy that falls inside the 40..8000 Hz analysis band. A
+    // hi-hat that lives entirely above 8 kHz scores near zero: the vector then describes its noise
+    // floor, not the sound, and a training stage can tell the two apart.
+    float inBandShare = 0.0f;
 
     bool ok() const { return error.isEmpty() && ! values.empty(); }
 };

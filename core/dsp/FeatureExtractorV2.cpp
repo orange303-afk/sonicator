@@ -202,6 +202,7 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
     std::vector<std::array<double, 5>> bandPowers;
     std::vector<std::array<double, envelopeBands>> bandEnergies;
     std::vector<double> frameEnergy;
+    double inBandPower = 0.0, fullBandPower = 0.0;
 
     const float invChannels = 1.0f / static_cast<float>(numChannels);
     for (int offset = 0; offset < analysisSamples; offset += fftHop)
@@ -237,6 +238,16 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
         }
         double total = 0.0;
         for (double value : energies) total += value;
+        for (int k = binLow; k <= binHigh; ++k)
+        {
+            const double magnitude = static_cast<double>(spectrum[static_cast<size_t>(k)]) * invChannels;
+            inBandPower += magnitude * magnitude;
+        }
+        for (int k = 1; k < numBins - 1; ++k)
+        {
+            const double magnitude = static_cast<double>(spectrum[static_cast<size_t>(k)]) * invChannels;
+            fullBandPower += magnitude * magnitude;
+        }
         frames.push_back(std::move(band));
         bandPowers.push_back(powers);
         bandEnergies.push_back(energies);
@@ -249,6 +260,21 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
         out.error = "no frames";
         return out;
     }
+    out.inBandShare = fullBandPower > 1e-12 ? clamp01(inBandPower / fullBandPower) : 0.0f;
+
+    // Frames below 60 dB of the loudest one describe a tail, dither or padding, not the sound. They
+    // are left out of every statistic averaged over frames, so the length of a trailing silence does
+    // not change the vector.
+    std::vector<bool> keep(static_cast<size_t>(frameCount), true);
+    double loudestFrame = 0.0;
+    for (double energy : frameEnergy) loudestFrame = std::max(loudestFrame, energy);
+    int keptFrames = 0;
+    for (int f = 0; f < frameCount; ++f)
+    {
+        keep[static_cast<size_t>(f)] = frameEnergy[static_cast<size_t>(f)] >= loudestFrame * 1e-3;
+        if (keep[static_cast<size_t>(f)]) ++keptFrames;
+    }
+    if (keptFrames == 0) keep.assign(static_cast<size_t>(frameCount), true);
 
     // 4..8: five band shares, the top one ending at 8 kHz so every source agrees on its meaning.
     {
@@ -269,8 +295,10 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
         std::vector<std::array<double, shapeStats>> perFrame;
         perFrame.reserve(static_cast<size_t>(frameCount));
         const double bandHigh = std::min(analysisHighHz, analysisRate * 0.5);
-        for (const auto& band : frames)
+        for (int frame = 0; frame < frameCount; ++frame)
         {
+            if (! keep[static_cast<size_t>(frame)]) continue;
+            const auto& band = frames[static_cast<size_t>(frame)];
             double sum = 0.0, sumFrequency = 0.0;
             for (int i = 0; i < bandBins; ++i)
             {
@@ -358,8 +386,15 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
     // 32..37: band contrast, peak minus valley in dB over an octave band, averaged over frames.
     {
         std::vector<double> average(static_cast<size_t>(bandBins), 0.0);
-        for (const auto& band : frames)
-            for (int i = 0; i < bandBins; ++i) average[static_cast<size_t>(i)] += band[static_cast<size_t>(i)] / frameCount;
+        int averaged = 0;
+        for (int frame = 0; frame < frameCount; ++frame)
+            if (keep[static_cast<size_t>(frame)])
+            {
+                const auto& band = frames[static_cast<size_t>(frame)];
+                for (int i = 0; i < bandBins; ++i) average[static_cast<size_t>(i)] += band[static_cast<size_t>(i)];
+                ++averaged;
+            }
+        for (double& value : average) value /= std::max(1, averaged);
         for (int b = 0; b < contrastBands; ++b)
         {
             const double centre = contrastCentres[b];
@@ -382,12 +417,14 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
     {
         const auto filters = makeMelFilters(analysisRate);
         std::vector<double> averagePower(static_cast<size_t>(bandBins), 0.0);
-        for (const auto& band : frames)
-            for (int i = 0; i < bandBins; ++i)
-            {
-                const double magnitude = band[static_cast<size_t>(i)];
-                averagePower[static_cast<size_t>(i)] += magnitude * magnitude / frameCount;
-            }
+        for (int frame = 0; frame < frameCount; ++frame)
+            if (keep[static_cast<size_t>(frame)])
+                for (int i = 0; i < bandBins; ++i)
+                {
+                    const double magnitude = frames[static_cast<size_t>(frame)][static_cast<size_t>(i)];
+                    averagePower[static_cast<size_t>(i)] += magnitude * magnitude;
+                }
+        for (double& value : averagePower) value /= std::max(1, keptFrames);
 
         std::vector<double> logEnergies(static_cast<size_t>(melFilters), 0.0);
         for (int f = 0; f < melFilters; ++f)
@@ -416,8 +453,10 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
         // Per-frame variation of the same coefficients: frames are compared through the mean
         // spectrum, so the standard deviation uses each frame's own log-mel energies.
         std::vector<std::array<double, mfccCount>> perFrame;
-        for (const auto& band : frames)
+        for (int frame = 0; frame < frameCount; ++frame)
         {
+            if (! keep[static_cast<size_t>(frame)]) continue;
+            const auto& band = frames[static_cast<size_t>(frame)];
             std::vector<double> logFrame(static_cast<size_t>(melFilters), 0.0);
             for (int f = 0; f < melFilters; ++f)
             {
@@ -453,9 +492,33 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
         }
     }
 
-    // 64..75: attack, decay and early share for four bands.
+    // 64..75: attack, decay and early share for four bands. The last frame is a padded fragment of
+    // the buffer, so decay is measured up to the last frame that covers real samples; a band that
+    // holds almost none of the energy reports no attack and no decay rather than the shape of noise.
     {
+        const int fullFrames = analysisSamples >= fftSize ? (analysisSamples - fftSize) / fftHop + 1 : 1;
+        const int lastFull = std::max(0, std::min(frameCount, fullFrames) - 1);
         const double earlyFrames = earlyShareSeconds / secondsPerFrame;
+
+        std::array<double, envelopeBands> bandTotals {};
+        for (const auto& energies : bandEnergies)
+            for (int b = 0; b < envelopeBands; ++b) bandTotals[static_cast<size_t>(b)] += energies[static_cast<size_t>(b)];
+        const double loudestBand = *std::max_element(bandTotals.begin(), bandTotals.end());
+
+        const auto crossing = [](const std::vector<double>& envelope, int peakIndex, double threshold)
+        {
+            for (int f = 0; f <= peakIndex; ++f)
+            {
+                const double value = envelope[static_cast<size_t>(f)];
+                if (value < threshold) continue;
+                if (f == 0) return 0.0;
+                const double previous = envelope[static_cast<size_t>(f - 1)];
+                const double span = value - previous;
+                return span > 1e-12 ? f - 1 + (threshold - previous) / span : static_cast<double>(f);
+            }
+            return static_cast<double>(peakIndex);
+        };
+
         for (int b = 0; b < envelopeBands; ++b)
         {
             std::vector<double> envelope;
@@ -465,30 +528,28 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
 
             double peakValue = 0.0;
             int peakIndex = 0;
-            for (int f = 0; f < frameCount; ++f)
+            for (int f = 0; f <= lastFull; ++f)
                 if (envelope[static_cast<size_t>(f)] > peakValue)
                 {
                     peakValue = envelope[static_cast<size_t>(f)];
                     peakIndex = f;
                 }
 
+            const bool hasContent = loudestBand > 1e-12 && bandTotals[static_cast<size_t>(b)] > loudestBand * 1e-3;
             double attack = 0.0;
-            if (peakValue > 1e-9)
+            if (hasContent && peakValue > 1e-9)
             {
-                int first = 0, last = peakIndex;
-                for (int f = 0; f <= peakIndex; ++f)
-                    if (envelope[static_cast<size_t>(f)] >= 0.1 * peakValue) { first = f; break; }
-                for (int f = first; f <= peakIndex; ++f)
-                    if (envelope[static_cast<size_t>(f)] >= 0.9 * peakValue) { last = f; break; }
-                attack = static_cast<double>(std::max(0, last - first)) * secondsPerFrame;
+                const double first = crossing(envelope, peakIndex, 0.1 * peakValue);
+                const double last = crossing(envelope, peakIndex, 0.9 * peakValue);
+                attack = std::max(0.0, last - first) * secondsPerFrame;
             }
 
             double decay = 0.0;
-            if (peakValue > 1e-9 && peakIndex < frameCount - 1)
+            if (hasContent && peakValue > 1e-9 && peakIndex < lastFull)
             {
-                const double endValue = std::max(1e-9, envelope.back());
+                const double endValue = std::max(1e-9, envelope[static_cast<size_t>(lastFull)]);
                 const double dropDb = 20.0 * std::log10(peakValue / endValue);
-                const double seconds = static_cast<double>(frameCount - 1 - peakIndex) * secondsPerFrame;
+                const double seconds = static_cast<double>(lastFull - peakIndex) * secondsPerFrame;
                 if (seconds > 1e-4 && dropDb > 0.0) decay = dropDb / seconds;
             }
 
@@ -507,13 +568,17 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
     }
 
     // 76: share of energy in spectral peaks (a tone concentrates it, noise spreads it out).
-    // 77: mean positive frame-to-frame change of the normalised spectrum.
+    // 77: mean frame-to-frame change of the normalised spectrum, over frames that carry the sound.
     {
         double peakShare = 0.0;
         double flux = 0.0;
+        int shareFrames = 0, fluxPairs = 0;
         std::vector<float> previous;
-        for (const auto& band : frames)
+        bool previousKept = false;
+        for (int frame = 0; frame < frameCount; ++frame)
         {
+            const auto& band = frames[static_cast<size_t>(frame)];
+            const bool kept = keep[static_cast<size_t>(frame)];
             double sum = 0.0, peaks = 0.0;
             for (int i = 0; i < bandBins; ++i) sum += band[static_cast<size_t>(i)];
             const double threshold = sum / bandBins * 2.0;
@@ -524,9 +589,13 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
                     && magnitude >= band[static_cast<size_t>(i + 1)])
                     peaks += magnitude;
             }
-            peakShare += sum > 1e-12 ? peaks / sum : 0.0;
+            if (kept)
+            {
+                peakShare += sum > 1e-12 ? peaks / sum : 0.0;
+                ++shareFrames;
+            }
 
-            if (! previous.empty())
+            if (previousKept && kept)
             {
                 double difference = 0.0, normPrevious = 0.0;
                 for (int i = 0; i < bandBins; ++i)
@@ -535,12 +604,17 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
                                             - previous[static_cast<size_t>(i)]);
                     normPrevious += previous[static_cast<size_t>(i)];
                 }
-                if (normPrevious > 1e-12) flux += std::min(2.0, difference / normPrevious);
+                if (normPrevious > 1e-12)
+                {
+                    flux += std::min(2.0, difference / normPrevious);
+                    ++fluxPairs;
+                }
             }
             previous = band;
+            previousKept = kept;
         }
-        out.values[76] = clamp01(peakShare / frameCount);
-        out.values[77] = clamp01(frameCount > 1 ? 2.0 * flux / (frameCount - 1) : 0.0);
+        out.values[76] = clamp01(shareFrames > 0 ? peakShare / shareFrames : 0.0);
+        out.values[77] = clamp01(fluxPairs > 0 ? 2.0 * flux / fluxPairs : 0.0);
     }
 
     // 78..81: onset density, envelope periodicity, mean onset strength, low-band periodicity.
@@ -568,13 +642,17 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
 
         const double duration = static_cast<double>(analysisSamples) / analysisRate;
         out.values[78] = clamp01(duration > 0.0 ? onsets / duration / 10.0 : 0.0);
-        out.values[79] = clamp01(periodicity(logEnergy, secondsPerFrame, 0.08, 1.0));
+        // Periodicity of the onset strength, not of the envelope itself: a single decaying note has a
+        // smooth envelope with a high autocorrelation at short lags, while a loop repeats its onsets.
+        out.values[79] = clamp01(periodicity(delta, secondsPerFrame, 0.08, 1.0));
         out.values[80] = clamp01(frameCount > 1 ? strength / (frameCount - 1) / 3.0 : 0.0);
 
-        std::vector<double> lowBand;
-        lowBand.reserve(static_cast<size_t>(frameCount));
-        for (const auto& energies : bandEnergies) lowBand.push_back(std::log(std::sqrt(energies[0]) + 1e-9));
-        out.values[81] = clamp01(periodicity(lowBand, secondsPerFrame, 0.08, 1.0));
+        std::vector<double> lowLog(static_cast<size_t>(frameCount), 0.0);
+        for (int f = 0; f < frameCount; ++f) lowLog[static_cast<size_t>(f)] = std::log(std::sqrt(bandEnergies[static_cast<size_t>(f)][0]) + 1e-9);
+        std::vector<double> lowDelta(static_cast<size_t>(frameCount), 0.0);
+        for (int f = 1; f < frameCount; ++f)
+            lowDelta[static_cast<size_t>(f)] = std::max(0.0, lowLog[static_cast<size_t>(f)] - lowLog[static_cast<size_t>(f - 1)]);
+        out.values[81] = clamp01(periodicity(lowDelta, secondsPerFrame, 0.08, 1.0));
     }
 
     // 82..83: stereo width and channel correlation; mono sources get 0 and 1.
@@ -593,7 +671,9 @@ FeatureVectorV2 FeatureExtractorV2::extract(const juce::AudioBuffer<float>& buff
                 side += (l - r) * (l - r);
                 middle += (l + r) * (l + r);
             }
-            out.values[82] = middle > 1e-12 ? clamp01(std::sqrt(side / middle)) : 0.0f;
+            // side / (side + middle): 0 for mono, 0.5 for uncorrelated channels, 1 for anti-phase,
+            // and no division by zero when the channels cancel.
+            out.values[82] = side + middle > 1e-12 ? clamp01(side / (side + middle)) : 0.0f;
             out.values[83] = clamp01((pearson(left, right) + 1.0) / 2.0);
         }
         else

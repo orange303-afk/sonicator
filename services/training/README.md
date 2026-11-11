@@ -67,7 +67,9 @@ ninja -C ~/Library/Caches/sonicator-build/release sonicator-features
 ```
 
 It writes one JSON line per file: `path`, `featureSchema` (2), `dimensions` (84), `sampleRate`,
-`durationSec`, `bandwidthHz` and `features`. Analysis uses the first 10 seconds (`readAnalysisAudio`),
+`durationSec`, `nyquistHz` (the file's limit, not the content's band), `inBandEnergyShare` (how much of
+the sound falls inside the 40–8000 Hz analysis band; near zero for a hi-hat that lives above 8 kHz) and
+`features`. Analysis uses the first 10 seconds (`readAnalysisAudio`),
 so a longer clip is represented by its start. Files that fail (missing, unreadable, non-finite samples)
 are reported on stderr and skipped.
 
