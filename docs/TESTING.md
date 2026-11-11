@@ -1,5 +1,31 @@
 # Verification
 
+## Continuous integration (2026-11-11)
+
+`.github/workflows/ci.yml` runs on every push to `main`, on every pull request and on demand.
+
+| Job | Runner | What it does | Blocking |
+|---|---|---|---|
+| macOS Debug | `macos-15` (arm64) | `cmake --preset ci-macos-debug`, build, `ctest` | yes |
+| macOS Release | `macos-15` (arm64) | same with `ci-macos-release` | yes |
+| Windows Debug | `windows-2022` | `cmake --preset ci-windows`, build, `ctest` | no (`continue-on-error`) |
+
+Notes:
+
+- `macos-14` was tried first and its jobs were cancelled before they started, with no runner assigned.
+  `macos-15` works; the label is pinned, not `-latest`.
+- Each job caches `build/_deps`, keyed by the hash of `CMakeLists.txt`, `tests/CMakeLists.txt` and
+  `CMakePresets.json`. Without the cache the first configure re-downloads about 0.5 GB per job.
+- On failure the job uploads `build/Testing/Temporary/LastTest.log`.
+- The Windows job builds the whole project and runs the suite, but 22 tests fail on Windows; the state
+  is recorded in `docs/WINDOWS_PORT.md` and the job is informational until they are resolved.
+- A Release-only flake was found here: `Changing image sample stops old playback before the new decode
+  completes` waited a fixed 60 ms for the transport to start and failed on the slower runner. The wait
+  is now bounded and condition-driven, and the assertion itself is unchanged.
+- The CI suite runs 651 cases; four real-library tests skip because Reason and Ableton packs are not
+  installed on the runners, which is why the CI assertion count is lower than a local run on a machine
+  that has them.
+
 ## Stage 0: hygiene, licence and CI preparation (2026-11-11)
 
 - Branch `chore/stage0-hygiene` from `main` `72f6387`. No product code changed: the only source edit is

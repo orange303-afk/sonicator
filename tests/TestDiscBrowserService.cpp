@@ -227,13 +227,19 @@ TEST_CASE("Changing image sample stops old playback before the new decode comple
         return nullptr;
     }();
     REQUIRE(stop != nullptr);
-    // The transport label is driven by engine.isPlaying(), not by the selection label.
-    juce::MessageManager::getInstance()->runDispatchLoopUntil(60);
-    auto* play = [&]() -> juce::Button* {
+    // The transport label is driven by engine.isPlaying(), not by the selection label. A loaded CI
+    // machine can take longer than one fixed slice to start the transport, so wait for the state
+    // change itself, bounded.
+    const auto findPlay = [&]() -> juce::Button*
+    {
         for (auto* child : preview->getChildren())
-            if (auto* button = dynamic_cast<juce::Button*>(child); button && button->getButtonText() == "Pause") return button;
+            if (auto* button = dynamic_cast<juce::Button*>(child); button && button->getButtonText() == "Pause")
+                return button;
         return nullptr;
-    }();
+    };
+    for (int i = 0; i < 100 && findPlay() == nullptr; ++i)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    auto* play = findPlay();
     REQUIRE(play != nullptr);
     browser->selectedRowsChanged(1);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(100);

@@ -1,5 +1,7 @@
 # SONICATOR — Sample Browser
 
+[![CI](https://github.com/orange303-afk/sonicator/actions/workflows/ci.yml/badge.svg)](https://github.com/orange303-afk/sonicator/actions/workflows/ci.yml)
+
 A local sample library browser and explorer for macOS and Windows: indexing, search, tags, smart
 metadata, waveform preview and drag-and-drop into a DAW, without a cloud account or a network
 dependency. This is a real working application, not an ML/map mockup.

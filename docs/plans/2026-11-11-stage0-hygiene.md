@@ -94,7 +94,46 @@ Task B3: complete. Перед удалением: оба прогона зелё
 Task D5: complete. `docs/TESTING.md` начинается разделом этапа с числами, подписью и списком
 непроверенного; заголовок документа больше не «Phase 1 verification».
 
-Task F1: (заполняется при merge).
+Task F1: complete. ff merge `chore/stage0-hygiene` → `main` (26443d9), `ctest --preset debug` на `main`
+passed (24.96 s), push выполнен, ветка удалена. Часть B начата после того, как владелец сделал
+репозиторий публичным.
+
+## Часть B
+
+Fact: macOS-задачи на `macos-14` отменялись через 2 с без назначенного раннера и без шагов; пробный
+workflow с `macos-15` и `ubuntu-latest` прошёл, `macos-13` ушёл в очередь (образ снят). Ruling:
+`runs-on: macos-15`, закреплённый label, не `-latest`; причина записана в workflow и `docs/TESTING.md`.
+
+Task C1: complete. `.github/workflows/ci.yml`: macOS Debug и Release через пресеты, кэш `build/_deps` по
+хешу трёх CMake-файлов, артефакт `LastTest.log` при падении, `concurrency` с отменой прошлого запуска,
+`permissions: contents: read`. Первый зелёный запуск macOS Debug — см. ниже.
+
+Fact C1: macOS Release на первом запуске упал на одном тесте из 651 —
+`Changing image sample stops old playback before the new decode completes`
+(`TestDiscBrowserService.cpp:237`, `REQUIRE(play != nullptr)`): тест ждал фиксированные 60 мс, пока
+транспорт перейдёт в воспроизведение, и на загруженном раннере не успевал. Ruling: ожидание заменено на
+ограниченное условием (`до 100 × 20 мс`, как в соседних тестах), сама проверка не ослаблена. Цена:
+тест может ждать до 2 с на медленной машине.
+
+Task C2: complete. Задача Windows (`windows-2022`, `continue-on-error`) собирает проект целиком и
+запускает тесты. Сборочная обвязка: при отсутствии системного zlib подтягивается архив 1.3.1
+(sha256 `9a93b2b7…df23`) и линкуется `zlibstatic`; `onnxruntime.dll` копируется рядом с исполняемыми
+файлами под `if(WIN32)`. Исходники под MSVC не правились.
+
+Fact C2: Windows собрался с первого раза. Тесты: 650 кейсов, 624 прошли, 22 упали, 4 пропущены (93 с).
+Падения — проверки, не краши; 20 из 22 — про разделители путей в тестах и в областях папок, плюс
+«Unsupported tracker instrument slots are drawn in red» и «Long exports run in bounded chunks».
+Подробности и список кейсов — `docs/WINDOWS_PORT.md`.
+
+Task C3: complete. `docs/WINDOWS_PORT.md` заполнен фактическими результатами, включая точные тексты
+первых падений и разделение «механика / требует решения».
+
+Task C4: complete. `.github/ISSUE_TEMPLATE/`: `bug_report.md`, `feature_request.md`,
+`format_support.md`. Выбраны markdown-шаблоны, а не issue forms, потому что только markdown принимает
+предзаполненный `body` в URL — на этом построена кнопка Report.
+
+Task F2: (заполняется после зелёного прогона на `main`).
+
 
 Task D1: complete. Заголовок без «Phase 1»; схема `user_version=12` с описанием версий 8–12 по коду
 миграций и планам (`ignored_paths` — схема 11 по `docs/superpowers/plans/2026-11-09-library-ignore.md`);
