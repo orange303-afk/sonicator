@@ -1,0 +1,105 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 22, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (outside iCloud)",
+      "inherits": "base",
+      "binaryDir": "$env{HOME}/Library/Caches/sonicator-build/debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "release",
+      "displayName": "Release (outside iCloud)",
+      "inherits": "base",
+      "binaryDir": "$env{HOME}/Library/Caches/sonicator-build/release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "universal",
+      "displayName": "Release universal (arm64;x86_64)",
+      "inherits": "base",
+      "binaryDir": "$env{HOME}/Library/Caches/sonicator-build/universal",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64"
+      }
+    },
+    {
+      "name": "ci-macos-debug",
+      "displayName": "CI macOS Debug",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "ci-macos-release",
+      "displayName": "CI macOS Release",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "ci-windows",
+      "displayName": "CI Windows x64 (Visual Studio 2022)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": { "value": "x64", "strategy": "set" },
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "BUILD_TESTING": "ON" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug", "jobs": 6 },
+    { "name": "release", "configurePreset": "release", "jobs": 6 },
+    { "name": "universal", "configurePreset": "universal", "jobs": 6 },
+    { "name": "ci-macos-debug", "configurePreset": "ci-macos-debug", "jobs": 6 },
+    { "name": "ci-macos-release", "configurePreset": "ci-macos-release", "jobs": 6 },
+    { "name": "ci-windows", "configurePreset": "ci-windows", "configuration": "Debug", "jobs": 6 }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "universal",
+      "configurePreset": "universal",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci-macos-debug",
+      "configurePreset": "ci-macos-debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "timeout": 900 }
+    },
+    {
+      "name": "ci-macos-release",
+      "configurePreset": "ci-macos-release",
+      "output": { "outputOnFailure": true },
+      "execution": { "timeout": 900 }
+    },
+    {
+      "name": "ci-windows",
+      "configurePreset": "ci-windows",
+      "configuration": "Debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "timeout": 900 }
+    }
+  ]
+}
