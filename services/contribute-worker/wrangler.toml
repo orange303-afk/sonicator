@@ -1,0 +1,11 @@
+name = "sonicator-contribute"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+# No secrets: the Worker reaches the bucket through this binding only.
+[[r2_buckets]]
+binding = "CONTRIBUTE"
+bucket_name = "sonicator-contribute"
+
+[observability]
+enabled = true
