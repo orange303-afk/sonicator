@@ -16,6 +16,7 @@ import {
   buildIndex,
   buildPrototypes,
   indexPrototypes,
+  indexRecords,
   normalizeRecords,
   parseDataset,
   predictTags,
@@ -99,6 +100,21 @@ function percent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+// Same index without the vector of the record under test, matched by reference: the record must
+// not be its own prototype, and a twin record with an identical vector must not stand in for it.
+function withoutOwnVector(index, features) {
+  const out = new Map();
+  for (const [kind, labels] of index) {
+    const copy = new Map();
+    for (const [key, entry] of labels) {
+      const prototypes = entry.prototypes.filter((vector) => vector !== features);
+      if (prototypes.length > 0) copy.set(key, { ...entry, prototypes });
+    }
+    out.set(kind, copy);
+  }
+  return out;
+}
+
 export function evaluate(records) {
   const normalized = normalizeRecords(records);
   const installs = [...new Set(normalized.map((record) => record.installId))].sort();
@@ -118,19 +134,17 @@ export function evaluate(records) {
     const others = normalized.filter((record) => record.installId !== install);
     const globalIndex = buildIndex(others);
     const localRecords = byInstall.get(install);
+    const localIndex = indexRecords(localRecords);
 
     for (const record of heldOut) {
-      const localIndex = buildIndex(
-        localRecords.filter((entry) => entry.recordId !== record.recordId),
-        { minInstalls: 1, minSupport: 1, includeCustomTypes: true },
-      );
+      const localForRecord = withoutOwnVector(localIndex, record.features);
       // A custom type is the person's own name, not a label the shipped model carries; it still
       // trains the local prototype exactly as the app does, so only its accuracy is left out.
       const hasType = Boolean(record.type) && !record.typeIsCustom;
       if (hasType) {
         const truthType = record.type.toLowerCase();
-        const beforeType = predictType(record.features, localIndex, emptyIndex);
-        const afterType = predictType(record.features, localIndex, globalIndex);
+        const beforeType = predictType(record.features, localForRecord, emptyIndex);
+        const afterType = predictType(record.features, localForRecord, globalIndex);
         result.type.records += 1;
         if (beforeType?.label.toLowerCase() === truthType) result.type.before += 1;
         if (afterType?.label.toLowerCase() === truthType) result.type.after += 1;
@@ -149,8 +163,8 @@ export function evaluate(records) {
       }
 
       const truthTags = new Set(tagNames(record).map((tag) => tag.toLowerCase()));
-      const beforeTags = predictTags(record.features, localIndex, emptyIndex);
-      const afterTags = predictTags(record.features, localIndex, globalIndex);
+      const beforeTags = predictTags(record.features, localForRecord, emptyIndex);
+      const afterTags = predictTags(record.features, localForRecord, globalIndex);
       result.tags.truth += truthTags.size;
       result.tags.predictedBefore += beforeTags.length;
       result.tags.predictedAfter += afterTags.length;
