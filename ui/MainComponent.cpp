@@ -2989,7 +2989,8 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
             }
             else
             {
-                repo->recordFeedback(id, type, tagNames, features);
+                repo->recordFeedback(id, type, tagNames, features,
+                                     SampleRepository::FeedbackOrigin::user);
                 AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
             }
         }
@@ -3276,14 +3277,14 @@ void MainComponent::startContribution()
     source.vocabulary = [safe]()
     {
         contribute::Vocabulary vocabulary;
+        // Only names that ship with the app count as standard. A user's custom type must be
+        // reported as custom, even though the repository knows it.
         vocabulary.types = canonicalSmartTypeNames();
         vocabulary.tags = {};
         if (safe != nullptr && safe->readRepo != nullptr)
         {
             try
             {
-                for (const auto& custom : safe->readRepo->customTypes())
-                    vocabulary.types.addIfNotAlreadyThere(custom);
                 vocabulary.tags = safe->readRepo->builtinTagNames();
             }
             catch (...) {}

@@ -4,10 +4,31 @@
 #include "core/database/SampleRepository.h"
 #include "core/settings/AppSettings.h"
 #include "TestHelpers.h"
+#include <sqlite3.h>
 using namespace sonicator;
 using namespace sonicator::contribute;
 
 namespace {
+using FeedbackOrigin = SampleRepository::FeedbackOrigin;
+void rawExec(const juce::File& file, const char* sql)
+{
+    sqlite3* db = nullptr;
+    REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &db) == SQLITE_OK);
+    REQUIRE(sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_close(db);
+}
+int rawScalar(const juce::File& file, const char* sql)
+{
+    sqlite3* db = nullptr;
+    REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &db) == SQLITE_OK);
+    sqlite3_stmt* s = nullptr;
+    REQUIRE(sqlite3_prepare_v2(db, sql, -1, &s, nullptr) == SQLITE_OK);
+    const int value = sqlite3_step(s) == SQLITE_ROW ? sqlite3_column_int(s, 0) : -1;
+    sqlite3_finalize(s);
+    sqlite3_close(db);
+    return value;
+}
+
 std::vector<Record> oneRecord()
 {
     Record record;
@@ -226,7 +247,7 @@ TEST_CASE("Repository stores a stable contribution id and a per-catalog watermar
     const auto id = repo.upsert(sample);
 
     const std::vector<float> features { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f };
-    repo.recordFeedback(id, "kick", { "acoustic" }, features);
+    repo.recordFeedback(id, "kick", { "acoustic" }, features, SampleRepository::FeedbackOrigin::user);
 
     auto rows = repo.contributionRecords(0, 10);
     REQUIRE(rows.size() == 1);
@@ -238,7 +259,7 @@ TEST_CASE("Repository stores a stable contribution id and a per-catalog watermar
 
     // A correction keeps the same record id, so the export can replace the earlier label.
     const auto firstId = rows[0].recordId;
-    repo.recordFeedback(id, "snare", { "acoustic" }, features);
+    repo.recordFeedback(id, "snare", { "acoustic" }, features, SampleRepository::FeedbackOrigin::user);
     rows = repo.contributionRecords(0, 10);
     REQUIRE(rows.size() == 1);
     CHECK(rows[0].recordId == firstId);
@@ -248,6 +269,66 @@ TEST_CASE("Repository stores a stable contribution id and a per-catalog watermar
     repo.setContributionWatermark(rows[0].updatedAt);
     CHECK(repo.contributionWatermark() == rows[0].updatedAt);
     CHECK(repo.contributionRecords(rows[0].updatedAt, 10).empty());
+}
+
+TEST_CASE("Only user-origin feedback is eligible for contribution", "[contribute][database]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("origins.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+
+    SampleRecord first;
+    first.filePath = "/library/kick.wav";
+    first.fileName = "kick.wav";
+    first.fileHash = "hash-kick";
+    const auto userSample = repo.upsert(first);
+
+    SampleRecord second;
+    second.filePath = "/library/snare.wav";
+    second.fileName = "snare.wav";
+    second.fileHash = "hash-snare";
+    const auto machineSample = repo.upsert(second);
+
+    const std::vector<float> features(14, 0.25f);
+    repo.recordFeedback(userSample, "kick", { "acoustic" }, features, FeedbackOrigin::user);
+    repo.recordFeedback(machineSample, "snare", { "acoustic" }, features, FeedbackOrigin::autoTag);
+
+    // The local prototype store still sees both rows: the app keeps learning from its own tags.
+    CHECK(repo.allFeedback().size() == 2);
+
+    // Only a person's confirmation may leave the machine.
+    const auto rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].targetType == "kick");
+}
+
+TEST_CASE("Rows written before schema 14 count as legacy and are not contributed", "[contribute][database]")
+{
+    TestDirectory t;
+    const auto file = t.dir.getChildFile("legacy.sqlite");
+    {
+        Database db(file);
+        SampleRepository repo(db);
+        repo.createTables();
+        SampleRecord sample;
+        sample.filePath = "/library/pad.wav";
+        sample.fileName = "pad.wav";
+        sample.fileHash = "hash-pad";
+        const auto id = repo.upsert(sample);
+        repo.recordFeedback(id, "Pad", { "Pad" }, std::vector<float>(14, 0.4f),
+                            FeedbackOrigin::user);
+    }
+    // Shape of a catalog written by the build before the origin column existed.
+    rawExec(file,
+            "ALTER TABLE ml_feedback_samples DROP COLUMN origin; PRAGMA user_version=13;");
+
+    Database db(file);
+    SampleRepository repo(db);
+    repo.createTables();
+    CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 14);
+    CHECK(repo.allFeedback().size() == 1);            // legacy rows stay on disk
+    CHECK(repo.contributionRecords(0, 10).empty());   // and out of the dataset
 }
 
 TEST_CASE("Contribution settings persist and default to off", "[contribute][settings]")

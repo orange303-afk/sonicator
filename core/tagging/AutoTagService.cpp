@@ -538,7 +538,7 @@ void AutoTagService::apply()
             else if (const auto res = repo.smartResult(id))
                 type = res->type;
 
-            repo.recordFeedback(id, type, tagNames, features);
+            repo.recordFeedback(id, type, tagNames, features, SampleRepository::FeedbackOrigin::autoTag);
             AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
         }
     }

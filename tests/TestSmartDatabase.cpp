@@ -47,7 +47,7 @@ TEST_CASE("Schema 5 catalogs upgrade to current schema with a backup and keep id
     rawExec(file, "PRAGMA user_version=5;");
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 13);
+        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 14);
         auto r = repo.findByPath("/lib/kick.wav");
         REQUIRE(r.has_value());
         REQUIRE(r->id == id);
@@ -162,7 +162,7 @@ TEST_CASE("SampleRepository custom types and ml feedback storage", "[smart][data
         const auto id = repo.upsert(r);
 
         std::vector<float> features(14, 0.5f);
-        repo.recordFeedback(id, "Sub-Drop", {"bass", "heavy"}, features);
+        repo.recordFeedback(id, "Sub-Drop", {"bass", "heavy"}, features, SampleRepository::FeedbackOrigin::user);
         auto all = repo.allFeedback();
         REQUIRE(all.size() == 1);
         CHECK(all[0].sampleId == id);

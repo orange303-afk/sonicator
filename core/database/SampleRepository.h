@@ -219,6 +219,9 @@ public:
     std::optional<SampleRecord> findById(int64_t) const;
 
     // Custom types & ML feedback prototypes
+    // Where a feedback row came from. Only `user` rows may leave the machine: `autoTag` rows are
+    // the app's own guesses and `legacy` rows predate the column, so their provenance is unknown.
+    enum class FeedbackOrigin { user, autoTag, legacy };
     struct FeedbackRecord
     {
         int64_t sampleId = 0;
@@ -231,7 +234,8 @@ public:
     std::vector<juce::String> customTypes() const;
     bool addCustomType(const juce::String& name);
     void recordFeedback(int64_t sampleId, const juce::String& targetType,
-                        const juce::StringArray& tags, const std::vector<float>& features);
+                        const juce::StringArray& tags, const std::vector<float>& features,
+                        FeedbackOrigin origin);
     void removeFeedback(int64_t sampleId);
     std::vector<FeedbackRecord> allFeedback() const;
 

@@ -11,7 +11,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
-constexpr int schemaVersion = 13;
+constexpr int schemaVersion = 14;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -637,7 +637,7 @@ void SampleRepository::createTables()
             "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE, file_hash TEXT NOT NULL,"
             "target_type TEXT NOT NULL COLLATE NOCASE, tags TEXT NOT NULL DEFAULT '',"
             "features BLOB NOT NULL, updated_at INTEGER NOT NULL,"
-            "contribution_id TEXT NOT NULL DEFAULT '');"
+            "contribution_id TEXT NOT NULL DEFAULT '', origin TEXT NOT NULL DEFAULT 'legacy');"
             "CREATE TABLE IF NOT EXISTS contribution_state ("
             "key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;");
         // Databases created before schema 3 predate the folded search column.
@@ -712,6 +712,9 @@ void SampleRepository::createTables()
         // Schema 13: a stable id per contributed record, so a later correction replaces the
         // earlier label during export instead of becoming a second sample.
         ensureColumn(db.handle, "ml_feedback_samples", "contribution_id", "TEXT NOT NULL DEFAULT ''");
+        // Schema 14: where a feedback row came from. Rows written by older builds keep the
+        // default and are treated as unknown provenance, never as a person's confirmation.
+        ensureColumn(db.handle, "ml_feedback_samples", "origin", "TEXT NOT NULL DEFAULT 'legacy'");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS smart_results_pipeline"
                                 " ON smart_results(pipeline_state, sample_id);");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_pair_key ON samples(pair_key) WHERE pair_key != '';");
@@ -786,7 +789,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=13;");
+        detail::exec(db.handle, "PRAGMA user_version=14;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -2947,8 +2950,22 @@ bool SampleRepository::addCustomType(const juce::String& name)
     }
 }
 
+namespace {
+const char* feedbackOriginName(SampleRepository::FeedbackOrigin origin)
+{
+    switch (origin)
+    {
+        case SampleRepository::FeedbackOrigin::user: return "user";
+        case SampleRepository::FeedbackOrigin::autoTag: return "auto";
+        case SampleRepository::FeedbackOrigin::legacy: return "legacy";
+    }
+    return "legacy";
+}
+} // namespace
+
 void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targetType,
-                                      const juce::StringArray& tags, const std::vector<float>& features)
+                                      const juce::StringArray& tags, const std::vector<float>& features,
+                                      FeedbackOrigin origin)
 {
     std::lock_guard lock(db.mutex);
     juce::String hash;
@@ -2962,11 +2979,11 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
     try
     {
         detail::Statement s(db.handle,
-            "INSERT INTO ml_feedback_samples (sample_id, file_hash, target_type, tags, features, updated_at, contribution_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO ml_feedback_samples (sample_id, file_hash, target_type, tags, features, updated_at, contribution_id, origin) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(sample_id) DO UPDATE SET "
             "file_hash=excluded.file_hash, target_type=excluded.target_type, tags=excluded.tags, "
-            "features=excluded.features, updated_at=excluded.updated_at");
+            "features=excluded.features, updated_at=excluded.updated_at, origin=excluded.origin");
         s.integer(1, sampleId);
         s.text(2, hash);
         s.text(3, targetType.trim());
@@ -2974,6 +2991,7 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
         s.blob(5, features.data(), static_cast<int>(features.size() * sizeof(float)));
         s.integer(6, juce::Time::currentTimeMillis());
         s.text(7, juce::Uuid().toDashedString().toLowerCase());
+        s.text(8, feedbackOriginName(origin));
         s.step();
         detail::exec(db.handle, "COMMIT;");
     }
@@ -3033,7 +3051,7 @@ std::vector<SampleRepository::ContributionRecord> SampleRepository::contribution
         "SELECT f.contribution_id, f.target_type, f.tags, f.features, f.updated_at,"
         " r.key_tonic, r.key_mode, r.bpm, r.has_bpm"
         " FROM ml_feedback_samples f LEFT JOIN smart_results r ON r.sample_id=f.sample_id"
-        " WHERE f.updated_at > ? ORDER BY f.updated_at, f.sample_id LIMIT ?");
+        " WHERE f.updated_at > ? AND f.origin='user' ORDER BY f.updated_at, f.sample_id LIMIT ?");
     s.integer(1, afterUpdatedAt);
     s.integer(2, juce::jlimit(1, 5000, limit));
     std::vector<ContributionRecord> out;
