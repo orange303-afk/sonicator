@@ -556,6 +556,18 @@ TEST_CASE("A type offered by the Type menu counts as standard", "[contribute]")
     CHECK_FALSE((bool) record->getProperty("typeIsCustom"));
 }
 
+TEST_CASE("A standard tag stays standard when the catalog created it as custom", "[contribute][database]")
+{
+    TestDirectory t;
+    const auto file = t.dir.getChildFile("builtin-tags.sqlite");
+    Database db(file);
+    SampleRepository repo(db);
+    repo.createTables();
+    rawExec(file, "UPDATE tags SET builtin=0 WHERE name='Crash'");
+    CHECK(repo.builtinTagNames().contains("Crash", true));
+    CHECK(repo.builtinTagNames().contains("Kick", true));
+}
+
 TEST_CASE("Contribution settings persist and default to off", "[contribute][settings]")
 {
     // Version 3 changed what is eligible: accepted AutoTag proposals count, older tag history does not.

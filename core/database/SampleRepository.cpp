@@ -3200,6 +3200,10 @@ juce::StringArray SampleRepository::builtinTagNames() const
     detail::Statement s(db.handle, "SELECT name FROM tags WHERE builtin=1");
     juce::StringArray out;
     while (s.step()) out.add(s.text(0));
+    // A catalog created before a tag was promoted can hold it with builtin=0. The name still ships
+    // with the app, so it must not be reported as a custom tag.
+    for (const auto& tag : standardTags) out.addIfNotAlreadyThere(tag.name, true);
+    for (const auto& tag : schema9Tags) out.addIfNotAlreadyThere(tag.name, true);
     return out;
 }
 } // namespace sonicator
