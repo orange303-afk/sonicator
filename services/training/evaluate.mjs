@@ -14,6 +14,9 @@ import {
   TAG_THRESHOLD,
   TYPE_THRESHOLD,
   buildIndex,
+  buildPrototypes,
+  indexPrototypes,
+  indexRecords,
   normalizeRecords,
   parseDataset,
   predictTags,
@@ -29,8 +32,87 @@ class EmptyIndex {
 }
 const emptyIndex = new EmptyIndex();
 
+// Folds are cut inside each install, by recordId order, so every fold holds records of every
+// install and no record is ever scored against a model built from itself.
+function assignFolds(records, folds) {
+  const byInstall = new Map();
+  for (const record of records) {
+    const list = byInstall.get(record.installId) ?? [];
+    list.push(record);
+    byInstall.set(record.installId, list);
+  }
+  const assigned = new Map();
+  for (const list of byInstall.values()) {
+    const sorted = [...list].sort((a, b) => (a.recordId < b.recordId ? -1 : a.recordId > b.recordId ? 1 : 0));
+    sorted.forEach((record, index) => assigned.set(record.recordId, index % folds));
+  }
+  return assigned;
+}
+
+// What a user actually gets from the file we ship: prototypes built without the record under test,
+// scored with the same global penalty the app applies. Custom types are not in the shipped file, so
+// they are left out of the number rather than counted as misses.
+export function crossValidateShipped(records, { folds = 5 } = {}) {
+  const normalized = normalizeRecords(records);
+  const foldCount = Math.max(1, Math.floor(folds));
+  const assigned = assignFolds(normalized, foldCount);
+  const result = {
+    folds: foldCount,
+    records: 0,
+    correct: 0,
+    accuracy: 0,
+    groups: new Map(),
+    labels: new Map(),
+  };
+
+  for (let fold = 0; fold < foldCount; fold += 1) {
+    const train = normalized.filter((record) => assigned.get(record.recordId) !== fold);
+    const test = normalized.filter((record) => assigned.get(record.recordId) === fold);
+    if (test.length === 0) continue;
+    const globalIndex = indexPrototypes(buildPrototypes(train, { minInstalls: 1, minSupport: 1 }));
+
+    for (const record of test) {
+      if (!record.type || record.typeIsCustom) continue;
+      const truth = record.type.toLowerCase();
+      const prediction = predictType(record.features, emptyIndex, globalIndex);
+      const hit = prediction?.label.toLowerCase() === truth;
+      result.records += 1;
+      if (hit) result.correct += 1;
+
+      const group = groupForType(record.type);
+      const groupEntry = result.groups.get(group) ?? { records: 0, correct: 0 };
+      groupEntry.records += 1;
+      if (hit) groupEntry.correct += 1;
+      result.groups.set(group, groupEntry);
+
+      const labelEntry = result.labels.get(truth) ?? { label: record.type, records: 0, correct: 0 };
+      labelEntry.records += 1;
+      if (hit) labelEntry.correct += 1;
+      result.labels.set(truth, labelEntry);
+    }
+  }
+
+  result.accuracy = result.records === 0 ? 0 : result.correct / result.records;
+  return result;
+}
+
 function percent(value) {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+// Same index without the vector of the record under test, matched by reference: the record must
+// not be its own prototype, and a twin record with an identical vector must not stand in for it.
+function withoutOwnVector(index, features) {
+  const out = new Map();
+  for (const [kind, labels] of index) {
+    const copy = new Map();
+    for (const [key, entry] of labels) {
+      const prototypes = entry.prototypes.filter((vector) => vector !== features);
+      if (prototypes.length > 0) copy.set(key, { ...entry, prototypes });
+    }
+    out.set(kind, copy);
+  }
+  return out;
 }
 
 export function evaluate(records) {
@@ -42,6 +124,9 @@ export function evaluate(records) {
   const result = {
     records: normalized.length,
     installs: installs.length,
+    // What the default thresholds would put in the shipped file for this dataset. Zero means the
+    // "after" column has no global evidence behind it, whatever its accuracy says.
+    shippedLabels: buildPrototypes(normalized).labels.length,
     type: { records: 0, before: 0, after: 0, groups: new Map() },
     tags: { truth: 0, before: 0, after: 0, predictedBefore: 0, predictedAfter: 0 },
     labels: new Map(),
@@ -52,19 +137,17 @@ export function evaluate(records) {
     const others = normalized.filter((record) => record.installId !== install);
     const globalIndex = buildIndex(others);
     const localRecords = byInstall.get(install);
+    const localIndex = indexRecords(localRecords);
 
     for (const record of heldOut) {
-      const localIndex = buildIndex(
-        localRecords.filter((entry) => entry.recordId !== record.recordId),
-        { minInstalls: 1, minSupport: 1, includeCustomTypes: true },
-      );
+      const localForRecord = withoutOwnVector(localIndex, record.features);
       // A custom type is the person's own name, not a label the shipped model carries; it still
       // trains the local prototype exactly as the app does, so only its accuracy is left out.
       const hasType = Boolean(record.type) && !record.typeIsCustom;
       if (hasType) {
         const truthType = record.type.toLowerCase();
-        const beforeType = predictType(record.features, localIndex, emptyIndex);
-        const afterType = predictType(record.features, localIndex, globalIndex);
+        const beforeType = predictType(record.features, localForRecord, emptyIndex);
+        const afterType = predictType(record.features, localForRecord, globalIndex);
         result.type.records += 1;
         if (beforeType?.label.toLowerCase() === truthType) result.type.before += 1;
         if (afterType?.label.toLowerCase() === truthType) result.type.after += 1;
@@ -83,8 +166,8 @@ export function evaluate(records) {
       }
 
       const truthTags = new Set(tagNames(record).map((tag) => tag.toLowerCase()));
-      const beforeTags = predictTags(record.features, localIndex, emptyIndex);
-      const afterTags = predictTags(record.features, localIndex, globalIndex);
+      const beforeTags = predictTags(record.features, localForRecord, emptyIndex);
+      const afterTags = predictTags(record.features, localForRecord, globalIndex);
       result.tags.truth += truthTags.size;
       result.tags.predictedBefore += beforeTags.length;
       result.tags.predictedAfter += afterTags.length;
@@ -129,7 +212,10 @@ export function summarizeEvaluation(result) {
       after,
       thresholdUsed: TYPE_THRESHOLD,
       tagThresholdUsed: TAG_THRESHOLD,
-      gate: after >= 0.6 && after + 1e-12 >= before,
+      shippedLabels: result.shippedLabels,
+      // Without a label that would actually ship there is no global evidence, and "after" equal to
+      // "before" says nothing about the prototypes.
+      gate: after >= 0.6 && after + 1e-12 >= before && result.shippedLabels > 0,
       groups,
       worst,
     },
@@ -142,13 +228,14 @@ export function summarizeEvaluation(result) {
   };
 }
 
-export function renderReport(summary, { generatedAt } = {}) {
+export function renderReport(summary, { generatedAt, crossValidation } = {}) {
   const groupRows = summary.type.groups
     .map((group) => [group.group, group.records, percent(group.before), percent(group.after)])
     .map((row) => `| ${row.join(" | ")} |`);
   const worstRows = summary.type.worst
     .map((label) => [label.label, label.records, percent(label.after)])
     .map((row) => `| ${row.join(" | ")} |`);
+  const shipped = crossValidation ? renderShippedSection(crossValidation) : "";
   return `# Training evaluation
 
 Generated: ${generatedAt ?? "unknown"}
@@ -156,6 +243,7 @@ Generated: ${generatedAt ?? "unknown"}
 - Installs held out in turn: ${summary.installs}
 - Records evaluated: ${summary.records}
 - Records with a standard type: ${summary.type.records}
+- Labels that would ship with the default thresholds: ${summary.type.shippedLabels}
 - Type acceptance threshold: ${summary.type.thresholdUsed}; tag threshold: ${summary.type.tagThresholdUsed}
 
 ## Type, top-1
@@ -165,7 +253,8 @@ Generated: ${generatedAt ?? "unknown"}
 | Before (local prototypes only) | ${percent(summary.type.before)} |
 | After (local + global, penalty 0.95, local within 0.02) | ${percent(summary.type.after)} |
 
-Threshold for shipping without the owner: after ≥ 60% and after ≥ before. Current result:
+Threshold for shipping without the owner: after ≥ 60%, after ≥ before, and at least one label that
+would ship at the default thresholds. Current result:
 **${summary.type.gate ? "passes" : "needs the owner's decision"}**.
 
 ### By group
@@ -189,21 +278,62 @@ preview for a later stage, not behaviour a user gets today.
 |---|---|---|
 | Before | ${percent(summary.tags.beforePrecision)} | ${percent(summary.tags.beforeRecall)} |
 | After | ${percent(summary.tags.afterPrecision)} | ${percent(summary.tags.afterRecall)} |
+${shipped}`;
+}
+
+// The number that answers "what does the shipped file actually get": no local confirmations, no
+// record scored against a prototype built from itself.
+function renderShippedSection(crossValidation) {
+  const groupRows = [...crossValidation.groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([group, entry]) => `| ${group} | ${entry.records} | ${percent(entry.correct / entry.records)} |`);
+  const worstRows = [...crossValidation.labels.values()]
+    .filter((label) => label.records >= 5)
+    .sort((a, b) => a.correct / a.records - b.correct / b.records
+      || b.records - a.records
+      || a.label.localeCompare(b.label))
+    .slice(0, 5)
+    .map((label) => `| ${label.label} | ${label.records} | ${percent(label.correct / label.records)} |`);
+  return `
+## Shipped prototypes, cross-validated
+
+The record under test is never part of the prototypes it is scored against. Folds are cut inside
+each install and the global penalty of 0.95 applies, as in the app.
+
+- Folds: ${crossValidation.folds}
+- Records: ${crossValidation.records}
+- Accuracy: ${percent(crossValidation.accuracy)}
+
+### By group
+
+| Group | Records | Accuracy |
+|---|---|---|
+${groupRows.length > 0 ? groupRows.join("\n") : "| (no record) | | |"}
+
+### Worst labels
+
+| Type | Records | Accuracy |
+|---|---|---|
+${worstRows.length > 0 ? worstRows.join("\n") : "| (no label with at least 5 records) | | |"}
 `;
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const input = valueOf(argv, "--in", "contribute-export.jsonl");
   const output = valueOf(argv, "--out", "training-report.md");
+  const folds = Number(valueOf(argv, "--cv", 5));
   const records = parseDataset(await readFile(input, "utf8"));
   const result = evaluate(records);
   const summary = summarizeEvaluation(result);
+  const crossValidation = folds > 0 ? crossValidateShipped(records, { folds }) : undefined;
   const generatedAt = valueOf(argv, "--generated-at", undefined)
     ?? new Date(Math.max(0, ...records.map((record) => record.updatedAt ?? 0))).toISOString();
   await mkdir(dirname(output), { recursive: true });
-  await writeFile(output, renderReport(summary, { generatedAt }));
+  await writeFile(output, renderReport(summary, { generatedAt, crossValidation }));
   console.log(`records: ${summary.records}, installs: ${summary.installs}`);
   console.log(`type accuracy before ${percent(summary.type.before)}, after ${percent(summary.type.after)}`);
+  if (crossValidation)
+    console.log(`shipped prototypes, ${crossValidation.folds}-fold cv: ${percent(crossValidation.accuracy)}`);
   console.log(`tags precision ${percent(summary.tags.afterPrecision)}, recall ${percent(summary.tags.afterRecall)}`);
   console.log(`gate: ${summary.type.gate ? "passes" : "needs the owner's decision"}`);
   console.log(`report: ${output}`);

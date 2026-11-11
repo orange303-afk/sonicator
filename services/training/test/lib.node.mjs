@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  MAX_RECORDS_PER_INSTALL_PER_LABEL,
   buildPrototypes,
   cosine,
   distance,
@@ -31,23 +30,93 @@ test("a label needs three installs and ten records", () => {
 
 test("one large install cannot take every prototype", () => {
   const rows = [];
-  for (let i = 0; i < 100; i += 1)
+  for (let i = 0; i < 200; i += 1)
     rows.push(record({
       installId: "big",
-      recordId: `big-a-${String(i).padStart(4, "0")}`,
+      recordId: `big-a${String(i).padStart(4, "0")}`,
       features: features(ACOUSTIC),
     }));
-  for (let i = 0; i < 100; i += 1)
+  for (let i = 0; i < 200; i += 1)
     rows.push(record({
       installId: "big",
-      recordId: `big-b-${String(i).padStart(4, "0")}`,
+      recordId: `big-b${String(i).padStart(4, "0")}`,
       features: features(BRIGHT),
     }));
-  const selected = selectPrototypes(rows);
+  const selected = selectPrototypes(rows, 2);
+  assert.equal(selected.length, 2);
+  assert.ok(selected.some((feature) => cosine(feature, features(ACOUSTIC)) > 0.99));
+  assert.ok(selected.some((feature) => cosine(feature, features(BRIGHT)) > 0.99),
+    "the later material of the same install is not crowded out");
+});
+
+test("a small install keeps a prototype beside a large one", () => {
+  const rows = [];
+  for (let i = 0; i < 1000; i += 1)
+    rows.push(record({
+      installId: "big",
+      recordId: `big-${String(i).padStart(4, "0")}`,
+      features: features(ACOUSTIC),
+    }));
+  for (let i = 0; i < 20; i += 1)
+    rows.push(record({
+      installId: "small",
+      recordId: `small-${String(i).padStart(4, "0")}`,
+      features: features(BRIGHT),
+    }));
+  const selected = selectPrototypes(rows, 2);
+  assert.equal(selected.length, 2);
+  assert.ok(selected.some((feature) => cosine(feature, features(ACOUSTIC)) > 0.99));
+  assert.ok(selected.some((feature) => cosine(feature, features(BRIGHT)) > 0.99),
+    "twenty records from a second install still count");
+});
+
+test("zero vectors and identical rows stay finite and deterministic", () => {
+  const rows = [
+    record({ recordId: "z1", features: new Array(14).fill(0) }),
+    record({ recordId: "z2", features: new Array(14).fill(0) }),
+    record({ recordId: "z3", features: features(ACOUSTIC) }),
+    record({ recordId: "z4", features: features(ACOUSTIC) }),
+  ];
+  const first = selectPrototypes(rows, 8);
+  const second = selectPrototypes(rows, 8);
+  assert.deepEqual(first, second);
+  for (const feature of first) for (const value of feature) assert.ok(Number.isFinite(value));
+});
+
+test("more prototypes than distinct vectors yields the distinct ones", () => {
+  const rows = [1, 2, 3].map((index) => record({ recordId: `r${index}`, features: features(ACOUSTIC) }));
+  const selected = selectPrototypes(rows, 8);
+  assert.equal(selected.length, 1);
+});
+
+test("prototypes stay inside 0..1", () => {
+  const rows = dataset(["a", "b", "c"], 30);
+  const selected = selectPrototypes(rows, 8);
   assert.ok(selected.length > 0);
-  // The first 20 rows by recordId are all in the low cluster, so the high cluster is not used.
-  for (const feature of selected) assert.ok(cosine(feature, features(ACOUSTIC)) > 0.99);
-  assert.equal(MAX_RECORDS_PER_INSTALL_PER_LABEL, 20);
+  for (const feature of selected)
+    for (const value of feature) assert.ok(value >= 0 && value <= 1, `value ${value}`);
+});
+
+test("every install carries the same weight when centres are averaged", () => {
+  const rows = [];
+  for (let i = 0; i < 1000; i += 1)
+    rows.push(record({
+      installId: "big",
+      recordId: `big-${String(i).padStart(4, "0")}`,
+      features: features(ACOUSTIC),
+    }));
+  for (let i = 0; i < 3; i += 1)
+    rows.push(record({
+      installId: "small",
+      recordId: `small-${String(i).padStart(4, "0")}`,
+      features: features(BRIGHT),
+    }));
+  const [centre] = selectPrototypes(rows, 1);
+  const acoustic = features(ACOUSTIC);
+  const bright = features(BRIGHT);
+  const midpoint = acoustic.map((value, index) => (value + bright[index]) / 2);
+  assert.ok(cosine(centre, midpoint) > 0.9995,
+    `the centre is the mean of the two installs, got cosine ${cosine(centre, midpoint)}`);
 });
 
 test("an outlier does not become the centre of a label", () => {

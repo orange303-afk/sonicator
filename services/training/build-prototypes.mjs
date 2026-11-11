@@ -31,6 +31,7 @@ export async function main(argv = process.argv.slice(2)) {
   await writeFile(output, serializePrototypes(file));
   console.log(`records: ${file.records}, installs: ${file.installs}, labels: ${file.labels.length}`);
   console.log(`per label: up to ${MAX_PROTOTYPES_PER_LABEL} prototypes, up to ${MAX_LABELS_PER_KIND} labels per kind`);
+  console.log("prototypes: weighted k-means centres, every install carries the same total weight");
   console.log(`wrote ${output}`);
   return 0;
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluate, renderReport, summarizeEvaluation } from "../evaluate.mjs";
-import { ACOUSTIC, dataset, features, record } from "./fixtures.mjs";
+import { crossValidateShipped, evaluate, renderReport, summarizeEvaluation } from "../evaluate.mjs";
+import { ACOUSTIC, BRIGHT, DARK, dataset, features, record } from "./fixtures.mjs";
 
 function globalWorld() {
   const out = [];
@@ -57,5 +57,53 @@ test("an empty dataset evaluates to zero without throwing", () => {
   const summary = summarizeEvaluation(evaluate([]));
   assert.equal(summary.records, 0);
   assert.equal(summary.type.after, 0);
+  assert.equal(summary.type.gate, false);
+});
+
+test("shipped prototypes are measured without seeing the record under test", () => {
+  const rows = [];
+  for (const [label, base] of [["kick", ACOUSTIC], ["snare", BRIGHT], ["hat", DARK]])
+    for (let i = 0; i < 40; i += 1)
+      rows.push(record({
+        installId: `i${i % 3}`,
+        recordId: `${label}-${String(i).padStart(4, "0")}`,
+        type: label,
+        tags: [],
+        features: features(base, 0.01 * (i % 5)),
+      }));
+  const result = crossValidateShipped(rows, { folds: 5 });
+  assert.equal(result.folds, 5);
+  assert.equal(result.records, 120);
+  assert.ok(result.accuracy > 0.9, `accuracy ${result.accuracy}`);
+  assert.equal([...result.labels.keys()].length, 3);
+  assert.equal([...result.groups.keys()].join(","), "percussion");
+});
+
+test("cross-validation tolerates fewer records than folds", () => {
+  const rows = [record({ recordId: "only-1", type: "kick", tags: [] })];
+  const result = crossValidateShipped(rows, { folds: 5 });
+  assert.equal(result.records, 1);
+  assert.ok(result.accuracy >= 0 && result.accuracy <= 1);
+});
+
+test("custom types do not count towards shipped accuracy", () => {
+  const rows = dataset(["a", "b", "c"], 20, { type: "MyLayer", typeIsCustom: true, tags: [] });
+  assert.equal(crossValidateShipped(rows).records, 0);
+});
+
+test("the gate does not pass when nothing global could be shipped", () => {
+  const rows = [];
+  for (let i = 0; i < 30; i += 1)
+    rows.push(record({
+      installId: "only",
+      recordId: `only-${String(i).padStart(3, "0")}`,
+      type: "kick",
+      tags: [],
+      features: features(ACOUSTIC, 0.01 * (i % 3)),
+    }));
+  const summary = summarizeEvaluation(evaluate(rows));
+  assert.equal(summary.installs, 1);
+  assert.ok(summary.type.after > 0.6, `accuracy ${summary.type.after}`);
+  assert.equal(summary.type.shippedLabels, 0);
   assert.equal(summary.type.gate, false);
 });

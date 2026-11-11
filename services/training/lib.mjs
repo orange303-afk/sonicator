@@ -8,7 +8,10 @@ export const MIN_INSTALLS = 3;
 export const MIN_SUPPORT = 10;
 export const MAX_PROTOTYPES_PER_LABEL = 8;
 export const MAX_LABELS_PER_KIND = 200;
-export const MAX_RECORDS_PER_INSTALL_PER_LABEL = 20;
+// A guard against one enormous label, not a weighting rule: every install carries the same total
+// weight inside a label, so a big library cannot fill every prototype with its own material.
+export const MAX_ROWS_PER_INSTALL_PER_LABEL = 2000;
+export const CLUSTER_ITERATIONS = 30;
 export const QUANTIZE_STEP = 1000;
 // Global evidence is worth slightly less than a person's own confirmation.
 export const GLOBAL_PENALTY = 0.95;
@@ -127,35 +130,79 @@ export function collectLabels(records, { includeCustomTypes = false } = {}) {
   }));
 }
 
-function capPerInstall(rows) {
+function capRows(rows) {
   const byInstall = new Map();
   const kept = [];
   for (const row of rows) {
     const count = byInstall.get(row.installId) ?? 0;
-    if (count >= MAX_RECORDS_PER_INSTALL_PER_LABEL) continue;
+    if (count >= MAX_ROWS_PER_INSTALL_PER_LABEL) continue;
     byInstall.set(row.installId, count + 1);
     kept.push(row);
   }
   return kept;
 }
 
-// Farthest-first initialisation, then medoid refinement. Farthest-first alone tends to keep an
-// outlier as a centre; the refinement pass moves each centre onto the record that is closest to
-// the rest of its group, so a rare sample is represented without becoming the label's centre.
-export function selectPrototypes(rows, max = MAX_PROTOTYPES_PER_LABEL) {
-  const points = capPerInstall(rows);
-  if (points.length === 0) return [];
-  if (points.length <= max) return points.map((row) => row.features);
+// Each install carries the same total weight inside a label: a row of a ten-record install weighs
+// as much as the combined rows of a thousand-record one. With a single install every weight is
+// equal, so the result reduces to a plain mean.
+function installWeights(rows) {
+  const counts = new Map();
+  for (const row of rows) counts.set(row.installId, (counts.get(row.installId) ?? 0) + 1);
+  return rows.map((row) => 1 / counts.get(row.installId));
+}
 
+function dot(a, b) {
+  let sum = 0;
+  const size = Math.min(a.length, b.length);
+  for (let i = 0; i < size; i += 1) sum += a[i] * b[i];
+  return sum;
+}
+
+function unit(vector) {
+  let sum = 0;
+  for (const value of vector) sum += value * value;
+  const norm = Math.sqrt(sum);
+  return norm > 0 ? vector.map((value) => value / norm) : vector.slice();
+}
+
+function weightedMean(rows, weights) {
+  const size = rows[0].features.length;
+  const mean = new Array(size).fill(0);
+  let total = 0;
+  for (let i = 0; i < rows.length; i += 1) {
+    total += weights[i];
+    for (let j = 0; j < size; j += 1) mean[j] += rows[i].features[j] * weights[i];
+  }
+  return total > 0 ? mean.map((value) => value / total) : mean;
+}
+
+function sameVector(a, b, tolerance = 1e-6) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (Math.abs(a[i] - b[i]) > tolerance) return false;
+  return true;
+}
+
+// Weighted k-means over the label's records, with the cluster centres returned as prototypes.
+// Farthest-first start, then each centre moves onto the weighted mean of its members, so a rare
+// sample may sit alone in a cluster without becoming the centre of the label. Deterministic:
+// rows arrive in recordId order, ties go to the lower index, and the centres are ordered by their
+// first member.
+export function selectPrototypes(rows, max = MAX_PROTOTYPES_PER_LABEL) {
+  const points = capRows(rows);
+  if (points.length === 0) return [];
+  const weights = installWeights(points);
+  const k = Math.max(1, Math.min(max, points.length));
+  if (k === 1) return [weightedMean(points, weights)];
+
+  const units = points.map((row) => unit(row.features));
   const chosen = [0];
-  while (chosen.length < max) {
+  while (chosen.length < k) {
     let best = -1;
     let bestDistance = -1;
     for (let i = 0; i < points.length; i += 1) {
       if (chosen.includes(i)) continue;
       let nearest = Infinity;
-      for (const j of chosen)
-        nearest = Math.min(nearest, distance(points[i].features, points[j].features));
+      for (const j of chosen) nearest = Math.min(nearest, 1 - dot(units[i], units[j]));
       if (nearest > bestDistance) {
         bestDistance = nearest;
         best = i;
@@ -165,40 +212,44 @@ export function selectPrototypes(rows, max = MAX_PROTOTYPES_PER_LABEL) {
     chosen.push(best);
   }
 
-  let medoids = [...chosen];
-  for (let pass = 0; pass < 10; pass += 1) {
-    const clusters = medoids.map(() => []);
-    for (let i = 0; i < points.length; i += 1) {
-      let nearest = 0;
-      let bestDistance = Infinity;
-      for (let m = 0; m < medoids.length; m += 1) {
-        const d = distance(points[i].features, points[medoids[m]].features);
-        if (d < bestDistance - 1e-12) {
-          bestDistance = d;
-          nearest = m;
+  let centres = chosen.map((index) => units[index]);
+  let assignments = points.map(() => -1);
+  for (let iteration = 0; iteration < CLUSTER_ITERATIONS; iteration += 1) {
+    let changed = false;
+    assignments = units.map((vector, index) => {
+      let bestCentre = 0;
+      let bestScore = -Infinity;
+      for (let c = 0; c < centres.length; c += 1) {
+        const score = dot(vector, centres[c]);
+        if (score > bestScore + 1e-12) {
+          bestScore = score;
+          bestCentre = c;
         }
       }
-      clusters[nearest].push(i);
-    }
-    const next = medoids.map((old, m) => {
-      if (clusters[m].length === 0) return old;
-      let best = clusters[m][0];
-      let bestCost = Infinity;
-      for (const candidate of clusters[m]) {
-        let cost = 0;
-        for (const other of clusters[m])
-          cost += distance(points[candidate].features, points[other].features);
-        if (cost < bestCost - 1e-12 || (Math.abs(cost - bestCost) <= 1e-12 && candidate < best)) {
-          bestCost = cost;
-          best = candidate;
-        }
-      }
-      return best;
+      if (assignments[index] !== bestCentre) changed = true;
+      return bestCentre;
     });
-    if (next.every((value, index) => value === medoids[index])) break;
-    medoids = next;
+    centres = centres.map((old, c) => {
+      const members = points.filter((_, index) => assignments[index] === c);
+      if (members.length === 0) return old;
+      return unit(weightedMean(members, weights.filter((_, index) => assignments[index] === c)));
+    });
+    if (!changed) break;
   }
-  return [...new Set(medoids)].sort((a, b) => a - b).map((index) => points[index].features);
+
+  const prototypes = [];
+  for (let c = 0; c < centres.length; c += 1) {
+    const members = points.filter((_, index) => assignments[index] === c);
+    if (members.length === 0) continue;
+    prototypes.push(weightedMean(members, weights.filter((_, index) => assignments[index] === c)));
+  }
+
+  const unique = [];
+  for (const vector of prototypes) {
+    if (unique.some((kept) => sameVector(kept, vector))) continue;
+    unique.push(vector);
+  }
+  return unique;
 }
 
 export function buildPrototypes(records, options = {}) {
@@ -277,6 +328,25 @@ export function indexPrototypes(file) {
       kind: label.kind,
       prototypes: (label.prototypes ?? []).map((vector) => vector.map(Number)),
     });
+  }
+  return index;
+}
+
+// The local side of the app keeps every confirmed row as a prototype, without clustering, so the
+// evaluation builds its local index the same way. Vectors are kept by reference, which lets a
+// caller drop the record under test by identity instead of by value.
+export function indexRecords(records) {
+  const index = new Map([["type", new Map()], ["tag", new Map()]]);
+  const add = (kind, name, features) => {
+    const target = index.get(kind);
+    const key = String(name).toLowerCase();
+    const entry = target.get(key) ?? { label: String(name), kind, prototypes: [] };
+    entry.prototypes.push(features);
+    target.set(key, entry);
+  };
+  for (const record of records) {
+    if (record.type) add("type", record.type, record.features);
+    for (const tag of tagNames(record)) add("tag", tag, record.features);
   }
   return index;
 }
