@@ -10,8 +10,8 @@ When an item is finished, record the commit or document here and append `✅` to
 
 | № | Item | State |
 |---|---|---|
-| 1 | Crash reporting: log to GitHub, group similar crashes into one issue | Not started |
-| 2 | **Report** in Settings: bug, feature request, or format/bank support with a sample file | Not started |
+| 1 | Crash reporting: log to GitHub, group similar crashes into one issue | Partly: the app writes a rolling log and a crash marker, and a report opens a prefilled issue. Automatic upload and grouping need a server. `docs/DIAGNOSTICS.md` |
+| 2 | **Report** in Settings: bug, feature request, or format/bank support with a sample file | Done: **Settings → REPORT** has three buttons that open the matching prefilled issue; a sample file is attached by the user in GitHub. `docs/DIAGNOSTICS.md` |
 | 3 | Integration with Sample Dicer, Loop Dicer, Drum Dicer (engine selection, Send to …) | Not started |
 | 4 | Tag-cloud tab: every file a point coloured by its tag, audition on hover, click-free stop | Not started |
 | 5 | Key and BPM passed to the DAW on drag | Not started |

@@ -2,14 +2,20 @@
 #include "ui/shell/WindowBounds.h"
 #include "core/settings/AppSettings.h"
 #include "core/database/SampleRepository.h"
+#include "core/diagnostics/Diagnostics.h"
+#include "core/Version.h"
 
 class SonicatorApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "SONICATOR"; }
-    const juce::String getApplicationVersion() override { return "0.1.0"; }
+    const juce::String getApplicationVersion() override { return sonicator::version(); }
     void initialise(const juce::String&) override
     {
+        // Logging and the crash marker start before anything else can fail.
+        sonicator::diagnostics::install();
+        juce::Logger::writeToLog("SONICATOR " + juce::String(sonicator::version()) + " starting on "
+                                 + juce::SystemStats::getOperatingSystemName());
         auto settings = sonicator::SettingsStore().load();
         sonicator::theme::apply(settings.theme);
         juce::Desktop::getInstance().setGlobalScaleFactor(
@@ -30,6 +36,8 @@ public:
     {
         if (window != nullptr) window->persistGeometry();
         window.reset();
+        juce::Logger::writeToLog("SONICATOR shutting down");
+        sonicator::diagnostics::uninstall();
     }
     void systemRequestedQuit() override { quit(); }
 private:

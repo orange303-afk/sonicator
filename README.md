@@ -77,6 +77,19 @@ Waveform selection exports are new WAV files under `Sonicator/exports/` in the s
 
 The source sample rate and channel count are preserved; 16-bit sources stay 16-bit PCM, 24/32-bit integer sources become 24-bit PCM, float sources become 32-bit float, and compressed sources become 24-bit PCM. Exported files are not deleted automatically because a DAW project or a message may reference them, so the folder grows until you remove files manually. Source originals are opened read-only and are never moved by a drag.
 
+## Reporting problems
+
+**Settings → REPORT** opens a new GitHub issue with the template and environment already filled in:
+bug report, feature request, or format/bank support (attach the smallest sample that reproduces it).
+Nothing is sent automatically; the report opens in your browser and you submit it.
+
+The application writes a rolling log to `~/Library/Logs/Sonicator/sonicator.log` (Windows:
+`%APPDATA%\Sonicator\logs\sonicator.log`), rotated at 2 MB into a single `sonicator.1.log`. A crash
+writes `crash.txt` beside the log with the signal and a backtrace; the next report includes it. The
+report body shortens your home directory to `~` and the catalog path to `<catalog>`, but keeps file
+names from the log, because a report without the failing file is rarely actionable. Details:
+[docs/DIAGNOSTICS.md](docs/DIAGNOSTICS.md).
+
 ## Reason Packs
 
 On macOS, `~/Library/Application Support/Propellerhead Software/Packs` is registered once when present. The global `reasonPacksAdded` setting prevents it returning after removal. WAV/AIFF/RX2 files use normal indexing and preview; `_audio previews` and `Audio Previews` directories inside packs are excluded, regardless of audio format.
@@ -120,6 +133,7 @@ core/disc/                   read-only image probing, filesystems, decoding and 
 core/reason/                 bounded patch metadata and one-time Packs registration
 core/ableton/                Ableton preview naming, protected-sample probe and one-time Packs registration
 core/settings/               persisted application settings
+core/diagnostics/             rolling log, crash marker and the prefilled report URLs
 ui/shell/                    theme, window geometry and themed dialogs
 ui/library/                  global search, tags, folder tree, paged/virtualized library, row drag
 ui/waveform/                 asynchronous thumbnail, bounded disk cache and range selection

@@ -1,5 +1,7 @@
 #include "SettingsPanel.h"
 #include "ui/shell/Theme.h"
+#include "core/Version.h"
+#include "core/diagnostics/Diagnostics.h"
 namespace sonicator {
 namespace {
 juce::Font sectionFont()
@@ -19,12 +21,35 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
       kofi("ko-fi.com/ilyaorange", juce::URL("https://ko-fi.com/ilyaorange")),
       boosty("boosty.to/ilyaorange", juce::URL("https://boosty.to/ilyaorange"))
 {
-    for (auto* c : std::array<juce::Component*,23>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
+    for (auto* c : std::array<juce::Component*,25>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
          &languageLabel,&languageNote,&libraryHeading,&databaseKey,&databaseLabel,&libraryNote,&databaseStatus,
-         &audioHeading,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&creditsLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
+         &audioHeading,&reportHeading,&reportNote,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&creditsLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
         addAndMakeVisible(c);
-    for (auto* c : std::array<juce::Component*,9>{&openDatabase,&backupDatabase,&audio,&close,&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
+    for (auto* c : std::array<juce::Component*,12>{&openDatabase,&backupDatabase,&audio,&reportBug,&reportFeature,
+         &reportFormat,&close,&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
         addAndMakeVisible(c);
+
+    const auto pendingCrash = diagnostics::pendingCrash (diagnostics::defaultCrashMarker(), database);
+    reportHeading.setText("REPORT", juce::dontSendNotification); reportHeading.setFont(sectionFont());
+    reportNote.setText(juce::String("Opens a new issue in your browser with the app version, the OS and the "
+                                    "tail of the log. Your home folder and catalog path are shortened; nothing "
+                                    "is sent automatically.")
+                       + (pendingCrash.isNotEmpty() ? " The previous session ended unexpectedly and its crash "
+                                                      "trace will be included." : ""),
+                       juce::dontSendNotification);
+    reportNote.setFont(noteFont());
+    reportNote.setJustificationType(juce::Justification::topLeft);
+    const auto openReport = [this](diagnostics::ReportKind kind)
+    {
+        diagnostics::ReportContext context;
+        context.appVersion = version();
+        context.catalogFile = database;
+        if (juce::URL (diagnostics::issueUrl (kind, context)).launchInDefaultBrowser())
+            diagnostics::clearPendingCrash (diagnostics::defaultCrashMarker());
+    };
+    reportBug.onClick = [openReport] { openReport (diagnostics::ReportKind::bug); };
+    reportFeature.onClick = [openReport] { openReport (diagnostics::ReportKind::feature); };
+    reportFormat.onClick = [openReport] { openReport (diagnostics::ReportKind::formatSupport); };
     addAndMakeVisible(contributeDataToggle);
     contributeDataToggle.setButtonText("Contribute anonymous feedback to improve classification models");
     contributeDataToggle.setToggleState(initial.contributeTrainingData, juce::dontSendNotification);
@@ -83,7 +108,8 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         link->setFont(juce::FontOptions(12),false);
         link->setJustificationType(juce::Justification::centredLeft);
     }
-    for (auto* button : std::array<juce::Button*,6>{&moveDatabase,&openDatabase,&relocateDatabase,&backupDatabase,&audio,&close})
+    for (auto* button : std::array<juce::Button*,9>{&moveDatabase,&openDatabase,&relocateDatabase,&backupDatabase,
+                                                    &audio,&reportBug,&reportFeature,&reportFormat,&close})
     {
         button->setWantsKeyboardFocus(false);
         button->setMouseClickGrabsKeyboardFocus(false);
@@ -124,7 +150,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         if (onClose) { onClose(); return; }
         if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
     };
-    setSize(560,776);
+    setSize(560,866);
 }
 void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
 {
@@ -136,7 +162,7 @@ void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
     for (auto* c : hidden)
         c->setVisible(! pluginMode);
     close.setVisible(pluginMode);
-    setSize(560, pluginMode ? 600 : 776);
+    setSize(560, pluginMode ? 700 : 866);
     resized();
 }
 void SettingsPanel::notifySettings()
@@ -195,6 +221,8 @@ void SettingsPanel::lookAndFeelChanged()
     authorLabel.setColour(juce::Label::textColourId,theme::muted);
     productLabel.setColour(juce::Label::textColourId,theme::text);
     title.setColour(juce::Label::textColourId,theme::text);
+    reportHeading.setColour(juce::Label::textColourId,theme::muted);
+    reportNote.setColour(juce::Label::textColourId,theme::muted);
     supportLabel.setColour(juce::Label::textColourId,theme::muted);
     creditsLabel.setColour(juce::Label::textColourId,theme::muted);
     for (auto* link : std::array<juce::HyperlinkButton*,5>{&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
@@ -297,6 +325,19 @@ void SettingsPanel::resized()
         section(audioHeading, 14);
         add(30, 4, false, [this](juce::Rectangle<int> area) { audio.setBounds(area.withTrimmedLeft(140)); });
     }
+
+    section(reportHeading, 14);
+    add(28, 4, false, [this](juce::Rectangle<int> area)
+    {
+        auto right = area.withTrimmedLeft(140);
+        const auto width = (right.getWidth() - 16) / 3;
+        reportBug.setBounds(right.removeFromLeft(width));
+        right.removeFromLeft(8);
+        reportFeature.setBounds(right.removeFromLeft(width));
+        right.removeFromLeft(8);
+        reportFormat.setBounds(right);
+    });
+    add(40, 6, false, [this](juce::Rectangle<int> area) { reportNote.setBounds(area.withTrimmedLeft(140)); });
 
     section(aboutHeading, 14);
     add(24, 2, false, [this](juce::Rectangle<int> area) { productLabel.setBounds(area); });

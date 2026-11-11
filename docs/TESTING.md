@@ -1,5 +1,21 @@
 # Verification
 
+## Diagnostics and the Report section (2026-11-11)
+
+- New `core/diagnostics`: a rotating log, a crash marker written by the crash handler, path redaction and
+  prefilled issue URLs. Installed in `app/Main.cpp` before the window exists; the settings panel builds
+  the reports, and nothing in the application opens a network connection.
+- Tests: `tests/TestDiagnostics.cpp` (`[diagnostics]`) covers rotation into exactly one previous file,
+  line and character caps, redaction of the catalog path, the home directory and the account name, the
+  crash-marker lifecycle, the per-kind report body, and that the URL contains the right template and
+  neither leaked path. `[ui][settings]` asserts the three report buttons and renders the panel in both
+  themes at 560×866.
+- The settings panel grew a REPORT section; the panel height went from 776 to 866 (700 in plugin mode),
+  and the plugin overlay still scales it to the editor.
+- macOS Debug: **657 cases / 10 597 assertions**, `ctest --preset debug` passed in 26.68 s.
+- Not verified: an actual crash on macOS and the resulting marker; the browser opening the issue page
+  (the URL is asserted, opening it is the user's action); Windows log path.
+
 ## Continuous integration (2026-11-11)
 
 `.github/workflows/ci.yml` runs on every push to `main`, on every pull request and on demand.

@@ -29,12 +29,16 @@ private:
     bool indexing = false, statusError = false, pluginMode = false;
     juce::Label title, appearance, themeLabel, scaleLabel, languageHeading, languageLabel,
                  languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
-                 audioHeading, aboutHeading, productLabel, authorLabel, supportLabel, creditsLabel;
+                 audioHeading, reportHeading, reportNote, aboutHeading, productLabel, authorLabel,
+                 supportLabel, creditsLabel;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::ToggleButton contributeDataToggle;
     juce::TextButton moveDatabase { "Move catalog..." }, openDatabase { "Open catalog..." },
                      relocateDatabase { "Relocate folders..." }, backupDatabase { "Backup database" },
-                     audio { "Audio/MIDI Settings" }, close { "Close" };
+                     audio { "Audio/MIDI Settings" },
+                     reportBug { "Report a bug..." }, reportFeature { "Request a feature..." },
+                     reportFormat { "Format support..." },
+                     close { "Close" };
     juce::HyperlinkButton gumroad, bandcamp, naukograd, kofi, boosty;
     std::unique_ptr<juce::FileChooser> chooser;
     std::vector<juce::Rectangle<float>> sectionRules;

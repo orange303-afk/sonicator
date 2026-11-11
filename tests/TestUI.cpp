@@ -235,7 +235,13 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
         if (auto* label = dynamic_cast<juce::Label*>(child))
             licence = licence || label->getText().contains("AGPL-3.0-or-later");
     REQUIRE(licence);
-    panel.setBounds(0,0,560,800);
+    std::set<juce::String> buttonText;
+    for (auto* child : panel.getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*>(child)) buttonText.insert(button->getButtonText());
+    REQUIRE(buttonText.count("Report a bug...") == 1);
+    REQUIRE(buttonText.count("Request a feature...") == 1);
+    REQUIRE(buttonText.count("Format support...") == 1);
+    panel.setBounds(0,0,560,panel.getHeight());
     // The credits block must still hold all four lines after the licence line was added.
     bool fits = false;
     for (auto* child : panel.getChildren())
