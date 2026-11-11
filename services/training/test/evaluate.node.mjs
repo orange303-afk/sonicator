@@ -90,3 +90,20 @@ test("custom types do not count towards shipped accuracy", () => {
   const rows = dataset(["a", "b", "c"], 20, { type: "MyLayer", typeIsCustom: true, tags: [] });
   assert.equal(crossValidateShipped(rows).records, 0);
 });
+
+test("the gate does not pass when nothing global could be shipped", () => {
+  const rows = [];
+  for (let i = 0; i < 30; i += 1)
+    rows.push(record({
+      installId: "only",
+      recordId: `only-${String(i).padStart(3, "0")}`,
+      type: "kick",
+      tags: [],
+      features: features(ACOUSTIC, 0.01 * (i % 3)),
+    }));
+  const summary = summarizeEvaluation(evaluate(rows));
+  assert.equal(summary.installs, 1);
+  assert.ok(summary.type.after > 0.6, `accuracy ${summary.type.after}`);
+  assert.equal(summary.type.shippedLabels, 0);
+  assert.equal(summary.type.gate, false);
+});

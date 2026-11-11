@@ -124,6 +124,9 @@ export function evaluate(records) {
   const result = {
     records: normalized.length,
     installs: installs.length,
+    // What the default thresholds would put in the shipped file for this dataset. Zero means the
+    // "after" column has no global evidence behind it, whatever its accuracy says.
+    shippedLabels: buildPrototypes(normalized).labels.length,
     type: { records: 0, before: 0, after: 0, groups: new Map() },
     tags: { truth: 0, before: 0, after: 0, predictedBefore: 0, predictedAfter: 0 },
     labels: new Map(),
@@ -209,7 +212,10 @@ export function summarizeEvaluation(result) {
       after,
       thresholdUsed: TYPE_THRESHOLD,
       tagThresholdUsed: TAG_THRESHOLD,
-      gate: after >= 0.6 && after + 1e-12 >= before,
+      shippedLabels: result.shippedLabels,
+      // Without a label that would actually ship there is no global evidence, and "after" equal to
+      // "before" says nothing about the prototypes.
+      gate: after >= 0.6 && after + 1e-12 >= before && result.shippedLabels > 0,
       groups,
       worst,
     },
@@ -237,6 +243,7 @@ Generated: ${generatedAt ?? "unknown"}
 - Installs held out in turn: ${summary.installs}
 - Records evaluated: ${summary.records}
 - Records with a standard type: ${summary.type.records}
+- Labels that would ship with the default thresholds: ${summary.type.shippedLabels}
 - Type acceptance threshold: ${summary.type.thresholdUsed}; tag threshold: ${summary.type.tagThresholdUsed}
 
 ## Type, top-1
@@ -246,7 +253,8 @@ Generated: ${generatedAt ?? "unknown"}
 | Before (local prototypes only) | ${percent(summary.type.before)} |
 | After (local + global, penalty 0.95, local within 0.02) | ${percent(summary.type.after)} |
 
-Threshold for shipping without the owner: after ≥ 60% and after ≥ before. Current result:
+Threshold for shipping without the owner: after ≥ 60%, after ≥ before, and at least one label that
+would ship at the default thresholds. Current result:
 **${summary.type.gate ? "passes" : "needs the owner's decision"}**.
 
 ### By group

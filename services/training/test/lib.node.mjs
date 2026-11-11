@@ -97,6 +97,28 @@ test("prototypes stay inside 0..1", () => {
     for (const value of feature) assert.ok(value >= 0 && value <= 1, `value ${value}`);
 });
 
+test("every install carries the same weight when centres are averaged", () => {
+  const rows = [];
+  for (let i = 0; i < 1000; i += 1)
+    rows.push(record({
+      installId: "big",
+      recordId: `big-${String(i).padStart(4, "0")}`,
+      features: features(ACOUSTIC),
+    }));
+  for (let i = 0; i < 3; i += 1)
+    rows.push(record({
+      installId: "small",
+      recordId: `small-${String(i).padStart(4, "0")}`,
+      features: features(BRIGHT),
+    }));
+  const [centre] = selectPrototypes(rows, 1);
+  const acoustic = features(ACOUSTIC);
+  const bright = features(BRIGHT);
+  const midpoint = acoustic.map((value, index) => (value + bright[index]) / 2);
+  assert.ok(cosine(centre, midpoint) > 0.9995,
+    `the centre is the mean of the two installs, got cosine ${cosine(centre, midpoint)}`);
+});
+
 test("an outlier does not become the centre of a label", () => {
   const rows = [];
   for (let i = 0; i < 30; i += 1)
