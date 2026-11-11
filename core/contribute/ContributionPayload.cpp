@@ -1,8 +1,15 @@
 #include "ContributionPayload.h"
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace sonicator::contribute {
 namespace {
+// The intake rejects a body above 256 KB. Keep a margin for the batch envelope and for JSON
+// escaping, so a full 500-record fetch is trimmed to what the server accepts instead of failing
+// the whole cycle with 413.
+constexpr int maxBatchBodyBytes = 240 * 1024;
+
 juce::String cleanLabel(const juce::String& text)
 {
     const auto trimmed = text.trim();
@@ -38,7 +45,9 @@ Batch buildBatch(const std::vector<Record>& records, const Vocabulary& vocabular
                  const juce::String& appVersion, const juce::String& os, juce::Time sentAt)
 {
     juce::Array<juce::var> out;
+    std::vector<int64_t> keptWatermarks;
     int64_t watermark = 0;
+    size_t bodyBytes = 0;
     for (const auto& record : records)
     {
         if (out.size() >= maxRecordsPerBatch) break;
@@ -82,23 +91,47 @@ Batch buildBatch(const std::vector<Record>& records, const Vocabulary& vocabular
         if (record.hasBpm && record.bpm > 0.0 && record.bpm <= 1000.0)
             entry->setProperty("bpm", std::round(record.bpm * 10.0) / 10.0);
 
-        out.add(juce::var(entry));
+        const juce::var entryVar(entry);
+        const auto entryBytes = (size_t) juce::JSON::toString(entryVar, false).length();
+        if (! out.isEmpty() && bodyBytes + entryBytes + 1 > (size_t) maxBatchBodyBytes)
+            break;
+        out.add(entryVar);
+        keptWatermarks.push_back(record.updatedAt);
+        bodyBytes += entryBytes + 1;
         watermark = juce::jmax(watermark, record.updatedAt);
     }
 
-    auto* batch = new juce::DynamicObject();
-    batch->setProperty("schema", "contribute.v1");
-    batch->setProperty("installId", installId.toLowerCase());
-    batch->setProperty("batchId", batchId.toLowerCase());
-    batch->setProperty("appVersion", appVersion);
-    batch->setProperty("os", os);
-    batch->setProperty("sentAt", sentAt.toISO8601(true));
-    batch->setProperty("records", out);
-
-    Batch result;
-    result.json = juce::JSON::toString(juce::var(batch), false);
-    result.recordCount = out.size();
-    result.watermark = watermark;
+    const auto makeBatch = [&]
+    {
+        auto* batch = new juce::DynamicObject();
+        batch->setProperty("schema", "contribute.v1");
+        batch->setProperty("installId", installId.toLowerCase());
+        batch->setProperty("batchId", batchId.toLowerCase());
+        batch->setProperty("appVersion", appVersion);
+        batch->setProperty("os", os);
+        batch->setProperty("sentAt", sentAt.toISO8601(true));
+        batch->setProperty("records", out);
+        Batch result;
+        result.json = juce::JSON::toString(juce::var(batch), false);
+        result.recordCount = out.size();
+        result.watermark = keptWatermarks.empty() ? 0 : keptWatermarks.back();
+        return result;
+    };
+    auto result = makeBatch();
+    // The per-record estimate can drift from the pretty-printed body; trim until it really fits.
+    while (out.size() > 1 && result.json.length() > maxBatchBodyBytes)
+    {
+        const auto ratio = (double) maxBatchBodyBytes / (double) result.json.length();
+        auto remove = juce::jmax(1, (int) std::ceil((double) out.size() * (1.0 - ratio)));
+        remove = juce::jmin(remove, out.size() - 1);
+        for (int i = 0; i < remove; ++i)
+        {
+            out.removeLast();
+            keptWatermarks.pop_back();
+        }
+        result = makeBatch();
+    }
+    juce::ignoreUnused(watermark);
     return result;
 }
 

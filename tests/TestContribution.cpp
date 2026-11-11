@@ -568,6 +568,26 @@ TEST_CASE("A standard tag stays standard when the catalog created it as custom",
     CHECK(repo.builtinTagNames().contains("Kick", true));
 }
 
+TEST_CASE("A contribution batch stays under the intake body limit", "[contribute]")
+{
+    std::vector<Record> records;
+    for (int i = 0; i < 500; ++i)
+    {
+        auto record = oneRecord()[0];
+        record.recordId = juce::String::formatted("%08d-0000-4000-8000-%012d", i, i);
+        for (int tag = 0; tag < 12; ++tag)
+            record.tags.add(juce::String::repeatedString("x", 28) + juce::String(i * 100 + tag));
+        records.push_back(std::move(record));
+    }
+    const auto batch = buildBatch(records, vocabulary(),
+        "3f2a8c1e-7b4d-4a9e-9c2f-1d6b8a0e5f31", "9b1d6c33-2e58-4f07-8a41-0c7d5e9b2a64",
+        "0.4.2", "mac", juce::Time::getCurrentTime());
+    CHECK(batch.recordCount > 0);
+    CHECK(batch.recordCount < 500);
+    CHECK(batch.json.length() < 256 * 1024);
+    CHECK(batch.json.contains("contribute.v1"));
+}
+
 TEST_CASE("Contribution settings persist and default to off", "[contribute][settings]")
 {
     // Version 3 changed what is eligible: accepted AutoTag proposals count, older tag history does not.
