@@ -1,0 +1,69 @@
+# Training stage
+
+Builds `resources/ml/global_prototypes.json`, the file of learned labels that ships inside the app, and
+measures what that file actually gets. Node only: no dependencies, no Python, no network calls at build
+time.
+
+## Input
+
+A JSONL export of contributed records:
+
+```bash
+cd services/contribute-worker
+node scripts/export.mjs --out out/contribute-export.jsonl
+```
+
+Each line carries `recordId`, `installId`, `featureSchema` (currently 1), 14 feature values in 0..1, an
+optional `type` and optional `tags`.
+
+## Commands
+
+```bash
+cd services/training
+npm test                                              # node:test, no installs needed
+node build-prototypes.mjs --in <export.jsonl>         # writes ../../resources/ml/global_prototypes.json
+node evaluate.mjs --in <export.jsonl> --cv 5          # writes training-report.md
+node candidates.mjs --in <export.jsonl>               # standard-tag candidates for the owner
+node generate-credits.mjs                             # writes ../../docs/DATA_CREDITS.md
+```
+
+`build-prototypes.mjs` needs at least 3 installs and 10 records per label before a label ships; with
+less data it writes a valid file with no labels, and the app behaves as it does without it.
+
+`evaluate.mjs` reports two things:
+
+- leave-one-install-out, local + global, which is the stage-2 gate (after ≥ 60% and not worse than
+  before);
+- `--cv N`: what the shipped prototypes alone get, with the record under test never part of the model
+  that scores it. This is the number to watch when changing the assembly.
+
+## How prototypes are built
+
+Weighted k-means over each label's records, up to 8 centres per label. Every install carries the same
+total weight inside a label, so a large library cannot fill every prototype with its own material. The
+centres are stored as plain means, so every value stays in 0..1 and the app's loader, its cosine
+similarity and `featureSchema 1` are unchanged.
+
+Measured on the owner's export of 2026-11-11 (4526 records, 1 install, 13 types), five folds:
+
+| Assembly | Shipped prototypes, 5-fold CV |
+|---|---|
+| Farthest-first with medoid refinement (until 2026-11-12) | 57.1% |
+| Weighted k-means centres | 65.7% |
+
+The local path (every confirmed row of the person's own library is a prototype, no clustering) reaches
+80.5% on the same records, which is the ceiling the shipped file is compared against.
+
+## Datasets and licences
+
+`datasets/manifest.json` lists every public dataset with its licence and a tier:
+
+- **A** CC0 / CC BY, **B** NC, SA, ND or research-only, **C** not usable (ML training prohibited, or
+  audio without an explicit licence).
+- Levels A and B are used; level C is never used. `validateManifest` refuses a level C entry marked as
+  used.
+- `docs/DATA_CREDITS.md` is generated from the registry and committed; `THIRD_PARTY_NOTICES.md` points
+  at it.
+
+A future plan adds `featureSchema 2`, a feature extraction CLI for the datasets above and `--max-tier`
+for rebuilding without level B sources.
