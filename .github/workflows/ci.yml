@@ -17,7 +17,9 @@ permissions:
 jobs:
   macos:
     name: macOS ${{ matrix.config }}
-    runs-on: macos-14
+    # macos-15 is the arm64 image this project is developed on. macos-14 is retired on GitHub-hosted
+    # runners: its jobs are cancelled before they start, so it must not be used.
+    runs-on: macos-15
     timeout-minutes: 90
     strategy:
       fail-fast: false
