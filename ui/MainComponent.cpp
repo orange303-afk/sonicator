@@ -551,6 +551,13 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         }
         smart = std::make_unique<SmartAnalysisService>(*writeRepo);
         tagging = std::make_unique<TaggingService>(*writeRepo);
+        tagging->onTagsChanged = [safe = juce::Component::SafePointer<MainComponent>(this)](std::vector<int64_t> ids)
+        {
+            juce::MessageManager::callAsync([safe, ids = std::move(ids)]
+            {
+                if (safe != nullptr) safe->triggerAdaptiveLearning(ids);
+            });
+        };
         autoTag = std::make_unique<AutoTagService>(*writeRepo);
         splitter = std::make_unique<SplitService>();
         extractor = std::make_unique<ExtractService>();
@@ -1631,7 +1638,7 @@ void MainComponent::showEditTagsMenu()
             bool isAssigned = false;
             for (const auto& current : safe->readRepo->tagsForSample(sampleId))
                 if (current.id == tag.id) isAssigned = true;
-            if (isAssigned) safe->writeRepo->setSampleTag(sampleId, tag.id, false);
+            if (isAssigned) { safe->writeRepo->setSampleTag(sampleId, tag.id, false); safe->triggerAdaptiveLearning({ sampleId }); }
             else safe->assignTagAndRemember({ sampleId }, tag.id);
             safe->reloadLibrary();
         });
@@ -3318,12 +3325,13 @@ void MainComponent::askContributionConsent()
 {
     if (contributionConsentCurrent()) return;
     const auto message = juce::String(
-        "Sonicator can send anonymous training data: the confirmed type, tags, tempo and key of a sample, "
-        "plus 14 acoustic measurements as plain numbers. Audio, file names, folder names and paths are "
-        "never sent, and nothing identifies you or your computer.\n\n"
-        "Confirmations you make from now on are included. Confirmations from older versions have "
-        "unknown origin and stay on your computer. You can review the exact data, stop at any "
-        "time and delete what was sent in Settings > Library.\n\n"
+        "Sonicator can send anonymous training data: the type you set, the tags you assign or accept "
+        "from an AutoTag suggestion, tempo and key of a sample, plus 14 acoustic measurements as "
+        "plain numbers. Audio, file names, folder names and paths are never sent, and nothing "
+        "identifies you or your computer.\n\n"
+        "Confirmations you make from now on are included. Tag assignments from older versions are "
+        "not uploaded, and rows with unknown origin stay on your computer. You can review the exact "
+        "data, stop at any time and delete what was sent in Settings > Library.\n\n"
         "Participate in training data collection?");
     juce::Component::SafePointer<MainComponent> safe(this);
     dialogs::showAlert(*this, "Help train the model", message,
@@ -3637,6 +3645,13 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     indexer = std::make_unique<IndexingService>(*writeRepo);
     smart = std::make_unique<SmartAnalysisService>(*writeRepo);
     tagging = std::make_unique<TaggingService>(*writeRepo);
+    tagging->onTagsChanged = [safe = juce::Component::SafePointer<MainComponent>(this)](std::vector<int64_t> ids)
+    {
+        juce::MessageManager::callAsync([safe, ids = std::move(ids)]
+        {
+            if (safe != nullptr) safe->triggerAdaptiveLearning(ids);
+        });
+    };
     autoTag = std::make_unique<AutoTagService>(*writeRepo);
     splitter = std::make_unique<SplitService>();
     taggingWasRunning = false;

@@ -90,6 +90,7 @@ TaggingProgress TaggingService::progress() const
 }
 void TaggingService::run()
 {
+    std::vector<int64_t> touched;
     try
     {
         std::vector<int64_t> ids;
@@ -173,6 +174,7 @@ void TaggingService::run()
                 snapshot = state;
             }
             if (onBatch) onBatch(snapshot);
+            touched.insert(touched.end(), batch.begin(), batch.end());
             start = end;
         }
         {
@@ -209,5 +211,6 @@ void TaggingService::run()
         state.lastError = juce::String::fromUTF8(e.what());
         state.message = "Tagging failed: " + state.lastError;
     }
+    if (! touched.empty() && onTagsChanged) onTagsChanged(touched);
 }
 } // namespace sonicator

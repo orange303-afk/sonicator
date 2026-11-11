@@ -235,7 +235,7 @@ void AutoTagService::prepare()
                 if (! skipHasConflict)
                 {
                     auto& adaptive = AcousticClassifierService::getSharedAdaptiveClassifier();
-                    if (adaptive.hasPrototypes())
+                    if (adaptive.hasTagPrototypes())
                     {
                         std::vector<float> features;
                         auto allFb = repo.allFeedback();
@@ -538,11 +538,13 @@ void AutoTagService::apply()
             else if (const auto res = repo.smartResult(id))
                 type = res->type;
 
-            // A row a person wrote is their confirmation; AutoTag must not overwrite it, nor the
-            // prototype the classifier already learned from it.
-            if (repo.hasUserFeedback(id)) continue;
-            repo.recordFeedback(id, type, tagNames, features, SampleRepository::FeedbackOrigin::autoTag);
-            AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
+            // The review dialog only applies proposals the person ticked, so this is an approved
+            // label, not an unreviewed guess. A row the person wrote keeps its type and origin;
+            // only its tag list refreshes.
+            const bool userRow = repo.hasUserFeedback(id);
+            repo.recordFeedback(id, type, tagNames, features, SampleRepository::FeedbackOrigin::approved);
+            if (! userRow)
+                AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
         }
     }
     result.message = result.cancelled

@@ -249,6 +249,8 @@ TEST_CASE("Repository stores a stable contribution id and a per-catalog watermar
     const auto id = repo.upsert(sample);
 
     const std::vector<float> features { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f };
+    const auto acoustic = repo.createTag("acoustic", 0xff00ff00);
+    repo.setSampleTag(id, acoustic, true);
     repo.recordFeedback(id, "kick", { "acoustic" }, features, SampleRepository::FeedbackOrigin::user);
 
     auto rows = repo.contributionRecords(0, 10);
@@ -328,7 +330,7 @@ TEST_CASE("Rows written before schema 14 count as legacy and are not contributed
     Database db(file);
     SampleRepository repo(db);
     repo.createTables();
-    CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 14);
+    CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 15);
     CHECK(repo.allFeedback().size() == 1);            // legacy rows stay on disk
     CHECK(repo.contributionRecords(0, 10).empty());   // and out of the dataset
 }
@@ -359,6 +361,119 @@ TEST_CASE("A machine write never replaces a person's confirmation", "[contribute
     CHECK_FALSE(rows[0].tags.contains("punchy"));
     REQUIRE(repo.allFeedback().size() == 1);
     CHECK(repo.allFeedback()[0].targetType == "kick");
+}
+
+TEST_CASE("An accepted AutoTag proposal counts as a confirmation", "[contribute][database]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("approved.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+    const std::vector<float> features(14, 0.3f);
+
+    SampleRecord manual;
+    manual.filePath = "/library/manual.wav";
+    manual.fileName = "manual.wav";
+    manual.fileHash = "hash-manual";
+    const auto manualId = repo.upsert(manual);
+    repo.recordFeedback(manualId, "Kick", {}, features, FeedbackOrigin::user);
+
+    SampleRecord machine;
+    machine.filePath = "/library/machine.wav";
+    machine.fileName = "machine.wav";
+    machine.fileHash = "hash-machine";
+    const auto machineId = repo.upsert(machine);
+
+    const auto punchy = repo.createTag("Punchy", 0xff00ff00);
+    repo.setSampleTag(manualId, punchy, true);
+    repo.setSampleTag(machineId, punchy, true);
+
+    // The review dialog applies a proposal for both samples. The manual row keeps its type.
+    repo.recordFeedback(manualId, "Snare", { "Punchy" }, features, FeedbackOrigin::approved);
+    repo.recordFeedback(machineId, "Snare", { "Punchy" }, features, FeedbackOrigin::approved);
+
+    const auto rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 2);
+    for (const auto& row : rows)
+    {
+        CHECK(row.tags.contains("Punchy"));
+        CHECK_FALSE(row.typeConfirmed); // no type override on either sample
+    }
+    const auto manualRow = std::find_if(rows.begin(), rows.end(),
+        [&](const SampleRepository::ContributionRecord& row) { return row.targetType == "Kick"; });
+    REQUIRE(manualRow != rows.end());
+    CHECK(repo.hasUserFeedback(manualId));
+    CHECK_FALSE(repo.hasUserFeedback(machineId));
+}
+
+TEST_CASE("Tag history starts at schema 15 but local prototypes keep old tags", "[contribute][database]")
+{
+    TestDirectory t;
+    const auto file = t.dir.getChildFile("tag-history.sqlite");
+    int64_t id = 0;
+    {
+        Database db(file);
+        SampleRepository repo(db);
+        repo.createTables();
+        SampleRecord sample;
+        sample.filePath = "/library/old.wav";
+        sample.fileName = "old.wav";
+        sample.fileHash = "hash-old";
+        id = repo.upsert(sample);
+        const auto tag = repo.createTag("OldTag", 0xff00ff00);
+        repo.setSampleTag(id, tag, true);
+        repo.recordFeedback(id, "Pad", { "OldTag" }, std::vector<float>(14, 0.4f),
+                            FeedbackOrigin::user);
+        SmartOverride overrideType;
+        overrideType.textValue = "Pad";
+        repo.setSmartOverride(id, SmartField::Type, overrideType);
+    }
+    rawExec(file, "ALTER TABLE ml_feedback_samples DROP COLUMN tag_history_schema; PRAGMA user_version=14;");
+    {
+        Database db(file);
+        SampleRepository repo(db);
+        repo.createTables();
+        CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 15);
+        REQUIRE(repo.allFeedback().size() == 1);
+        CHECK(repo.allFeedback()[0].tags.contains("OldTag")); // local prototype still learns it
+        const auto rows = repo.contributionRecords(0, 10);
+        REQUIRE(rows.size() == 1);
+        CHECK(rows[0].tags.isEmpty());                        // but it is not uploaded
+        CHECK(rows[0].typeConfirmed);
+        CHECK(rows[0].targetType == "Pad");
+    }
+}
+
+TEST_CASE("Exported tags follow the current catalog", "[contribute][database]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("tag-current.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+    SampleRecord sample;
+    sample.filePath = "/library/tagged.wav";
+    sample.fileName = "tagged.wav";
+    sample.fileHash = "hash-tagged";
+    const auto id = repo.upsert(sample);
+    const auto tag = repo.createTag("OldName", 0xff00ff00);
+    repo.setSampleTag(id, tag, true);
+    repo.recordFeedback(id, "Kick", { "OldName" }, std::vector<float>(14, 0.2f),
+                        FeedbackOrigin::user);
+    REQUIRE(repo.contributionRecords(0, 10)[0].tags.contains("OldName"));
+
+    REQUIRE(repo.renameTag(tag, "NewName"));
+    auto rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].tags.contains("NewName"));
+    CHECK_FALSE(rows[0].tags.contains("OldName"));
+
+    const auto beforeDelete = rows[0].updatedAt;
+    juce::Thread::sleep(2);
+    repo.deleteTag(tag);
+    rows = repo.contributionRecords(0, 10);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows[0].tags.isEmpty());
+    CHECK(rows[0].updatedAt > beforeDelete);
 }
 
 TEST_CASE("A tag action exports tags without claiming the resolved type", "[contribute][database]")
@@ -443,8 +558,8 @@ TEST_CASE("A type offered by the Type menu counts as standard", "[contribute]")
 
 TEST_CASE("Contribution settings persist and default to off", "[contribute][settings]")
 {
-    // Version 2 changed what is eligible: pre-schema-14 rows stay behind, so everyone re-consents.
-    CHECK(AppSettings::currentContributionConsentVersion >= 2);
+    // Version 3 changed what is eligible: accepted AutoTag proposals count, older tag history does not.
+    CHECK(AppSettings::currentContributionConsentVersion >= 3);
     AppSettings s;
     CHECK_FALSE(s.contributeTrainingData);
     CHECK(s.contributionConsentVersion == 0);

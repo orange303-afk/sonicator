@@ -34,6 +34,9 @@ public:
     // Called on the worker after each committed batch. The UI may publish progress here; tests
     // use it to request cancellation at a deterministic boundary.
     std::function<void(const TaggingProgress&)> onBatch;
+    // Called once on the worker after the job with every id whose tags may have changed, so the
+    // owner can refresh learned prototypes and the contribution row.
+    std::function<void(const std::vector<int64_t>&)> onTagsChanged;
 private:
     SampleRepository& repo;
     const int batchSize;

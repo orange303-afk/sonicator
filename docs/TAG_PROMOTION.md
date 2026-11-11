@@ -12,8 +12,9 @@ records each decision here.
    in `services/training/`. It writes `docs/tag-candidates.md` and
    `services/training/out/candidates.json`.
 3. The report keeps a label when at least five installs and at least 1% of installs confirmed it,
-   and drops paths, addresses, URLs, numbers and fragments shorter than two characters. A match
-   with a standard name, ignoring case, is reported as a merge rather than a new label.
+   and drops paths, addresses, URLs, numbers and fragments shorter than two characters. Both manual
+   assignments and AutoTag proposals the person reviewed and applied count. A match with a standard
+   name, ignoring case, is reported as a merge rather than a new label.
    A custom type is not shipped in the prototype file automatically; it reaches every catalog only
    through this promotion. A type the person did not set themselves is not exported at all, so the
    report only sees real choices.

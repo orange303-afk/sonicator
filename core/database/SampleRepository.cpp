@@ -11,7 +11,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
-constexpr int schemaVersion = 14;
+constexpr int schemaVersion = 15;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -637,7 +637,8 @@ void SampleRepository::createTables()
             "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE, file_hash TEXT NOT NULL,"
             "target_type TEXT NOT NULL COLLATE NOCASE, tags TEXT NOT NULL DEFAULT '',"
             "features BLOB NOT NULL, updated_at INTEGER NOT NULL,"
-            "contribution_id TEXT NOT NULL DEFAULT '', origin TEXT NOT NULL DEFAULT 'legacy');"
+            "contribution_id TEXT NOT NULL DEFAULT '', origin TEXT NOT NULL DEFAULT 'legacy',"
+            "tag_history_schema INTEGER NOT NULL DEFAULT 0);"
             "CREATE TABLE IF NOT EXISTS contribution_state ("
             "key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;");
         // Databases created before schema 3 predate the folded search column.
@@ -715,6 +716,9 @@ void SampleRepository::createTables()
         // Schema 14: where a feedback row came from. Rows written by older builds keep the
         // default and are treated as unknown provenance, never as a person's confirmation.
         ensureColumn(db.handle, "ml_feedback_samples", "origin", "TEXT NOT NULL DEFAULT 'legacy'");
+        // Schema 15: tag history starts here. Rows written earlier keep their local prototype but
+        // are not exported with tags, so a rewrite of the dataset does not upload old assignments.
+        ensureColumn(db.handle, "ml_feedback_samples", "tag_history_schema", "INTEGER NOT NULL DEFAULT 0");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS smart_results_pipeline"
                                 " ON smart_results(pipeline_state, sample_id);");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_pair_key ON samples(pair_key) WHERE pair_key != '';");
@@ -789,7 +793,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=14;");
+        detail::exec(db.handle, "PRAGMA user_version=15;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -1745,13 +1749,35 @@ bool SampleRepository::renameTag(int64_t tagId, const juce::String& name)
     std::lock_guard lock(db.mutex);
     detail::Statement s(db.handle, "UPDATE OR IGNORE tags SET name=? WHERE id=?");
     s.text(1, trimmed); s.integer(2, tagId); s.step();
-    return sqlite3_changes(db.handle) > 0;
+    if (sqlite3_changes(db.handle) <= 0) return false;
+    // The exported tags are read from sample_tags, so re-send every affected feedback row.
+    detail::Statement touch(db.handle,
+        "UPDATE ml_feedback_samples SET updated_at=? WHERE sample_id IN"
+        " (SELECT sample_id FROM sample_tags WHERE tag_id=?)");
+    touch.integer(1, juce::Time::currentTimeMillis());
+    touch.integer(2, tagId);
+    touch.step();
+    return true;
 }
 void SampleRepository::deleteTag(int64_t tagId)
 {
     std::lock_guard lock(db.mutex);
+    // sample_tags rows disappear with the tag, so remember the samples before the delete.
+    std::vector<int64_t> affected;
+    {
+        detail::Statement s(db.handle, "SELECT sample_id FROM sample_tags WHERE tag_id=?");
+        s.integer(1, tagId);
+        while (s.step()) affected.push_back(s.integer(0));
+    }
     detail::Statement s(db.handle, "DELETE FROM tags WHERE id=?");
     s.integer(1, tagId); s.step();
+    detail::Statement touch(db.handle,
+        "UPDATE ml_feedback_samples SET updated_at=? WHERE sample_id=?");
+    const auto now = juce::Time::currentTimeMillis();
+    for (const auto id : affected)
+    {
+        touch.reset(); touch.integer(1, now); touch.integer(2, id); touch.step();
+    }
 }
 void SampleRepository::setSampleTag(int64_t sampleId, int64_t tagId, bool assigned)
 {
@@ -2956,6 +2982,7 @@ const char* feedbackOriginName(SampleRepository::FeedbackOrigin origin)
     switch (origin)
     {
         case SampleRepository::FeedbackOrigin::user: return "user";
+        case SampleRepository::FeedbackOrigin::approved: return "approved";
         case SampleRepository::FeedbackOrigin::autoTag: return "auto";
         case SampleRepository::FeedbackOrigin::legacy: return "legacy";
     }
@@ -2974,19 +3001,41 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
         s.integer(1, sampleId);
         if (s.step()) hash = s.text(0);
     }
+    juce::String existingOrigin;
+    {
+        detail::Statement s(db.handle, "SELECT origin FROM ml_feedback_samples WHERE sample_id=?");
+        s.integer(1, sampleId);
+        if (s.step()) existingOrigin = s.text(0);
+    }
     const auto tagsStr = tags.joinIntoString(",");
+    const auto tagSchema = origin == FeedbackOrigin::legacy ? 0 : schemaVersion;
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
     try
     {
+        // A reviewed AutoTag tag may refresh the current tag list of a row the person wrote, but
+        // must not replace the type they confirmed or the row's provenance.
+        if (existingOrigin == "user" && origin != FeedbackOrigin::user)
+        {
+            detail::Statement merge(db.handle,
+                "UPDATE ml_feedback_samples SET tags=?, updated_at=?, tag_history_schema=? WHERE sample_id=?");
+            merge.text(1, tagsStr);
+            merge.integer(2, juce::Time::currentTimeMillis());
+            merge.integer(3, tagSchema);
+            merge.integer(4, sampleId);
+            merge.step();
+            detail::exec(db.handle, "COMMIT;");
+            return;
+        }
         detail::Statement s(db.handle,
-            "INSERT INTO ml_feedback_samples (sample_id, file_hash, target_type, tags, features, updated_at, contribution_id, origin) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO ml_feedback_samples (sample_id, file_hash, target_type, tags, features, updated_at, contribution_id, origin, tag_history_schema) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(sample_id) DO UPDATE SET "
             "file_hash=excluded.file_hash, target_type=excluded.target_type, tags=excluded.tags, "
-            "features=excluded.features, updated_at=excluded.updated_at, origin=excluded.origin "
+            "features=excluded.features, updated_at=excluded.updated_at, origin=excluded.origin, "
+            "tag_history_schema=excluded.tag_history_schema "
             // A person's confirmation is never replaced by a machine guess, even when AutoTag runs
             // again over a sample the person already labelled. A later user correction still wins.
-            "WHERE ml_feedback_samples.origin != 'user' OR excluded.origin = 'user'");
+            "WHERE ml_feedback_samples.origin NOT IN ('user','approved') OR excluded.origin IN ('user','approved')");
         s.integer(1, sampleId);
         s.text(2, hash);
         s.text(3, targetType.trim());
@@ -2995,6 +3044,7 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
         s.integer(6, juce::Time::currentTimeMillis());
         s.text(7, juce::Uuid().toDashedString().toLowerCase());
         s.text(8, feedbackOriginName(origin));
+        s.integer(9, tagSchema);
         s.step();
         detail::exec(db.handle, "COMMIT;");
     }
@@ -3012,6 +3062,29 @@ bool SampleRepository::hasUserFeedback(int64_t sampleId) const
         "SELECT 1 FROM ml_feedback_samples WHERE sample_id=? AND origin='user'");
     s.integer(1, sampleId);
     return s.step();
+}
+
+void SampleRepository::touchFeedback(const std::vector<int64_t>& sampleIds)
+{
+    if (sampleIds.empty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement s(db.handle,
+            "UPDATE ml_feedback_samples SET updated_at=? WHERE sample_id=?");
+        const auto now = juce::Time::currentTimeMillis();
+        for (const auto id : sampleIds)
+        {
+            s.reset(); s.integer(1, now); s.integer(2, id); s.step();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
 }
 
 void SampleRepository::removeFeedback(int64_t sampleId)
@@ -3059,13 +3132,21 @@ std::vector<SampleRepository::ContributionRecord> SampleRepository::contribution
 {
     std::lock_guard lock(db.mutex);
     // Only the fields the model uses. smart_results supplies the key and tempo the user saw.
-    detail::Statement s(db.handle,
-        "SELECT f.contribution_id, f.target_type, f.tags, f.features, f.updated_at,"
+    // Tags come from sample_tags, so a renamed tag travels under its new name and a deleted tag
+    // stops being learned. Rows written before schema 15 keep their local prototype but export
+    // no tags at all, which is the migration decision: tag history starts here.
+    detail::Statement s(db.handle, (juce::String(
+        "SELECT f.contribution_id, f.target_type, f.features, f.updated_at,"
         " r.key_tonic, r.key_mode, r.bpm, r.has_bpm,"
         " EXISTS(SELECT 1 FROM smart_overrides o WHERE o.sample_id=f.sample_id"
-        " AND o.field='type' AND o.cleared=0 AND o.not_applicable=0 AND o.text_value != '')"
-        " FROM ml_feedback_samples f LEFT JOIN smart_results r ON r.sample_id=f.sample_id"
-        " WHERE f.updated_at > ? AND f.origin='user' ORDER BY f.updated_at, f.sample_id LIMIT ?");
+        " AND o.field='type' AND o.cleared=0 AND o.not_applicable=0 AND o.text_value != ''),"
+        " CASE WHEN f.tag_history_schema >= ")
+        + juce::String(schemaVersion)
+        + " THEN (SELECT group_concat(t.name, ',') FROM sample_tags st"
+          " JOIN tags t ON t.id=st.tag_id WHERE st.sample_id=f.sample_id) ELSE '' END"
+          " FROM ml_feedback_samples f LEFT JOIN smart_results r ON r.sample_id=f.sample_id"
+          " WHERE f.updated_at > ? AND f.origin IN ('user','approved')"
+          " ORDER BY f.updated_at, f.sample_id LIMIT ?").toRawUTF8());
     s.integer(1, afterUpdatedAt);
     s.integer(2, juce::jlimit(1, 5000, limit));
     std::vector<ContributionRecord> out;
@@ -3075,21 +3156,22 @@ std::vector<SampleRepository::ContributionRecord> SampleRepository::contribution
         r.recordId = s.text(0);
         if (r.recordId.isEmpty()) continue;
         r.targetType = s.text(1);
-        r.tags.addTokens(s.text(2), ",", "");
-        r.tags.trim();
-        r.tags.removeEmptyStrings();
-        const auto* blobData = reinterpret_cast<const float*>(s.blob(3));
-        const int numBytes = s.bytes(3);
+        const auto* blobData = reinterpret_cast<const float*>(s.blob(2));
+        const int numBytes = s.bytes(2);
         if (blobData != nullptr && numBytes > 0)
         {
             const size_t numFloats = numBytes / sizeof(float);
             r.features.assign(blobData, blobData + numFloats);
         }
-        r.updatedAt = s.integer(4);
-        r.typeConfirmed = s.integer(9) != 0;
-        r.key = keyDisplayName((int) s.integer(5), s.text(6));
-        r.bpm = s.real(7);
-        r.hasBpm = s.integer(8) != 0 && r.bpm > 0.0;
+        r.updatedAt = s.integer(3);
+        r.key = keyDisplayName((int) s.integer(4), s.text(5));
+        r.bpm = s.real(6);
+        r.hasBpm = s.integer(7) != 0 && r.bpm > 0.0;
+        r.typeConfirmed = s.integer(8) != 0;
+        r.tags.addTokens(s.text(9), ",", "");
+        r.tags.trim();
+        r.tags.removeEmptyStrings();
+        r.tags.sort(true);
         out.push_back(std::move(r));
     }
     return out;

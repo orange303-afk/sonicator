@@ -11,7 +11,8 @@ using namespace sonicator;
 
 namespace {
 juce::String prototypeDocument(const juce::String& label, const std::vector<float>& features,
-                               const juce::String& schema = "prototypes.v1", int featureSchema = 1)
+                               const juce::String& schema = "prototypes.v1", int featureSchema = 1,
+                               const juce::String& kind = "type")
 {
     juce::Array<juce::var> vector;
     for (const auto value : features) vector.add(value);
@@ -20,7 +21,7 @@ juce::String prototypeDocument(const juce::String& label, const std::vector<floa
 
     auto* entry = new juce::DynamicObject();
     entry->setProperty("label", label);
-    entry->setProperty("kind", "type");
+    entry->setProperty("kind", kind);
     entry->setProperty("support", 10);
     entry->setProperty("installSupport", 3);
     entry->setProperty("prototypes", vectors);
@@ -71,6 +72,7 @@ TEST_CASE("Global prototypes are loaded, but do not enable the AutoTag path", "[
     CHECK(classifier.hasTypePrototypes());
     // hasPrototypes() is what AutoTag checks; a shipped file must not start background tagging.
     CHECK_FALSE(classifier.hasPrototypes());
+    CHECK_FALSE(classifier.hasTagPrototypes());
     CHECK(classifier.prototypeCount() == 0);
 
     const auto predictions = classifier.predictType(axis(), 1);
@@ -147,6 +149,29 @@ TEST_CASE("Smart analysis reports where an adaptive type came from", "[contribut
     }
     CHECK(found);
     shared.clear();
+}
+
+TEST_CASE("Global tag prototypes reach AutoTag with the local preference", "[contribute][training]")
+{
+    AdaptiveClassifier classifier;
+    REQUIRE(classifier.loadGlobalPrototypes(prototypeDocument("Punchy", ray(0.99), "prototypes.v1", 1, "tag")));
+    CHECK(classifier.hasTagPrototypes());
+    CHECK(classifier.hasGlobalPrototypes() == false);
+
+    auto tags = classifier.predictTags(axis(), 1);
+    REQUIRE(tags.size() == 1);
+    CHECK(tags[0].label == "Punchy");
+    CHECK(tags[0].source == "global_adaptive");
+    CHECK(tags[0].score == Catch::Approx(0.99f * 0.95f).epsilon(0.001));
+
+    // A near-equal local tag wins, exactly as a local type does.
+    AdaptiveClassifier near;
+    REQUIRE(near.loadGlobalPrototypes(prototypeDocument("Punchy", ray(0.95), "prototypes.v1", 1, "tag")));
+    near.updatePrototype(1, {}, { "Warm" }, ray(0.90));
+    const auto mixed = near.predictTags(axis(), 1);
+    REQUIRE(mixed.size() == 1);
+    CHECK(mixed[0].label == "Warm");
+    CHECK(mixed[0].source == "user_adaptive");
 }
 
 TEST_CASE("A global type does not compete with an existing metadata type", "[contribute][training]")

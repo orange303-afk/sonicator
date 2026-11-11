@@ -156,10 +156,14 @@ publishes them as a `user_adaptive` source, which AutoTag can turn into suggesti
 
 ## Training and shipped prototypes
 
-`ml_feedback_samples.origin` keeps the app's own guesses out of the dataset: only `user` rows leave
-the machine, and only through `contributionRecords`. A machine write never replaces a person's row.
-A tag action exports the tags only; the type is exported when the person set it themselves
-(`smart_overrides`), so the app's resolved type is not presented as a confirmation.
+`ml_feedback_samples.origin` keeps the app's own guesses out of the dataset: only `user` rows and
+`approved` rows (an AutoTag proposal the person reviewed and applied) leave the machine, and only
+through `contributionRecords`. A machine write never replaces a person's row; a reviewed tag only
+refreshes that row's tag list. A tag action exports the tags only; the type is exported when the
+person set it themselves (`smart_overrides`), so the app's resolved type is not presented as a
+confirmation. Exported tags are read from `sample_tags`, so a renamed tag travels under its new name
+and a deleted one stops being learned; `tag_history_schema` keeps assignments from older builds on
+the machine instead of uploading them retroactively.
 `services/contribute-worker/scripts/export.mjs` turns the bucket into `contribute.jsonl` plus
 `report.md`, refusing an unknown feature schema or a value outside 0..1. `services/training/` builds
 `resources/ml/global_prototypes.json` with up to eight medoids per label, a label needing three
@@ -173,9 +177,10 @@ prototypes ahead of global ones: a global score is multiplied by 0.95 before the
 threshold, and a local label wins within 0.02. A global type arrives as the `global_adaptive`
 source, ranked immediately below `user_adaptive`, and only when no other type candidate exists, so
 it is a fallback rather than a second opinion that turns a confident type into "ambiguous". Global
-tags are in the file for a later stage and are deliberately not loaded, so `hasPrototypes()` stays
-local and AutoTag does not start tagging from other libraries. The empty shipped file (no labels)
-leaves today's behaviour unchanged; the About section shows its date and label count.
+tag prototypes are loaded too and reach AutoTag through `hasTagPrototypes()`: the review dialog can
+then propose a standard tag learned from other libraries, still only as a proposal the person ticks.
+The empty shipped file (no labels) leaves today's behaviour unchanged; the About section shows its
+date and label count.
 
 The prototype file does not change the analysis version. Files analysed before a build with a
 non-empty file keep their stored result until they are analysed again; the release that first ships

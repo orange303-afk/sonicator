@@ -219,9 +219,10 @@ public:
     std::optional<SampleRecord> findById(int64_t) const;
 
     // Custom types & ML feedback prototypes
-    // Where a feedback row came from. Only `user` rows may leave the machine: `autoTag` rows are
-    // the app's own guesses and `legacy` rows predate the column, so their provenance is unknown.
-    enum class FeedbackOrigin { user, autoTag, legacy };
+    // Where a feedback row came from. Only `user` and `approved` rows may leave the machine:
+    // `approved` is an AutoTag proposal the person reviewed and applied, `autoTag` is the app's
+    // own guess, and `legacy` predates the column, so its provenance is unknown.
+    enum class FeedbackOrigin { user, approved, autoTag, legacy };
     struct FeedbackRecord
     {
         int64_t sampleId = 0;
@@ -238,6 +239,8 @@ public:
                         FeedbackOrigin origin);
     // True when the row was written by a person; a later machine write leaves it untouched.
     bool hasUserFeedback(int64_t sampleId) const;
+    // Marks changed rows so the contribution watermark re-sends their current labels.
+    void touchFeedback(const std::vector<int64_t>& sampleIds);
     void removeFeedback(int64_t sampleId);
     std::vector<FeedbackRecord> allFeedback() const;
 

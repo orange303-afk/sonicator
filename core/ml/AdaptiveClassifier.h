@@ -33,6 +33,8 @@ public:
     bool hasPrototypes() const;
     // Local or global type prototypes: smart analysis may use either.
     bool hasTypePrototypes() const;
+    // Local or global tag prototypes: AutoTag may propose either.
+    bool hasTagPrototypes() const;
     bool hasGlobalPrototypes() const;
     int globalLabelCount() const;
     juce::String globalGeneratedAt() const;

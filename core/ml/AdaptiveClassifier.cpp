@@ -65,6 +65,7 @@ struct AdaptiveClassifier::Impl {
     mutable std::mutex mutex;
     std::vector<Prototype> prototypes;
     std::vector<Prototype> globalPrototypes;
+    std::vector<Prototype> globalTagPrototypes;
     juce::String globalGeneratedAt;
     int globalLabelCount = 0;
 };
@@ -101,7 +102,8 @@ bool AdaptiveClassifier::loadGlobalPrototypes(const juce::String& json)
     if (document->getProperty("schema").toString() != "prototypes.v1") return false;
     if ((int) document->getProperty("featureSchema") != contribute::featureSchemaVersion) return false;
 
-    std::vector<Prototype> loaded;
+    std::vector<Prototype> loadedTypes;
+    std::vector<Prototype> loadedTags;
     int64_t syntheticId = -1;
     int labelCount = 0;
     const auto labelsValue = document->getProperty("labels");
@@ -112,9 +114,8 @@ bool AdaptiveClassifier::loadGlobalPrototypes(const juce::String& json)
         auto* label = labelValue.getDynamicObject();
         if (label == nullptr) return false;
         ++labelCount;
-        // Tags are kept in the file for a later stage, but never loaded here: AutoTag must
-        // not start tagging from other people's libraries in this build.
-        if (label->getProperty("kind").toString() != "type") continue;
+        const auto kind = label->getProperty("kind").toString();
+        if (kind != "type" && kind != "tag") continue;
         const auto name = label->getProperty("label").toString().trim();
         if (name.isEmpty()) return false;
         const auto vectorsValue = label->getProperty("prototypes");
@@ -126,7 +127,8 @@ bool AdaptiveClassifier::loadGlobalPrototypes(const juce::String& json)
             if (values == nullptr || values->size() != contribute::featureCount) return false;
             Prototype prototype;
             prototype.sampleId = syntheticId--;
-            prototype.targetType = name;
+            if (kind == "type") prototype.targetType = name;
+            else prototype.tags.add(name);
             prototype.features.reserve(contribute::featureCount);
             for (const auto& value : *values)
             {
@@ -135,12 +137,13 @@ bool AdaptiveClassifier::loadGlobalPrototypes(const juce::String& json)
                 if (! std::isfinite(number) || number < 0.0f || number > 1.0f) return false;
                 prototype.features.push_back(number);
             }
-            loaded.push_back(std::move(prototype));
+            (kind == "type" ? loadedTypes : loadedTags).push_back(std::move(prototype));
         }
     }
 
     std::lock_guard lock(impl->mutex);
-    impl->globalPrototypes = std::move(loaded);
+    impl->globalPrototypes = std::move(loadedTypes);
+    impl->globalTagPrototypes = std::move(loadedTags);
     impl->globalGeneratedAt = document->getProperty("generatedAt").toString();
     impl->globalLabelCount = labelCount;
     return true;
@@ -182,6 +185,7 @@ void AdaptiveClassifier::clear()
     std::lock_guard lock(impl->mutex);
     impl->prototypes.clear();
     impl->globalPrototypes.clear();
+    impl->globalTagPrototypes.clear();
     impl->globalGeneratedAt.clear();
     impl->globalLabelCount = 0;
 }
@@ -201,6 +205,17 @@ bool AdaptiveClassifier::hasTypePrototypes() const
                            [](const Prototype& p) { return p.targetType.isNotEmpty(); });
     };
     return hasType(impl->prototypes) || hasType(impl->globalPrototypes);
+}
+
+bool AdaptiveClassifier::hasTagPrototypes() const
+{
+    std::lock_guard lock(impl->mutex);
+    const auto hasTag = [](const std::vector<Prototype>& list)
+    {
+        return std::any_of(list.begin(), list.end(),
+                           [](const Prototype& p) { return ! p.tags.isEmpty(); });
+    };
+    return hasTag(impl->prototypes) || ! impl->globalTagPrototypes.empty();
 }
 
 bool AdaptiveClassifier::hasGlobalPrototypes() const
@@ -313,48 +328,85 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictTags(
 {
     if (features.empty() || topK <= 0) return {};
     std::lock_guard lock(impl->mutex);
-    if (impl->prototypes.empty()) return {};
+    if (impl->prototypes.empty() && impl->globalTagPrototypes.empty()) return {};
 
     struct LabelAgg {
         juce::String display;
-        float score = 0.0f;
+        float localScore = 0.0f;
+        float globalScore = 0.0f;
+        float score() const { return std::max(localScore, globalScore); }
+        juce::String source() const { return localScore >= globalScore ? "user_adaptive" : "global_adaptive"; }
     };
     std::map<juce::String, LabelAgg> tagBestScore;
 
-    // Local prototypes only: global tag prototypes ship in the file for a later stage but are
-    // deliberately not loaded, so AutoTag cannot tag a library from other people's guesses.
-    for (const auto& p : impl->prototypes)
+    const auto accumulate = [&](const std::vector<Prototype>& list, bool global)
     {
-        if (p.tags.isEmpty() || p.features.empty()) continue;
-        const float sim = computeCosineSimilarity(features, p.features);
-        if (sim <= 0.0f) continue;
-        for (const auto& tag : p.tags)
+        for (const auto& p : list)
         {
-            const auto trimmed = tag.trim();
-            if (trimmed.isEmpty()) continue;
-            if (! isPlausibleAdaptiveTag(trimmed, features)) continue;
-            const auto key = trimmed.toLowerCase();
-            auto& agg = tagBestScore[key];
-            if (agg.display.isEmpty()) agg.display = trimmed;
-            if (sim > agg.score) agg.score = sim;
+            if (p.tags.isEmpty() || p.features.empty()) continue;
+            const float sim = computeCosineSimilarity(features, p.features);
+            if (sim <= 0.0f) continue;
+            for (const auto& tag : p.tags)
+            {
+                const auto trimmed = tag.trim();
+                if (trimmed.isEmpty()) continue;
+                if (! isPlausibleAdaptiveTag(trimmed, features)) continue;
+                const auto key = trimmed.toLowerCase();
+                auto& agg = tagBestScore[key];
+                if (agg.display.isEmpty()) agg.display = trimmed;
+                if (global) agg.globalScore = std::max(agg.globalScore, sim * globalPenalty);
+                else agg.localScore = std::max(agg.localScore, sim);
+            }
+        }
+    };
+    accumulate(impl->prototypes, false);
+    accumulate(impl->globalTagPrototypes, true);
+
+    struct Candidate {
+        juce::String display;
+        float score = 0.0f;
+        float localScore = 0.0f;
+        juce::String source;
+    };
+    std::vector<Candidate> results;
+    results.reserve(tagBestScore.size());
+    for (const auto& [key, agg] : tagBestScore)
+    {
+        juce::ignoreUnused(key);
+        results.push_back({ agg.display, agg.score(), agg.localScore, agg.source() });
+    }
+
+    std::sort(results.begin(), results.end(), [](const Candidate& a, const Candidate& b) {
+        if (std::abs(a.score - b.score) > 1e-6f) return a.score > b.score;
+        return a.display.compareIgnoreCase(b.display) < 0;
+    });
+
+    // A person's own tag wins over a global prototype that is not clearly better.
+    if (! results.empty() && results.front().source == "global_adaptive")
+    {
+        size_t bestLocal = results.size();
+        for (size_t i = 0; i < results.size(); ++i)
+            if (results[i].localScore > 0.0f
+                && (bestLocal == results.size() || results[i].localScore > results[bestLocal].localScore))
+                bestLocal = i;
+        if (bestLocal < results.size()
+            && results.front().score - results[bestLocal].localScore <= localPriorityMargin + 1e-6f)
+        {
+            auto local = results[bestLocal];
+            local.score = local.localScore;
+            local.source = "user_adaptive";
+            results.erase(results.begin() + (long) bestLocal);
+            results.insert(results.begin(), std::move(local));
         }
     }
 
-    std::vector<Prediction> results;
-    results.reserve(tagBestScore.size());
-    for (const auto& pair : tagBestScore)
-    {
-        results.push_back({ pair.second.display, pair.second.score });
-    }
-
-    std::sort(results.begin(), results.end(), [](const Prediction& a, const Prediction& b) {
-        return a.score > b.score;
-    });
-
-    if (static_cast<size_t>(topK) < results.size())
-        results.resize(static_cast<size_t>(topK));
-
-    return results;
+    std::vector<Prediction> out;
+    out.reserve(results.size());
+    for (const auto& candidate : results)
+        out.push_back({ candidate.display, candidate.score, candidate.source });
+    if (static_cast<size_t>(topK) < out.size())
+        out.resize(static_cast<size_t>(topK));
+    return out;
 }
 
 std::vector<float> AdaptiveClassifier::extractFeatures(const juce::AudioBuffer<float>& buffer, double sampleRate)
