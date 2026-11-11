@@ -52,10 +52,10 @@ option requires for a combined work.
     (`core/dsp/AcousticFeatures`, `FastAcousticRules`) and the user-adaptive prototypes. The library
     still adds tens of megabytes to every bundle. Whether to drop it, ship a model, or keep it for a
     future stage is an open owner decision, recorded in `docs/BACKLOG.md`.
-- zlib, the system library found by `find_package(ZLIB REQUIRED)`, used by JUCE and by the NKI reader
-  (`core/sampler/FileInstrument.cpp`, zlib-compressed XML). On macOS the build uses the copy in the
-  Command Line Tools SDK. A Windows build is being established and needs zlib supplied through vcpkg,
-  because it is not part of the default MSVC installation.
+- zlib, found with `find_package(ZLIB)`, used by JUCE and by the NKI reader
+  (`core/sampler/FileInstrument.cpp`, zlib-compressed XML). macOS takes the copy in the Command Line
+  Tools SDK; Windows has none, so `CMakeLists.txt` fetches zlib 1.3.1 and links the static target
+  instead of requiring vcpkg or a manual install.
 - CMake >=3.22 and a C++20 compiler. Build presets are in `CMakePresets.json`.
 
 No Python, HNSW, FAISS or UMAP runtime dependencies exist. The application makes no network requests:

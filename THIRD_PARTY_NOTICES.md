@@ -15,7 +15,7 @@ component is present and what the project does not ship.
 | SQLite | 3.47.2 | `resources/sqlite/` amalgamation | Public domain | <https://sqlite.org/copyright.html> |
 | libxmp | 4.6.2 | FetchContent, linked statically | LGPL-2.1-or-later | <https://github.com/libxmp/libxmp/blob/libxmp-4.6.2/docs/COPYING> |
 | ONNX Runtime | 1.20.1 | Prebuilt release binary (macOS universal2, Windows x64, Linux x64) | MIT | <https://github.com/microsoft/onnxruntime/blob/v1.20.1/LICENSE.txt> |
-| zlib | system (1.2.12 on the macOS SDK) | Linked by JUCE and by `core/sampler/FileInstrument.cpp` | Zlib | <https://zlib.net/zlib_license.html> |
+| zlib | system copy on macOS (1.2.12 in the SDK), fetched 1.3.1 on Windows | Linked by JUCE and by `core/sampler/FileInstrument.cpp` | Zlib | <https://zlib.net/zlib_license.html> |
 
 ### libxmp and the LGPL
 

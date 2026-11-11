@@ -13,8 +13,12 @@
 - The settings panel grew a REPORT section; the panel height went from 776 to 866 (700 in plugin mode),
   and the plugin overlay still scales it to the editor.
 - macOS Debug: **657 cases / 10 597 assertions**, `ctest --preset debug` passed in 26.68 s.
-- Not verified: an actual crash on macOS and the resulting marker; the browser opening the issue page
-  (the URL is asserted, opening it is the user's action); Windows log path.
+- The crash path was verified end to end on a real Debug build: the application was started on a
+  temporary basis, sent `SIGSEGV`, and wrote `crash.txt` with `signal 11`, the time and a backtrace
+  before the process died. The marker was then deleted so the owner's next launch does not report a
+  crash that did not happen.
+- Not verified: the browser actually opening the issue page (the URL is asserted; opening it is the
+  user's action) and the Windows log path.
 
 ## Continuous integration (2026-11-11)
 

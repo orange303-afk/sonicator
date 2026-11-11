@@ -37,8 +37,8 @@ presets, any generator works, but choose a binary directory outside iCloud:
 ### Windows
 
 Windows is built in CI, and its current state is recorded in `docs/WINDOWS_PORT.md`. A local build needs
-Visual Studio 2022 with the Desktop C++ workload, zlib (for example through vcpkg) and the ONNX Runtime
-DLL next to the executable.
+Visual Studio 2022 with the Desktop C++ workload; zlib is fetched automatically when the system has none,
+and the ONNX Runtime DLL is copied next to the executable by the build.
 
 macOS builds receive a local ad-hoc bundle signature. This is not Developer ID signing, a Windows signature, an installer or a notarized release.
 
