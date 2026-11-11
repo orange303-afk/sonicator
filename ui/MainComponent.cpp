@@ -24,6 +24,16 @@
 #include <thread>
 namespace sonicator {
 namespace {
+// The file ships in the bundle (an empty label list when there is not enough data), so a broken
+// resource degrades to today's local-only behaviour instead of stopping startup.
+void loadShippedGlobalPrototypes()
+{
+    auto& classifier = AcousticClassifierService::getSharedAdaptiveClassifier();
+    const auto json = juce::String::fromUTF8(BinaryData::global_prototypes_json,
+                                             BinaryData::global_prototypes_jsonSize);
+    if (! classifier.loadGlobalPrototypes(json))
+        juce::Logger::writeToLog("Global prototypes were not loaded; using local feedback only");
+}
 bool isDiscImageFormat(const juce::String& format)
 {
     return format == "ISO" || format == "AKAI" || format == "CUE" || format == "MDX" || format == "BIN" || format == "IMG";
@@ -520,6 +530,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             writeRepo->refreshDuplicates();
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
+        loadShippedGlobalPrototypes();
         indexer = std::make_unique<IndexingService>(*writeRepo);
         // Only a real application startup may register the user's system pack folders.
         if (persistSessionState)
@@ -3626,6 +3637,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     writeDb = std::move(newWriteDb); writeRepo = std::move(newWriteRepo);
     readDb = std::move(newReadDb); readRepo = std::move(newReadRepo);
     AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
+        loadShippedGlobalPrototypes();
     indexer = std::make_unique<IndexingService>(*writeRepo);
     smart = std::make_unique<SmartAnalysisService>(*writeRepo);
     tagging = std::make_unique<TaggingService>(*writeRepo);

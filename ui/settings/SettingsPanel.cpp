@@ -2,6 +2,7 @@
 #include "ui/shell/Theme.h"
 #include "core/Version.h"
 #include "core/diagnostics/Diagnostics.h"
+#include "core/smart/AcousticClassifierService.h"
 #include "ui/shell/ThemedDialogs.h"
 namespace sonicator {
 namespace {
@@ -22,9 +23,9 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
       kofi("ko-fi.com/ilyaorange", juce::URL("https://ko-fi.com/ilyaorange")),
       boosty("boosty.to/ilyaorange", juce::URL("https://boosty.to/ilyaorange"))
 {
-    for (auto* c : std::array<juce::Component*,25>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
+    for (auto* c : std::array<juce::Component*,26>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
          &languageLabel,&languageNote,&libraryHeading,&databaseKey,&databaseLabel,&libraryNote,&databaseStatus,
-         &audioHeading,&reportHeading,&reportNote,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&creditsLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
+         &audioHeading,&reportHeading,&reportNote,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&creditsLabel,&prototypesLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
         addAndMakeVisible(c);
     for (auto* c : std::array<juce::Component*,13>{&openDatabase,&backupDatabase,&audio,&reportBug,&reportFeature,
          &reportFormat,&reportDiscuss,&close,&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
@@ -117,6 +118,17 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     creditsLabel.setFont(juce::FontOptions(10.5f));
     creditsLabel.setJustificationType(juce::Justification::topLeft);
     creditsLabel.setMinimumHorizontalScale(0.7f);
+    {
+        const auto& classifier = AcousticClassifierService::getSharedAdaptiveClassifier();
+        const auto generatedAt = classifier.globalGeneratedAt();
+        prototypesLabel.setText(generatedAt.isNotEmpty()
+                ? "Global prototypes: " + generatedAt.substring(0, 10) + ", "
+                      + juce::String(classifier.globalLabelCount()) + " labels"
+                : "Global prototypes: none in this build",
+            juce::dontSendNotification);
+        prototypesLabel.setFont(noteFont());
+        prototypesLabel.setJustificationType(juce::Justification::centredLeft);
+    }
     for (auto* link : std::array<juce::HyperlinkButton*,5>{&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
     {
         link->setFont(juce::FontOptions(12),false);
@@ -242,6 +254,7 @@ void SettingsPanel::lookAndFeelChanged()
     reportNote.setColour(juce::Label::textColourId,theme::muted);
     supportLabel.setColour(juce::Label::textColourId,theme::muted);
     creditsLabel.setColour(juce::Label::textColourId,theme::muted);
+    prototypesLabel.setColour(juce::Label::textColourId,theme::muted);
     for (auto* link : std::array<juce::HyperlinkButton*,5>{&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
         link->setColour(juce::HyperlinkButton::textColourId,theme::accent);
     repaint();
@@ -434,6 +447,7 @@ void SettingsPanel::resized()
         boosty.setBounds(area);
     });
     add(86, 10, false, [this](juce::Rectangle<int> area) { creditsLabel.setBounds(area); });
+    add(18, 2, false, [this](juce::Rectangle<int> area) { prototypesLabel.setBounds(area); });
     if (close.isVisible())
         add(30, 12, false, [this](juce::Rectangle<int> area) { close.setBounds(area.removeFromRight(110)); });
 

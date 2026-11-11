@@ -21,8 +21,8 @@ When an item is finished, record the commit or document here and append `✅` to
 | 9 | VST3 and AU with full drag-and-drop, Match BPM, Match Scale | Partly: VST3/AU build, host audio and MIDI, embedded dialogs; Cubase accepted. Other hosts, shared catalog, Match BPM/Scale open. `docs/plans/2026-11-11-vst3-au-plugin-spike.md` |
 | 10 | Multi-format converter with settings | Not started; only selection export to WAV exists |
 | 11 | Smart AI content-type detection | Stage 1: hybrid metadata + acoustic rules + adaptive prototypes. `docs/SMART_ANALYSIS.md` |
-| 12 | Training on user libraries, opt-in at first run and in Settings | Done for collection: first-run consent, per-catalog watermark, background upload, preview and delete in Settings → Library, Cloudflare Worker intake in `services/contribute-worker/`. Training, aggregation and dataset publication are the next stage. `docs/PRIVACY.md`, `docs/superpowers/specs/2026-11-11-training-data-contribution-design.md` |
-| 13 | Collect custom tags and sample types into later builds as built-in | Storage exists (`custom_types`, user tags); the collection step into a build does not |
+| 12 | Training on user libraries, opt-in at first run and in Settings | Done: collection with consent, preview and deletion; `origin` keeps machine guesses out; deterministic global prototypes ship in the build; leave-one-install-out evaluation and a tag-candidate report. Dataset stays private in R2. `docs/ARCHITECTURE.md`, `docs/superpowers/specs/2026-11-11-training-and-tag-promotion-design.md` |
+| 13 | Collect custom tags and sample types into later builds as built-in | Report exists (`docs/tag-candidates.md`); no promotion yet because the bucket has no records. Promotion stays manual and is recorded in `docs/TAG_PROMOTION.md` |
 | 14 | Credits in About | Done: frameworks, libraries, decoders. `ui/settings/SettingsPanel.cpp` |
 | 15 | Boosty donation link | Done: Settings → About. `ui/settings/SettingsPanel.cpp` |
 | 16 | Move a waveform selection while playing; wheel changes its size | Done: dragging publishes the live selection and the wheel scales it around its centre (`72f6387`) |

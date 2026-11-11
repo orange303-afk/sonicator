@@ -56,15 +56,16 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
     if (buffer.getNumSamples() > 0 && sampleRate > 0.0)
     {
         auto& adaptive = getSharedAdaptiveClassifier();
-        if (adaptive.hasPrototypes())
+        if (adaptive.hasTypePrototypes())
         {
             const auto features = AdaptiveClassifier::extractFeatures(buffer, sampleRate);
             const auto preds = adaptive.predictType(features, 1);
             if (! preds.empty() && preds.front().score >= 0.80f)
             {
+                const bool global = preds.front().source == "global_adaptive";
                 SmartCandidate c;
                 c.field = SmartField::Type;
-                c.source = "user_adaptive";
+                c.source = global ? "global_adaptive" : "user_adaptive";
                 c.textValue = preds.front().label;
                 c.detail = "adaptive_sim=" + juce::String(preds.front().score, 2);
                 c.numericValue = preds.front().score;
@@ -72,7 +73,8 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
                 c.extractorId = "dsp";
                 c.extractorVersion = smartDspVersion;
                 c.rawValue = preds.front().label;
-                c.limitation = "type learned from user feedback prototype";
+                c.limitation = global ? "type inferred from global prototypes"
+                                      : "type learned from user feedback prototype";
                 candidates.push_back(std::move(c));
             }
         }

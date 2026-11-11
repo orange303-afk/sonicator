@@ -28,6 +28,10 @@ What one example contains:
 | a random record id, the app version and `mac`/`win` | your name, computer name, e-mail or address |
 | a random installation id, created when you opt in | your IP address (it is used for rate limiting and never stored) |
 
+Only rows recorded from your own action are sent. A type or tag that AutoTag applied is marked
+`auto` locally, and rows written before the origin column existed are `legacy`; both stay on your
+computer and never enter a batch. The preview shows exactly what a `user` row produces.
+
 Confirmations you made before opting in are included, and the consent question says so. A custom
 tag is text you typed, so it is the one field that could carry something personal by accident: tags
 that look like a path, an address or a URL are dropped, and tags are limited to 32 characters.
@@ -48,6 +52,16 @@ failed request changes nothing and is retried the next day.
 Deletion reaches the stored batches immediately. A dataset or model that was already built and
 released is rebuilt from the bucket each time, so the deleted data leaves the next release. A copy
 somebody already downloaded cannot be recalled.
+
+## What a released build contains
+
+The dataset stays in the private bucket. A build ships only `resources/ml/global_prototypes.json`:
+up to eight short vectors of 14 numbers per label, plus how many records and distinct installs
+confirmed that label. The file carries no installation id, record id, path or file name, and only
+labels confirmed by at least three installs and ten records are included, so one installation cannot
+put a label there. Settings → About shows the date and label count of the file in the build. Because
+the file is rebuilt from the bucket before each release, deleting your contribution removes it from
+the next build; a copy already shipped cannot be recalled.
 
 ## Residual risk, stated plainly
 
