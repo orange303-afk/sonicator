@@ -14,6 +14,8 @@ import {
   TAG_THRESHOLD,
   TYPE_THRESHOLD,
   buildIndex,
+  buildPrototypes,
+  indexPrototypes,
   normalizeRecords,
   parseDataset,
   predictTags,
@@ -28,6 +30,70 @@ class EmptyIndex {
   }
 }
 const emptyIndex = new EmptyIndex();
+
+// Folds are cut inside each install, by recordId order, so every fold holds records of every
+// install and no record is ever scored against a model built from itself.
+function assignFolds(records, folds) {
+  const byInstall = new Map();
+  for (const record of records) {
+    const list = byInstall.get(record.installId) ?? [];
+    list.push(record);
+    byInstall.set(record.installId, list);
+  }
+  const assigned = new Map();
+  for (const list of byInstall.values()) {
+    const sorted = [...list].sort((a, b) => (a.recordId < b.recordId ? -1 : a.recordId > b.recordId ? 1 : 0));
+    sorted.forEach((record, index) => assigned.set(record.recordId, index % folds));
+  }
+  return assigned;
+}
+
+// What a user actually gets from the file we ship: prototypes built without the record under test,
+// scored with the same global penalty the app applies. Custom types are not in the shipped file, so
+// they are left out of the number rather than counted as misses.
+export function crossValidateShipped(records, { folds = 5 } = {}) {
+  const normalized = normalizeRecords(records);
+  const foldCount = Math.max(1, Math.floor(folds));
+  const assigned = assignFolds(normalized, foldCount);
+  const result = {
+    folds: foldCount,
+    records: 0,
+    correct: 0,
+    accuracy: 0,
+    groups: new Map(),
+    labels: new Map(),
+  };
+
+  for (let fold = 0; fold < foldCount; fold += 1) {
+    const train = normalized.filter((record) => assigned.get(record.recordId) !== fold);
+    const test = normalized.filter((record) => assigned.get(record.recordId) === fold);
+    if (test.length === 0) continue;
+    const globalIndex = indexPrototypes(buildPrototypes(train, { minInstalls: 1, minSupport: 1 }));
+
+    for (const record of test) {
+      if (!record.type || record.typeIsCustom) continue;
+      const truth = record.type.toLowerCase();
+      const prediction = predictType(record.features, emptyIndex, globalIndex);
+      const hit = prediction?.label.toLowerCase() === truth;
+      result.records += 1;
+      if (hit) result.correct += 1;
+
+      const group = groupForType(record.type);
+      const groupEntry = result.groups.get(group) ?? { records: 0, correct: 0 };
+      groupEntry.records += 1;
+      if (hit) groupEntry.correct += 1;
+      result.groups.set(group, groupEntry);
+
+      const labelEntry = result.labels.get(truth) ?? { label: record.type, records: 0, correct: 0 };
+      labelEntry.records += 1;
+      if (hit) labelEntry.correct += 1;
+      result.labels.set(truth, labelEntry);
+    }
+  }
+
+  result.accuracy = result.records === 0 ? 0 : result.correct / result.records;
+  return result;
+}
 
 function percent(value) {
   return `${(value * 100).toFixed(1)}%`;
@@ -142,13 +208,14 @@ export function summarizeEvaluation(result) {
   };
 }
 
-export function renderReport(summary, { generatedAt } = {}) {
+export function renderReport(summary, { generatedAt, crossValidation } = {}) {
   const groupRows = summary.type.groups
     .map((group) => [group.group, group.records, percent(group.before), percent(group.after)])
     .map((row) => `| ${row.join(" | ")} |`);
   const worstRows = summary.type.worst
     .map((label) => [label.label, label.records, percent(label.after)])
     .map((row) => `| ${row.join(" | ")} |`);
+  const shipped = crossValidation ? renderShippedSection(crossValidation) : "";
   return `# Training evaluation
 
 Generated: ${generatedAt ?? "unknown"}
@@ -189,21 +256,62 @@ preview for a later stage, not behaviour a user gets today.
 |---|---|---|
 | Before | ${percent(summary.tags.beforePrecision)} | ${percent(summary.tags.beforeRecall)} |
 | After | ${percent(summary.tags.afterPrecision)} | ${percent(summary.tags.afterRecall)} |
+${shipped}`;
+}
+
+// The number that answers "what does the shipped file actually get": no local confirmations, no
+// record scored against a prototype built from itself.
+function renderShippedSection(crossValidation) {
+  const groupRows = [...crossValidation.groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([group, entry]) => `| ${group} | ${entry.records} | ${percent(entry.correct / entry.records)} |`);
+  const worstRows = [...crossValidation.labels.values()]
+    .filter((label) => label.records >= 5)
+    .sort((a, b) => a.correct / a.records - b.correct / b.records
+      || b.records - a.records
+      || a.label.localeCompare(b.label))
+    .slice(0, 5)
+    .map((label) => `| ${label.label} | ${label.records} | ${percent(label.correct / label.records)} |`);
+  return `
+## Shipped prototypes, cross-validated
+
+The record under test is never part of the prototypes it is scored against. Folds are cut inside
+each install and the global penalty of 0.95 applies, as in the app.
+
+- Folds: ${crossValidation.folds}
+- Records: ${crossValidation.records}
+- Accuracy: ${percent(crossValidation.accuracy)}
+
+### By group
+
+| Group | Records | Accuracy |
+|---|---|---|
+${groupRows.length > 0 ? groupRows.join("\n") : "| (no record) | | |"}
+
+### Worst labels
+
+| Type | Records | Accuracy |
+|---|---|---|
+${worstRows.length > 0 ? worstRows.join("\n") : "| (no label with at least 5 records) | | |"}
 `;
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const input = valueOf(argv, "--in", "contribute-export.jsonl");
   const output = valueOf(argv, "--out", "training-report.md");
+  const folds = Number(valueOf(argv, "--cv", 5));
   const records = parseDataset(await readFile(input, "utf8"));
   const result = evaluate(records);
   const summary = summarizeEvaluation(result);
+  const crossValidation = folds > 0 ? crossValidateShipped(records, { folds }) : undefined;
   const generatedAt = valueOf(argv, "--generated-at", undefined)
     ?? new Date(Math.max(0, ...records.map((record) => record.updatedAt ?? 0))).toISOString();
   await mkdir(dirname(output), { recursive: true });
-  await writeFile(output, renderReport(summary, { generatedAt }));
+  await writeFile(output, renderReport(summary, { generatedAt, crossValidation }));
   console.log(`records: ${summary.records}, installs: ${summary.installs}`);
   console.log(`type accuracy before ${percent(summary.type.before)}, after ${percent(summary.type.after)}`);
+  if (crossValidation)
+    console.log(`shipped prototypes, ${crossValidation.folds}-fold cv: ${percent(crossValidation.accuracy)}`);
   console.log(`tags precision ${percent(summary.tags.afterPrecision)}, recall ${percent(summary.tags.afterRecall)}`);
   console.log(`gate: ${summary.type.gate ? "passes" : "needs the owner's decision"}`);
   console.log(`report: ${output}`);
