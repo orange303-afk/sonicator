@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include "core/disc/AkaiFilesystem.h"
 #include "core/disc/AkaiSampleReader.h"
 #include "core/disc/CueSheet.h"
@@ -7,9 +8,11 @@
 #include "core/disc/DiscImageProbe.h"
 #include "core/disc/RawDiscSource.h"
 #include "core/disc/SectorLayout.h"
+#include "core/audio/AudioEngine.h"
 #include "core/database/Database.h"
 #include "core/database/SampleRepository.h"
 #include "core/scanner/FileScanner.h"
+#include "ui/preview/PreviewPanel.h"
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -378,6 +381,39 @@ TEST_CASE("Opt-in real disc image catalogue", "[.disc-corpus]")
         REQUIRE(file.getSize() == size);
         REQUIRE(file.getLastModificationTime() == modified);
         REQUIRE(FileScanner::computeFileHash(file) == hash);
+
+        // The app path: the decoded source plays through the ordinary transport and exports its
+        // exact frames from the preview panel.
+        {
+            TestDirectory exports;
+            AudioEngine engine(false);
+            PreviewPanel preview(engine, exports.dir.getChildFile("cache"),
+                                 exports.dir.getChildFile("exports"));
+            const auto& sample = records.front();
+            REQUIRE(preview.loadDiscSample(file, sample.name, sample.audio, false, 0, 0, false, false));
+            REQUIRE(engine.isDiscMode());
+            REQUIRE(preview.waveformLength()
+                    == Catch::Approx((double) sample.audio->frames / sample.audio->sampleRate).margin(1.0e-6));
+            preview.selectRange(0.0, preview.waveformLength());
+            REQUIRE(preview.waitForSelectionPreparation(10000));
+            REQUIRE(preview.isSelectionReady());
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(preview.preparedSelection()));
+            REQUIRE(reader != nullptr);
+            REQUIRE(reader->lengthInSamples == sample.audio->frames);
+            REQUIRE(reader->sampleRate == sample.audio->sampleRate);
+            juce::AudioBuffer<float> decoded(1, (int) sample.audio->frames);
+            REQUIRE(reader->read(&decoded, 0, (int) sample.audio->frames, 0, true, false));
+            // The WAV writer quantises to 16 bits, so a round trip may differ by one LSB.
+            float maxDifference = 0;
+            for (int i = 0; i < (int) sample.audio->frames; ++i)
+                maxDifference = juce::jmax(maxDifference,
+                                           std::abs(decoded.getSample(0, i) - sample.audio->left[(size_t) i]));
+            REQUIRE(maxDifference <= 1.0f / 32768.0f);
+            preview.clearDiscSource();
+            REQUIRE_FALSE(engine.isDiscMode());
+        }
     }
 }
 
