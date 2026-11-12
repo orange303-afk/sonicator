@@ -175,7 +175,7 @@ void IndexingService::run()
         if (! cancelled)
         {
             { std::lock_guard lock(stateMutex); state.message = "Updating duplicate groups"; }
-            repo.refreshDuplicates();
+            repo.refreshDuplicates([this] { return checkpoint(); });
         }
         std::lock_guard lock(stateMutex);
         state.message = cancelled ? "Cancelled; completed results were saved"

@@ -574,3 +574,32 @@ TEST_CASE("Compatibility round-trips and Hide empty hides incompatible assets", 
     filter.hideEmpty = false;
     REQUIRE(repo.query(filter).total == 5);
 }
+
+TEST_CASE("A cancelled duplicate refresh rolls back and keeps the previous groups",
+          "[database][duplicates][cancel]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("cancel-dups.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    auto make = [](const juce::String& path, const juce::String& name, const juce::String& hash)
+    {
+        SampleRecord r; r.filePath = path; r.fileName = name; r.fileHash = hash; r.fileSize = 1000;
+        r.format = "WAV"; r.version = basicFeaturesVersion; return r;
+    };
+    const auto a = repo.upsert(make("/lib/a.wav", "a.wav", "first"));
+    const auto b = repo.upsert(make("/lib/b.wav", "b.wav", "first"));
+    REQUIRE(repo.refreshDuplicates());
+    REQUIRE(repo.duplicateCounts({ a }).at(a) == 2);
+
+    const auto c = repo.upsert(make("/lib/c.wav", "c.wav", "second"));
+    const auto d = repo.upsert(make("/lib/d.wav", "d.wav", "second"));
+    int calls = 0;
+    REQUIRE_FALSE(repo.refreshDuplicates([&] { return ++calls > 1; }));
+    // Cancelling rolls the whole rebuild back: the new pair is not published and the old group
+    // is exactly as it was, so a quit never leaves a half-rebuilt duplicate table behind.
+    CHECK(calls >= 2);
+    CHECK(repo.duplicateCounts({ c }).count(c) == 0);
+    CHECK(repo.duplicateCounts({ a }).at(a) == 2);
+    CHECK(repo.refreshDuplicates());
+    CHECK(repo.duplicateCounts({ c }).at(c) == 2);
+    CHECK(repo.duplicateCounts({ a }).at(a) == 2);
+}

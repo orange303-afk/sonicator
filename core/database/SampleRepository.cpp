@@ -2144,10 +2144,13 @@ void SampleRepository::setStarred(const std::vector<int64_t>& sampleIds, bool st
         throw;
     }
 }
-void SampleRepository::refreshDuplicates()
+bool SampleRepository::refreshDuplicates(const std::function<bool()>& cancel)
 {
+    const auto cancelled = [&cancel] { return cancel && cancel(); };
+    if (cancelled()) return false;
     std::lock_guard lock(db.mutex);
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    const auto rollback = [this] { detail::exec(db.handle, "ROLLBACK;"); };
     try
     {
         {
@@ -2207,21 +2210,29 @@ void SampleRepository::refreshDuplicates()
             " AND l.missing=0 AND r.missing=0;";
         detail::exec(db.handle, stereoPairSql);
         detail::exec(db.handle, "DELETE FROM duplicates;");
+        // NOT EXISTS rather than NOT IN: sample_id is the stereo_pairs rowid, so this is one
+        // indexed lookup per candidate row, while NOT IN rescans the whole table for every hash.
         detail::Statement groups(db.handle,
             "SELECT hash FROM samples WHERE hash<>'' AND size>0 AND ignored=0"
-            " AND id NOT IN (SELECT sample_id FROM stereo_pairs WHERE is_representative=0)"
+            " AND NOT EXISTS (SELECT 1 FROM stereo_pairs sp"
+            "                 WHERE sp.sample_id=samples.id AND sp.is_representative=0)"
             " GROUP BY hash HAVING COUNT(*)>1");
         std::vector<juce::String> hashes;
         while (groups.step()) hashes.push_back(groups.text(0));
         struct Member { int64_t id = 0; bool starred = false, missing = false; bool failed = false; int pathLength = 0; };
+        // Forcing the hash index matters: the planner otherwise picks samples_ignored and walks
+        // every row of the catalog once per hash, which turned a 370k-sample catalog into hours.
         detail::Statement select(db.handle,
-            "SELECT id,path,starred,missing,error FROM samples WHERE hash=? AND ignored=0"
-            " AND id NOT IN (SELECT sample_id FROM stereo_pairs WHERE is_representative=0)");
+            "SELECT id,path,starred,missing,error FROM samples INDEXED BY samples_hash"
+            " WHERE hash=? AND ignored=0"
+            " AND NOT EXISTS (SELECT 1 FROM stereo_pairs sp"
+            "                 WHERE sp.sample_id=samples.id AND sp.is_representative=0)");
         detail::Statement insert(db.handle,
             "INSERT OR REPLACE INTO duplicates(sample_id,representative_id,group_hash,group_size,is_representative)"
             " VALUES(?,?,?,?,?)");
         for (const auto& hash : hashes)
         {
+            if (cancelled()) { rollback(); return false; }
             select.reset(); select.text(1, hash);
             std::vector<Member> members;
             while (select.step())
@@ -2246,10 +2257,11 @@ void SampleRepository::refreshDuplicates()
             }
         }
         detail::exec(db.handle, "COMMIT;");
+        return true;
     }
     catch (...)
     {
-        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        try { rollback(); } catch (...) {}
         throw;
     }
 }

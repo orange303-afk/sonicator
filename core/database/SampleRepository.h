@@ -171,7 +171,10 @@ public:
     int countWithTagInFolder(const juce::String& folder, int64_t tagId) const;
     void setStarred(const std::vector<int64_t>& sampleIds, bool starred);
     // Rebuilds the byte-identical duplicate groups (same full SHA-256 and size).
-    void refreshDuplicates();
+    // Rebuilds duplicate and stereo-pair groups. Pass a cancel check to stop between groups: the
+    // whole rebuild is one transaction, so a cancelled pass rolls back and leaves the previous
+    // groups in place. Returns false when cancelled (or cancelled before it started).
+    bool refreshDuplicates(const std::function<bool()>& cancel = {});
     void updateDuplicateRepresentative(int64_t sampleId);
     void updateDuplicateRepresentatives(const std::vector<int64_t>& sampleIds);
     std::map<int64_t,int> duplicateCounts(const std::vector<int64_t>& sampleIds) const;
