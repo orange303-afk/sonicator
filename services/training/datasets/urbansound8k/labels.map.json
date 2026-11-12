@@ -1,0 +1,16 @@
+{
+  "datasetDir": "urbansound8k/UrbanSound8K",
+  "licenseUrl": "https://creativecommons.org/licenses/by-nc/3.0/",
+  "classes": {
+    "air_conditioner": { "type": null, "group": "ambience", "domain": "ambience" },
+    "car_horn": { "type": null, "group": "foley", "domain": "foley" },
+    "children_playing": { "type": null, "group": "foley", "domain": "voice" },
+    "dog_bark": { "type": null, "group": "foley", "domain": "foley" },
+    "drilling": { "type": null, "group": "foley", "domain": "foley" },
+    "engine_idling": { "type": null, "group": "ambience", "domain": "ambience" },
+    "gun_shot": { "type": null, "group": "foley", "domain": "foley" },
+    "jackhammer": { "type": null, "group": "foley", "domain": "foley" },
+    "siren": { "type": null, "group": "foley", "domain": "foley" },
+    "street_music": { "type": null, "group": "tonal", "domain": "music" }
+  }
+}

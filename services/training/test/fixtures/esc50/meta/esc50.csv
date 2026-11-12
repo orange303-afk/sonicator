@@ -1,0 +1,5 @@
+filename,fold,target,category,esc10,src_file,take
+1-100032-A-0.wav,1,0,dog,True,100032-3,0
+1-100038-A-14.wav,4,14,chirping_birds,True,100038-4,0
+1-100039-A-1.wav,5,1,rooster,True,100039-1,0
+1-100041-A-4.wav,2,4,clapping,False,100041-2,0

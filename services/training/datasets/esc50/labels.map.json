@@ -1,0 +1,24 @@
+{
+  "datasetDir": "esc50",
+  "licenseUrl": "https://creativecommons.org/licenses/by-nc/4.0/",
+  "types": {
+    "clapping": "clap",
+    "laughing": "vocal",
+    "coughing": "vocal",
+    "sneezing": "vocal",
+    "breathing": "vocal",
+    "snoring": "vocal",
+    "crying_baby": "vocal"
+  },
+  "groups": {
+    "Animals": { "group": "ambience", "domain": "ambience" },
+    "Natural soundscapes & water sounds": { "group": "ambience", "domain": "ambience" },
+    "Human, non-speech sounds": { "group": "vocal", "domain": "voice" },
+    "Interior/domestic sounds": { "group": "foley", "domain": "foley" },
+    "Exterior/urban noises": { "group": "foley", "domain": "foley" }
+  },
+  "typeGroups": {
+    "clap": { "group": "percussion", "domain": "music" },
+    "vocal": { "group": "vocal", "domain": "voice" }
+  }
+}

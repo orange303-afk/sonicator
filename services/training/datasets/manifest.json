@@ -96,6 +96,9 @@
     "tier": "B",
     "used": true,
     "creditLine": "ESC-50 (Piczak, 2015), CC BY-NC 4.0",
+    "downloadedAt": "2026-11-12",
+    "clipsSeen": 2000,
+    "clipsUsed": 2000,
     "audio": { "format": "wav", "sampleRateHz": 44100 },
     "notes": "2000 clips in 50 environmental classes, 5 s each"
   },
@@ -109,6 +112,9 @@
     "tier": "B",
     "used": true,
     "creditLine": "UrbanSound8K (Salamon et al., 2014), NYU, CC BY-NC 3.0",
+    "downloadedAt": "2026-11-12",
+    "clipsSeen": 8732,
+    "clipsUsed": 8732,
     "audio": { "format": "wav", "sampleRateHz": 44100 },
     "notes": "8732 urban excerpts in 10 classes"
   },

@@ -122,3 +122,26 @@ public map is fitted on the public `val` split. The app's 0.80 acceptance thresh
 "about 80% correct" for either source, the 0.95 penalty and 0.02 margin compare like with like, and
 the report shows the whole coverage → precision curve instead of one operating point. Mode (1) is
 reported at the same reading, which is why its coverage is no longer 100%.
+
+### Wave 2 (2026-11-12): ESC-50 and UrbanSound8K
+
+Two tier-B datasets were added: ESC-50 (2000 clips, folds 1–3/4/5 → train/val/test) and UrbanSound8K
+(8732 clips, official folds 1–8/9/10). Both are NC-licensed, which the manifest allows for a free
+non-commercial app. UrbanSound8K contributes **no typed labels** (its classes are events, not
+instruments), so it only feeds the group/domain columns. ESC-50 contributes `clap` (40 clips) and
+`vocal` (240).
+
+Measured on the same gold sample and the same `train.mjs`:
+
+| metric | wave 1 | wave 1 + wave 2 |
+|---|---|---|
+| mode (1) top-1 | 76.8% | 76.8% |
+| mode (4) top-1 | 78.1% | 78.1% |
+| mode (4) precision at acceptance | 87.2% | 87.6% |
+| clap top-1 | 65.1% | 70.2% (218 rows) |
+| cold start top-1 | 73.0% | 72.7% |
+
+The clap gain is the only visible one; everything else moved within 0.4 pp and the criteria did not
+change. SONYC-UST (14 GB) and Slakh2100-redux (104 GB) were not fetched: their labels (engine, siren,
+bass, keys, guitar) do not cover the gold types that fail (`fx`, `impact`, `riser`, `synth`), so the
+download would cost hours for the same tenths of a point.

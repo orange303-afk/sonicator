@@ -5,7 +5,9 @@ import { homedir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ingest as ingestOneShot } from "./datasets/freesound-one-shot-percussive/ingest.mjs";
+import { ingest as ingestEsc50 } from "./datasets/esc50/ingest.mjs";
 import { ingest as ingestFsd50k } from "./datasets/fsd50k/ingest.mjs";
+import { ingest as ingestUrbanSound8k } from "./datasets/urbansound8k/ingest.mjs";
 import { ingest as ingestNsynth } from "./datasets/nsynth/ingest.mjs";
 
 const DEFAULT_ROOT = "/Volumes/1TBSSD/Datasets";
@@ -134,6 +136,8 @@ function ingestSources({ root, source }) {
   if (source === "all" || source === "one-shot") add("one-shot", ingestOneShot({ root }));
   if (source === "all" || source === "fsd50k")
     for (const split of ["dev", "eval"]) add(`fsd50k-${split}`, ingestFsd50k({ root, split }));
+  if (source === "all" || source === "esc50") add("esc50", ingestEsc50({ root }));
+  if (source === "all" || source === "urbansound8k") add("urbansound8k", ingestUrbanSound8k({ root }));
   collected.clips.sort((a, b) => {
     if (a.source !== b.source) return a.source < b.source ? -1 : 1;
     if (a.split !== b.split) return a.split < b.split ? -1 : 1;
@@ -147,6 +151,8 @@ function ingestSources({ root, source }) {
 export function datasetDirectory(root, source, split) {
   if (source === "nsynth") return join(root, "nsynth", `nsynth-${split === "val" ? "valid" : split}`);
   if (source === "fsd50k") return join(root, "fsd50k", split === "test" ? "FSD50K.eval_audio" : "FSD50K.dev_audio");
+  if (source === "esc50") return join(root, "esc50", "audio");
+  if (source === "urbansound8k") return join(root, "urbansound8k", "UrbanSound8K", "audio");
   return join(root, "freesound-one-shot-percussive", "one_shot_percussive_sounds");
 }
 
