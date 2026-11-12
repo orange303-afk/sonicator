@@ -16,7 +16,8 @@ repacked.
 | WAV/AIFF/FLAC/MP3 inside ISO (mono/stereo) | decoded from the entry stream; no temporary files or fake paths |
 | Raw Akai S1000/S3000 catalogue | yes: validated partitions → volumes → records |
 | Akai program records | metadata-only containers; keygroups, filters, envelopes are not emulated |
-| Akai sample PCM | yes for the verified variant: 150-byte header + signed 16-bit little-endian; any other header length is refused, not guessed |
+| Akai sample PCM | yes for the two verified variants: S1000 150-byte and S3000 192-byte header + signed 16-bit little-endian; the length must satisfy `L + 2*frames == declaredBytes` exactly, any other header is refused, not guessed |
+| Akai sample rates | any nonzero rate field; real discs carry 1280 and 6000 Hz samples. A zero rate field is reported as an invalid record |
 | Stereo pairs | Akai and ISO L/R records with the same base name and equal size merge into one stereo entry; physical mono WAVs with L/R markers play and export as one stereo file |
 | BIN/CUE | yes for `FILE ... BINARY`, MODE1/2048, MODE1/2352, MODE2/2352 (XA Form 1), AUDIO tracks (metadata-only), INDEX 00/01, PREGAP/POSTGAP; a sibling `.cue` is found for a BIN, and a multi-data-track cue offers a track choice |
 | MDX | unsupported; separate decoder/licence gate |
@@ -46,6 +47,9 @@ not guessed.
 ## Akai details verified against a real image
 
 - 8192-byte blocks; the partition table is read at `0x4500`.
+- The table may declare more blocks than the image holds (a trimmed or partial copy): partitions
+  that start inside the image are kept, the rest are dropped, and a partition whose FAT markers
+  are missing is skipped. An image with no surviving volume table is still refused.
 - Each validated partition has its own volume table at `+0x00ca` and FAT at `+0x070a`.
 - Volume and file start blocks are **relative to their partition**.
 - This image stores FAT values big-endian while volume/file fields are little-endian; the byte
@@ -68,9 +72,44 @@ PCM evidence for this library (read-only analysis of the image, no copied corpus
   (`CO1HANDB1 .L` / `.R`) merge into one stereo entry and decode to two channels.
 - The 2,681 sample records become 1,911 listed sample entries after verified L/R pairing; the
   record count itself is unchanged.
-- Other header lengths (for example the documented 190-byte S3000 variant) are **refused** with an
-  explicit message. No independent third-party decoder was used; this is whole-library structural
-  and statistical evidence, not a bit-for-bit comparison with another tool.
+- The documented 190-byte S3000 variant is **not** what real discs store: the S3000 header is 192
+  bytes (see the next section). Both 150 and 192 are accepted by the size equation, so a specific
+  disc never needs its variant guessed from the file name.
+
+## Akai S3000 (192-byte header) verified against real CDs
+
+Two CDs of the Robert Miles set (`TZRMRM1AK.bin`/`.cue`, `TZRMRM2AK.bin`/`.cue`, MODE1/2352,
+read-only):
+
+- Header fields: `0x00` id (3), `0x02` root note, `0x03..0x0e` name, `0x1a` frames, `0x1e` start,
+  `0x22` playback end, `0x8a` rate (u16 LE). Data starts at **192** and is signed 16-bit LE mono.
+- `declaredBytes - frames*2` is exactly 192 for every checked record; the same equation with 150
+  cannot hold at the same time, so the family is identified, not guessed.
+- Disc 1: 9 partitions, 229 volumes, 1,569 program records, 4,535 listed samples, 4,639 sample
+  records (4,638 decodable, one record has a zero rate field), 105 stereo pairs, all 192-byte.
+- Disc 2 is a **trimmed image**: its table declares 65,535 blocks but the data track holds 61,514.
+  It still opens: 9 partitions, 60 volumes, 68 programs, 2,269 samples, 2,392 records, 123 stereo
+  pairs, all 192-byte. Every record decodes, including the hidden right halves of stereo pairs.
+- Rates on these discs include 1280 Hz and 6000 Hz, so the old 8 kHz floor would have refused real
+  samples. A zero rate field occurs once and is reported as an invalid record.
+- The catalog pass stores metadata rows for the samples of both discs (4,535 rows each side of the
+  pair, on a temporary database in the test).
+
+### Reference conversion check
+
+`Converted/` next to the discs holds WAVs made by an independent converter. For the 1,505 records
+whose names are unique on both sides (1,949 reference names, 636 ambiguous, 4,886 without a
+reference), the decoded frames `[start, end)` were compared with the reference audio:
+
+- **1,487 of 1,505 pairs are bit-exact** over the range the reference contains.
+- The converter reads only whole 8192-byte blocks up to the block holding the playback end and
+  zero-pads the rest; its audio therefore stops up to one block before `end`. The check compares the
+  frames the reference actually produced.
+- 18 same-named pairs differ from the start of their audio. `Converted` is a mixed conversion of
+  several libraries, so these are different takes under the same name, not a decode difference; the
+  test prints them. The exact-match share (≥ 98 %) is the regression guard.
+- Export: the preview writes the source frames as 16-bit WAV; a read-back differs by at most one
+  LSB, and the corpus test checks this on a real sample.
 
 ## Stereo pairs
 
@@ -95,8 +134,8 @@ truncated.
 
 ## Not established
 
-- BIN/CUE layout parsing, pregap/INDEX handling and raw 2352 user-data extraction.
-- Akai PCM numeric equivalence to an independent decoder.
+- Bit-exact equivalence with a third-party *decoder* for the whole corpus: the reference check
+  above covers 1,505 same-named pairs (1,487 exact), not every record.
 - MDX catalogue or playback.
 - Mid-session unplug/restore of a disc browser.
 - Remote/network images (always refused).
