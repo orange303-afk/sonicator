@@ -36,3 +36,5 @@ target_sources(SonicatorTests PRIVATE TestFeaturesCatalog.cpp ${CMAKE_SOURCE_DIR
 target_sources(SonicatorTests PRIVATE TestFeatureSchema16.cpp)
 target_sources(SonicatorTests PRIVATE TestFeatureV2Backfill.cpp)
 target_sources(SonicatorTests PRIVATE TestGlobalLinearModel.cpp)
+target_sources(SonicatorTests PRIVATE TestKrzFile.cpp)
+target_sources(SonicatorTests PRIVATE TestKrzCorpus.cpp)
