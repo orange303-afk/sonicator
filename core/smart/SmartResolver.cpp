@@ -12,21 +12,22 @@ bool usable(const SmartCandidate& c)
 }
 bool validOnly(const SmartCandidate& c) { return c.status == CandidateStatus::Valid; }
 int rank(const SmartCandidate& c) { return smartSourcePriority(c.source); }
-// Type evidence, strongest first: container metadata, a confident acoustic rule, an explicit
-// filename token, learned prototypes and the ML classifier, then DSP structure. A name is direct
-// evidence about this file, so it outranks a nearest-prototype guess; the acoustic rule stays
-// above it, as documented in SMART_ANALYSIS.md.
+// Type evidence, strongest first: container metadata, an explicit filename token, the nearest
+// folder that names an instrument, a confident acoustic rule, learned prototypes and the ML
+// classifier, then DSP structure. A name is direct evidence about this file, so it outranks
+// acoustic and learned guesses, as documented in SMART_ANALYSIS.md.
 int typeSourceCategory(const SmartCandidate& c)
 {
     const auto& source = c.source;
     if (source == "wav_smpl" || source == "wav_inst" || source == "rx2_recy" || source == "rx2_glob"
         || source == "aiff_basc" || source == "wav_acid" || source == "id3") return 0;
-    if (source == "dsp_acoustic") return 1;
-    if (source == "filename") return 2;
-    if (source == "user_adaptive" || source == "global_adaptive" || source == "global_model") return 3;
-    if (source == "ml_classifier") return 4;
-    if (source == "dsp") return 5;
-    return 6;
+    if (source == "filename") return 1;
+    if (source == "folder") return 2;
+    if (source == "dsp_acoustic") return 3;
+    if (source == "user_adaptive" || source == "global_adaptive" || source == "global_model") return 4;
+    if (source == "ml_classifier") return 5;
+    if (source == "dsp") return 6;
+    return 7;
 }
 juce::String formatNumber(double value, int decimals = 2)
 {

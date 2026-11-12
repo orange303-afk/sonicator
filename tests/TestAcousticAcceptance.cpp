@@ -671,7 +671,10 @@ TEST_CASE("Acoustic classification end-to-end pipeline integration", "[acceptanc
         resolved.pipelineState = SmartPipelineState::Complete;
         resolved.extractorVersion = smartExtractorsVersion;
         resolved.resolverVersion = smartResolverVersion;
-        REQUIRE(resolved.type == "Kick");
+        // The file name says nothing, so the "Kicks" folder supplies the type; the acoustic
+        // candidate agrees and keeps the state resolved.
+        REQUIRE(resolved.type.equalsIgnoreCase("Kick"));
+        REQUIRE(resolved.typeSource == "folder");
         REQUIRE(resolved.typeState == SmartState::Resolved);
         REQUIRE(resolved.explanation.contains("genre context"));
 

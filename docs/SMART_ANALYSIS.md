@@ -99,13 +99,20 @@ visible underneath, including when it is stale.
 - A DSP pass with competing grids stores the tempo as an `invalid` candidate: the
   resolved BPM becomes `ambiguous`, never an invented single number. A valid
   metadata BPM still wins over it by source priority.
-- Type evidence is ordered: container metadata (sampler chunk, REX2, AIFF BASC, ACID), then a
-  confident acoustic rule, then an explicit filename token, then learned prototypes
-  (`user_adaptive`, `global_adaptive`, `global_model`) and the ML classifier, then DSP structure.
-  A name such as `bd07` is direct evidence about that file, so it outranks a nearest-prototype
-  guess; disagreement is reported as `ambiguous`. The smart filename parser uses the same whole
+- Type evidence is ordered: container metadata (sampler chunk, REX2, AIFF BASC, ACID), then an
+  explicit filename token, then the nearest folder that names an instrument, then a confident
+  acoustic rule, then learned prototypes (`user_adaptive`, `global_adaptive`, `global_model`) and
+  the ML classifier, then DSP structure. A name such as `bd07` is direct evidence about that file,
+  so it outranks a nearest-prototype or acoustic guess; disagreement is reported as `ambiguous`.
+  A file in `SNARE/`, `BD/` or `PAD/` takes that type from the folder, and when the immediate
+  folder says nothing the nearest ancestor that names an instrument is used, so
+  `Best Service - XXL 800 Pads/Vol 1/01.wav` is a pad. Only the nearest such folder counts, and
+  a deeper ancestor contributes only its instrument word, never its numbers or key words. The smart filename parser uses the same whole
   drum abbreviations as AutoTag (`bd`, `sd`, `hh` and their L/R forms) and splits a glued numeric
-  index (`bd07` → `bd`), while `bdroom` stays one word and is not a kick.
+  index (`bd07` → `bd`), while `bdroom` stays one word and is not a kick. The same whole-token rule
+  covers the instrument vocabulary — `piano`, `organ`, `synth`, `chord`, `stab`, `fx`, `riser`,
+  `uplifter`, `downlifter`, `boom`, `guitar`, `lead`, `bass`, `wobble`, `bell`, `pad`, `drone` and
+  their common spellings — so `pianoforte` or `bellboy` are not instruments.
 - DSP structure (`loop` / `one-shot`) is a normal text candidate. A name or container
   value with stronger priority wins, and disagreement is reported as `ambiguous`.
 - Variable tempo does not resolve to a single BPM.

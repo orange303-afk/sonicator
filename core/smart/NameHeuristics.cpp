@@ -1,5 +1,6 @@
 #include "NameHeuristics.h"
 #include "KeyNames.h"
+#include <algorithm>
 #include <cmath>
 namespace sonicator {
 namespace {
@@ -40,16 +41,25 @@ constexpr Alias typeAliases[] = {
     { "808", "808|808bass|808sub" },
     { "reese", "reese|reesebass" },
     { "acid", "acid|303|tb303" },
-    { "lead", "lead|arp|arpeggio|pluck|stab|riff" },
-    { "pad", "pad|pads|atmos|atmosphere|texture|drone|ambient" },
-    { "keys", "keys|piano|organ|rhodes|wurli|clav" },
-    { "synth", "synth|chord|chords|poly" },
-    { "guitar", "guitar|gtr" },
+    { "lead", "lead|leads|arp|arpeggio|arps|pluck|plucks|riff|riffs" },
+    { "pad", "pad|pads|atmos|atmosphere|texture|textures|ambient|ambience" },
+    { "drone", "drone|drones" },
+    { "keys", "keys|rhodes|wurli|wurlitzer|clav|clavinet" },
+    { "piano", "piano|pianos|pno|grand|upright|klavier" },
+    { "organ", "organ|organs|hammond" },
+    { "synth", "synth|synths|synthesizer|polysynth|poly" },
+    { "chord", "chord|chords" },
+    { "stab", "stab|stabs" },
+    { "guitar", "guitar|guitars|gtr" },
     { "vocal", "vocal|vocals|vox|choir|acapella" },
-    { "fx", "fx|sfx|effect|effects|noise|sweep|impact|foley" },
+    { "bell", "bell|bells|chime|chimes|glockenspiel" },
+    { "wobble", "wobble|wobbles|wub|wubs" },
+    { "impact", "impact|impacts|boom|booms|slam|slams" },
+    { "fx", "fx|sfx|effect|effects|noise|noises|sweep|sweeps" },
     { "foley", "foley" },
-    { "riser", "riser|sweep|upfilter|uplifter" },
-    { "drop", "drop|fall|downfilter|downlifter" },
+    { "riser", "riser|risers|uplifter|uplifters|upfilter|upfilters" },
+    { "downfilter", "downfilter|downfilters|downlifter|downlifters" },
+    { "drop", "drop|drops|fall|falls" },
     { "brass", "brass|trumpet|sax|saxophone|horn|horns" },
     { "strings", "string|strings|violin|cello|viola" }
 };
@@ -133,6 +143,20 @@ bool hasModeSuffix(const juce::String& token)
         || lower.endsWith("m7") || lower.endsWith("dim") || lower.endsWith("aug")
         || lower.endsWith("m");
 }
+void appendTypeCandidate(const juce::String& token, const juce::String& source,
+                         std::vector<SmartCandidate>& out)
+{
+    auto type = typeForToken(token);
+    if (type.isEmpty()) type = typeForSplitToken(token);
+    if (type.isEmpty()) return;
+    SmartCandidate c; c.field = SmartField::Type; c.source = source;
+    c.textValue = type; c.detail = token; out.push_back(c);
+}
+void collectTypesOnly(const juce::String& text, const juce::String& source,
+                      std::vector<SmartCandidate>& out)
+{
+    for (const auto& token : splitTokens(text)) appendTypeCandidate(token, source, out);
+}
 void collect(const juce::String& text, const juce::String& source, std::vector<SmartCandidate>& out)
 {
     auto tokens = splitTokens(text);
@@ -146,13 +170,7 @@ void collect(const juce::String& text, const juce::String& source, std::vector<S
     for (int i = 0; i < tokens.size(); ++i)
     {
         const auto& token = tokens[(size_t) i];
-        auto type = typeForToken(token);
-        if (type.isEmpty()) type = typeForSplitToken(token);
-        if (type.isNotEmpty())
-        {
-            SmartCandidate c; c.field = SmartField::Type; c.source = source;
-            c.textValue = type; c.detail = token; out.push_back(c);
-        }
+        appendTypeCandidate(token, source, out);
         if (token.equalsIgnoreCase("one") && i + 1 < tokens.size()
             && tokens[(size_t) i + 1].equalsIgnoreCase("shot"))
         {
@@ -243,8 +261,33 @@ std::vector<SmartCandidate> extractNameCandidates(const juce::String& path)
     std::vector<SmartCandidate> out;
     const juce::File file(path);
     collect(file.getFileNameWithoutExtension(), "filename", out);
-    const auto folder = file.getParentDirectory().getFileName();
-    if (folder.isNotEmpty()) collect(folder, "folder", out);
+    const auto folder = file.getParentDirectory();
+    if (folder.getFileName().isNotEmpty()) collect(folder.getFileName(), "folder", out);
+    // The nearest ancestor folder that names an instrument is context too, so a pack such as
+    // "Best Service - XXL 800 Pads/Vol 1/01.wav" still says pad. Deeper ancestors contribute a
+    // type only: their numbers and key words are not evidence about this file.
+    const auto hasFolderType = [&out]
+    {
+        return std::any_of(out.begin(), out.end(), [](const SmartCandidate& c)
+        {
+            return c.field == SmartField::Type && c.source == "folder";
+        });
+    };
+    if (! hasFolderType())
+    {
+        auto ancestor = folder.getParentDirectory();
+        for (int depth = 0; depth < 6 && ancestor.getFullPathName().isNotEmpty(); ++depth)
+        {
+            std::vector<SmartCandidate> types;
+            collectTypesOnly(ancestor.getFileName(), "folder", types);
+            if (! types.empty())
+            {
+                out.insert(out.end(), types.begin(), types.end());
+                break;
+            }
+            ancestor = ancestor.getParentDirectory();
+        }
+    }
     return out;
 }
 } // namespace sonicator

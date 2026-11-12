@@ -50,24 +50,45 @@ TEST_CASE("Case 3: Agreement between filename and acoustic candidate", "[smart][
     auto fn = makeCandidate(SmartField::Type, "filename", "kick", smartExtractorsVersion);
     auto ac = makeCandidate(SmartField::Type, "dsp_acoustic", "Kick", smartDspVersion);
     auto res = resolveSmart({ fn, ac });
-    REQUIRE(res.type == "Kick");
+    // The filename candidate wins the tie (display capitalises it); agreement keeps the state.
+    REQUIRE(res.type.equalsIgnoreCase("Kick"));
     REQUIRE(res.typeState == SmartState::Resolved);
     REQUIRE(res.explanation.contains("dsp_acoustic"));
     REQUIRE(res.explanation.contains("filename"));
     REQUIRE(res.explanation.contains("independent sources agree"));
 }
 
-TEST_CASE("Case 4: Disagreement where high-confidence acoustic overrides filename", "[smart][resolver][acoustic]")
+TEST_CASE("Case 4: An explicit filename instrument outranks the acoustic rule", "[smart][resolver][acoustic]")
 {
-    // Case 4: Disagreement where high-confidence acoustic overrides filename:
-    // filename has "snare", dsp_acoustic has "Pad": resolves to "Pad" with source "dsp_acoustic".
+    // A file whose name says "snare" is a snare: the name is direct evidence about this file,
+    // while the acoustic rule is a guess from its spectrum.
     auto fn = makeCandidate(SmartField::Type, "filename", "snare", smartExtractorsVersion);
     auto ac = makeCandidate(SmartField::Type, "dsp_acoustic", "Pad", smartDspVersion);
     auto res = resolveSmart({ fn, ac });
-    REQUIRE(res.type == "Pad");
-    REQUIRE(res.typeSource == "dsp_acoustic");
+    REQUIRE(res.type == "snare");
+    REQUIRE(res.typeSource == "filename");
     REQUIRE(res.typeState == SmartState::Ambiguous);
     REQUIRE(res.explanation.contains("interpretations differ"));
+}
+
+TEST_CASE("A folder instrument outranks acoustic and learned guesses", "[smart][resolver][acoustic]")
+{
+    auto folder = makeCandidate(SmartField::Type, "folder", "snare", smartExtractorsVersion);
+    auto ac = makeCandidate(SmartField::Type, "dsp_acoustic", "Pad", smartDspVersion);
+    auto learned = makeCandidate(SmartField::Type, "user_adaptive", "Conga", smartDspVersion);
+    auto res = resolveSmart({ learned, ac, folder });
+    REQUIRE(res.type == "snare");
+    REQUIRE(res.typeSource == "folder");
+    REQUIRE(res.typeState == SmartState::Ambiguous);
+}
+
+TEST_CASE("A filename instrument outranks its folder", "[smart][resolver][acoustic]")
+{
+    auto fn = makeCandidate(SmartField::Type, "filename", "kick", smartExtractorsVersion);
+    auto folder = makeCandidate(SmartField::Type, "folder", "snare", smartExtractorsVersion);
+    auto res = resolveSmart({ folder, fn });
+    REQUIRE(res.type == "kick");
+    REQUIRE(res.typeSource == "filename");
 }
 
 TEST_CASE("A filename instrument outranks a learned prototype guess", "[smart][resolver][acoustic]")
