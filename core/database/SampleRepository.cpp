@@ -2187,16 +2187,21 @@ void SampleRepository::refreshDuplicates()
             }
         }
         detail::exec(db.handle, "DELETE FROM stereo_pairs;");
+        // The join must use the pair_key index. Without the explicit indexed access SQLite
+        // prefers samples_ignored on both sides and turns the join into a full cross product:
+        // on the 350k-sample catalog that is billions of comparisons inside one transaction.
         constexpr auto stereoPairSql =
             "INSERT OR IGNORE INTO stereo_pairs(sample_id,representative_id,partner_id,is_representative) "
-            "SELECT l.id,l.id,r.id,1 FROM samples l JOIN samples r ON r.pair_key=l.pair_key "
-            "WHERE l.pair_key<>'' AND l.pair_side=-1 AND r.pair_side=1"
+            "SELECT l.id,l.id,r.id,1 FROM samples l INDEXED BY samples_pair_key"
+            " JOIN samples r INDEXED BY samples_pair_key ON r.pair_key=l.pair_key "
+            "WHERE l.pair_key<>'' AND r.pair_key<>'' AND l.pair_side=-1 AND r.pair_side=1"
             " AND l.channels=1 AND r.channels=1 AND l.rate=r.rate AND l.duration>0"
             " AND abs(l.duration-r.duration)<0.001 AND l.ignored=0 AND r.ignored=0"
             " AND l.missing=0 AND r.missing=0 "
             "UNION ALL "
-            "SELECT r.id,l.id,r.id,0 FROM samples l JOIN samples r ON r.pair_key=l.pair_key "
-            "WHERE l.pair_key<>'' AND l.pair_side=-1 AND r.pair_side=1"
+            "SELECT r.id,l.id,r.id,0 FROM samples l INDEXED BY samples_pair_key"
+            " JOIN samples r INDEXED BY samples_pair_key ON r.pair_key=l.pair_key "
+            "WHERE l.pair_key<>'' AND r.pair_key<>'' AND l.pair_side=-1 AND r.pair_side=1"
             " AND l.channels=1 AND r.channels=1 AND l.rate=r.rate AND l.duration>0"
             " AND abs(l.duration-r.duration)<0.001 AND l.ignored=0 AND r.ignored=0"
             " AND l.missing=0 AND r.missing=0;";
