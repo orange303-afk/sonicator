@@ -7,6 +7,7 @@
 #include "ui/split/SplitDialog.h"
 #include "ui/extract/ExtractDialog.h"
 #include "core/extract/EmbeddedSamples.h"
+#include "core/extract/ExtractFollowUp.h"
 #include "core/scanner/FileScanner.h"
 #include "BinaryData.h"
 #include "core/database/PathRelocation.h"
@@ -2305,6 +2306,14 @@ void MainComponent::finishExtract()
         summary << "  " << juce::String(progress.failed) << " problem(s), see details.";
     if (progress.cancelled)
         summary << "\nCancelled; finished samples were kept.";
+    juce::StringArray outputFolders;
+    for (const auto& result : results)
+        if (result.written > 0 && result.folder.isDirectory()
+            && (result.state == ExtractFileState::extracted
+                || result.state == ExtractFileState::cancelled)
+            && ! outputFolders.contains(result.folder.getFullPathName()))
+            outputFolders.add(result.folder.getFullPathName());
+    pendingExtractScan.addArray(outputFolders);
     status.setText(summary.replace("\n", " "), juce::dontSendNotification);
     status.setTooltip(details.joinIntoString("\n"));
     if (extractContent != nullptr)
@@ -3310,6 +3319,52 @@ void MainComponent::timerCallback()
         else
         {
             pendingSplitScan = folders;
+        }
+    }
+    if (! pendingExtractScan.isEmpty() && ! isExtractRunning() && indexer != nullptr
+        && ! indexer->progress().running && ! (smart && smart->progress().running)
+        && ! (tagging && tagging->progress().running)
+        && ! (autoTag && autoTag->progress().running) && ! isSplitRunning())
+    {
+        const auto folders = pendingExtractScan;
+        pendingExtractScan.clear();
+        const auto roots = readRepo != nullptr ? readRepo->roots() : juce::StringArray();
+        const auto plan = planExtractFollowUp(folders, roots);
+        bool rootsChanged = false;
+        if (writeRepo != nullptr)
+            for (const auto& root : plan.newRoots)
+            {
+                writeRepo->addRoot(root);
+                rootsChanged = true;
+            }
+        if (rootsChanged) reloadLibrary();
+        if (indexer->startFoldersNewOnly(plan.scanFolders))
+        {
+            pendingExtractSmart.addArray(plan.scanFolders);
+            status.setText("Indexing extracted samples", juce::dontSendNotification);
+            wasRunning = true;
+        }
+        else
+        {
+            pendingExtractScan.addArray(folders);
+        }
+    }
+    else if (! pendingExtractSmart.isEmpty() && ! isExtractRunning() && smart != nullptr
+             && indexer != nullptr && ! indexer->progress().running
+             && ! smart->progress().running
+             && ! (tagging && tagging->progress().running)
+             && ! (autoTag && autoTag->progress().running) && ! isSplitRunning())
+    {
+        const auto folder = pendingExtractSmart[0];
+        pendingExtractSmart.remove(0);
+        if (smart->startFolder(folder))
+        {
+            status.setText("Analysing extracted samples", juce::dontSendNotification);
+            wasRunning = true;
+        }
+        else
+        {
+            pendingExtractSmart.insert(0, folder);
         }
     }
     const auto now = juce::Time::getMillisecondCounter();

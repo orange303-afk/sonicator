@@ -130,6 +130,8 @@ private:
     juce::Component::SafePointer<juce::DialogWindow> extractDialog;
     juce::Component::SafePointer<ExtractDialog> extractContent;
     juce::StringArray pendingSplitScan;
+    // Extract follow-up: folders to index once the batch ends, then folders to smart-analyse.
+    juce::StringArray pendingExtractScan, pendingExtractSmart;
     SplitOptions activeSplitOptions;
     juce::uint32 splitStartMs = 0;
     bool splitWasRunning = false;
