@@ -101,7 +101,9 @@ read-only):
 whose names are unique on both sides (1,949 reference names, 636 ambiguous, 4,886 without a
 reference), the decoded frames `[start, end)` were compared with the reference audio:
 
-- **1,487 of 1,505 pairs are bit-exact** over the range the reference contains.
+- **1,482 of the 1,500 pairs that carry comparable audio are bit-exact** over the range the
+  reference contains; 5 more same-named pairs have no reference audio after the block cut and are
+  counted separately.
 - The converter reads only whole 8192-byte blocks up to the block holding the playback end and
   zero-pads the rest; its audio therefore stops up to one block before `end`. The check compares the
   frames the reference actually produced.
@@ -138,7 +140,7 @@ truncated.
 ## Not established
 
 - Bit-exact equivalence with a third-party *decoder* for the whole corpus: the reference check
-  above covers 1,505 same-named pairs (1,487 exact), not every record.
+  above covers 1,500 same-named pairs with audio (1,482 exact), not every record.
 - MDX catalogue or playback.
 - Mid-session unplug/restore of a disc browser.
 - Remote/network images (always refused).
