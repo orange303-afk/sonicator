@@ -2182,7 +2182,8 @@ void MainComponent::filesDropped(const juce::StringArray& files, int, int)
 void MainComponent::startExtract(const std::vector<juce::File>& files,
                                  const std::vector<DiscExtractJob>& discJobs)
 {
-    if ((files.empty() && discJobs.empty()) || extractor == nullptr) return;
+    const auto routing = routeExtractSources(files, discJobs);
+    if ((routing.embedded.empty() && routing.jobs.empty()) || extractor == nullptr) return;
     if (isExtractRunning())
     {
         status.setText("Extract is already running.", juce::dontSendNotification);
@@ -2202,8 +2203,8 @@ void MainComponent::startExtract(const std::vector<juce::File>& files,
         return;
     }
     // The dialog names every image and bank in the batch; entry jobs contribute their image.
-    auto dialogSources = files;
-    for (const auto& job : discJobs)
+    auto dialogSources = routing.embedded;
+    for (const auto& job : routing.jobs)
     {
         bool known = false;
         for (const auto& existing : dialogSources)
@@ -2211,7 +2212,8 @@ void MainComponent::startExtract(const std::vector<juce::File>& files,
         if (! known) dialogSources.push_back(job.image);
     }
     auto* dialog = new ExtractDialog(dialogSources, appSettings,
-        [safe = juce::Component::SafePointer<MainComponent>(this), files, discJobs](ExtractOptions options) -> bool
+        [safe = juce::Component::SafePointer<MainComponent>(this), embedded = routing.embedded,
+         jobs = routing.jobs](ExtractOptions options) -> bool
         {
             if (safe == nullptr || safe->extractor == nullptr) return false;
             safe->appSettings.extractSameFolder = options.sameFolder;
@@ -2233,18 +2235,18 @@ void MainComponent::startExtract(const std::vector<juce::File>& files,
             catch (const std::exception&)
             {
             }
-            if (! files.empty())
+            if (! embedded.empty())
             {
-                if (! safe->extractor->start(files, options)) return false;
+                if (! safe->extractor->start(embedded, options)) return false;
                 // A mixed selection finishes the banks first; finishExtract starts the disc batch.
-                safe->pendingDiscExtract = discJobs;
+                safe->pendingDiscExtract = jobs;
                 safe->pendingDiscOptions = options;
             }
-            else if (! safe->extractor->startDisc(discJobs, options)) return false;
+            else if (! jobs.empty() && ! safe->extractor->startDisc(jobs, options)) return false;
             safe->extractStartMs = juce::Time::getMillisecondCounter();
             safe->extractWasRunning = true;
             safe->status.setText("Extracting samples from "
-                + juce::String((int) (files.size() + discJobs.size())) + " source(s)",
+                + juce::String((int) (embedded.size() + jobs.size())) + " source(s)",
                 juce::dontSendNotification);
             return true;
         });
@@ -2272,10 +2274,19 @@ void MainComponent::finishExtract()
     if (extractor == nullptr) return;
     if (! pendingDiscExtract.empty())
     {
-        auto jobs = std::move(pendingDiscExtract);
+        const auto jobs = std::move(pendingDiscExtract);
         pendingDiscExtract.clear();
-        if (extractor->startDisc(jobs, pendingDiscOptions))
+        if (extractor->progress().cancelled)
         {
+            juce::StringArray skipped;
+            for (const auto& job : jobs) skipped.add(job.image.getFileName());
+            pendingExtractProblems.add("Cancelled before the images were read: "
+                                       + skipped.joinIntoString(", "));
+        }
+        else if (extractor->startDisc(jobs, pendingDiscOptions))
+        {
+            // Keep the bank phase's report; the disc phase appends its own.
+            pendingExtractSummary = status.getText();
             extractStartMs = juce::Time::getMillisecondCounter();
             extractWasRunning = true;
             status.setText("Extracting samples from " + juce::String((int) jobs.size())
@@ -2296,12 +2307,16 @@ void MainComponent::finishExtract()
         for (const auto& problem : result.problems)
             details.add(result.source.getFileName() + ": " + problem);
     }
+    details.addArray(pendingExtractProblems);
+    pendingExtractProblems.clear();
     if (filesFailed == 0 && details.isEmpty())
         details.add("No problems.");
     juce::String summary = "Extracted " + juce::String(progress.written) + " sample(s) from "
         + juce::String(filesDone) + " of " + juce::String((int) results.size()) + " file(s).";
     summary << "\nSkipped " << juce::String(progress.skippedEmpty) << " empty and "
             << juce::String(progress.skippedSilent) << " silent.";
+    if (progress.skippedUnsupported > 0)
+        summary << "  " << juce::String(progress.skippedUnsupported) << " unsupported file(s) skipped.";
     if (progress.failed > 0)
         summary << "  " << juce::String(progress.failed) << " problem(s), see details.";
     if (progress.cancelled)
@@ -2314,6 +2329,11 @@ void MainComponent::finishExtract()
             && ! outputFolders.contains(result.folder.getFullPathName()))
             outputFolders.add(result.folder.getFullPathName());
     pendingExtractScan.addArray(outputFolders);
+    if (pendingExtractSummary.isNotEmpty())
+    {
+        summary = pendingExtractSummary + "\n" + summary;
+        pendingExtractSummary.clear();
+    }
     status.setText(summary.replace("\n", " "), juce::dontSendNotification);
     status.setTooltip(details.joinIntoString("\n"));
     if (extractContent != nullptr)
@@ -2453,6 +2473,10 @@ void MainComponent::finishSplit()
     {
         const auto queued = pendingSplitScan;
         pendingSplitScan.clear();
+    pendingExtractScan.clear();
+    pendingDiscExtract.clear();
+    pendingExtractSummary.clear();
+    pendingExtractProblems.clear();
         requestSplitScan(queued);
     }
 }
@@ -3340,31 +3364,13 @@ void MainComponent::timerCallback()
         if (rootsChanged) reloadLibrary();
         if (indexer->startFoldersNewOnly(plan.scanFolders))
         {
-            pendingExtractSmart.addArray(plan.scanFolders);
+            // The standard pass after indexing also runs smart analysis over the new files.
             status.setText("Indexing extracted samples", juce::dontSendNotification);
             wasRunning = true;
         }
         else
         {
             pendingExtractScan.addArray(folders);
-        }
-    }
-    else if (! pendingExtractSmart.isEmpty() && ! isExtractRunning() && smart != nullptr
-             && indexer != nullptr && ! indexer->progress().running
-             && ! smart->progress().running
-             && ! (tagging && tagging->progress().running)
-             && ! (autoTag && autoTag->progress().running) && ! isSplitRunning())
-    {
-        const auto folder = pendingExtractSmart[0];
-        pendingExtractSmart.remove(0);
-        if (smart->startFolder(folder))
-        {
-            status.setText("Analysing extracted samples", juce::dontSendNotification);
-            wasRunning = true;
-        }
-        else
-        {
-            pendingExtractSmart.insert(0, folder);
         }
     }
     const auto now = juce::Time::getMillisecondCounter();

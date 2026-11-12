@@ -131,7 +131,7 @@ private:
     juce::Component::SafePointer<ExtractDialog> extractContent;
     juce::StringArray pendingSplitScan;
     // Extract follow-up: folders to index once the batch ends, then folders to smart-analyse.
-    juce::StringArray pendingExtractScan, pendingExtractSmart;
+    juce::StringArray pendingExtractScan;
     SplitOptions activeSplitOptions;
     juce::uint32 splitStartMs = 0;
     bool splitWasRunning = false;
@@ -141,6 +141,8 @@ private:
     // A mixed selection runs the embedded banks first; the disc jobs start when that batch ends.
     std::vector<DiscExtractJob> pendingDiscExtract;
     ExtractOptions pendingDiscOptions;
+    juce::String pendingExtractSummary;
+    juce::StringArray pendingExtractProblems;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog, autoTagDialog;
     juce::Component::SafePointer<juce::Component> embeddedSettingsHost;

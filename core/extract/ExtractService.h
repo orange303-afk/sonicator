@@ -19,7 +19,7 @@ enum class ExtractFileState { extracted, failed, cancelled };
 struct ExtractFileResult
 {
     juce::File source, folder;
-    int written = 0, empty = 0, silent = 0, failed = 0;
+    int written = 0, empty = 0, silent = 0, failed = 0, skipped = 0;
     ExtractFileState state = ExtractFileState::failed;
     juce::String error;
     juce::StringArray problems;
@@ -29,7 +29,7 @@ struct ExtractProgress
     bool running = false, cancelled = false;
     int totalFiles = 0, processedFiles = 0;
     int totalSamples = 0, processedSamples = 0;
-    int written = 0, skippedEmpty = 0, skippedSilent = 0, failed = 0;
+    int written = 0, skippedEmpty = 0, skippedSilent = 0, failed = 0, skippedUnsupported = 0;
     double fraction = 0.0;
     juce::String current;
 };

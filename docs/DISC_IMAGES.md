@@ -145,13 +145,16 @@ sample rows, or drop the image file on the window. The existing Extract dialog w
 `<image stem> samples/001 Name.wav` next to the image or into a chosen folder:
 
 - one WAV per listed sample, stereo pairs as one stereo file, programs and other record types skipped;
-  empty and entirely silent samples are counted and left out;
+  empty and entirely silent samples are counted and left out; on a data image every non-audio file
+  is skipped as unsupported, not reported as a failure;
 - the source image is opened read-only and never changed; existing WAVs are never overwritten;
 - a private `DiscBrowserService` decodes each record (the same path the preview uses), so the written
   audio is exactly what plays;
 - after the batch, the output folder is registered as a library root when it lies outside every
-  existing root, scanned for new files (`startFoldersNewOnly`), and then smart-analysed
-  (`startFolder`). A cancelled batch still indexes what was written.
+  existing root and scanned for new files (`startFoldersNewOnly`); the standard smart-analysis pass
+  that follows indexing then analyses them. A cancelled batch still indexes what was written.
+- a mixed selection (banks and images) runs the banks first, then the images; cancelling the first
+  phase cancels the second, and both phases share one report.
 
 Opt-in check: `SONICATOR_DISC_IMAGE=<cue> SonicatorTests "[.extract-corpus]"` extracts five records of
 a real image into a temporary folder and compares every written WAV with the decoder (bit-exact).

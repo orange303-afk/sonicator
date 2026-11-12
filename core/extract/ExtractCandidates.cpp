@@ -3,6 +3,35 @@
 #include <map>
 #include <set>
 namespace sonicator {
+ExtractRouting routeExtractSources(const std::vector<juce::File>& files,
+                                   const std::vector<DiscExtractJob>& jobs)
+{
+    ExtractRouting routing;
+    std::set<juce::String> jobImages, embeddedPaths;
+    for (const auto& job : jobs)
+    {
+        if (job.image == juce::File()) continue;
+        if (! jobImages.insert(job.image.getFullPathName()).second) continue;
+        routing.jobs.push_back(job);
+    }
+    for (const auto& file : files)
+    {
+        if (! file.existsAsFile()) continue;
+        const auto path = file.getFullPathName();
+        if (isDiscExtractSource(file))
+        {
+            if (jobImages.count(path) > 0) continue; // selected records already cover it
+            if (! jobImages.insert(path).second) continue;
+            routing.jobs.push_back({ file, {} });
+        }
+        else if (isEmbeddedSampleSource(file) && embeddedPaths.insert(path).second)
+        {
+            routing.embedded.push_back(file);
+        }
+    }
+    return routing;
+}
+
 ExtractCandidates collectExtractCandidates(const std::vector<SampleRecord>& selection,
                                            const std::function<bool(const juce::String&)>& ignored)
 {

@@ -84,6 +84,28 @@ TEST_CASE("Extract candidates group image rows and selected disc samples", "[ext
     REQUIRE_FALSE(candidates.empty());
 }
 
+TEST_CASE("A batch routes images to disc jobs and banks to the embedded reader", "[extract][candidates]")
+{
+    TestDirectory t;
+    const auto cue = touch(t, "a.cue");
+    const auto bin = touch(t, "b.bin");
+    const auto bank = touch(t, "c.sf2");
+    const auto wave = touch(t, "d.wav");
+    const auto routing = routeExtractSources({ cue, bin, bank, wave }, {});
+    REQUIRE(routing.embedded.size() == 1);
+    REQUIRE(routing.embedded.front() == bank);
+    REQUIRE(routing.jobs.size() == 2);
+    REQUIRE(routing.jobs[0].image == cue);
+    REQUIRE(routing.jobs[0].entries.empty());
+
+    // An image already covered by a selected-record job is not added again.
+    DiscExtractJob job { cue, { { { 5 }, {}, "KICK" } } };
+    const auto merged = routeExtractSources({ cue }, { job });
+    REQUIRE(merged.jobs.size() == 1);
+    REQUIRE(merged.jobs.front().entries.size() == 1);
+    REQUIRE(merged.embedded.empty());
+}
+
 TEST_CASE("A selection without extractable rows yields no candidates", "[extract][candidates]")
 {
     TestDirectory t;

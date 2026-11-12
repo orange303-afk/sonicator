@@ -224,6 +224,7 @@ TEST_CASE("Cancelling image extraction keeps finished files", "[extract][disc]")
     const auto progress = service.progress();
     REQUIRE(progress.cancelled);
     REQUIRE(progress.written >= 1);
+    REQUIRE(progress.written < 20); // cancel stops the batch before every sample is written
     const auto folder = t.dir.getChildFile("many samples");
     if (folder.isDirectory())
     {

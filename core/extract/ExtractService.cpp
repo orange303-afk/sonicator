@@ -399,6 +399,21 @@ void ExtractService::runDisc()
             p.fraction = juce::jlimit(0.0, 1.0, ((double) completedJobs + within) / total);
         });
     };
+    const auto cancelJob = [this, &results, jobCount](ExtractFileResult& result, int index)
+    {
+        result.state = ExtractFileState::cancelled;
+        result.error = "Cancelled";
+        updateProgress([](ExtractProgress& p) { p.cancelled = true; });
+        results.push_back(result);
+        for (int rest = index + 1; rest < jobCount; ++rest)
+        {
+            ExtractFileResult skipped;
+            skipped.source = discJobs[(size_t) rest].image;
+            skipped.state = ExtractFileState::cancelled;
+            skipped.error = "Cancelled";
+            results.push_back(std::move(skipped));
+        }
+    };
     const auto failJob = [this, &results, publishFraction](ExtractFileResult& result, int index,
                                                            const juce::String& error)
     {
@@ -442,6 +457,7 @@ void ExtractService::runDisc()
         juce::String error;
         service.requestOpen(job.image);
         const auto opened = waitForDisc(service, DiscBrowserService::Kind::open, cancelled, error);
+        if (cancelled.load()) { cancelJob(result, index); break; }
         if (opened.status != DiscStatus::ready)
         {
             failJob(result, index, opened.error.isNotEmpty() ? opened.error : error);
@@ -451,6 +467,7 @@ void ExtractService::runDisc()
         // only after the same recursive listing the browser performs.
         service.requestList(opened.root, true);
         const auto listed = waitForDisc(service, DiscBrowserService::Kind::list, cancelled, error);
+        if (cancelled.load()) { cancelJob(result, index); break; }
         if (listed.status != DiscStatus::ready)
         {
             failJob(result, index, listed.error.isNotEmpty() ? listed.error : error);
@@ -484,6 +501,25 @@ void ExtractService::runDisc()
             }
             service.requestDecode(entry.id, entry.name, entry.partner);
             const auto decoded = waitForDisc(service, DiscBrowserService::Kind::decode, cancelled, error);
+            if (cancelled.load())
+            {
+                result.state = ExtractFileState::cancelled;
+                result.error = "Cancelled";
+                updateProgress([](ExtractProgress& p) { p.cancelled = true; });
+                break;
+            }
+            if (decoded.status == DiscStatus::unsupported)
+            {
+                // A data image holds files that are not audio; skipping them is not a failure.
+                ++result.skipped;
+                updateProgress([](ExtractProgress& p)
+                {
+                    ++p.processedSamples;
+                    ++p.skippedUnsupported;
+                });
+                publishFraction(index, ordinal, entryCount);
+                continue;
+            }
             if (decoded.status != DiscStatus::ready || decoded.audio == nullptr)
             {
                 ++result.failed;
