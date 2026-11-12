@@ -145,3 +145,21 @@ The clap gain is the only visible one; everything else moved within 0.4 pp and t
 change. SONYC-UST (14 GB) and Slakh2100-redux (104 GB) were not fetched: their labels (engine, siren,
 bass, keys, guitar) do not cover the gold types that fail (`fx`, `impact`, `riser`, `synth`), so the
 download would cost hours for the same tenths of a point.
+
+### Rejected: FSD50K sound-effect classes as `fx`/`impact`
+
+FSD50K already on disk has classes that look like sound design: `Slam`, `Thump_and_thud`, `Boom`,
+`Shatter`, `Whoosh_and_swoosh_and_swish`, `Crackle`, `Crushing`, `Hiss`, `Crack`, `Buzz`, `Screech`,
+`Scratching`. Mapping them to `impact` (~1000 clips) and `fx` (~2150) was tried and reverted:
+
+| metric | before | with the mapping |
+|---|---|---|
+| cold start top-1 | 72.7% | 64.4% |
+| mode (3) `fx` top-1 | — | 9.3% |
+| mode (4) top-1 | 78.1% | 76.1% |
+| percussion top-1 (4) | 82.5% | 79.8% |
+
+The public `fx` cluster is a different family of sounds from the owner's `fx` one-shots, and the new
+labels pulled multi-label clips out of `kick`/`snare`. The mapping stays out; the experiment is kept
+here so it is not repeated. This also means the wave-2 datasets have no source for `riser`,
+`downfilter` or `synth` — those need a labelled source the public datasets do not provide.
