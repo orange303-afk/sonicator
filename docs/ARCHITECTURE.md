@@ -226,3 +226,22 @@ the cue once. `disc_index` stores each image's identity so an unchanged image is
 - Standalone GUI target first; the VST3/AU plugin hosts the same `MainComponent` behind an off-by-default CMake option, with no APVTS or plugin parameters.
 
 See `phase1-progress.md` for execution evidence and decisions.
+
+## Feature schema 2 and the global model
+
+Schema 16 adds `ml_feedback_samples.feature_schema` (1 or 2) and `features_v2` (a BLOB of 84
+floats). Existing rows keep schema 1 and an empty v2 blob, so the app starts without recomputing
+anything. `core/ml/FeatureV2Backfill` walks the confirmed rows in a background thread at startup,
+decodes each file once (the same 10-second prefix the training CLI uses), writes the v2 vector and
+leaves a missing or unreadable file on schema 1. A new confirmation computes both vectors from the
+same decode and stores them together; `AdaptiveClassifier` keeps both, compares only vectors of the
+same schema, and a schema-2 query can use the model without disturbing the schema-1 prototypes.
+
+`resources/ml/global_model.json` is the schema-2 softmax layer (`model.v1`, kind `M2`): feature
+selection, `mu`/`sd`, the label matrix, the temperature and the similarity table that turns a
+probability into the same "precision at this score" scale as a local cosine. It is loaded next to
+`global_prototypes.json`; its type candidates carry the `global_model` source, which sits at the
+same resolver rank as `global_adaptive` and is still only a fallback when no other type candidate
+exists. The About panel shows the model date, label count and the dataset attribution line.
+Contribution payloads now carry `featureSchema` per record and the intake, export and schema-1
+training reader accept both lengths; the shipped prototype file stays schema 1.
