@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/audio/SonicatorFormats.h"
 #include "core/dsp/AnalysisAudio.h"
+#include "core/database/Database.h"
+#include "core/indexing/IndexingService.h"
 #include "core/scanner/FileScanner.h"
 #include "EblTestFile.h"
 #include "TestHelpers.h"
@@ -76,4 +78,46 @@ TEST_CASE("EBL garbage is refused by the shared manager", "[ebl][format]")
     sonicator::registerSonicatorFormats(formats);
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
     CHECK(reader == nullptr);
+}
+
+TEST_CASE("EBL catalog rows are named from the header", "[ebl][catalog]")
+{
+    TestDirectory t;
+    auto folder = t.dir.getChildFile("library");
+    folder.createDirectory();
+    auto named = ebltest::monoOptions();
+    named.name = "org nod C +36";
+    named.loop = std::pair<uint32_t, uint32_t> { 2, 6 };
+    writeEbl(t, "library/named.ebl", named);
+    auto blank = ebltest::monoOptions();
+    blank.name = "     ";
+    writeEbl(t, "library/blank.ebl", blank);
+
+    sonicator::Database db(t.dir.getChildFile("catalog.sqlite"));
+    sonicator::SampleRepository repo(db);
+    repo.createTables();
+    sonicator::IndexingService index(repo);
+    REQUIRE(index.start(juce::StringArray { folder.getFullPathName() }));
+    REQUIRE(index.waitUntilFinished(10000));
+    REQUIRE(index.progress().failed == 0);
+
+    const auto namedRow = repo.findByPath(folder.getChildFile("named.ebl").getFullPathName());
+    REQUIRE(namedRow.has_value());
+    CHECK(namedRow->fileName == "org nod C +36");
+    CHECK(namedRow->duration > 0.0);
+    CHECK(namedRow->sampleRate == 47360);
+    CHECK(namedRow->numChannels == 1);
+    CHECK(namedRow->error.isEmpty());
+
+    const auto blankRow = repo.findByPath(folder.getChildFile("blank.ebl").getFullPathName());
+    REQUIRE(blankRow.has_value());
+    CHECK(blankRow->fileName == "blank.ebl");
+    CHECK(blankRow->error.isEmpty());
+
+    sonicator::LibraryFilter filter;
+    filter.text = "org nod";
+    const auto page = repo.query(filter);
+    CHECK(page.total == 1);
+    REQUIRE(page.samples.size() == 1);
+    CHECK(page.samples.front().fileName == "org nod C +36");
 }

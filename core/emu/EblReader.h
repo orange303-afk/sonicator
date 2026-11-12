@@ -31,5 +31,8 @@ struct EblResult
 EblResult parseEbl(std::span<const std::byte> bytes, uint64_t maxDecodedBytes = 128ull << 20);
 // Reads the whole file, refusing anything larger than the decoded cap plus a 64 KiB header.
 EblResult readEblFile(const juce::File&, uint64_t maxDecodedBytes = 128ull << 20);
+// The sample name from the header, for catalog rows. Empty when the header cannot be read;
+// reads at most the first 4 KiB, so it is cheap enough for discovery.
+juce::String readEblName(const juce::File&);
 bool isEblFile(const juce::File&);
 } // namespace sonicator

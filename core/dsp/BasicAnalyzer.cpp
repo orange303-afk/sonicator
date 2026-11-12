@@ -1,4 +1,5 @@
 #include "BasicAnalyzer.h"
+#include "core/emu/EblReader.h"
 #include "core/audio/SonicatorFormats.h"
 #include "core/audio/ContainerValidation.h"
 #include <array>
@@ -8,6 +9,13 @@ SampleRecord BasicAnalyzer::analyze(const juce::File& file, CancelCheck cancel) 
 {
     SampleRecord r;
     r.filePath = file.getFullPathName(); r.fileName = file.getFileName();
+    // A bank file name is a bare sequence ("Orbit 8080SL289.ebl"); the sample's own name is in
+    // the header, and that is what a user searches for. An empty header keeps the file name.
+    if (isEblFile(file))
+    {
+        const auto headerName = readEblName(file);
+        if (headerName.isNotEmpty()) r.fileName = headerName;
+    }
     r.format = file.getFileExtension().trimCharactersAtStart(".").toUpperCase();
     r.fileSize = file.getSize(); r.dateModified = file.getLastModificationTime().toMilliseconds();
     r.error = validateContainer(file, &r.compatibility);

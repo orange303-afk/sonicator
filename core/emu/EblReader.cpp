@@ -83,6 +83,30 @@ bool isEblFile(const juce::File& file)
     return file.hasFileExtension("ebl");
 }
 
+juce::String readEblName(const juce::File& file)
+{
+    auto input = file.createInputStream();
+    if (! input) return {};
+    const auto total = input->getTotalLength();
+    if (total <= 0) return {};
+    std::vector<std::byte> bytes((size_t) juce::jmin<juce::int64>(total, 4096));
+    size_t done = 0;
+    while (done < bytes.size())
+    {
+        const int n = input->read(bytes.data() + done, (int) (bytes.size() - done));
+        if (n <= 0) break;
+        done += (size_t) n;
+    }
+    const std::span<const std::byte> header(bytes.data(), done);
+    if (header.size() < firstSection + 12 || ! hasMagic(header, 0, "FORM")) return {};
+    if (header.size() < 16 || std::memcmp(header.data() + 8, "E5B0TOC2", 8) != 0) return {};
+    if (! hasMagic(header, firstSection, "E5S1")) return {};
+    const auto second = (size_t) be32(header.data() + secondSectionOffsetField);
+    const size_t block = second + secondSectionLen;
+    if (block + nameLen > header.size()) return {};
+    return decodeName(header.data() + block);
+}
+
 EblResult parseEbl(std::span<const std::byte> bytes, uint64_t maxDecodedBytes)
 {
     if (bytes.size() < firstSection + 12 || ! hasMagic(bytes, 0, "FORM"))
