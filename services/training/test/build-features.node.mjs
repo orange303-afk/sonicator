@@ -3,7 +3,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { checkShardCount, datasetDirectory, isShardDone, joinRows, parseArgs, planShards, validateFeatureLine } from "../build-features.mjs";
+import { fileURLToPath } from "node:url";
+import { assertOutAllowed, checkShardCount, datasetDirectory, isShardDone, joinRows, parseArgs, planShards, validateFeatureLine } from "../build-features.mjs";
 
 const feature = (overrides = {}) => ({ featureSchema: 2, dimensions: 84, features: Array(84).fill(0.5), ...overrides });
 
@@ -53,6 +54,20 @@ test("dataset directories follow the names on disk, not the canonical splits", (
 test("a non-numeric --jobs is refused instead of running nothing", () => {
   assert.throws(() => parseArgs(["--out", "/tmp/x", "--jobs", "abc"]), /--jobs must be a positive integer/);
   assert.throws(() => parseArgs(["--out", "/tmp/x", "--jobs", "0"]), /--jobs must be a positive integer/);
+});
+
+test("--out inside the repository must stay under services/training/out", () => {
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  assert.throws(() => assertOutAllowed(join(repoRoot, "services/training/wave1"), repoRoot), /services\/training\/out/);
+  assert.throws(() => assertOutAllowed(repoRoot, repoRoot), /services\/training\/out/);
+  assert.doesNotThrow(() => assertOutAllowed(join(repoRoot, "services/training/out/x"), repoRoot));
+  assert.doesNotThrow(() => assertOutAllowed("/Volumes/1TBSSD/out/x", repoRoot));
+  assert.doesNotThrow(() => assertOutAllowed(join(tmpdir(), "gold-v2.jsonl"), repoRoot));
+});
+
+test("parseArgs refuses a repository path outside services/training/out", () => {
+  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  assert.throws(() => parseArgs(["--out", join(repoRoot, "services/training/wave1")]), /services\/training\/out/);
 });
 
 test("a short shard stops the run instead of being marked done", () => {

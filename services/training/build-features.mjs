@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { cpus } from "node:os";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { basename, join, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { ingest as ingestOneShot } from "./datasets/freesound-one-shot-percussive/ingest.mjs";
 import { ingest as ingestFsd50k } from "./datasets/fsd50k/ingest.mjs";
 import { ingest as ingestNsynth } from "./datasets/nsynth/ingest.mjs";
@@ -81,6 +81,22 @@ export function checkShardCount({ shard, lines, expected }) {
     throw new Error(`shard ${shard}: the CLI wrote ${lines} of ${expected} lines`);
 }
 
+export function repositoryRoot() {
+  return fileURLToPath(new URL("../..", import.meta.url));
+}
+
+// Feature files are large and the repository must stay clean: a path inside the checkout is only
+// allowed under services/training/out, which is git-ignored. Anywhere outside the checkout is fine.
+export function assertOutAllowed(out, repoRoot = repositoryRoot()) {
+  const target = resolve(out);
+  const root = resolve(repoRoot);
+  const allowed = join(root, "services", "training", "out");
+  const insideRepository = target === root || target.startsWith(root + sep);
+  if (!insideRepository) return;
+  if (target === allowed || target.startsWith(allowed + sep)) return;
+  throw new Error(`--out inside the repository must be under services/training/out: ${target}`);
+}
+
 export function parseArgs(argv) {
   const options = { root: process.env.SONICATOR_DATASETS_ROOT ?? DEFAULT_ROOT, out: null, jobs: Math.min(4, cpus().length),
     source: "all", cli: process.env.SONICATOR_FEATURES_CLI ?? DEFAULT_CLI, full: false };
@@ -99,6 +115,7 @@ export function parseArgs(argv) {
     else throw new Error(`unknown argument: ${argument}`);
   }
   if (options.out === null) throw new Error("--out is required");
+  assertOutAllowed(options.out);
   if (!Number.isInteger(options.jobs) || options.jobs < 1) throw new Error("--jobs must be a positive integer");
   return options;
 }

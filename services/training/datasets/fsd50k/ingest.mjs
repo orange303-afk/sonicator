@@ -5,6 +5,10 @@ import { capClips, isShareableLicense, licenseName, makeClip } from "../clip.mjs
 const MAP = JSON.parse(readFileSync(new URL("./labels.map.json", import.meta.url), "utf8"));
 const GROUP_RULES = MAP.groupRules.map((rule) => ({ ...rule, regex: new RegExp(rule.pattern, "i") }));
 
+// The taxonomy groups the report and the ablation use. Every vocabulary class must land in one of
+// them; a new group in labels.map.json has to be added here as well.
+export const GROUPS = ["percussion", "tonal", "vocal", "fx", "foley", "ambience", "loop"];
+
 function normalize(text) {
   return String(text).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
