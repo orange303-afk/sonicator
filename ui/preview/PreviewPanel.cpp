@@ -110,14 +110,17 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     rexInfo.setFont(juce::FontOptions(12));
     rexInfo.setColour(juce::Label::textColourId,theme::muted);
     rexInfo.setJustificationType(juce::Justification::centredLeft);
-    presetBox.setTooltip("SoundFont preset (bank:program name); selecting one keeps MIDI Preview active");
+    presetBox.setTooltip("Program of the loaded bank (SoundFont preset, or a K2000 program); "
+                         "selecting one keeps MIDI Preview active");
     presetBox.onChange = [this]
     {
         const int index = presetBox.getSelectedId() - 1;
         if (index < 0) return;
-        if (engine.selectSoundFontPreset(index))
+        const bool switched = engine.isSoundFontMode() ? engine.selectSoundFontPreset(index)
+                                                       : engine.selectInstrumentProgram(index);
+        if (switched)
         {
-            filename.setText(loadedFile.getFileName() + "  —  " + engine.soundFontPresetName(),juce::dontSendNotification);
+            filename.setText(loadedFile.getFileName() + "  —  " + engine.instrumentName(),juce::dontSendNotification);
             refreshInstrumentSamples();
         }
         else
@@ -301,13 +304,21 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
         sampleDragButton.setVisible(false);
         songProgress.setVisible(false);
         waveform.setVisible(true);
+        // A bank with more than one program (Kurzweil) gets the same switcher as a SoundFont.
+        const bool programs = ! soundFont && engine.instrumentProgramCount() > 1;
         presetBox.clear(juce::dontSendNotification);
-        presetBox.setVisible(soundFont);
+        presetBox.setVisible(soundFont || programs);
         if (soundFont)
         {
             for (int i = 0; i < engine.soundFontPresetCount(); ++i)
                 presetBox.addItem(engine.soundFontPresetLabel(i), i + 1);
             presetBox.setSelectedId(engine.soundFontPresetIndex() + 1,juce::dontSendNotification);
+        }
+        else if (programs)
+        {
+            for (int i = 0; i < engine.instrumentProgramCount(); ++i)
+                presetBox.addItem(engine.instrumentProgramLabel(i), i + 1);
+            presetBox.setSelectedId(engine.instrumentProgramIndex() + 1,juce::dontSendNotification);
         }
         rexGate.setVisible(false);
         rexInfo.setVisible(false);

@@ -79,7 +79,18 @@ public:
     int lastInstrumentMidiLayers() const
     { return sf2Mode ? sf2Sampler.midiMonitorLayers() : externalSampler.midiMonitorLayers(); }
     juce::String instrumentName() const
-    { return sf2Mode ? sf2Sampler.presetName() : externalInstrument.name; }
+    {
+        if (sf2Mode) return sf2Sampler.presetName();
+        if (externalInstrument.currentProgram >= 0
+            && externalInstrument.currentProgram < (int) externalInstrument.programs.size())
+            return externalInstrument.programs[(size_t) externalInstrument.currentProgram].name;
+        return externalInstrument.name;
+    }
+    // Programs of a multi-program external bank (Kurzweil); empty for EXS24 and NKI.
+    int instrumentProgramCount() const { return (int) externalInstrument.programs.size(); }
+    juce::String instrumentProgramLabel(int index) const;
+    int instrumentProgramIndex() const { return externalInstrument.currentProgram; }
+    bool selectInstrumentProgram(int index);
     juce::StringArray instrumentWarnings() const { return externalInstrument.warnings; }
     // REX2 slices are a MIDI drum map starting at startNote (default 36). Gate stops a slice on
     // NoteOff; one-shot lets it ring out.

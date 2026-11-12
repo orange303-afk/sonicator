@@ -159,7 +159,8 @@ bool AudioEngine::loadFile(const juce::File& file)
         attachRender();
         return previewRex2(file);
     }
-    if (extension == ".exs" || extension == ".nki")
+    if (extension == ".exs" || extension == ".nki" || extension == ".krz"
+        || extension == ".k25" || extension == ".k26")
     {
         attachRender();
         return previewFileInstrument(file);
@@ -282,6 +283,37 @@ double AudioEngine::deviceSampleRate() const
             return device->getCurrentSampleRate();
     return 44100.0;
 }
+juce::String AudioEngine::instrumentProgramLabel(int index) const
+{
+    if (index < 0 || index >= (int) externalInstrument.programs.size()) return {};
+    const auto& program = externalInstrument.programs[(size_t) index];
+    return juce::String(program.number) + "  " + program.name;
+}
+bool AudioEngine::selectInstrumentProgram(int index)
+{
+    if (! externalMode) { lastError = "Instrument is not loaded"; return false; }
+    detachRender();
+    juce::String error;
+    if (! sonicator::selectInstrumentProgram(externalInstrument, index, error))
+    {
+        lastError = error;
+        attachRender();
+        return false;
+    }
+    lastError.clear();
+    if (! externalSampler.load(externalInstrument, error))
+    {
+        lastError = error;
+        attachRender();
+        return false;
+    }
+    externalSampler.prepare(deviceSampleRate());
+    ++externalGeneration;
+    externalSampler.setGeneration(externalGeneration);
+    refreshExternalSamples(true);
+    attachRender();
+    return true;
+}
 juce::String AudioEngine::soundFontPresetLabel(int index) const
 {
     if (index < 0 || index >= (int) sf2Bank.presets().size()) return {};
@@ -357,7 +389,9 @@ bool AudioEngine::previewFileInstrument(const juce::File& file)
     detachRender();
     clearContainers();
     const auto extension = file.getFileExtension().toLowerCase();
-    const auto format = extension == ".exs" ? FileInstrumentFormat::exs24 : FileInstrumentFormat::nki;
+    const auto format = extension == ".exs" ? FileInstrumentFormat::exs24
+        : (extension == ".krz" || extension == ".k25" || extension == ".k26" ? FileInstrumentFormat::krz
+                                                                           : FileInstrumentFormat::nki);
     juce::String error;
     if (! loadFileInstrument(file, format, externalInstrument, error))
     {

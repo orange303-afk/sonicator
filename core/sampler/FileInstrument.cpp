@@ -1,5 +1,6 @@
 #include "FileInstrument.h"
 #include "core/audio/SonicatorFormats.h"
+#include "core/kurzweil/KrzInstrument.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <cmath>
@@ -407,6 +408,7 @@ bool isNkiFile(const juce::File& file, juce::String& detail)
 bool loadFileInstrument(const juce::File& file, FileInstrumentFormat format,
                         FileInstrument& instrument, juce::String& error)
 {
+    if (format == FileInstrumentFormat::krz) return loadKrzInstrument(file, instrument, error);
     error.clear();
     instrument = {};
     instrument.file = file;
