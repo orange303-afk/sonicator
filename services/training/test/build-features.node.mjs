@@ -57,7 +57,7 @@ test("a non-numeric --jobs is refused instead of running nothing", () => {
 });
 
 test("--out inside the repository must stay under services/training/out", () => {
-  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   assert.throws(() => assertOutAllowed(join(repoRoot, "services/training/wave1"), repoRoot), /services\/training\/out/);
   assert.throws(() => assertOutAllowed(repoRoot, repoRoot), /services\/training\/out/);
   assert.doesNotThrow(() => assertOutAllowed(join(repoRoot, "services/training/out/x"), repoRoot));
@@ -66,7 +66,7 @@ test("--out inside the repository must stay under services/training/out", () => 
 });
 
 test("parseArgs refuses a repository path outside services/training/out", () => {
-  const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   assert.throws(() => parseArgs(["--out", join(repoRoot, "services/training/wave1")]), /services\/training\/out/);
 });
 

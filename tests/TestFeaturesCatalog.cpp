@@ -133,3 +133,91 @@ TEST_CASE("catalog gold keeps confirmed rows only and never writes a path", "[fe
     REQUIRE(pathLines.size() == 2);
     REQUIRE(paths.loadFileAsString().contains(first.getFullPathName()));
 }
+
+namespace {
+
+int64_t addSample(SampleRepository& repository, const juce::File& file, const juce::String& hash)
+{
+    SampleRecord record;
+    record.filePath = file.getFullPathName();
+    record.fileName = file.getFileName();
+    record.fileHash = hash;
+    return repository.upsert(record);
+}
+
+} // namespace
+
+TEST_CASE("a corrupt audio file is counted as unreadable, not as missing", "[features][catalog]")
+{
+    TestDirectory directory;
+    const auto good = directory.wave("good.wav", 330.0);
+    const auto broken = directory.dir.getChildFile("broken.wav");
+    broken.replaceWithText("this is not audio");
+    const auto databaseFile = directory.dir.getChildFile("catalog.sqlite");
+    {
+        Database db(databaseFile);
+        SampleRepository repository(db);
+        repository.createTables();
+        const auto goodId = addSample(repository, good, "hash-good");
+        const auto brokenId = addSample(repository, broken, "hash-broken");
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(databaseFile.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        addFeedback(raw, goodId, "hash-good", "Snare", "", "user");
+        addFeedback(raw, brokenId, "hash-broken", "Kick", "", "user");
+        sqlite3_close(raw);
+    }
+    const auto result = writeCatalogGold(databaseFile, directory.dir.getChildFile("gold.jsonl"), {});
+    REQUIRE(result.error.isEmpty());
+    REQUIRE(result.written == 1);
+    REQUIRE(result.unreadable == 1);
+    REQUIRE(result.missingFile == 0);
+}
+
+TEST_CASE("an empty catalog read keeps the previous gold file", "[features][catalog]")
+{
+    TestDirectory directory;
+    const auto gone = directory.dir.getChildFile("gone.wav");
+    const auto databaseFile = directory.dir.getChildFile("catalog.sqlite");
+    {
+        Database db(databaseFile);
+        SampleRepository repository(db);
+        repository.createTables();
+        const auto id = addSample(repository, gone, "hash-gone");
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(databaseFile.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        addFeedback(raw, id, "hash-gone", "Kick", "", "user");
+        sqlite3_close(raw);
+    }
+    const auto out = directory.dir.getChildFile("gold.jsonl");
+    const char previous[] = "previous good sample\n";
+    out.replaceWithData(previous, static_cast<size_t>(juce::String(previous).length()));
+    const auto result = writeCatalogGold(databaseFile, out, {});
+    REQUIRE(result.error.isNotEmpty());
+    REQUIRE(out.loadFileAsString().trim() == "previous good sample");
+}
+
+TEST_CASE("the catalog itself cannot be the output", "[features][catalog]")
+{
+    TestDirectory directory;
+    const auto databaseFile = directory.dir.getChildFile("catalog.sqlite");
+    {
+        Database db(databaseFile);
+        SampleRepository repository(db);
+        repository.createTables();
+    }
+    const auto sizeBefore = databaseFile.getSize();
+    const auto result = writeCatalogGold(databaseFile, databaseFile, {});
+    REQUIRE(result.error.isNotEmpty());
+    REQUIRE(databaseFile.getSize() == sizeBefore);
+}
+
+TEST_CASE("a file that is not a catalog is reported, not read as empty", "[features][catalog]")
+{
+    TestDirectory directory;
+    const auto file = directory.dir.getChildFile("notes.sqlite");
+    file.replaceWithText("hello, this is not a database");
+    juce::String error;
+    const auto rows = readGoldRows(file, error);
+    REQUIRE(rows.empty());
+    REQUIRE(error.isNotEmpty());
+}

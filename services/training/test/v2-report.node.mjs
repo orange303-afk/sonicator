@@ -101,8 +101,10 @@ test("the report carries no path and no file name", () => {
     generatedAt: "2026-11-12T00:00:00.000Z",
     rows: { public: 120, gold: 24 },
     comparisons: [
-      { mode: 1, name: "v1, local", top1: 0.8, top3: 0.9, coverage: 0.8, precision: 0.9, records: 24 },
-      { mode: 4, name: "v2, local + public", top1: 0.9, top3: 0.95, coverage: 0.8, precision: 0.92, records: 24 },
+      { mode: 1, name: "v1, local", top1: 0.8, top3: 0.9, coverage: 0.8, precision: 0.9, records: 24,
+        perGroup: [{ group: "percussion", top1: 0.8 }, { group: "tonal", top1: 0.75 }] },
+      { mode: 4, name: "v2, local + public", top1: 0.9, top3: 0.95, coverage: 0.8, precision: 0.92, records: 24,
+        globalWins: 3, perGroup: [{ group: "percussion", top1: 0.9 }, { group: "tonal", top1: 0.85 }] },
     ],
     criteria: [{ name: "cold_start", value: "0.75", threshold: "0.70", pass: true }],
     ablation: [{ group: "G2", valDelta: "0.6", goldDelta: "0.1", kept: true }],
@@ -115,6 +117,9 @@ test("the report carries no path and no file name", () => {
   assert.equal(text.includes("/Users/"), false);
   assert.equal(text.includes(".wav"), false);
   assert.match(text, /Verification|Проверка|Критерии/i);
+  assert.match(text, /По группам/);
+  assert.match(text, /решила \*\*3\*\* из \*\*24\*\*/);
+  assert.match(text, /выбирались по этой же золотой выборке/);
 });
 
 test("two train.mjs runs write byte-identical files", () => {

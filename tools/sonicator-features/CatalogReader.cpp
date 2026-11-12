@@ -36,16 +36,34 @@ bool openReadOnly(const juce::File& file, DatabaseHandle& holder, juce::String& 
     return true;
 }
 
-juce::StringArray readCustomTypes(sqlite3* db)
+// A failure here would silently mark every custom type as standard, so it is reported like any other
+// read error instead of returning an empty list.
+bool readCustomTypes(sqlite3* db, juce::StringArray& names, juce::String& error)
 {
-    juce::StringArray names;
     sqlite3_stmt* statement = nullptr;
     if (sqlite3_prepare_v2(db, "SELECT name FROM custom_types", -1, &statement, nullptr) != SQLITE_OK)
-        return names;
-    while (sqlite3_step(statement) == SQLITE_ROW)
-        names.addIfNotAlreadyThere(juce::String::fromUTF8(reinterpret_cast<const char*>(sqlite3_column_text(statement, 0))).trim().toLowerCase());
+    {
+        error = "cannot read custom types: " + lastError(db);
+        return false;
+    }
+    while (true)
+    {
+        const auto step = sqlite3_step(statement);
+        if (step == SQLITE_ROW)
+        {
+            names.addIfNotAlreadyThere(juce::String::fromUTF8(
+                reinterpret_cast<const char*>(sqlite3_column_text(statement, 0))).trim().toLowerCase());
+        }
+        else if (step == SQLITE_DONE) break;
+        else
+        {
+            error = "cannot read custom types: " + lastError(db);
+            sqlite3_finalize(statement);
+            return false;
+        }
+    }
     sqlite3_finalize(statement);
-    return names;
+    return true;
 }
 
 juce::StringArray tagList(const juce::String& text)
@@ -69,12 +87,13 @@ std::vector<GoldRow> readGoldRows(const juce::File& database, juce::String& erro
     DatabaseHandle holder;
     if (! openReadOnly(database, holder, error)) return rows;
 
-    const auto customTypes = readCustomTypes(holder.handle);
+    juce::StringArray customTypes;
+    if (! readCustomTypes(holder.handle, customTypes, error)) return rows;
     constexpr auto query =
         "SELECT f.file_hash, f.target_type, f.tags, f.origin, s.path"
         " FROM ml_feedback_samples f JOIN samples s ON s.id = f.sample_id"
         " WHERE f.origin IN ('user','approved')"
-        " ORDER BY f.file_hash";
+        " ORDER BY f.file_hash, f.sample_id";
     sqlite3_stmt* statement = nullptr;
     if (sqlite3_prepare_v2(holder.handle, query, -1, &statement, nullptr) != SQLITE_OK)
     {
@@ -82,8 +101,17 @@ std::vector<GoldRow> readGoldRows(const juce::File& database, juce::String& erro
         return rows;
     }
 
-    while (sqlite3_step(statement) == SQLITE_ROW)
+    while (true)
     {
+        const auto step = sqlite3_step(statement);
+        if (step == SQLITE_DONE) break;
+        if (step != SQLITE_ROW)
+        {
+            // A busy or malformed catalog must not turn into a short gold file that looks complete.
+            error = "cannot read feedback rows: " + lastError(holder.handle);
+            sqlite3_finalize(statement);
+            return {};
+        }
         const auto text = [&](int column)
         {
             const auto* value = sqlite3_column_text(statement, column);
@@ -136,6 +164,15 @@ juce::String goldJsonLine(const GoldRow& row, const FeatureVectorV2& vector)
 CatalogResult writeCatalogGold(const juce::File& database, const juce::File& out, const juce::File& paths)
 {
     CatalogResult result;
+    const auto databasePath = database.getFullPathName();
+    const auto outPath = out.getFullPathName();
+    const auto pathsPath = paths == juce::File() ? juce::String() : paths.getFullPathName();
+    if (outPath == databasePath || pathsPath == databasePath || (pathsPath.isNotEmpty() && pathsPath == outPath))
+    {
+        result.error = "the output must not be the catalog or the paths file";
+        return result;
+    }
+
     juce::String error;
     const auto rows = readGoldRows(database, error);
     if (error.isNotEmpty())
@@ -143,61 +180,111 @@ CatalogResult writeCatalogGold(const juce::File& database, const juce::File& out
         result.error = error;
         return result;
     }
-
-    out.getParentDirectory().createDirectory();
-    out.deleteFile();
-    juce::FileOutputStream stream(out);
-    if (! stream.openedOk())
+    if (rows.empty())
     {
-        result.error = "cannot write " + out.getFullPathName();
+        result.error = "the catalog has no confirmed rows";
         return result;
     }
-    std::unique_ptr<juce::FileOutputStream> pathStream;
-    if (paths != juce::File())
+
+    // Write a sibling temporary file and replace the old gold only on success: a disconnected drive or
+    // a full disk must never destroy the previous good sample.
+    out.getParentDirectory().createDirectory();
+    const auto temporary = out.getSiblingFile("." + out.getFileName() + ".tmp");
+    temporary.deleteFile();
+    juce::File pathsTemporary;
+    if (pathsPath.isNotEmpty())
     {
-        paths.deleteFile();
         paths.getParentDirectory().createDirectory();
-        pathStream = std::make_unique<juce::FileOutputStream>(paths);
-        if (! pathStream->openedOk())
-        {
-            result.error = "cannot write " + paths.getFullPathName();
-            return result;
-        }
+        pathsTemporary = paths.getSiblingFile("." + paths.getFileName() + ".tmp");
+        pathsTemporary.deleteFile();
     }
 
-    for (const auto& row : rows)
     {
-        if (! row.file.existsAsFile())
+        juce::FileOutputStream stream(temporary);
+        if (! stream.openedOk())
         {
-            ++result.missingFile;
-            continue;
+            result.error = "cannot write " + temporary.getFullPathName();
+            return result;
         }
-        AnalysisAudioOptions options;
-        options.maxSeconds = 10.0;
-        const auto audio = readAnalysisAudio(row.file, options, {});
-        if (! audio.ok())
+        std::unique_ptr<juce::FileOutputStream> pathStream;
+        if (pathsPath.isNotEmpty())
         {
-            ++result.unreadable;
-            continue;
+            pathStream = std::make_unique<juce::FileOutputStream>(pathsTemporary);
+            if (! pathStream->openedOk())
+            {
+                result.error = "cannot write " + pathsTemporary.getFullPathName();
+                temporary.deleteFile();
+                return result;
+            }
         }
-        const auto vector = FeatureExtractorV2::extract(audio.buffer, audio.sampleRate);
-        if (! vector.ok())
+
+        for (const auto& row : rows)
         {
-            ++result.unreadable;
-            continue;
+            if (! row.file.existsAsFile())
+            {
+                ++result.missingFile;
+                continue;
+            }
+            AnalysisAudioOptions options;
+            options.maxSeconds = 10.0;
+            const auto audio = readAnalysisAudio(row.file, options, {});
+            if (! audio.ok())
+            {
+                ++result.unreadable;
+                continue;
+            }
+            const auto vector = FeatureExtractorV2::extract(audio.buffer, audio.sampleRate);
+            if (! vector.ok())
+            {
+                ++result.unreadable;
+                continue;
+            }
+            if (! stream.writeText(goldJsonLine(row, vector) + "\n", false, false, "\n"))
+            {
+                result.error = "cannot write " + temporary.getFullPathName();
+                break;
+            }
+            ++result.written;
+            if (pathStream != nullptr)
+            {
+                juce::String line;
+                line << "{\"recordId\":" << jsonString(row.recordId)
+                     << ",\"path\":" << jsonString(row.file.getFullPathName()) << "}";
+                if (! pathStream->writeText(line + "\n", false, false, "\n"))
+                {
+                    result.error = "cannot write " + pathsTemporary.getFullPathName();
+                    break;
+                }
+            }
         }
-        stream.writeText(goldJsonLine(row, vector) + "\n", false, false, "\n");
-        ++result.written;
-        if (pathStream != nullptr)
-        {
-            juce::String line;
-            line << "{\"recordId\":" << jsonString(row.recordId)
-                 << ",\"path\":" << jsonString(row.file.getFullPathName()) << "}";
-            pathStream->writeText(line + "\n", false, false, "\n");
-        }
+        stream.flush();
+        if (pathStream != nullptr) pathStream->flush();
+        if (result.error.isEmpty() && stream.getStatus().failed())
+            result.error = "cannot write " + temporary.getFullPathName();
+        if (result.error.isEmpty() && pathStream != nullptr && pathStream->getStatus().failed())
+            result.error = "cannot write " + pathsTemporary.getFullPathName();
     }
-    stream.flush();
-    if (pathStream != nullptr) pathStream->flush();
+
+    if (result.error.isEmpty() && result.written == 0)
+        result.error = "no rows written: every confirmed file is missing or unreadable";
+    if (result.error.isNotEmpty())
+    {
+        temporary.deleteFile();
+        if (pathsTemporary != juce::File()) pathsTemporary.deleteFile();
+        return result;
+    }
+    if (! temporary.replaceFileIn(out))
+    {
+        result.error = "cannot replace " + outPath;
+        temporary.deleteFile();
+        if (pathsTemporary != juce::File()) pathsTemporary.deleteFile();
+        return result;
+    }
+    if (pathsTemporary != juce::File() && ! pathsTemporary.replaceFileIn(paths))
+    {
+        result.error = "cannot replace " + pathsPath;
+        pathsTemporary.deleteFile();
+    }
     return result;
 }
 

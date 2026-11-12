@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fitScaler, indicesFor, transform } from "../v2/features.mjs";
-import { evaluateGold, labelIntersection, mergeCandidates } from "../v2/evaluate.mjs";
+import { dedupeGold, evaluateGold, labelIntersection, mergeCandidates } from "../v2/evaluate.mjs";
 
 function features(value, wobble = 0) {
   return Array.from({ length: 84 }, (_, index) => Math.min(1, Math.max(0, value + ((index * 13) % 7) * wobble)));
@@ -100,4 +100,49 @@ test("thresholds report coverage and precision separately from top-1", () => {
   assert.ok(result.coverage > 0 && result.coverage <= 1);
   assert.ok(result.precisionAtThreshold >= 0.9, `precision ${result.precisionAtThreshold}`);
   assert.ok(result.top1 >= 0.9, `top1 ${result.top1}`);
+});
+
+test("duplicate content is counted and deduplicated by recordId", () => {
+  const original = goldRow("kick", 0.2, 0);
+  const gold = [
+    original,
+    { ...original },
+    { ...goldRow("hit", 0.2, 0), recordId: original.recordId },
+  ];
+  const deduped = dedupeGold(gold);
+  assert.equal(deduped.rows.length, 1);
+  assert.equal(deduped.duplicates, 2);
+  assert.equal(deduped.conflicts, 1);
+});
+
+test("a copy of the same content never votes for itself", () => {
+  const twin = goldRow("kick", 0.2, 0);
+  const gold = [twin, { ...twin }, goldRow("hat", 0.8, 1)];
+  const scaler = fitScaler(gold, indicesFor(["G1"]));
+  const model = m1Model(["kick", "hat"], [transform(scaler, features(0.2)), transform(scaler, features(0.8))]);
+  const result = evaluateGold({ gold, publicModel: model, scaler, mode: 2, indices: indicesFor(["G1"]), minRowsPerLabel: 1 });
+  assert.ok(result.top1 <= 0.5, `top1 ${result.top1}`);
+});
+
+test("mode 3 reports which labels the public model cannot know", () => {
+  const gold = [
+    ...Array.from({ length: 12 }, (_, index) => goldRow("kick", 0.2, index)),
+    ...Array.from({ length: 12 }, (_, index) => goldRow("riser", 0.9, index)),
+  ];
+  const scaler = fitScaler(gold, indicesFor(["G1"]));
+  const model = m1Model(["kick"], [transform(scaler, features(0.2))]);
+  const result = evaluateGold({ gold, publicModel: model, scaler, mode: 3, indices: indicesFor(["G1"]) });
+  assert.deepEqual(result.missingLabels, ["riser"]);
+});
+
+test("mode 4 counts how often the public model actually wins", () => {
+  const shape = (low) => Array.from({ length: 84 }, (_, index) =>
+    (index < 7 ? (low ? 0.9 : 0.1) : index < 14 ? (low ? 0.1 : 0.9) : 0.5));
+  const kick = { ...goldRow("kick", 0.2, 0), features: shape(true) };
+  const hat = { ...goldRow("hat", 0.8, 1), features: shape(false) };
+  const gold = [kick, hat];
+  const scaler = fitScaler(gold, indicesFor(["G1"]));
+  const model = m1Model(["kick", "hat"], [transform(scaler, kick.features), transform(scaler, hat.features)]);
+  const result = evaluateGold({ gold, publicModel: model, scaler, mode: 4, indices: indicesFor(["G1"]), minRowsPerLabel: 1 });
+  assert.equal(result.globalWins, 2);
 });

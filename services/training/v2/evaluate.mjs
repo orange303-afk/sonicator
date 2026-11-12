@@ -44,12 +44,35 @@ function localRanked(row, index, indices) {
   for (const [label, list] of index) {
     let best = 0;
     for (const candidate of list) {
-      if (candidate.row === row) continue;
+      if (candidate.row === row || candidate.row.recordId === row.recordId) continue;
       best = Math.max(best, cosine(vector, candidate.vector));
     }
     entries.push({ label, score: best, source: "local" });
   }
   return sortedCandidates(entries);
+}
+
+// The gold file can hold several rows of the same audio content (the same file_hash under two paths, or
+// an old copy). They share recordId, and a copy must not stand in as the "other" prototype for its twin.
+export function dedupeGold(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const list = groups.get(row.recordId) ?? [];
+    list.push(row);
+    groups.set(row.recordId, list);
+  }
+  const signature = (row) =>
+    JSON.stringify([row.label ?? row.type ?? "", row.typeIsCustom === true, ...(row.tags ?? [])]);
+  const kept = [];
+  let duplicates = 0;
+  let conflicts = 0;
+  for (const recordId of [...groups.keys()].sort()) {
+    const list = groups.get(recordId);
+    if (list.length > 1) duplicates += list.length - 1;
+    if (new Set(list.map(signature)).size > 1) conflicts += 1;
+    kept.push([...list].sort((a, b) => (signature(a) < signature(b) ? -1 : signature(a) > signature(b) ? 1 : 0))[0]);
+  }
+  return { rows: kept, duplicates, conflicts };
 }
 
 export function mergeCandidates(local, global) {
@@ -79,6 +102,10 @@ export function evaluateGold({ gold, publicModel, scaler, mode, indices, minRows
   const mainLabels = new Set([...counts.entries()].filter(([, count]) => count >= minRowsPerLabel).map(([label]) => label));
 
   const intersection = publicModel ? new Set(labelIntersection(publicModel.labels, gold)) : new Set();
+  const publicLabels = new Set((publicModel?.labels ?? []).map((label) => String(label).toLowerCase()));
+  const missingLabels = [...new Set(gold.filter(isStandardLabel).map((row) => row.label))]
+    .filter((label) => !publicLabels.has(label))
+    .sort();
   const main = gold.filter((row) => isStandardLabel(row) && mainLabels.has(row.label));
   const rows = mode === 3 ? main.filter((row) => intersection.has(row.label)) : main;
 
@@ -89,6 +116,8 @@ export function evaluateGold({ gold, publicModel, scaler, mode, indices, minRows
     mode,
     records: rows.length,
     correct: 0,
+    globalWins: 0,
+    missingLabels,
     top1: 0,
     top3: 0,
     coverage: 0,
@@ -115,8 +144,11 @@ export function evaluateGold({ gold, publicModel, scaler, mode, indices, minRows
       const local = sortedCandidates(localRanked(row, index, localIndices));
       const global = restrict(predict(publicModel, scaler, row.features).ranked, intersection);
       const localBest = local.length > 0 ? local[0] : null;
-      const globalBest = global.length > 0 ? { ...global[0], score: global[0].score * 0.95 } : null;
+      const globalBest = global.length > 0
+        ? { ...global[0], score: global[0].score * 0.95, source: "global" }
+        : null;
       const winner = mergeCandidates(localBest, globalBest);
+      if (winner !== null && winner.source === "global") result.globalWins += 1;
       // One list for top-3: a local candidate keeps the 0.02 bonus the app gives it when sorting.
       const combined = new Map();
       for (const entry of local) combined.set(entry.label, { ...entry, score: entry.score + LOCAL_PRIORITY_MARGIN });

@@ -5,10 +5,16 @@ function percent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function points(value) {
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)} п.п.`;
+}
+
 function criteriaTable(criteria) {
   const rows = criteria.map((entry) => {
-    const value = typeof entry.value === "number" ? percent(entry.value) : String(entry.value);
-    const threshold = typeof entry.threshold === "number" ? percent(entry.threshold) : String(entry.threshold);
+    const value = typeof entry.value !== "number" ? String(entry.value)
+      : entry.unit === "pp" ? points(entry.value) : percent(entry.value);
+    const threshold = typeof entry.threshold !== "number" ? String(entry.threshold)
+      : entry.unit === "pp" ? points(entry.threshold) : percent(entry.threshold);
     return `| ${entry.name} | ${value} | ${threshold} | ${entry.pass ? "✓" : "✗"} |`;
   });
   return ["| критерий | значение | порог | итог |", "|---|---|---|---|", ...rows].join("\n");
@@ -37,11 +43,51 @@ export function renderReport(report) {
   const lines = [];
   lines.push("# Отчёт этапа 5: обучение модели v2", "");
   lines.push(`Дата модели: ${report.generatedAt}`, "");
-  lines.push(`Строк публичных данных: **${report.rows.public}**, строк золотой выборки: **${report.rows.gold}**.`, "");
+  lines.push(`Строк публичных данных: **${report.rows.public}**.`, "");
   lines.push("Золотая выборка — подтверждённые записи `user` и `approved` каталога владельца; пути и имена файлов",
     "в неё не входят, аудио не покидает машину.", "");
+  if (report.rows.exported !== undefined) {
+    const custom = report.rows.exported - report.rows.standard;
+    lines.push(`- Экспортировано подтверждённых строк: **${report.rows.exported}**`);
+    lines.push(`- Кастомный тип (в метрики по стандартным типам не входит): **${custom}**`);
+    lines.push(`- Стандартных строк: **${report.rows.standard}**`);
+    lines.push(`- Различных по содержимому (\`recordId\`): **${report.rows.gold}**`
+      + `, отброшено дубликатов: ${report.rows.duplicates}, групп с конфликтующими метками: ${report.rows.conflicts}`);
+    lines.push("");
+  }
 
   lines.push("## Сравнения на золотой выборке", "", comparisonTable(report.comparisons), "");
+  const mode4 = report.comparisons.find((entry) => entry.mode === 4);
+  const mode3 = report.comparisons.find((entry) => entry.mode === 3);
+  if (mode4 !== undefined && mode4.globalWins !== undefined) {
+    lines.push(`Публичная модель решила **${mode4.globalWins}** из **${mode4.records}** строк режима (4);`,
+      "остальные решила локальная часть. Причина — шкала: калиброванная вероятность публичной модели",
+      "монотонно отображается в точность и упирается в точность на `val`, а локальный косинус на сырых",
+      "признаках почти всегда выше 0.90. Поэтому режим (4) на этой выборке читается как «локальный v2 с",
+      "включённой публичной моделью», а не как прирост от публичных данных.", "");
+  }
+  if (mode3 !== undefined && (mode3.missingLabels ?? []).length > 0) {
+    lines.push(`Меток нет в публичных данных, поэтому режим (3) не может их угадать: ${mode3.missingLabels.join(", ")}.`
+      + " Они входят в режим (4) и в знаменатель его метрик.", "");
+  }
+
+  const groupNames = [...new Set((report.comparisons ?? [])
+    .flatMap((entry) => (entry.perGroup ?? []).map((group) => group.group)))].sort();
+  if (groupNames.length > 0) {
+    lines.push("## По группам (top-1)", "",
+      "| группа | (1) v1 локальный | (2) v2 локальный | (3) публичная | (4) публичная + локальная |",
+      "|---|---|---|---|---|");
+    const at = (entry, group) => (entry.perGroup ?? []).find((item) => item.group === group)?.top1;
+    for (const group of groupNames) {
+      const cells = [1, 2, 3, 4].map((mode) => {
+        const entry = report.comparisons.find((item) => item.mode === mode);
+        const value = entry === undefined ? undefined : at(entry, group);
+        return value === undefined ? "—" : percent(value);
+      });
+      lines.push(`| ${group} | ${cells.join(" | ")} |`);
+    }
+    lines.push("");
+  }
 
   if (report.choice !== undefined) {
     lines.push("## Выбор модели", "",
@@ -50,6 +96,9 @@ export function renderReport(report) {
   }
 
   lines.push("## Критерии приёмки (7.6)", "", criteriaTable(report.criteria), "");
+  if (report.groupNote !== undefined) lines.push(`Группы: ${report.groupNote}.`, "");
+  lines.push("Набор групп признаков и модель выбирались по этой же золотой выборке, поэтому её цифры",
+    "включают эффект отбора. Абсолютные значения — не независимая оценка, а результат выбора.", "");
 
   if (report.ablation !== undefined && report.ablation.length > 0) {
     lines.push("## Абляция групп признаков", "",
@@ -64,12 +113,15 @@ export function renderReport(report) {
   }
 
   if (report.confusion !== undefined) {
-    lines.push("## Матрицы ошибок", "");
+    lines.push("## Матрицы ошибок", "",
+      "Режим (4), строки — подтверждённая метка, столбцы — решение; «прочее» — метка вне набора.", "");
     for (const [title, block] of Object.entries(report.confusion)) lines.push(confusionBlock(title, block));
   }
 
   if (report.worst !== undefined && report.worst.length > 0) {
-    lines.push("## Худшие 10 меток", "", "| метка | строк | top-1 |", "|---|---|---|");
+    lines.push("## Худшие 10 меток", "",
+      "Режим (4); метки, у которых в золотой выборке не меньше 10 строк.", "",
+      "| метка | строк | top-1 |", "|---|---|---|");
     for (const entry of report.worst) lines.push(`| ${entry.label} | ${entry.records} | ${percent(entry.top1)} |`);
     lines.push("");
   }
@@ -88,7 +140,8 @@ export function renderReport(report) {
       `- Файл: \`${report.model.file}\``,
       `- Размер: ${report.model.bytes} байт`,
       `- \`JSON.parse\`: ≤ ${report.model.parseMs.toFixed(0)} мс`,
-      `- Разбиения без утечки: NSynth официальные train/valid/test; Freesound по автору; FSD50K dev/eval.`,
+      `- Разбиения без утечки: NSynth официальные train/valid/test (val и test делят инструменты);`,
+      `  Freesound по автору; FSD50K dev/eval.`,
       "");
     if (report.datasets !== undefined) {
       lines.push("| датасет | уровень | клипов в волне |", "|---|---|---|");
