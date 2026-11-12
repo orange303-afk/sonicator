@@ -6,12 +6,13 @@ namespace {
 constexpr double maxAnalysisSeconds = 10.0;
 } // namespace
 
-FeatureV2Result backfillFeatureV2(SampleRepository& repository, const CancelCheck& cancel)
+FeatureV2Result backfillFeatureV2(SampleRepository& repository, const CancelCheck& cancel, int maxRows)
 {
     FeatureV2Result result;
     const auto rows = repository.allFeedback();
     for (const auto& row : rows)
     {
+        if (maxRows > 0 && result.updated >= maxRows) break;
         if (cancel && cancel()) break;
         ++result.scanned;
         if (row.featureSchema >= 2) continue;

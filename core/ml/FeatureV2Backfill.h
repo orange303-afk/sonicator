@@ -16,6 +16,8 @@ struct FeatureV2Result
 // Fills the v2 vector for every confirmed row still on schema 1. One decode per file, bounded to the
 // same 10 seconds the training CLI uses, so the vector matches the model. Missing files keep their
 // schema-1 vector and are counted; nothing is deleted or rewritten to a guess.
-FeatureV2Result backfillFeatureV2(SampleRepository& repository, const CancelCheck& cancel = {});
+// `maxRows` limits the pass for a manual check or a throttled run; 0 means every confirmed row.
+FeatureV2Result backfillFeatureV2(SampleRepository& repository, const CancelCheck& cancel = {},
+                                  int maxRows = 0);
 
 } // namespace sonicator

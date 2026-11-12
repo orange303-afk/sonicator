@@ -61,6 +61,27 @@ TEST_CASE("the v2 backfill fills schema-1 rows and counts the rest", "[ml][featu
     REQUIRE(schemaBroken == 1);
 }
 
+TEST_CASE("a copy of the live catalog migrates and backfills real audio", "[ml][features][manual]")
+{
+    const auto path = juce::SystemStats::getEnvironmentVariable("SONICATOR_LIVE_CATALOG_COPY", {});
+    if (path.isEmpty()) return; // manual check: set the variable to a copy, never the live catalog
+
+    const auto file = juce::File(path);
+    REQUIRE(file.existsAsFile());
+    Database db(file);
+    SampleRepository repository(db);
+    repository.createTables();
+
+    const auto result = backfillFeatureV2(repository, {}, 40);
+    REQUIRE(result.scanned > 0);
+    REQUIRE(result.updated > 0);
+    REQUIRE(result.updated + result.missing + result.failed >= result.updated);
+    int schemaTwo = 0;
+    for (const auto& row : repository.allFeedback())
+        if (row.featureSchema == 2 && row.featuresV2.size() == 84) ++schemaTwo;
+    REQUIRE(schemaTwo > 0);
+}
+
 TEST_CASE("the v2 backfill is idempotent and obeys cancellation", "[ml][features]")
 {
     TestDirectory directory;

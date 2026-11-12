@@ -85,3 +85,21 @@ TEST_CASE("a zero vector and an unknown feature length stay finite", "[ml][model
     std::vector<float> shortFeatures(2, 1.0f);
     REQUIRE_NOTHROW(model.rank(shortFeatures, 2));
 }
+
+TEST_CASE("the shipped model loads and ranks", "[ml][model]")
+{
+    const auto file = juce::File(SONICATOR_FIXTURE_DIR).getParentDirectory().getParentDirectory()
+                          .getChildFile("resources/ml/global_model.json");
+    REQUIRE(file.existsAsFile());
+    GlobalLinearModel model;
+    juce::String error;
+    REQUIRE(model.load(file.loadFileAsString(), error));
+    REQUIRE(error.isEmpty());
+    REQUIRE(model.labelCount() > 0);
+    REQUIRE(model.featureCount() > 0);
+    REQUIRE(model.generatedAt().isNotEmpty());
+    std::vector<float> zeros(84, 0.0f);
+    const auto ranked = model.rank(zeros, 3);
+    REQUIRE_FALSE(ranked.empty());
+    for (const auto& entry : ranked) REQUIRE(std::isfinite(entry.score));
+}
