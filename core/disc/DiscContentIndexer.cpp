@@ -109,7 +109,8 @@ bool isDiscContentFormat(const juce::File& file)
 bool isDiscContentCandidate(const juce::File& file)
 {
     if (! isDiscContentFormat(file)) return false;
-    if (! file.hasFileExtension("bin")) return true;
+    // A raw data file with a cue of the same stem is represented by the cue alone.
+    if (! file.hasFileExtension("bin;img")) return true;
     // Case-insensitive like the browser's cue lookup; otherwise the same contents appear twice.
     for (const auto& entry : juce::RangedDirectoryIterator(file.getParentDirectory(), false, "*.cue",
                                                           juce::File::findFiles,

@@ -339,6 +339,11 @@ TEST_CASE("Disc content indexing is cancellable and skips BIN covered by a CUE",
     REQUIRE_FALSE(isDiscContentCandidate(bin));
     REQUIRE(isDiscContentCandidate(t.dir.getChildFile("disk.cue")));
     REQUIRE_FALSE(isDiscContentCandidate(t.dir.getChildFile("volume.mdx")));
+    auto img = t.dir.getChildFile("image-disk.img");
+    img.replaceWithData("data", 4);
+    REQUIRE(isDiscContentCandidate(img));
+    t.dir.getChildFile("image-disk.cue").replaceWithText("FILE \"image-disk.img\" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n");
+    REQUIRE_FALSE(isDiscContentCandidate(img));
 }
 
 TEST_CASE("Removing a folder drops disc index state so contents return after re-add", "[disc-content][remove]")

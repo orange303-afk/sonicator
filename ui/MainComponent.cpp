@@ -2522,6 +2522,15 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     if (isRoot) menu.addItem(7011, "Rename folder...");
     menu.addSeparator();
     const bool splitBusy = isSplitRunning();
+    // A disc image is shown as a container node in the tree, so its own menu offers Extract too.
+    const bool isDiscImage = isDiscExtractSource(folder);
+    const bool extractIdle = extractor != nullptr && ! isExtractRunning()
+        && (indexer == nullptr || ! indexer->progress().running)
+        && (smart == nullptr || ! smart->progress().running)
+        && (tagging == nullptr || ! tagging->progress().running)
+        && (autoTag == nullptr || ! autoTag->progress().running)
+        && ! splitBusy;
+    if (isDiscImage) menu.addItem(7012, "Extract samples...", extractIdle);
     menu.addItem(7002, "Scan folder", indexer != nullptr && ! indexer->progress().running && ! splitBusy);
     menu.addItem(7003, "Analyze smart metadata (" + juce::String(catalogued) + ")",
                  smart != nullptr && ! smart->progress().running && ! splitBusy
@@ -2557,7 +2566,12 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
             }
             try
             {
-                if (result == 7011)
+                if (result == 7012)
+                {
+                    const juce::File image(folderPath);
+                    if (isDiscExtractSource(image)) safe->startExtract({ image });
+                }
+                else if (result == 7011)
                 {
                     safe->promptRenameFolder(folderPath);
                 }

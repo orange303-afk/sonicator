@@ -1,5 +1,6 @@
 #include "FolderTree.h"
 #include "ui/shell/Theme.h"
+#include "core/disc/DiscContentIndexer.h"
 namespace sonicator {
 class FolderTree::Item final : public juce::TreeViewItem
 {
@@ -157,7 +158,11 @@ void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPa
             if (row.containerPath.isNotEmpty()) continue; // disc contents stay inside the image node
             if (! revealIgnored && isPathIgnored(row.path, ignoredEntries)) continue;
             auto folder = juce::File(row.path).getParentDirectory();
-            if (juce::File(row.path).hasFileExtension("iso;bin;mdx;cue;akai;img"))
+            const juce::File nodeFile(row.path);
+            // A .bin/.img with a sibling .cue is the same image; show the cue only, once.
+            const bool representedByCue = nodeFile.hasFileExtension("bin;img")
+                && ! isDiscContentCandidate(nodeFile);
+            if (! representedByCue && nodeFile.hasFileExtension("iso;bin;mdx;cue;akai;img"))
             {
                 images.insert(row.path);
                 imageIds.push_back(row.id);
