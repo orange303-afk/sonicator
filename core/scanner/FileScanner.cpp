@@ -1,16 +1,19 @@
 #include "FileScanner.h"
 #include "core/ableton/AbletonPacks.h"
 #include "core/reason/ReasonPatch.h"
+#include "core/kurzweil/KrzFile.h"
 #include <stdexcept>
 namespace sonicator {
 bool FileScanner::isMetadataOnlyFormat(const juce::File& f)
 {
     // Tracker modules are indexed by identity and header metadata; their PCM is decoded only
     // when the module is opened, never during a library scan.
-    return f.hasFileExtension("rx2;sf2;exs;nki;mod;xm;s3m;iso;img;bin;cue;mdx;repatch");
+    return f.hasFileExtension("rx2;sf2;exs;nki;mod;xm;s3m;iso;img;bin;cue;mdx;repatch;krz;k25;k26");
 }
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {
+    // A Kurzweil set is one row: its later parts are data only and are joined on load.
+    if (krz::continuationPartNumber(f) >= 2) return false;
     if (isMetadataOnlyFormat(f)) return true;
     if (! f.hasFileExtension("wav;aif;aiff;flac;mp3;ogg;ebl")) return false;
     // Ableton factory AIFC samples use the closed "able" codec and only Live can decode them.

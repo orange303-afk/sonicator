@@ -6,6 +6,7 @@
 #include "core/disc/CueSheet.h"
 #include "core/sampler/FileInstrument.h"
 #include "core/reason/ReasonPatch.h"
+#include "core/kurzweil/KrzFile.h"
 #include <cmath>
 namespace sonicator {
 namespace {
@@ -77,6 +78,15 @@ SampleRecord analyzeMetadataAsset(const juce::File& file, CancelCheck cancel)
         if (! isSoundFont(file))
         {
             r.error = "Not a SoundFont 2 bank"; r.compatibility = AssetCompatibility::invalid; return r;
+        }
+    }
+    else if (r.format == "KRZ" || r.format == "K25" || r.format == "K26")
+    {
+        if (! krz::isKrzFile(file))
+        {
+            r.error = "Not a Kurzweil K2000/K2500/K2600 bank";
+            r.compatibility = AssetCompatibility::invalid;
+            return r;
         }
     }
     else if (r.format == "EXS")
