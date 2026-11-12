@@ -1,0 +1,29 @@
+{
+  "datasetDir": "freesound-one-shot-percussive",
+  "audioDir": "one_shot_percussive_sounds",
+  "domain": "music",
+  "group": "percussion",
+  "rules": [
+    { "type": "kick", "pattern": "(^| )(kick|bass ?drum|bd)( |$)" },
+    { "type": "snare", "pattern": "snare|(^| )sd( |$)" },
+    { "type": "hat", "pattern": "hi ?hat|(^| )hh( |$)" },
+    { "type": "clap", "pattern": "clap" },
+    { "type": "rim", "pattern": "rim" },
+    { "type": "tom", "pattern": "(^| )tom" },
+    { "type": "crash", "pattern": "crash" },
+    { "type": "ride", "pattern": "ride" },
+    { "type": "cymbal", "pattern": "cymbal" },
+    { "type": "cowbell", "pattern": "cowbell" },
+    { "type": "shaker", "pattern": "shaker" },
+    { "type": "tamb", "pattern": "tamb" },
+    { "type": "snap", "pattern": "snap" },
+    { "type": "conga", "pattern": "conga" },
+    { "type": "bongo", "pattern": "bongo" },
+    { "type": "djembe", "pattern": "djembe" },
+    { "type": "tabla", "pattern": "tabla" },
+    { "type": "timbale", "pattern": "timbale" },
+    { "type": "agogo", "pattern": "agogo" },
+    { "type": "clave", "pattern": "clave" },
+    { "type": "cabasa", "pattern": "cabasa" }
+  ]
+}

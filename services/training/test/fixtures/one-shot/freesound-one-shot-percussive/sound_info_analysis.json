@@ -1,0 +1,6 @@
+[
+  { "id": 1001, "name": "kick_01.wav", "tags": ["Kick", "Drum"] },
+  { "id": 1002, "name": "acoustic_closed_hihat1.wav", "tags": ["Hi-hat", "Cymbal"] },
+  { "id": 1003, "name": "clap_01.wav", "tags": ["Clap", "Percussion"] },
+  { "id": 1004, "name": "snare_01.wav", "tags": ["Snare"] }
+]

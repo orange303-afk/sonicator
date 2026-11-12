@@ -1,0 +1,5 @@
+{
+  "1001": { "name": "kick_01.wav", "username": "alice", "license": "http://creativecommons.org/publicdomain/zero/1.0/" },
+  "1002": { "name": "acoustic_closed_hihat1.wav", "username": "bob", "license": "http://creativecommons.org/licenses/by/3.0/" },
+  "1003": { "name": "clap_01.wav", "username": "carol", "license": "http://creativecommons.org/licenses/by-nc/3.0/" }
+}
