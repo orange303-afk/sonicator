@@ -631,6 +631,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         featureV2Worker = std::make_unique<std::thread>([this, repo = writeRepo.get()]
         {
             backfillFeatureV2(*repo, [this] { return cancelFeatureV2.load(); });
+            if (! cancelFeatureV2.load())
+                AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*repo);
         });
     juce::Desktop::getInstance().addDarkModeSettingListener(this);
     if (persistSessionState && ! embeddedUi)
@@ -3022,12 +3024,18 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
             {
                 repo->recordFeedback(id, type, tagNames, features,
                                      SampleRepository::FeedbackOrigin::user);
+                std::vector<float> featuresV2;
                 if (needV2 && audio.ok())
                 {
                     const auto vector = FeatureExtractorV2::extract(audio.buffer, audio.sampleRate);
-                    if (vector.ok()) repo->setFeedbackV2(id, vector.values);
+                    if (vector.ok())
+                    {
+                        featuresV2 = vector.values;
+                        repo->setFeedbackV2(id, featuresV2);
+                    }
                 }
-                AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
+                AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(
+                    id, type, tagNames, features, featuresV2);
             }
         }
     });

@@ -1,4 +1,5 @@
 #include "AcousticClassifierService.h"
+#include "core/dsp/FeatureExtractorV2.h"
 #include "GenreContextExtractor.h"
 #include "core/dsp/AcousticFeatures.h"
 #include "core/dsp/FastAcousticRules.h"
@@ -59,14 +60,27 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
         auto& adaptive = getSharedAdaptiveClassifier();
         if (adaptive.hasTypePrototypes())
         {
-            const auto features = AdaptiveClassifier::extractFeatures(buffer, sampleRate);
-            const auto preds = adaptive.predictType(features, 1);
+            std::vector<float> features;
+            bool fromV2 = false;
+            if (adaptive.hasV2TypePrototypes() || adaptive.hasGlobalModel())
+            {
+                const auto vector = FeatureExtractorV2::extract(buffer, sampleRate);
+                if (vector.ok())
+                {
+                    features = vector.values;
+                    fromV2 = true;
+                }
+            }
+            if (features.empty()) features = AdaptiveClassifier::extractFeatures(buffer, sampleRate);
+            const auto preds = fromV2 ? adaptive.predictTypeV2(features, 1)
+                                      : adaptive.predictType(features, 1);
             if (! preds.empty() && preds.front().score >= 0.80f)
             {
-                const bool global = preds.front().source == "global_adaptive";
+                const auto source = preds.front().source;
+                const bool global = source != "user_adaptive";
                 SmartCandidate c;
                 c.field = SmartField::Type;
-                c.source = global ? "global_adaptive" : "user_adaptive";
+                c.source = source;
                 c.textValue = preds.front().label;
                 c.detail = "adaptive_sim=" + juce::String(preds.front().score, 2);
                 c.numericValue = preds.front().score;
@@ -74,7 +88,8 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
                 c.extractorId = "dsp";
                 c.extractorVersion = smartDspVersion;
                 c.rawValue = preds.front().label;
-                c.limitation = global ? "type inferred from global prototypes"
+                c.limitation = global ? (fromV2 ? "type inferred from the global model"
+                                                : "type inferred from global prototypes")
                                       : "type learned from user feedback prototype";
                 adaptiveCandidate = std::move(c);
             }

@@ -554,15 +554,21 @@ void AutoTagService::apply()
             // only its tag list refreshes.
             const bool userRow = repo.hasUserFeedback(id);
             repo.recordFeedback(id, type, tagNames, features, SampleRepository::FeedbackOrigin::approved);
+            std::vector<float> featuresV2;
             if (needV2 && audio.ok())
             {
                 const auto vector = FeatureExtractorV2::extract(audio.buffer, audio.sampleRate);
-                if (vector.ok()) repo.setFeedbackV2(id, vector.values);
+                if (vector.ok())
+                {
+                    featuresV2 = vector.values;
+                    repo.setFeedbackV2(id, featuresV2);
+                }
             }
             if (userRow)
                 AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototypeTags(id, tagNames);
             else
-                AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
+                AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(
+                    id, type, tagNames, features, featuresV2);
         }
     }
     result.message = result.cancelled

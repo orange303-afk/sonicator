@@ -1,4 +1,5 @@
 #pragma once
+#include "GlobalLinearModel.h"
 #include "core/database/SampleRepository.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>
@@ -24,8 +25,15 @@ public:
     // false and keeps the previous global set when the document is not a prototypes.v1 file of
     // this feature schema or holds a malformed vector.
     bool loadGlobalPrototypes(const juce::String& json);
+    // Loads the schema-2 softmax model (model.v1). Kept separately from the schema-1 prototypes:
+    // a query is scored against the model of its own feature schema only.
+    bool loadGlobalModel(const juce::String& json);
     void updatePrototype(int64_t sampleId, const juce::String& targetType,
                          const juce::StringArray& tags, const std::vector<float>& features);
+    // Stores both vectors, so the same row can serve schema-1 and schema-2 queries.
+    void updatePrototype(int64_t sampleId, const juce::String& targetType,
+                         const juce::StringArray& tags, const std::vector<float>& features,
+                         const std::vector<float>& featuresV2);
     // Refreshes only the tag list of an existing prototype, so an accepted AutoTag tag is learned
     // locally without replacing the type the person set.
     void updatePrototypeTags(int64_t sampleId, const juce::StringArray& tags);
@@ -39,16 +47,22 @@ public:
     // Local or global tag prototypes: AutoTag may propose either.
     bool hasTagPrototypes() const;
     bool hasGlobalPrototypes() const;
+    bool hasGlobalModel() const;
+    bool hasV2TypePrototypes() const;
     int globalLabelCount() const;
     juce::String globalGeneratedAt() const;
     size_t prototypeCount() const;
 
     std::vector<Prediction> predictType(const std::vector<float>& features, int topK = 3) const;
+    // Schema-2 query: local prototypes stored with featuresV2 and the global softmax model.
+    std::vector<Prediction> predictTypeV2(const std::vector<float>& features, int topK = 3) const;
     std::vector<Prediction> predictTags(const std::vector<float>& features, int topK = 5) const;
 
     static std::vector<float> extractFeatures(const juce::AudioBuffer<float>& buffer, double sampleRate);
 
 private:
+    std::vector<Prediction> predictTypeWithSchema(const std::vector<float>& features, int schema,
+                                                  int topK) const;
     struct Impl;
     std::unique_ptr<Impl> impl;
 };

@@ -59,6 +59,8 @@ struct Prototype {
     juce::String targetType;
     juce::StringArray tags;
     std::vector<float> features;
+    int schema = 1;
+    std::vector<float> featuresV2;
 };
 
 struct AdaptiveClassifier::Impl {
@@ -68,6 +70,7 @@ struct AdaptiveClassifier::Impl {
     std::vector<Prototype> globalTagPrototypes;
     juce::String globalGeneratedAt;
     int globalLabelCount = 0;
+    GlobalLinearModel globalModel;
 };
 
 AdaptiveClassifier::AdaptiveClassifier()
@@ -90,6 +93,8 @@ void AdaptiveClassifier::loadFromRepository(const SampleRepository& repo)
         p.targetType = r.targetType;
         p.tags = r.tags;
         p.features = std::move(r.features);
+        p.schema = r.featureSchema >= 2 ? 2 : 1;
+        p.featuresV2 = std::move(r.featuresV2);
         impl->prototypes.push_back(std::move(p));
     }
 }
@@ -152,7 +157,15 @@ bool AdaptiveClassifier::loadGlobalPrototypes(const juce::String& json)
 void AdaptiveClassifier::updatePrototype(int64_t sampleId, const juce::String& targetType,
                                          const juce::StringArray& tags, const std::vector<float>& features)
 {
+    updatePrototype(sampleId, targetType, tags, features, {});
+}
+
+void AdaptiveClassifier::updatePrototype(int64_t sampleId, const juce::String& targetType,
+                                         const juce::StringArray& tags, const std::vector<float>& features,
+                                         const std::vector<float>& featuresV2)
+{
     std::lock_guard lock(impl->mutex);
+    const auto schema = featuresV2.empty() ? 1 : 2;
     for (auto& p : impl->prototypes)
     {
         if (p.sampleId == sampleId)
@@ -160,6 +173,8 @@ void AdaptiveClassifier::updatePrototype(int64_t sampleId, const juce::String& t
             p.targetType = targetType.trim();
             p.tags = tags;
             p.features = features;
+            p.featuresV2 = featuresV2;
+            p.schema = schema;
             return;
         }
     }
@@ -168,6 +183,8 @@ void AdaptiveClassifier::updatePrototype(int64_t sampleId, const juce::String& t
     p.targetType = targetType.trim();
     p.tags = tags;
     p.features = features;
+    p.featuresV2 = featuresV2;
+    p.schema = schema;
     impl->prototypes.push_back(std::move(p));
 }
 
@@ -199,6 +216,7 @@ void AdaptiveClassifier::clear()
     impl->globalTagPrototypes.clear();
     impl->globalGeneratedAt.clear();
     impl->globalLabelCount = 0;
+    impl->globalModel.clear();
 }
 
 bool AdaptiveClassifier::hasPrototypes() const
@@ -215,7 +233,22 @@ bool AdaptiveClassifier::hasTypePrototypes() const
         return std::any_of(list.begin(), list.end(),
                            [](const Prototype& p) { return p.targetType.isNotEmpty(); });
     };
-    return hasType(impl->prototypes) || hasType(impl->globalPrototypes);
+    return hasType(impl->prototypes) || hasType(impl->globalPrototypes) || impl->globalModel.loaded();
+}
+
+bool AdaptiveClassifier::hasGlobalModel() const
+{
+    std::lock_guard lock(impl->mutex);
+    return impl->globalModel.loaded();
+}
+
+bool AdaptiveClassifier::hasV2TypePrototypes() const
+{
+    std::lock_guard lock(impl->mutex);
+    return std::any_of(impl->prototypes.begin(), impl->prototypes.end(), [](const Prototype& p)
+    {
+        return p.schema == 2 && p.targetType.isNotEmpty() && ! p.featuresV2.empty();
+    });
 }
 
 bool AdaptiveClassifier::hasTagPrototypes() const
@@ -238,13 +271,13 @@ bool AdaptiveClassifier::hasGlobalPrototypes() const
 int AdaptiveClassifier::globalLabelCount() const
 {
     std::lock_guard lock(impl->mutex);
-    return impl->globalLabelCount;
+    return impl->globalModel.loaded() ? impl->globalModel.labelCount() : impl->globalLabelCount;
 }
 
 juce::String AdaptiveClassifier::globalGeneratedAt() const
 {
     std::lock_guard lock(impl->mutex);
-    return impl->globalGeneratedAt;
+    return impl->globalModel.loaded() ? impl->globalModel.generatedAt() : impl->globalGeneratedAt;
 }
 
 size_t AdaptiveClassifier::prototypeCount() const
@@ -253,19 +286,50 @@ size_t AdaptiveClassifier::prototypeCount() const
     return impl->prototypes.size();
 }
 
+bool AdaptiveClassifier::loadGlobalModel(const juce::String& json)
+{
+    GlobalLinearModel model;
+    juce::String error;
+    if (! model.load(json, error))
+    {
+        juce::Logger::writeToLog("global model refused: " + error);
+        return false;
+    }
+    std::lock_guard lock(impl->mutex);
+    impl->globalModel = std::move(model);
+    return true;
+}
+
 std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictType(
     const std::vector<float>& features, int topK) const
 {
+    return predictTypeWithSchema(features, 1, topK);
+}
+
+std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictTypeV2(
+    const std::vector<float>& features, int topK) const
+{
+    return predictTypeWithSchema(features, 2, topK);
+}
+
+std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictTypeWithSchema(
+    const std::vector<float>& features, int schema, int topK) const
+{
     if (features.empty() || topK <= 0) return {};
     std::lock_guard lock(impl->mutex);
-    if (impl->prototypes.empty() && impl->globalPrototypes.empty()) return {};
+    if (impl->prototypes.empty() && impl->globalPrototypes.empty() && ! impl->globalModel.loaded())
+        return {};
 
     struct LabelAgg {
         juce::String display;
         float localScore = 0.0f;
         float globalScore = 0.0f;
         float score() const { return std::max(localScore, globalScore); }
-        juce::String source() const { return localScore >= globalScore ? "user_adaptive" : "global_adaptive"; }
+        juce::String source(int featureSchema) const
+        {
+            if (localScore >= globalScore) return "user_adaptive";
+            return featureSchema == 2 ? "global_model" : "global_adaptive";
+        }
     };
     std::map<juce::String, LabelAgg> typeBestScore;
 
@@ -273,9 +337,11 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictType(
     {
         for (const auto& p : list)
         {
-            if (p.targetType.isEmpty() || p.features.empty()) continue;
+            if (p.schema != schema) continue;
+            const auto& vector = schema == 1 ? p.features : p.featuresV2;
+            if (p.targetType.isEmpty() || vector.empty()) continue;
             if (! isPlausibleAdaptiveTag(p.targetType, features)) continue;
-            const float sim = computeCosineSimilarity(features, p.features);
+            const float sim = computeCosineSimilarity(features, vector);
             if (sim <= 0.0f) continue;
             const auto key = p.targetType.toLowerCase();
             auto& agg = typeBestScore[key];
@@ -285,7 +351,20 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictType(
         }
     };
     accumulate(impl->prototypes, false);
-    accumulate(impl->globalPrototypes, true);
+    if (schema == 1)
+    {
+        accumulate(impl->globalPrototypes, true);
+    }
+    else if (impl->globalModel.loaded())
+    {
+        for (const auto& prediction : impl->globalModel.rank(features, impl->globalModel.labelCount()))
+        {
+            const auto key = prediction.label.toLowerCase();
+            auto& agg = typeBestScore[key];
+            if (agg.display.isEmpty()) agg.display = prediction.label;
+            agg.globalScore = std::max(agg.globalScore, prediction.score * globalPenalty);
+        }
+    }
 
     struct Candidate {
         juce::String display;
@@ -298,7 +377,7 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictType(
     for (const auto& [key, agg] : typeBestScore)
     {
         juce::ignoreUnused(key);
-        results.push_back({ agg.display, agg.score(), agg.localScore, agg.source() });
+        results.push_back({ agg.display, agg.score(), agg.localScore, agg.source(schema) });
     }
 
     std::sort(results.begin(), results.end(), [](const Candidate& a, const Candidate& b) {
@@ -306,8 +385,8 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictType(
         return a.display.compareIgnoreCase(b.display) < 0;
     });
 
-    // A person's own confirmation wins over a global prototype that is not clearly better.
-    if (! results.empty() && results.front().source == "global_adaptive")
+    // A person's own confirmation wins over a global model that is not clearly better.
+    if (! results.empty() && results.front().source != "user_adaptive")
     {
         size_t bestLocal = results.size();
         for (size_t i = 0; i < results.size(); ++i)

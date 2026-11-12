@@ -68,3 +68,46 @@ TEST_CASE("AdaptiveClassifier case-insensitive label aggregation", "[ml][adaptiv
     CHECK(tagPreds[0].label.equalsIgnoreCase("analog"));
 }
 
+
+TEST_CASE("schema-2 prototypes answer only schema-2 queries", "[ml][adaptive]")
+{
+    AdaptiveClassifier classifier;
+    std::vector<float> v1(14, 0.5f);
+    std::vector<float> v2(84, 0.5f);
+    v2[0] = 0.9f;
+    classifier.updatePrototype(7, "Kick", { "Kick" }, v1, v2);
+    REQUIRE(classifier.hasV2TypePrototypes());
+
+    const auto v2Preds = classifier.predictTypeV2(v2, 1);
+    REQUIRE_FALSE(v2Preds.empty());
+    CHECK(v2Preds[0].label == "Kick");
+    CHECK(v2Preds[0].source == "user_adaptive");
+    CHECK(classifier.predictType(v1, 1).empty());
+}
+
+TEST_CASE("the global model serves schema-2 queries as global_model", "[ml][adaptive]")
+{
+    AdaptiveClassifier classifier;
+    const juce::String model = R"({
+      "schema": "model.v1", "featureSchema": 2, "generatedAt": "2026-11-12T00:00:00.000Z",
+      "featureIndices": [0, 1], "mu": [0.0, 0.0], "sd": [1.0, 1.0],
+      "model": { "kind": "M2", "labels": ["kick", "hat"], "W": [[1.0, 0.0], [0.0, 1.0]],
+                 "b": [0.0, 0.0], "temperature": 1.0 },
+      "similarityMap": [[0.0, 0.0], [1.0, 1.0]],
+      "groups": { "kick": "percussion", "hat": "percussion" },
+      "datasets": []
+    })";
+    REQUIRE(classifier.loadGlobalModel(model));
+    REQUIRE(classifier.hasGlobalModel());
+    REQUIRE(classifier.globalLabelCount() == 2);
+
+    std::vector<float> v2(84, 0.0f);
+    v2[0] = 2.0f;
+    const auto preds = classifier.predictTypeV2(v2, 2);
+    REQUIRE_FALSE(preds.empty());
+    CHECK(preds[0].label == "kick");
+    CHECK(preds[0].source == "global_model");
+
+    std::vector<float> v1(14, 0.0f);
+    CHECK(classifier.predictType(v1, 1).empty());
+}
