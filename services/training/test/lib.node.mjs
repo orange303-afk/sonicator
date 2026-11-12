@@ -205,9 +205,25 @@ test("a tag-only record contributes tags and no type", () => {
   assert.equal(labels.filter((label) => label.kind === "tag").length, 1);
 });
 
-test("the dataset reader refuses a foreign feature schema", () => {
+test("the dataset reader accepts schema 2 and refuses a foreign one", () => {
+  const v2 = JSON.stringify({
+    recordId: "x", installId: "a", featureSchema: 2,
+    features: Array(84).fill(0.5), type: "kick",
+  });
+  assert.equal(parseDataset(v2)[0].featureSchema, 2);
   assert.throws(
-    () => parseDataset('{"recordId":"x","installId":"a","featureSchema":2,"features":[],"type":"kick"}'),
+    () => parseDataset('{"recordId":"x","installId":"a","featureSchema":3,"features":[],"type":"kick"}'),
     /featureSchema/,
   );
+});
+
+test("schema-1 prototypes ignore schema-2 rows", () => {
+  const v1 = dataset(["a", "b", "c"], 4);
+  const v2 = {
+    recordId: "v2-row", installId: "a", featureSchema: 2, features: Array(84).fill(0.5),
+    type: "kick", tags: [],
+  };
+  const labels = buildPrototypes([...v1, v2]).labels;
+  assert.ok(labels.length > 0);
+  for (const label of labels) assert.ok(label.prototypes.every((vector) => vector.length === 14));
 });

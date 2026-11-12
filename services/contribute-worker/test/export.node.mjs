@@ -90,7 +90,9 @@ test("out-of-range features and an unknown schema stop the export", () => {
   const bad = record();
   bad.features[3] = Number.NaN;
   assert.throws(() => assertValid([{ ...bad, installId: A }]), /outside 0\.\.1/);
-  assert.throws(() => assertValid([{ ...record({ featureSchema: 2 }), installId: A }]), /featureSchema/);
+  assert.throws(() => assertValid([{ ...record({ featureSchema: 3 }), installId: A }]), /featureSchema/);
+  const v2 = { ...record({ features: Array(84).fill(0.5) }), featureSchema: 2, installId: A };
+  assertValid([v2]);
 });
 
 test("a tag-only record is valid and contributes tags, not a type", () => {

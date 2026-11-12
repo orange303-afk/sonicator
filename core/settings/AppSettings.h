@@ -49,7 +49,8 @@ struct AppSettings
     // Bump when the consent text or the payload changes in a way the user should see again.
     // Version 3: an AutoTag proposal the person accepts counts as a confirmation, and tag history
     // starts at schema 15; older tag assignments are not uploaded.
-    static constexpr int currentContributionConsentVersion = 3;
+    // Version 4: a confirmed row may carry the richer 84-value feature vector (schema 2).
+    static constexpr int currentContributionConsentVersion = 4;
     static juce::String defaultContributionEndpoint();
     static juce::File defaultSettingsFile();
     static juce::String themeToString(ThemeMode);

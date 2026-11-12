@@ -17,6 +17,7 @@ import { dirname, join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
+export const FEATURE_SCHEMAS = new Map([[1, 14], [2, 84]]);
 export const FEATURE_SCHEMA = 1;
 export const FEATURE_COUNT = 14;
 export const DEFAULT_MIN_INSTALLS = 3;
@@ -59,10 +60,11 @@ export function assertValid(records) {
       throw new Error("a record has no recordId");
     if (typeof record.installId !== "string" || record.installId.length === 0)
       throw new Error(`${where}: missing installId`);
-    if (record.featureSchema !== FEATURE_SCHEMA)
-      throw new Error(`${where}: featureSchema ${record.featureSchema} is not ${FEATURE_SCHEMA}`);
-    if (!Array.isArray(record.features) || record.features.length !== FEATURE_COUNT)
-      throw new Error(`${where}: expected ${FEATURE_COUNT} features, got ${record.features?.length}`);
+    const expectedFeatures = FEATURE_SCHEMAS.get(record.featureSchema);
+    if (expectedFeatures === undefined)
+      throw new Error(`${where}: featureSchema ${record.featureSchema} is not 1 or 2`);
+    if (!Array.isArray(record.features) || record.features.length !== expectedFeatures)
+      throw new Error(`${where}: expected ${expectedFeatures} features, got ${record.features?.length}`);
     for (const value of record.features)
       if (!isFiniteFeature(value))
         throw new Error(`${where}: feature ${value} is outside 0..1`);
@@ -118,7 +120,7 @@ export function summarize(records, minInstalls = DEFAULT_MIN_INSTALLS) {
   const average = (labels) =>
     labels.length === 0 ? 0 : Math.round((labels.reduce((sum, label) => sum + label.support, 0) / labels.length) * 10) / 10;
   return {
-    featureSchema: FEATURE_SCHEMA,
+    featureSchemas: [...new Set(records.map((record) => record.featureSchema))].sort(),
     minInstalls,
     installs: installs.size,
     records: records.length,
@@ -148,7 +150,7 @@ export function renderReport(summary, { generatedAt } = {}) {
 
 Generated: ${generatedAt ?? "unknown"}
 
-- Feature schema: ${summary.featureSchema}
+- Feature schemas: ${(summary.featureSchemas ?? []).join(", ")}
 - Installs: ${summary.installs}
 - Records: ${summary.records}
 - Minimum installs for a label in this report: ${summary.minInstalls}

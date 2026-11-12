@@ -3,6 +3,10 @@
 
 export const FEATURE_SCHEMA = 1;
 export const FEATURE_COUNT = 14;
+// Schema 2 is accepted by the reader and stored by the intake, but the shipped schema-1 prototype
+// file (and everything that compares its 14 values) stays schema 1 only.
+export const FEATURE_SCHEMA_V2 = 2;
+export const FEATURE_COUNT_V2 = 84;
 export const PROTOTYPE_SCHEMA = "prototypes.v1";
 export const MIN_INSTALLS = 3;
 export const MIN_SUPPORT = 10;
@@ -46,10 +50,12 @@ export function validateRecord(record, where = "record") {
     throw new Error(`${where}: missing recordId`);
   if (typeof record.installId !== "string" || record.installId.length === 0)
     throw new Error(`${where}: missing installId`);
-  if (record.featureSchema !== FEATURE_SCHEMA)
-    throw new Error(`${where}: featureSchema ${record.featureSchema} is not ${FEATURE_SCHEMA}`);
-  if (!Array.isArray(record.features) || record.features.length !== FEATURE_COUNT)
-    throw new Error(`${where}: expected ${FEATURE_COUNT} features`);
+  const schema = record.featureSchema ?? FEATURE_SCHEMA;
+  if (schema !== FEATURE_SCHEMA && schema !== FEATURE_SCHEMA_V2)
+    throw new Error(`${where}: featureSchema ${record.featureSchema} is not ${FEATURE_SCHEMA} or ${FEATURE_SCHEMA_V2}`);
+  const expectedFeatures = schema === FEATURE_SCHEMA_V2 ? FEATURE_COUNT_V2 : FEATURE_COUNT;
+  if (!Array.isArray(record.features) || record.features.length !== expectedFeatures)
+    throw new Error(`${where}: expected ${expectedFeatures} features`);
   for (const value of record.features)
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)
       throw new Error(`${where}: feature ${value} is outside 0..1`);
@@ -253,7 +259,9 @@ export function selectPrototypes(rows, max = MAX_PROTOTYPES_PER_LABEL) {
 }
 
 export function buildPrototypes(records, options = {}) {
-  const normalized = normalizeRecords(records);
+  // The shipped file is schema 1: schema-2 rows are kept out instead of mixing vector lengths.
+  const normalized = normalizeRecords(records)
+    .filter((record) => (record.featureSchema ?? FEATURE_SCHEMA) === FEATURE_SCHEMA);
   const installs = new Set(normalized.map((record) => record.installId));
   const minInstalls = options.minInstalls ?? MIN_INSTALLS;
   const minSupport = options.minSupport ?? MIN_SUPPORT;

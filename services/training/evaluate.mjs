@@ -53,7 +53,7 @@ function assignFolds(records, folds) {
 // scored with the same global penalty the app applies. Custom types are not in the shipped file, so
 // they are left out of the number rather than counted as misses.
 export function crossValidateShipped(records, { folds = 5 } = {}) {
-  const normalized = normalizeRecords(records);
+  const normalized = normalizeRecords(records).filter((record) => (record.featureSchema ?? 1) === 1);
   const foldCount = Math.max(1, Math.floor(folds));
   const assigned = assignFolds(normalized, foldCount);
   const result = {
@@ -116,7 +116,7 @@ function withoutOwnVector(index, features) {
 }
 
 export function evaluate(records) {
-  const normalized = normalizeRecords(records);
+  const normalized = normalizeRecords(records).filter((record) => (record.featureSchema ?? 1) === 1);
   const installs = [...new Set(normalized.map((record) => record.installId))].sort();
   const byInstall = new Map(installs.map((install) => [install, []]));
   for (const record of normalized) byInstall.get(record.installId).push(record);

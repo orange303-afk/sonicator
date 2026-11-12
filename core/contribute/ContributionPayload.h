@@ -23,6 +23,7 @@ struct Record
     bool typeConfirmed = true; // false when `type` is just what the app resolved
     juce::StringArray tags;
     std::vector<float> features;
+    int featureSchema = 1;     // 1: 14 values, 2: 84 values
     juce::String key;          // empty when unknown
     double bpm = 0.0;
     bool hasBpm = false;

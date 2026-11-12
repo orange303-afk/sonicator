@@ -80,6 +80,13 @@ describe("intake", () => {
     expect((await call(batch({ records: [record({ type: undefined, typeIsCustom: undefined, tags: [] })] }))).status).toBe(400);
   });
 
+  it("accepts schema 2 with 84 features and rejects it with 14", async () => {
+    const v2 = record({ features: Array(84).fill(0.5), featureSchema: 2 });
+    expect((await call(batch({ records: [v2] }))).status).toBe(204);
+    const short = record({ features: Array(14).fill(0.5), featureSchema: 2 });
+    expect((await call(batch({ records: [short] }))).status).toBe(400);
+  });
+
   it("rejects a wrong feature count, NaN and out-of-range values", async () => {
     expect((await call(batch({ records: [record({ features: [0.1, 0.2] })] }))).status).toBe(400);
     const nan = record();

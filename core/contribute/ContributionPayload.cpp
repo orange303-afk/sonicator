@@ -52,7 +52,8 @@ Batch buildBatch(const std::vector<Record>& records, const Vocabulary& vocabular
     {
         if (out.size() >= maxRecordsPerBatch) break;
         if (record.recordId.isEmpty()) continue;
-        if ((int) record.features.size() != featureCount) continue;
+        const int expected = record.featureSchema == 2 ? 84 : featureCount;
+        if ((int) record.features.size() != expected) continue;
         const auto type = record.typeConfirmed ? cleanLabel(record.type) : juce::String();
 
         juce::Array<juce::var> tags;
@@ -77,7 +78,7 @@ Batch buildBatch(const std::vector<Record>& records, const Vocabulary& vocabular
         juce::Array<juce::var> features;
         for (const auto value : record.features) features.add((double) cleanFeature(value));
         entry->setProperty("features", features);
-        entry->setProperty("featureSchema", featureSchemaVersion);
+        entry->setProperty("featureSchema", record.featureSchema == 2 ? 2 : 1);
 
         if (type.isNotEmpty())
         {

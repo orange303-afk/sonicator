@@ -14,6 +14,7 @@ export interface Env {
 
 export const BATCH_SCHEMA = "contribute.v1";
 export const FEATURE_COUNT = 14;
+export const FEATURE_COUNT_V2 = 84;
 export const MAX_BODY_BYTES = 256 * 1024;
 export const MAX_RECORDS = 500;
 export const MAX_TEXT = 32;
@@ -92,7 +93,8 @@ function isRecord(value: unknown): value is BatchRecord {
   for (const name of Object.keys(record)) if (!allowed.has(name)) return false;
 
   if (!isUuid(record.recordId)) return false;
-  if (!Array.isArray(record.features) || record.features.length !== FEATURE_COUNT) return false;
+  const expectedFeatures = record.featureSchema === 2 ? FEATURE_COUNT_V2 : FEATURE_COUNT;
+  if (!Array.isArray(record.features) || record.features.length !== expectedFeatures) return false;
   if (!record.features.every((item) => isFiniteNumber(item, 0, 1))) return false;
   if (!isFiniteNumber(record.featureSchema, 1, 10_000)) return false;
   if (!Number.isInteger(record.featureSchema)) return false;
