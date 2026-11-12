@@ -63,6 +63,7 @@ must keep those notices next to the binary.
 | Source | Used for | Licence |
 |---|---|---|
 | [VelociLoops](https://github.com/kunitoki/VelociLoops) | The DWOP predictive decoder in `core/rex/Rex2Decoder.cpp` is adapted from `src/velociloops.cpp` | The Unlicense (public-domain dedication) |
+| [samplerdisc](https://github.com/bmxcode/samplerdisc) | E-mu Emulator X `.ebl` format documentation only (`docs/formats/emu-ebl.md`, `sample/emu_ebl.py`); the C++ decoder in `core/emu/` is an independent implementation, no code copied, linked or executed | MIT |
 
 No other source code was copied into this repository. Format specifications and public documentation were
 used as references; they are not redistributed.
