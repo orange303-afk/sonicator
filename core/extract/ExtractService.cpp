@@ -1,5 +1,6 @@
 #include "ExtractService.h"
 #include "EmbeddedSamples.h"
+#include "core/disc/DiscBrowserService.h"
 #include "core/export/AudioExporter.h"
 #include <algorithm>
 #include <cmath>
@@ -82,11 +83,37 @@ bool ExtractService::start(const std::vector<juce::File>& sources, const Extract
     waitForThreadToExit(-1);
     {
         std::lock_guard lock(stateMutex);
+        discJobs.clear();
         files = sources;
         options = requested;
         state = {};
         state.running = true;
         state.totalFiles = (int) files.size();
+        state.current = "Preparing";
+        fileResults.clear();
+    }
+    cancelled = false;
+    if (! startThread())
+    {
+        std::lock_guard lock(stateMutex);
+        state.running = false;
+        state.current = "Cannot start extract thread";
+        return false;
+    }
+    return true;
+}
+bool ExtractService::startDisc(const std::vector<DiscExtractJob>& jobs, const ExtractOptions& requested)
+{
+    if (isThreadRunning() || jobs.empty()) return false;
+    waitForThreadToExit(-1);
+    {
+        std::lock_guard lock(stateMutex);
+        files.clear();
+        discJobs = jobs;
+        options = requested;
+        state = {};
+        state.running = true;
+        state.totalFiles = (int) discJobs.size();
         state.current = "Preparing";
         fileResults.clear();
     }
@@ -122,6 +149,11 @@ void ExtractService::updateProgress(const std::function<void(ExtractProgress&)>&
     change(state);
 }
 void ExtractService::run()
+{
+    if (! discJobs.empty()) { runDisc(); return; }
+    runEmbedded();
+}
+void ExtractService::runEmbedded()
 {
     std::vector<ExtractFileResult> results;
     AudioExporter exporter;
@@ -328,5 +360,229 @@ void ExtractService::run()
     state.processedFiles = (int) files.size();
     state.fraction = state.cancelled ? state.fraction : 1.0;
     state.current.clear();
+}
+
+namespace {
+DiscBrowserService::Completion waitForDisc(DiscBrowserService& service, DiscBrowserService::Kind kind,
+                                           std::atomic<bool>& cancelled, juce::String& error)
+{
+    for (int waited = 0; waited < 120000; waited += 10)
+    {
+        if (cancelled.load())
+        {
+            error = "Cancelled";
+            service.close();
+            return {};
+        }
+        DiscBrowserService::Completion next;
+        while (service.poll(next))
+            if (next.kind == kind) return next;
+        juce::Thread::sleep(10);
+    }
+    error = "The image did not respond";
+    service.close();
+    return {};
+}
+} // namespace
+
+void ExtractService::runDisc()
+{
+    std::vector<ExtractFileResult> results;
+    AudioExporter exporter;
+    const int jobCount = (int) discJobs.size();
+    const auto publishFraction = [this, jobCount](int completedJobs, int entry, int entryCount)
+    {
+        updateProgress([completedJobs, entry, entryCount, jobCount](ExtractProgress& p)
+        {
+            const double total = jobCount > 0 ? (double) jobCount : 1.0;
+            const double within = entryCount > 0 ? (double) entry / (double) entryCount : 0.0;
+            p.fraction = juce::jlimit(0.0, 1.0, ((double) completedJobs + within) / total);
+        });
+    };
+    const auto failJob = [this, &results, publishFraction](ExtractFileResult& result, int index,
+                                                           const juce::String& error)
+    {
+        result.state = ExtractFileState::failed;
+        result.error = error.isNotEmpty() ? error : juce::String("Cannot read the image");
+        results.push_back(result);
+        updateProgress([index](ExtractProgress& p)
+        {
+            p.processedFiles = index + 1;
+            p.failed += 1;
+            p.current.clear();
+        });
+        publishFraction(index + 1, 0, 0);
+    };
+    for (int index = 0; index < jobCount; ++index)
+    {
+        if (cancelled.load())
+        {
+            for (int rest = index; rest < jobCount; ++rest)
+            {
+                ExtractFileResult skipped;
+                skipped.source = discJobs[(size_t) rest].image;
+                skipped.state = ExtractFileState::cancelled;
+                skipped.error = "Cancelled";
+                results.push_back(std::move(skipped));
+            }
+            break;
+        }
+        const auto job = discJobs[(size_t) index];
+        ExtractFileResult result;
+        result.source = job.image;
+        updateProgress([&job](ExtractProgress& p) { p.current = job.image.getFileName(); });
+
+        const auto parent = options.sameFolder ? job.image.getParentDirectory() : options.outputFolder;
+        if (! parent.isDirectory() && ! parent.createDirectory())
+        {
+            failJob(result, index, "Cannot create output folder: " + parent.getFullPathName());
+            continue;
+        }
+        DiscBrowserService service;
+        juce::String error;
+        service.requestOpen(job.image);
+        const auto opened = waitForDisc(service, DiscBrowserService::Kind::open, cancelled, error);
+        if (opened.status != DiscStatus::ready)
+        {
+            failJob(result, index, opened.error.isNotEmpty() ? opened.error : error);
+            continue;
+        }
+        // The filesystem records sample idents while it lists, so a selected entry is decoded
+        // only after the same recursive listing the browser performs.
+        service.requestList(opened.root, true);
+        const auto listed = waitForDisc(service, DiscBrowserService::Kind::list, cancelled, error);
+        if (listed.status != DiscStatus::ready)
+        {
+            failJob(result, index, listed.error.isNotEmpty() ? listed.error : error);
+            continue;
+        }
+        std::vector<DiscExtractEntry> entries = job.entries;
+        if (entries.empty())
+            for (const auto& entry : listed.listing.entries)
+                if (entry.kind == DiscEntryKind::file && entry.capability.isEmpty())
+                    entries.push_back({ entry.id, entry.partner, entry.displayName });
+        const auto folder = uniqueSampleFolder(parent,
+            folderStem(job.image.getFileNameWithoutExtension()));
+        if (folder == juce::File() || ! folder.createDirectory())
+        {
+            failJob(result, index, "Cannot create sample folder beside " + job.image.getFileName());
+            continue;
+        }
+        result.folder = folder;
+        const int entryCount = (int) entries.size();
+        updateProgress([entryCount](ExtractProgress& p) { p.totalSamples += entryCount; });
+        int ordinal = 0;
+        for (const auto& entry : entries)
+        {
+            ++ordinal;
+            if (cancelled.load())
+            {
+                result.state = ExtractFileState::cancelled;
+                result.error = "Cancelled";
+                updateProgress([](ExtractProgress& p) { p.cancelled = true; });
+                break;
+            }
+            service.requestDecode(entry.id, entry.name, entry.partner);
+            const auto decoded = waitForDisc(service, DiscBrowserService::Kind::decode, cancelled, error);
+            if (decoded.status != DiscStatus::ready || decoded.audio == nullptr)
+            {
+                ++result.failed;
+                result.problems.add(entry.name + ": "
+                    + (decoded.error.isNotEmpty() ? decoded.error
+                       : (error.isNotEmpty() ? error : juce::String("Cannot decode the sample"))));
+                updateProgress([](ExtractProgress& p)
+                {
+                    ++p.processedSamples;
+                    ++p.failed;
+                });
+                publishFraction(index, ordinal, entryCount);
+                continue;
+            }
+            if (AudioExporter::isEntirelySilent(*decoded.audio))
+            {
+                ++result.silent;
+                updateProgress([](ExtractProgress& p)
+                {
+                    ++p.processedSamples;
+                    ++p.skippedSilent;
+                });
+                publishFraction(index, ordinal, entryCount);
+                continue;
+            }
+            const auto destination = uniqueSampleFile(folder, ordinal, entry.name);
+            if (destination == juce::File())
+            {
+                ++result.failed;
+                result.problems.add(entry.name + ": Cannot allocate a unique file name");
+                updateProgress([](ExtractProgress& p)
+                {
+                    ++p.processedSamples;
+                    ++p.failed;
+                });
+                publishFraction(index, ordinal, entryCount);
+                continue;
+            }
+            const auto exported = exporter.exportSampleFile(*decoded.audio, destination,
+                options.normalize, [this] { return cancelled.load(); });
+            if (! exported.success)
+            {
+                if (exported.error.containsIgnoreCase("cancel"))
+                {
+                    result.state = ExtractFileState::cancelled;
+                    result.error = "Cancelled";
+                    updateProgress([](ExtractProgress& p) { p.cancelled = true; });
+                    break;
+                }
+                ++result.failed;
+                result.problems.add(entry.name + ": " + exported.error);
+                updateProgress([](ExtractProgress& p)
+                {
+                    ++p.processedSamples;
+                    ++p.failed;
+                });
+            }
+            else
+            {
+                ++result.written;
+                updateProgress([](ExtractProgress& p)
+                {
+                    ++p.processedSamples;
+                    ++p.written;
+                });
+            }
+            publishFraction(index, ordinal, entryCount);
+        }
+        if (result.state != ExtractFileState::cancelled) result.state = ExtractFileState::extracted;
+        results.push_back(result);
+        updateProgress([index](ExtractProgress& p)
+        {
+            p.processedFiles = index + 1;
+            p.current.clear();
+        });
+        publishFraction(index + 1, 0, 0);
+        if (result.state == ExtractFileState::cancelled)
+        {
+            for (int rest = index + 1; rest < jobCount; ++rest)
+            {
+                ExtractFileResult skipped;
+                skipped.source = discJobs[(size_t) rest].image;
+                skipped.state = ExtractFileState::cancelled;
+                skipped.error = "Cancelled";
+                results.push_back(std::move(skipped));
+            }
+            break;
+        }
+    }
+    std::lock_guard lock(stateMutex);
+    fileResults = std::move(results);
+    state.running = false;
+    state.processedFiles = jobCount;
+    state.fraction = state.cancelled ? state.fraction : 1.0;
+    state.current.clear();
+}
+
+bool isDiscExtractSource(const juce::File& file)
+{
+    return file.existsAsFile() && file.hasFileExtension("iso;img;bin;cue");
 }
 } // namespace sonicator

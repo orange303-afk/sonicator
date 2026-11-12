@@ -1,4 +1,5 @@
 #pragma once
+#include "DiscExtract.h"
 #include <juce_core/juce_core.h>
 #include <atomic>
 #include <functional>
@@ -46,18 +47,24 @@ public:
     ExtractService() : Thread("Extract samples") {}
     ~ExtractService() override;
     bool start(const std::vector<juce::File>& sources, const ExtractOptions&);
+    // Extracts samples of disc images: a whole image when `entries` is empty, otherwise exactly the
+    // listed records. Uses the same progress, results and output naming as embedded sources.
+    bool startDisc(const std::vector<DiscExtractJob>& jobs, const ExtractOptions&);
     void cancel();
     ExtractProgress progress() const;
     std::vector<ExtractFileResult> results() const;
     bool waitUntilFinished(int timeoutMs) { return waitForThreadToExit(timeoutMs); }
 private:
     std::vector<juce::File> files;
+    std::vector<DiscExtractJob> discJobs;
     ExtractOptions options;
     std::atomic<bool> cancelled { false };
     mutable std::mutex stateMutex;
     ExtractProgress state;
     std::vector<ExtractFileResult> fileResults;
     void run() override;
+    void runEmbedded();
+    void runDisc();
     void updateProgress(const std::function<void(ExtractProgress&)>&);
 };
 } // namespace sonicator
