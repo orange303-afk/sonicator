@@ -36,6 +36,7 @@ private:
     int dragStartHeight = 0;
 };
 class MainComponent final : public juce::Component,
+                            public juce::FileDragAndDropTarget,
                             private juce::Timer,
                             private juce::DarkModeSettingListener
 {
@@ -218,6 +219,12 @@ private:
     bool isSplitRunning() const { return splitter != nullptr && splitter->progress().running; }
     void startExtract(const std::vector<juce::File>& files,
                       const std::vector<DiscExtractJob>& discJobs = {});
+public:
+    // Pure decision used by the window itself: only disc images start an extract on drop.
+    static bool isDiscDropTarget(const juce::StringArray& files);
+    bool isInterestedInFileDrag(const juce::StringArray& files) override;
+    void filesDropped(const juce::StringArray& files, int x, int y) override;
+private:
     void finishExtract();
     void closeExtractDialog();
     void requestCloseExtract();

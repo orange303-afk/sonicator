@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/extract/ExtractCandidates.h"
+#include "ui/MainComponent.h"
 #include "TestHelpers.h"
 using namespace sonicator;
 
@@ -90,4 +91,17 @@ TEST_CASE("A selection without extractable rows yields no candidates", "[extract
     const auto missing = t.dir.getChildFile("gone.iso");
     std::vector<SampleRecord> selection { recordFor(wave), recordFor(missing) };
     REQUIRE(collectExtractCandidates(selection).empty());
+}
+
+TEST_CASE("The window accepts only disc images as file drops", "[extract][drop]")
+{
+    TestDirectory t;
+    const auto cue = touch(t, "a.cue");
+    const auto iso = touch(t, "b.iso");
+    const auto wav = touch(t, "a.wav");
+    REQUIRE(MainComponent::isDiscDropTarget({ cue.getFullPathName() }));
+    REQUIRE(MainComponent::isDiscDropTarget({ wav.getFullPathName(), iso.getFullPathName() }));
+    REQUIRE_FALSE(MainComponent::isDiscDropTarget({ wav.getFullPathName() }));
+    REQUIRE_FALSE(MainComponent::isDiscDropTarget({ t.dir.getFullPathName() }));
+    REQUIRE_FALSE(MainComponent::isDiscDropTarget({}));
 }

@@ -2155,6 +2155,29 @@ void MainComponent::requestCloseSplit()
     if (splitContent->isFinished() && splitContent->onOk) splitContent->onOk();
     closeSplitDialog();
 }
+bool MainComponent::isDiscDropTarget(const juce::StringArray& files)
+{
+    for (const auto& path : files)
+        if (isDiscExtractSource(juce::File(path))) return true;
+    return false;
+}
+bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files)
+{
+    return isDiscDropTarget(files);
+}
+void MainComponent::filesDropped(const juce::StringArray& files, int, int)
+{
+    std::vector<juce::File> images;
+    std::set<juce::String> seen;
+    for (const auto& path : files)
+    {
+        const juce::File file(path);
+        if (! isDiscExtractSource(file)) continue;
+        if (seen.insert(file.getFullPathName()).second) images.push_back(file);
+    }
+    if (images.empty()) return;
+    startExtract(images);
+}
 void MainComponent::startExtract(const std::vector<juce::File>& files,
                                  const std::vector<DiscExtractJob>& discJobs)
 {
