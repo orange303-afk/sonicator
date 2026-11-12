@@ -11,6 +11,7 @@
 #include "core/tagging/TaggingService.h"
 #include "core/tagging/AutoTagService.h"
 #include "core/split/SplitService.h"
+#include "core/extract/ExtractCandidates.h"
 #include "core/extract/ExtractService.h"
 #include "core/settings/AppSettings.h"
 #include "core/contribute/ContributionUploader.h"
@@ -134,6 +135,9 @@ private:
     bool splitScanApproved = false;
     juce::uint32 extractStartMs = 0;
     bool extractWasRunning = false;
+    // A mixed selection runs the embedded banks first; the disc jobs start when that batch ends.
+    std::vector<DiscExtractJob> pendingDiscExtract;
+    ExtractOptions pendingDiscOptions;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog, autoTagDialog;
     juce::Component::SafePointer<juce::Component> embeddedSettingsHost;
@@ -212,7 +216,8 @@ private:
     void closeSplitDialog();
     void requestCloseSplit();
     bool isSplitRunning() const { return splitter != nullptr && splitter->progress().running; }
-    void startExtract(const std::vector<juce::File>& files);
+    void startExtract(const std::vector<juce::File>& files,
+                      const std::vector<DiscExtractJob>& discJobs = {});
     void finishExtract();
     void closeExtractDialog();
     void requestCloseExtract();

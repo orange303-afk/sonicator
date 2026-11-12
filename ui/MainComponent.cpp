@@ -2155,9 +2155,10 @@ void MainComponent::requestCloseSplit()
     if (splitContent->isFinished() && splitContent->onOk) splitContent->onOk();
     closeSplitDialog();
 }
-void MainComponent::startExtract(const std::vector<juce::File>& files)
+void MainComponent::startExtract(const std::vector<juce::File>& files,
+                                 const std::vector<DiscExtractJob>& discJobs)
 {
-    if (files.empty() || extractor == nullptr) return;
+    if ((files.empty() && discJobs.empty()) || extractor == nullptr) return;
     if (isExtractRunning())
     {
         status.setText("Extract is already running.", juce::dontSendNotification);
@@ -2176,8 +2177,17 @@ void MainComponent::startExtract(const std::vector<juce::File>& files)
         if (extractDialog != nullptr) extractDialog->toFront(true);
         return;
     }
-    auto* dialog = new ExtractDialog(files, appSettings,
-        [safe = juce::Component::SafePointer<MainComponent>(this), files](ExtractOptions options) -> bool
+    // The dialog names every image and bank in the batch; entry jobs contribute their image.
+    auto dialogSources = files;
+    for (const auto& job : discJobs)
+    {
+        bool known = false;
+        for (const auto& existing : dialogSources)
+            if (existing == job.image) { known = true; break; }
+        if (! known) dialogSources.push_back(job.image);
+    }
+    auto* dialog = new ExtractDialog(dialogSources, appSettings,
+        [safe = juce::Component::SafePointer<MainComponent>(this), files, discJobs](ExtractOptions options) -> bool
         {
             if (safe == nullptr || safe->extractor == nullptr) return false;
             safe->appSettings.extractSameFolder = options.sameFolder;
@@ -2199,11 +2209,19 @@ void MainComponent::startExtract(const std::vector<juce::File>& files)
             catch (const std::exception&)
             {
             }
-            if (! safe->extractor->start(files, options)) return false;
+            if (! files.empty())
+            {
+                if (! safe->extractor->start(files, options)) return false;
+                // A mixed selection finishes the banks first; finishExtract starts the disc batch.
+                safe->pendingDiscExtract = discJobs;
+                safe->pendingDiscOptions = options;
+            }
+            else if (! safe->extractor->startDisc(discJobs, options)) return false;
             safe->extractStartMs = juce::Time::getMillisecondCounter();
             safe->extractWasRunning = true;
-            safe->status.setText("Extracting samples from " + juce::String((int) files.size())
-                + " file(s)", juce::dontSendNotification);
+            safe->status.setText("Extracting samples from "
+                + juce::String((int) (files.size() + discJobs.size())) + " source(s)",
+                juce::dontSendNotification);
             return true;
         });
     dialog->onCancel = [safe = juce::Component::SafePointer<MainComponent>(this)]
@@ -2228,6 +2246,19 @@ void MainComponent::startExtract(const std::vector<juce::File>& files)
 void MainComponent::finishExtract()
 {
     if (extractor == nullptr) return;
+    if (! pendingDiscExtract.empty())
+    {
+        auto jobs = std::move(pendingDiscExtract);
+        pendingDiscExtract.clear();
+        if (extractor->startDisc(jobs, pendingDiscOptions))
+        {
+            extractStartMs = juce::Time::getMillisecondCounter();
+            extractWasRunning = true;
+            status.setText("Extracting samples from " + juce::String((int) jobs.size())
+                + " image(s)", juce::dontSendNotification);
+            return;
+        }
+    }
     const auto results = extractor->results();
     const auto progress = extractor->progress();
     int filesDone = 0, filesFailed = 0;
@@ -2623,7 +2654,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         allIgnored = allIgnored && ignored;
         if (ignored && ! readRepo->hasExactIgnore(record.filePath)) anyInherited = true;
     }
-    std::vector<juce::File> existingFiles, splitCandidates, extractCandidates;
+    std::vector<juce::File> existingFiles, splitCandidates;
     for (const auto& record : selection)
     {
         const juce::File file(record.filePath);
@@ -2632,9 +2663,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         existingFiles.push_back(file);
         if (! FileScanner::isMetadataOnlyFormat(file)) splitCandidates.push_back(file);
     }
-    // Embedded sources are metadata-only for scanning, so they must be selected from the
-    // existing-file list rather than from the split candidates.
-    extractCandidates = embeddedSources(existingFiles);
+    // Embedded banks and disc images are metadata-only for scanning, and a disc sample row has a
+    // synthetic path, so they are collected from the records rather than from the file list.
+    const auto extractCandidates = collectExtractCandidates(selection,
+        [&ignoredPaths](const juce::String& path) { return isPathIgnored(path, ignoredPaths); });
     const auto assignments = readRepo->tagsForSamples(ids);
     std::map<int64_t, bool> allHave;
     for (const auto& tag : allTags)
@@ -2665,8 +2697,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     menu.addItem(9008, splitCandidates.size() > 1
         ? "Split by silence (" + juce::String((int) splitCandidates.size()) + ")..."
         : juce::String("Split by silence..."), ! splitCandidates.empty());
-    menu.addItem(9010, extractCandidates.size() > 1
-        ? "Extract samples from " + juce::String((int) extractCandidates.size()) + " files..."
+    menu.addItem(9010, extractCandidates.sourceCount() > 1
+        ? "Extract samples from " + juce::String(extractCandidates.sourceCount()) + " item(s)..."
         : juce::String("Extract samples..."), ! extractCandidates.empty());
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
@@ -2844,7 +2876,9 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                 }
                 else if (result == 9010)
                 {
-                    safe->startExtract(extractCandidates);
+                    auto files = extractCandidates.embedded;
+                    files.insert(files.end(), extractCandidates.images.begin(), extractCandidates.images.end());
+                    safe->startExtract(files, extractCandidates.entries);
                 }
                 else if (result == 9009)
                 {

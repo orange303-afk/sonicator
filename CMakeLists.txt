@@ -83,7 +83,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/database/Database.cpp core/database/PathRelocation.cpp core/database/SearchSyntax.cpp core/database/SampleRepository.cpp core/settings/AppSettings.cpp
     core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/dsp/RhythmAnalyzer.cpp core/dsp/AnalysisAudio.cpp core/dsp/TonalAnalyzer.cpp core/dsp/AcousticFeatures.cpp core/dsp/FastAcousticRules.cpp core/dsp/FeatureExtractorV2.cpp core/dsp/FeatureJson.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/PreviewReaderSource.cpp core/audio/SampleAudition.cpp core/audio/ContainerValidation.cpp
     core/export/AudioExporter.cpp core/export/SelectionExporter.cpp core/export/ExternalFileDrag.cpp
-    core/extract/EmbeddedSamples.cpp core/extract/ExtractService.cpp
+    core/extract/EmbeddedSamples.cpp core/extract/ExtractService.cpp core/extract/ExtractCandidates.cpp
     core/indexing/IndexingService.cpp core/split/SplitService.cpp core/split/SilenceDetector.cpp
     core/tagging/TaggingService.cpp core/tagging/AutoTagRules.cpp core/tagging/AutoTagService.cpp
     core/smart/SmartTypes.cpp core/smart/KeyNames.cpp core/smart/SmartResolver.cpp core/smart/NameHeuristics.cpp core/smart/WavMetadata.cpp core/smart/AiffMetadata.cpp core/smart/AbletonAsd.cpp core/smart/Rex2Metadata.cpp core/smart/SmartAnalysisService.cpp core/smart/AssetAnalyzer.cpp core/smart/RhythmCandidates.cpp core/smart/TonalCandidates.cpp core/smart/GenreContextExtractor.cpp core/smart/AcousticClassifierService.cpp
