@@ -150,7 +150,9 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
             for (const auto& candidate : existingCandidates)
                 if (candidate.field == SmartField::Type && candidate.textValue.isNotEmpty())
                     otherType = true;
-            if (adaptiveCandidate->source != "global_adaptive" || ! otherType)
+            const bool globalCandidate = adaptiveCandidate->source == "global_adaptive"
+                || adaptiveCandidate->source == "global_model";
+            if (! globalCandidate || ! otherType)
                 candidates.push_back(std::move(*adaptiveCandidate));
         }
     }

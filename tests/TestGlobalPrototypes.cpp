@@ -209,3 +209,11 @@ TEST_CASE("global_adaptive sits right below the user's own confirmation", "[cont
     CHECK(smartSourcePriority("global_adaptive") < smartSourcePriority("dsp_acoustic"));
     CHECK(smartSourceGroup("global_adaptive") == "adaptive");
 }
+
+TEST_CASE("global_model sits at the same rank as global_adaptive", "[contribute][training]")
+{
+    CHECK(smartSourcePriority("global_model") == smartSourcePriority("global_adaptive"));
+    CHECK(smartSourcePriority("global_model") == smartSourcePriority("user_adaptive") + 1);
+    CHECK(smartSourcePriority("global_model") < smartSourcePriority("dsp_acoustic"));
+    CHECK(smartSourceGroup("global_model") == "adaptive");
+}

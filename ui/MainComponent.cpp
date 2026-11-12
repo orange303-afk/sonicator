@@ -35,6 +35,10 @@ void loadShippedGlobalPrototypes()
                                              BinaryData::global_prototypes_jsonSize);
     if (! classifier.loadGlobalPrototypes(json))
         juce::Logger::writeToLog("Global prototypes were not loaded; using local feedback only");
+    const auto model = juce::String::fromUTF8(BinaryData::global_model_json,
+                                              BinaryData::global_model_jsonSize);
+    if (! classifier.loadGlobalModel(model))
+        juce::Logger::writeToLog("Global model was not loaded; schema-2 queries use local prototypes only");
 }
 bool isDiscImageFormat(const juce::String& format)
 {
@@ -3308,7 +3312,8 @@ void MainComponent::startContribution()
                 record.type = row.targetType;
                 record.typeConfirmed = row.typeConfirmed;
                 record.tags = row.tags;
-                record.features = row.features;
+                record.featureSchema = row.featureSchema >= 2 && row.featuresV2.size() == 84 ? 2 : 1;
+                record.features = record.featureSchema == 2 ? row.featuresV2 : row.features;
                 record.key = row.key;
                 record.bpm = row.bpm;
                 record.hasBpm = row.hasBpm;

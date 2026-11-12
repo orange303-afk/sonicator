@@ -13,7 +13,7 @@ public:
     struct Prediction {
         juce::String label;
         float score = 0.0f;
-        juce::String source; // user_adaptive or global_adaptive
+        juce::String source; // user_adaptive, global_adaptive or global_model
     };
 
     AdaptiveClassifier();

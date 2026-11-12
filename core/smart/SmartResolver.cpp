@@ -401,7 +401,7 @@ void applyOverride(const SmartOverrideMap& overrides, SmartField field, SmartRes
 int smartSourcePriority(const juce::String& source)
 {
     if (source == "user_adaptive") return -1;
-    if (source == "global_adaptive") return 0;
+    if (source == "global_adaptive" || source == "global_model") return 0;
     if (source == "rx2_recy") return 1;
     if (source == "rx2_glob") return 2;
     if (source == "wav_smpl" || source == "wav_inst") return 1;
@@ -417,7 +417,7 @@ int smartSourcePriority(const juce::String& source)
 }
 juce::String smartSourceGroup(const juce::String& source)
 {
-    if (source == "user_adaptive" || source == "global_adaptive") return "adaptive";
+    if (source == "user_adaptive" || source == "global_adaptive" || source == "global_model") return "adaptive";
     if (source == "filename" || source == "folder" || source == "path") return "name";
     if (source == "asd_warp") return "sidecar";
     if (source == "dsp" || source == "dsp_acoustic" || source == "ml_classifier") return "dsp";

@@ -62,7 +62,8 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     addAndMakeVisible(contributionNote);
     addAndMakeVisible(contributionPreview);
     addAndMakeVisible(contributionDelete);
-    contributionNote.setText("Sends confirmed types, tags, tempo and key plus acoustic numbers. No audio, "
+    contributionNote.setText("Sends confirmed types, tags, tempo and key plus acoustic numbers (14 values, "
+                             "or 84 on rows with the richer vector). No audio, "
                            "file names or paths. Off by default.", juce::dontSendNotification);
     contributionNote.setFont(noteFont());
     contributionNote.setJustificationType(juce::Justification::centredLeft);
@@ -113,6 +114,8 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         "Analysis: own DSP - YIN pitch, chroma key, spectral-flux rhythm, adaptive prototypes.\n"
         "No telemetry. Training data leaves only with your consent. No pretrained weights.\n"
         "REX2 decoder based on VelociLoops (Unlicense).\n"
+        "Model trained on NSynth, Freesound One-Shot Percussive Sounds, FSD50K, ESC-50 and UrbanSound8K; "
+        "see docs/DATA_CREDITS.md.\n"
         "Licensed under AGPL-3.0-or-later."),
         juce::dontSendNotification);
     creditsLabel.setFont(juce::FontOptions(10.5f));
@@ -121,10 +124,11 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     {
         const auto& classifier = AcousticClassifierService::getSharedAdaptiveClassifier();
         const auto generatedAt = classifier.globalGeneratedAt();
+        const auto kind = classifier.hasGlobalModel() ? "Global model" : "Global prototypes";
         prototypesLabel.setText(generatedAt.isNotEmpty()
-                ? "Global prototypes: " + generatedAt.substring(0, 10) + ", "
+                ? juce::String(kind) + ": " + generatedAt.substring(0, 10) + ", "
                       + juce::String(classifier.globalLabelCount()) + " labels"
-                : "Global prototypes: none in this build",
+                : juce::String(kind) + ": none in this build",
             juce::dontSendNotification);
         prototypesLabel.setFont(noteFont());
         prototypesLabel.setJustificationType(juce::Justification::centredLeft);
