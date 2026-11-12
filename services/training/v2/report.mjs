@@ -59,12 +59,15 @@ export function renderReport(report) {
   lines.push("## Сравнения на золотой выборке", "", comparisonTable(report.comparisons), "");
   const mode4 = report.comparisons.find((entry) => entry.mode === 4);
   const mode3 = report.comparisons.find((entry) => entry.mode === 3);
-  if (mode4 !== undefined && mode4.globalWins !== undefined) {
-    lines.push(`Публичная модель решила **${mode4.globalWins}** из **${mode4.records}** строк режима (4);`,
-      "остальные решила локальная часть. Причина — шкала: калиброванная вероятность публичной модели",
-      "монотонно отображается в точность и упирается в точность на `val`, а локальный косинус на сырых",
-      "признаках почти всегда выше 0.90. Поэтому режим (4) на этой выборке читается как «локальный v2 с",
-      "включённой публичной моделью», а не как прирост от публичных данных.", "");
+  if (mode4 !== undefined && mode4.globalWins === 0) {
+    lines.push(`Публичная модель решила **0** из **${mode4.records}** строк режима (4): её калиброванная`,
+      "вероятность упирается в точность на `val`, а локальный косинус на сырых признаках почти всегда",
+      "выше. Режим (4) на этой выборке читается как «локальный v2 с включённой публичной моделью», а не",
+      "как прирост от публичных данных.", "");
+  } else if (mode4 !== undefined && mode4.globalWins !== undefined) {
+    lines.push(`Публичная модель решила **${mode4.globalWins}** из **${mode4.records}** строк режима (4),`,
+      "остальные — локальная часть. Обе шкалы переведены в оценку точности, поэтому выбор между ними",
+      "осмысленный; там, где публичная модель уступает локальной (часть `fx`), решение остаётся локальным.", "");
   }
   if (mode3 !== undefined && (mode3.missingLabels ?? []).length > 0) {
     lines.push(`Меток нет в публичных данных, поэтому режим (3) не может их угадать: ${mode3.missingLabels.join(", ")}.`
@@ -85,6 +88,22 @@ export function renderReport(report) {
         return value === undefined ? "—" : percent(value);
       });
       lines.push(`| ${group} | ${cells.join(" | ")} |`);
+    }
+    lines.push("");
+  }
+
+  if (report.curves !== undefined) {
+    lines.push("## Порог приёма", "",
+      "Порог 0.80 применяется к оценке точности, а не к сырому косинусу: обе шкалы (локальный косинус и",
+      "вероятность публичной модели) переведены в «какую точность они на самом деле несут». Поэтому",
+      "покрытие ниже 100%, а точность при приёме что-то значит.", "",
+      "| порог | (1) покрытие | (1) точность | (4) покрытие | (4) точность |",
+      "|---|---|---|---|---|");
+    for (let i = 0; i < report.curves.one.length; i += 1) {
+      const one = report.curves.one[i];
+      const four = report.curves.four[i];
+      lines.push(`| ${one.threshold.toFixed(2)} | ${percent(one.coverage)} | ${percent(one.precision)} `
+        + `| ${percent(four.coverage)} | ${percent(four.precision)} |`);
     }
     lines.push("");
   }

@@ -7,14 +7,12 @@
 // Mode 3: the public model alone (cold start), on labels present in both datasets.
 // Mode 4: local leave-one-out plus the public model, with the app's 0.95 penalty and 0.02 margin.
 
-import { LOCAL_PRIORITY_MARGIN, TYPE_THRESHOLD, cosine, tagNames } from "../lib.mjs";
+import { LOCAL_PRIORITY_MARGIN, TYPE_THRESHOLD, tagNames } from "../lib.mjs";
 import { groupForType } from "../groups.mjs";
 import { STANDARD_TYPES } from "../standard.mjs";
+import { applyMap } from "./calibration.mjs";
+import { buildLocalIndex, localRanked } from "./local.mjs";
 import { predict } from "./models.mjs";
-
-function vectorOf(row, indices) {
-  return indices.map((index) => row.features[index]);
-}
 
 function isStandardLabel(row) {
   return typeof row.label === "string" && row.label.length > 0
@@ -25,35 +23,6 @@ function sortedCandidates(entries) {
   return entries.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
 }
 
-function buildLocalIndex(rows, indices) {
-  const index = new Map();
-  for (const row of rows) {
-    if (!row.label) continue;
-    const list = index.get(row.label) ?? [];
-    list.push({ row, vector: vectorOf(row, indices) });
-    index.set(row.label, list);
-  }
-  return index;
-}
-
-// The row under test is dropped by identity, so an identical vector on another row still counts as a
-// prototype while the row itself never votes for itself.
-function localRanked(row, index, indices) {
-  const vector = vectorOf(row, indices);
-  const entries = [];
-  for (const [label, list] of index) {
-    let best = 0;
-    for (const candidate of list) {
-      if (candidate.row === row || candidate.row.recordId === row.recordId) continue;
-      best = Math.max(best, cosine(vector, candidate.vector));
-    }
-    entries.push({ label, score: best, source: "local" });
-  }
-  return sortedCandidates(entries);
-}
-
-// The gold file can hold several rows of the same audio content (the same file_hash under two paths, or
-// an old copy). They share recordId, and a copy must not stand in as the "other" prototype for its twin.
 export function dedupeGold(rows) {
   const groups = new Map();
   for (const row of rows) {
@@ -94,7 +63,7 @@ function restrict(ranked, allowed) {
   return ranked.filter((entry) => allowed.has(entry.label));
 }
 
-export function evaluateGold({ gold, publicModel, scaler, mode, indices, minRowsPerLabel = 10 }) {
+export function evaluateGold({ gold, publicModel, scaler, mode, indices, minRowsPerLabel = 10, localMap = null }) {
   if (![1, 2, 3, 4].includes(mode)) throw new Error(`unknown mode ${mode}`);
   const counts = new Map();
   for (const row of gold)
@@ -128,6 +97,7 @@ export function evaluateGold({ gold, publicModel, scaler, mode, indices, minRows
     perGroup: [],
     perLabel: [],
     confusion: new Map(),
+    samples: [],
     tail: { records: 0, correct: 0 },
     recordsWithTags: 0,
   };
@@ -136,12 +106,15 @@ export function evaluateGold({ gold, publicModel, scaler, mode, indices, minRows
 
   for (const row of rows) {
     let ranked;
+    const local = mode === 1 || mode === 2 || mode === 4
+      ? sortedCandidates(localRanked(row, index, localIndices).map((entry) =>
+        (localMap === null ? entry : { ...entry, rawScore: entry.score, score: applyMap(localMap, entry.score) })))
+      : null;
     if (mode === 1 || mode === 2) {
-      ranked = localRanked(row, index, localIndices);
+      ranked = local;
     } else if (mode === 3) {
       ranked = restrict(predict(publicModel, scaler, row.features).ranked, intersection);
     } else {
-      const local = sortedCandidates(localRanked(row, index, localIndices));
       const global = restrict(predict(publicModel, scaler, row.features).ranked, intersection);
       const localBest = local.length > 0 ? local[0] : null;
       const globalBest = global.length > 0
@@ -166,6 +139,7 @@ export function evaluateGold({ gold, publicModel, scaler, mode, indices, minRows
     const hit = top !== null && top.label === truth;
     result.correct += hit ? 1 : 0;
     if (ranked.slice(0, 3).some((entry) => entry.label === truth)) result.top3 += 1;
+    result.samples.push({ score: top === null ? 0 : top.score, hit: hit ? 1 : 0 });
     if (top !== null && top.score >= TYPE_THRESHOLD) {
       result.accepted += 1;
       if (hit) result.acceptedCorrect += 1;

@@ -106,6 +106,10 @@ test("the report carries no path and no file name", () => {
       { mode: 4, name: "v2, local + public", top1: 0.9, top3: 0.95, coverage: 0.8, precision: 0.92, records: 24,
         globalWins: 3, perGroup: [{ group: "percussion", top1: 0.9 }, { group: "tonal", top1: 0.85 }] },
     ],
+    curves: {
+      one: [{ threshold: 0.8, coverage: 0.8, precision: 0.9 }],
+      four: [{ threshold: 0.8, coverage: 0.7, precision: 0.92 }],
+    },
     criteria: [{ name: "cold_start", value: "0.75", threshold: "0.70", pass: true }],
     ablation: [{ group: "G2", valDelta: "0.6", goldDelta: "0.1", kept: true }],
     confusion: { "snare/clap/hat/rim": { labels: ["snare", "hat"], cells: [[10, 2], [1, 9]] } },
@@ -118,6 +122,7 @@ test("the report carries no path and no file name", () => {
   assert.equal(text.includes(".wav"), false);
   assert.match(text, /Verification|Проверка|Критерии/i);
   assert.match(text, /По группам/);
+  assert.match(text, /Порог приёма/);
   assert.match(text, /решила \*\*3\*\* из \*\*24\*\*/);
   assert.match(text, /выбирались по этой же золотой выборке/);
 });

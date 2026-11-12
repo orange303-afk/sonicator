@@ -12,6 +12,7 @@ import { loadManifest, usedDatasets } from "./datasets.mjs";
 import { groupForType } from "./groups.mjs";
 import { STANDARD_TYPES } from "./standard.mjs";
 import { fitScaler, indicesFor, loadGold, loadPublic, prepare } from "./v2/features.mjs";
+import { fitLocalCalibration } from "./v2/calibration.mjs";
 import { dedupeGold, evaluateGold } from "./v2/evaluate.mjs";
 import { fitSimilarityMap, predict, trainCentroids, trainSoftmax } from "./v2/models.mjs";
 import { renderReport } from "./v2/report.mjs";
@@ -114,12 +115,12 @@ export function ablate({ train, val, gold, epochs = 300, patience = 20 }) {
   return { steps, indices: best.scaler.indices, groups, scaler: best.scaler };
 }
 
-function evaluateModes({ gold, model, scaler, indices }) {
+function evaluateModes({ gold, model, scaler, indices, localMaps }) {
   const modes = {
-    1: evaluateGold({ gold, publicModel: model, scaler, mode: 1, indices }),
-    2: evaluateGold({ gold, publicModel: model, scaler, mode: 2, indices }),
+    1: evaluateGold({ gold, publicModel: model, scaler, mode: 1, indices, localMap: localMaps.v1 }),
+    2: evaluateGold({ gold, publicModel: model, scaler, mode: 2, indices, localMap: localMaps.v2 }),
     3: evaluateGold({ gold, publicModel: model, scaler, mode: 3, indices }),
-    4: evaluateGold({ gold, publicModel: model, scaler, mode: 4, indices }),
+    4: evaluateGold({ gold, publicModel: model, scaler, mode: 4, indices, localMap: localMaps.v2 }),
   };
   return {
     modes,
@@ -240,6 +241,22 @@ function parseArgs(argv) {
   return options;
 }
 
+const CURVE_THRESHOLDS = [0.5, 0.6, 0.7, 0.8, 0.9];
+
+// The acceptance threshold decides how much of the library gets a label at all, so the report shows
+// the trade-off instead of one operating point.
+function coverageCurve(result) {
+  const total = result.samples.length;
+  return CURVE_THRESHOLDS.map((threshold) => {
+    const accepted = result.samples.filter((sample) => sample.score >= threshold);
+    return {
+      threshold,
+      coverage: total === 0 ? 0 : accepted.length / total,
+      precision: accepted.length === 0 ? 0 : accepted.filter((sample) => sample.hit === 1).length / accepted.length,
+    };
+  });
+}
+
 function groupNote(modes) {
   const top1 = (result, group) => (result.perGroup ?? []).find((entry) => entry.group === group)?.top1 ?? 0;
   return ["percussion", "tonal"]
@@ -259,7 +276,11 @@ function runPipeline({ train, val, test, gold, manifest, generatedAt, epochs, pa
   const m2Score = goldTop1(m2, scaler, gold);
   const chosen = chooseModel({ m1: { top1: m1Score }, m2: { top1: m2Score } });
   const model = chosen === "M2" ? m2 : m1;
-  const { modes, comparisons } = evaluateModes({ gold, model, scaler, indices: scaler.indices });
+  const localMaps = {
+    v1: fitLocalCalibration(gold, { indices: Array.from({ length: 14 }, (_, index) => index) }),
+    v2: fitLocalCalibration(gold, { indices: scaler.indices }),
+  };
+  const { modes, comparisons } = evaluateModes({ gold, model, scaler, indices: scaler.indices, localMaps });
   const file = buildModelFile({ model, scaler, generatedAt, manifest });
   const confusion = modes[4].confusion;
   return {
@@ -271,6 +292,7 @@ function runPipeline({ train, val, test, gold, manifest, generatedAt, epochs, pa
       generatedAt,
       choice: { m1: m1Score, m2: m2Score, chosen },
       comparisons,
+      curves: { one: coverageCurve(modes[1]), four: coverageCurve(modes[4]) },
       ablation: ablation.steps,
       featureCount: scaler.indices.length,
       groupNote: groupNote(modes),

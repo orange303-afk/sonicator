@@ -7,6 +7,7 @@
 // temperature on the validation split.
 
 import { cosine, selectPrototypes } from "../lib.mjs";
+import { applyMap, isotonicMap } from "./calibration.mjs";
 import { transform } from "./features.mjs";
 
 const EPSILON = 1e-12;
@@ -203,65 +204,18 @@ export function predict(model, scaler, features) {
   return { label: entries[0].label, score: entries[0].score, ranked: entries };
 }
 
-// Isotonic (pool-adjacent-violators) mapping from the calibrated probability to the precision the
-// model actually has at that probability. A linear layer gives no 0..1 "similarity" on its own, and
-// the app's thresholds are similarity thresholds, so the table is what makes them mean the same
-// thing as they do for the existing prototypes.
+// Isotonic map from the calibrated probability to the precision the model actually has at that
+// probability: a linear layer gives no 0..1 "similarity" of its own, and the app's thresholds are
+// similarity thresholds, so the table is what makes them mean the same thing.
 export function fitSimilarityMap(model, scaler, valRows) {
   if (valRows.length === 0) return [[0, 0], [1, 1]];
   const samples = valRows.map((row) => {
     const prediction = predict({ ...model, similarityMap: undefined }, scaler, row.features);
-    return { p: prediction.ranked[0].probability, hit: prediction.label === row.label ? 1 : 0 };
+    return { x: prediction.ranked[0].probability, hit: prediction.label === row.label ? 1 : 0 };
   });
-  samples.sort((a, b) => a.p - b.p || a.hit - b.hit);
-
-  const blocks = [];
-  for (const sample of samples) {
-    const last = blocks.at(-1);
-    if (last !== undefined && Math.abs(last.p - sample.p) < 1e-12) {
-      last.hits += sample.hit;
-      last.count += 1;
-    } else {
-      blocks.push({ p: sample.p, hits: sample.hit, count: 1 });
-    }
-  }
-  for (let i = 0; i < blocks.length; i += 1) blocks[i].precision = blocks[i].hits / blocks[i].count;
-
-  const pooled = [];
-  for (const block of blocks) {
-    pooled.push({ ...block });
-    while (pooled.length > 1
-      && pooled[pooled.length - 2].precision > pooled[pooled.length - 1].precision + 1e-12) {
-      const right = pooled.pop();
-      const left = pooled.pop();
-      pooled.push({
-        p: left.p,
-        hits: left.hits + right.hits,
-        count: left.count + right.count,
-        precision: (left.hits + right.hits) / (left.count + right.count),
-      });
-    }
-  }
-
-  const map = pooled.map((block) => [block.p, Math.min(1, Math.max(0, block.precision))]);
-  if (map[0][0] > 0) map.unshift([0, map[0][1]]);
-  if (map.at(-1)[0] < 1) map.push([1, map.at(-1)[1]]);
-  map[0] = [0, Math.min(map[0][1], map[1]?.[1] ?? 1)];
-  return map;
+  return isotonicMap(samples);
 }
 
 export function toSimilarity(map, probability) {
-  if (!Array.isArray(map) || map.length === 0) return probability;
-  const p = Math.min(1, Math.max(0, probability));
-  if (p <= map[0][0]) return map[0][1];
-  for (let i = 1; i < map.length; i += 1) {
-    const [rightP, rightS] = map[i];
-    if (p <= rightP) {
-      const [leftP, leftS] = map[i - 1];
-      if (rightP - leftP < 1e-12) return rightS;
-      const t = (p - leftP) / (rightP - leftP);
-      return leftS + (rightS - leftS) * t;
-    }
-  }
-  return map.at(-1)[1];
+  return applyMap(map, probability);
 }

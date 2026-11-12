@@ -112,3 +112,13 @@ node train.mjs --public out/wave1/features.jsonl \
 The gold file never carries a path (only `gold-v2.paths.jsonl` does, locally). The model candidate
 stays in `out/model-v2/`; `resources/` is not touched. `train.mjs` exits 0 once it has written both
 files, even when a criterion fails: the numbers are the owner's decision.
+
+### Stage 5b: one scale for local and public evidence
+
+A raw local cosine and a softmax probability are not comparable, so both are mapped to the precision
+they actually carry (`v2/calibration.mjs`). The local map is fitted with five folds cut by
+`recordId`, so two copies of the same audio never train the model that scores the other copy; the
+public map is fitted on the public `val` split. The app's 0.80 acceptance threshold then means
+"about 80% correct" for either source, the 0.95 penalty and 0.02 margin compare like with like, and
+the report shows the whole coverage → precision curve instead of one operating point. Mode (1) is
+reported at the same reading, which is why its coverage is no longer 100%.
