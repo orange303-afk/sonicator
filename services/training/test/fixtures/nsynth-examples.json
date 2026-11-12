@@ -1,0 +1,45 @@
+{
+  "bass_acoustic_001-003-025": {
+    "qualities": [0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+    "pitch": 49,
+    "note": 217499,
+    "instrument_source_str": "acoustic",
+    "velocity": 25,
+    "instrument_str": "bass_acoustic_001",
+    "instrument": 1,
+    "sample_rate": 16000,
+    "qualities_str": ["dark"],
+    "instrument_source": 0,
+    "note_str": "bass_acoustic_001-003-025",
+    "instrument_family": 0,
+    "instrument_family_str": "bass"
+  },
+  "bass_acoustic_001-007-025": {
+    "pitch": 53,
+    "instrument_source_str": "acoustic",
+    "instrument_str": "bass_acoustic_001",
+    "note_str": "bass_acoustic_001-007-025",
+    "instrument_family_str": "bass"
+  },
+  "bass_acoustic_001-011-025": {
+    "pitch": 57,
+    "instrument_source_str": "acoustic",
+    "instrument_str": "bass_acoustic_001",
+    "note_str": "bass_acoustic_001-011-025",
+    "instrument_family_str": "bass"
+  },
+  "mallet_acoustic_002-003-025": {
+    "pitch": 49,
+    "instrument_source_str": "acoustic",
+    "instrument_str": "mallet_acoustic_002",
+    "note_str": "mallet_acoustic_002-003-025",
+    "instrument_family_str": "mallet"
+  },
+  "vocal_synthetic_003-003-025": {
+    "pitch": 49,
+    "instrument_source_str": "synthetic",
+    "instrument_str": "vocal_synthetic_003",
+    "note_str": "vocal_synthetic_003-003-025",
+    "instrument_family_str": "vocal"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "licenseUrl": "http://creativecommons.org/licenses/by/4.0/",
+  "domain": "music",
+  "families": {
+    "bass": { "label": "bass", "group": "tonal" },
+    "brass": { "label": "brass", "group": "tonal" },
+    "guitar": { "label": "guitar", "group": "tonal" },
+    "keyboard": { "label": "keys", "group": "tonal" },
+    "organ": { "label": "keys", "group": "tonal" },
+    "string": { "label": "strings", "group": "tonal" },
+    "synth_lead": { "label": "lead", "group": "tonal" },
+    "vocal": { "label": "vocal", "group": "vocal" },
+    "flute": { "label": null, "group": "tonal" },
+    "mallet": { "label": null, "group": "tonal" },
+    "reed": { "label": null, "group": "tonal" }
+  }
+}
