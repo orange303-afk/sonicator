@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { groupForLabel, ingest, readVocabulary, typeForLabel } from "../datasets/fsd50k/ingest.mjs";
+import { groupForLabel, ingest, pickLabelAndGroup, readVocabulary, typeForLabel } from "../datasets/fsd50k/ingest.mjs";
 
 const fixtureRoot = fileURLToPath(new URL("fixtures", import.meta.url));
 
@@ -26,4 +26,10 @@ test("only CC0/BY clips are kept and the split follows the ground truth", () => 
   assert.deepEqual(one.extras.labels, ["Bass_drum", "Drum"]);
   assert.equal(one.label, "kick");
   assert.equal(one.group, "percussion");
+});
+
+test("the group comes from the label that produced the type", () => {
+  assert.deepEqual(pickLabelAndGroup(["Male_speech_and_man_speaking", "Hi-hat"]),
+    { label: "hat", group: "percussion", domain: "music" });
+  assert.equal(pickLabelAndGroup(["Door"]).group, "foley");
 });

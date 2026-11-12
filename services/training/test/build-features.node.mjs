@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { isShardDone, joinRows, planShards, validateFeatureLine } from "../build-features.mjs";
+import { checkShardCount, datasetDirectory, isShardDone, joinRows, parseArgs, planShards, validateFeatureLine } from "../build-features.mjs";
 
 const feature = (overrides = {}) => ({ featureSchema: 2, dimensions: 84, features: Array(84).fill(0.5), ...overrides });
 
@@ -36,4 +36,27 @@ test("a half-written shard is not treated as done", () => {
   assert.equal(isShardDone({ out, shard: "nsynth-test", expected: 2 }), true);
   writeFileSync(join(out, "nsynth-test.done"), "3\n");
   assert.equal(isShardDone({ out, shard: "nsynth-test", expected: 4 }), false);
+});
+
+test("joining counts rows whose clip has no label", () => {
+  const clip = { clipId: "a", file: "/data/a.wav", label: null };
+  const { unlabelled } = joinRows({ lines: [{ path: "/link/a.wav", ...feature() }], clipsByPath: new Map([["/link/a.wav", clip]]) });
+  assert.equal(unlabelled, 1);
+});
+
+test("dataset directories follow the names on disk, not the canonical splits", () => {
+  assert.match(datasetDirectory("/data", "nsynth", "val"), /nsynth-valid$/);
+  assert.match(datasetDirectory("/data", "fsd50k", "train"), /FSD50K\.dev_audio$/);
+  assert.match(datasetDirectory("/data", "fsd50k", "test"), /FSD50K\.eval_audio$/);
+});
+
+test("a non-numeric --jobs is refused instead of running nothing", () => {
+  assert.throws(() => parseArgs(["--out", "/tmp/x", "--jobs", "abc"]), /--jobs must be a positive integer/);
+  assert.throws(() => parseArgs(["--out", "/tmp/x", "--jobs", "0"]), /--jobs must be a positive integer/);
+});
+
+test("a short shard stops the run instead of being marked done", () => {
+  assert.doesNotThrow(() => checkShardCount({ shard: "s", lines: 3, expected: 3 }));
+  assert.throws(() => checkShardCount({ shard: "s", lines: 2, expected: 3 }), /wrote 2 of 3 lines/);
+  assert.doesNotThrow(() => checkShardCount({ shard: "s", lines: 99, expected: null }));
 });

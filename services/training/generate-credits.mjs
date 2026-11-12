@@ -2,6 +2,7 @@
 // Writes docs/DATA_CREDITS.md from the dataset registry. The file is committed, so the repository
 // carries the attribution the licences require without anyone having to remember it.
 
+import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import process from "node:process";
@@ -9,14 +10,23 @@ import { pathToFileURL } from "node:url";
 import { loadManifest } from "./datasets.mjs";
 
 const DEFAULT_OUTPUT = new URL("../../docs/DATA_CREDITS.md", import.meta.url);
+const AUTHORS_PATH = new URL("./datasets/cc-by-authors.json", import.meta.url);
 const COMPARE = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+function loadAuthors() {
+  try {
+    return JSON.parse(readFileSync(AUTHORS_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
 
 function tableRow(cells) {
   return `| ${cells.join(" | ")} |`;
 }
 
 // No timestamp and no machine paths, so the committed file is reproducible from the registry.
-export function renderCredits(entries) {
+export function renderCredits(entries, authors = loadAuthors()) {
   const byId = [...entries].sort((a, b) => COMPARE(a.id, b.id));
   const used = byId.filter((entry) => entry.used);
   const unused = byId.filter((entry) => !entry.used);
@@ -46,12 +56,22 @@ export function renderCredits(entries) {
     "",
     ...used.map((entry) => `- ${entry.creditLine} — ${entry.version}, ${entry.url}`),
     "",
+  ];
+  const attributed = Object.keys(authors).length > 0;
+  if (attributed) {
+    lines.push("## Authors of CC-BY clips used in the wave", "");
+    for (const [source, names] of Object.entries(authors).sort((a, b) => COMPARE(a[0], b[0]))) {
+      if (!Array.isArray(names) || names.length === 0) continue;
+      lines.push(`**${source}** — ${names.length} authors: ${names.join(", ")}`, "");
+    }
+  }
+  lines.push(
     "## Not used",
     "",
     ...unused.map((entry) =>
       `- **${entry.title}** (${entry.id}), level ${entry.tier}: ${entry.notes ?? "excluded"}`),
     "",
-  ];
+  );
   return lines.join("\n");
 }
 

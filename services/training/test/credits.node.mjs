@@ -36,3 +36,14 @@ test("the credits document is stable regardless of entry order", () => {
   const entries = loadManifest();
   assert.equal(renderCredits([...entries].reverse()), renderCredits(entries));
 });
+
+test("the committed authors list is sorted, unique and rendered", async () => {
+  const { readFileSync } = await import("node:fs");
+  const authors = JSON.parse(readFileSync(new URL("../datasets/cc-by-authors.json", import.meta.url), "utf8"));
+  assert.deepEqual(Object.keys(authors).sort(), ["freesound-one-shot-percussive", "fsd50k"]);
+  for (const names of Object.values(authors)) {
+    assert.ok(names.length > 0, "author list is empty");
+    assert.deepEqual(names, [...new Set(names)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+  }
+  assert.match(renderCredits(loadManifest(), authors), /Authors of CC-BY clips/);
+});

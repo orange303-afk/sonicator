@@ -18,6 +18,7 @@ export function summarise({ clips, rows }) {
   const perDomain = new Map();
   const licenses = new Map();
   const unmapped = new Map();
+  const unmappedLabels = new Map();
   const labels = new Map();
   const bands = { below01: 0, below05: 0, atLeast05: 0 };
   let lowBandShare = 0;
@@ -28,8 +29,11 @@ export function summarise({ clips, rows }) {
     count(perGroup, record.group ?? "?");
     count(perDomain, record.domain ?? "?");
     count(licenses, record.license ?? "?");
-    if (record.label === null || record.label === undefined) count(unmapped, record.source ?? "?");
-    else count(labels, record.label);
+    if (record.label === null || record.label === undefined) {
+      count(unmapped, record.source ?? "?");
+      const raw = (record.extras?.labels ?? [record.labelRaw]).filter((value) => typeof value === "string");
+      for (const value of raw) count(unmappedLabels, `${record.source ?? "?"}|${value}`);
+    } else count(labels, record.label);
     const share = record.inBandEnergyShare;
     if (typeof share === "number") {
       if (share < 0.1) {
@@ -48,6 +52,7 @@ export function summarise({ clips, rows }) {
     perDomain: toObject(perDomain),
     licenses: toObject(licenses),
     unmapped: toObject(unmapped),
+    unmappedLabels: toObject(unmappedLabels),
     labels: toObject(labels),
     lowBandShare,
     bands,
@@ -62,23 +67,44 @@ export function renderReport(summary, extra = {}) {
       lines.push(`| ${key} | ${value} |`);
     lines.push("");
   };
-  lines.push("# Волна 1: состав набора", "", `Строк: **${summary.total}**`, "");
+  lines.push("# Волна 1: состав набора", "", `Строк: **${summary.total}**`, "",
+    "NSynth `valid` и `test` содержат по 53 инструмента официального разбиения и делят инструменты между",
+    "собой (ноты не пересекаются), поэтому подбор по `val` переносится на `test` с этой оговоркой.", "");
   table("Источники", summary.perSource);
   table("Сплиты", summary.perSplit);
   table("Группы", summary.perGroup);
   table("Домены", summary.perDomain);
   table("Лицензии", summary.licenses);
   table("Без метки (label: null)", summary.unmapped);
+  const unmapped = Object.entries(summary.unmappedLabels ?? {})
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  if (unmapped.length > 0) {
+    lines.push("## Метки без соответствия", "", "| исходная метка | источник | клипов |", "|---|---|---|");
+    for (const [key, value] of unmapped) {
+      const [source, ...rest] = key.split("|");
+      lines.push(`| ${rest.join("|")} | ${source} | ${value} |`);
+    }
+    lines.push("");
+  }
   lines.push("## Полоса", "", `Ниже 0.1 доли энергии в 40–8000 Гц: **${summary.lowBandShare}**`, "",
     `- < 0.1: ${summary.bands.below01}`, `- 0.1–0.5: ${summary.bands.below05}`, `- ≥ 0.5: ${summary.bands.atLeast05}`, "");
   lines.push("## Метки", "", "| label | clips |", "|---|---|");
   const labels = Object.entries(summary.labels).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
   for (const [label, value] of labels) lines.push(`| ${label} | ${value} |`);
   lines.push("");
-  if (extra.skipped !== undefined) {
-    lines.push("## Отброшено при ингесте", "", "```json", JSON.stringify(extra.skipped, null, 2), "```", "");
+  if (extra.datasets !== undefined) {
+    lines.push("## Источники и объём", "", "| датасет | выгружено | вошло в волну | дата выгрузки |", "|---|---|---|---|");
+    for (const entry of extra.datasets)
+      lines.push(`| ${entry.id} | ${entry.clipsSeen} | ${entry.clipsUsed ?? "—"} | ${entry.downloadedAt ?? "—"} |`);
+    lines.push("");
   }
-  if (extra.unmatched !== undefined) lines.push(`Строк признаков без разметки: **${extra.unmatched}**.`, "");
+  if (extra.skipped !== undefined) {
+    lines.push("## Счётчики ингеста", "",
+      "`unmappedLabel` — клип оставлен с `label: null` и группой, а не отброшен.", "",
+      "```json", JSON.stringify(extra.skipped, null, 2), "```", "");
+  }
+  if (extra.unmatched !== undefined)
+    lines.push(`Строк признаков без клипа (unmatched): **${extra.unmatched}**.`, "");
   return lines.join("\n");
 }
 
@@ -91,10 +117,11 @@ function readJsonLines(file) {
 
 function main() {
   const argv = process.argv.slice(2);
-  const options = { in: null, doc: null };
+  const options = { in: null, doc: null, manifest: null };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--in") options.in = argv[++i];
     else if (argv[i] === "--doc") options.doc = argv[++i];
+    else if (argv[i] === "--manifest") options.manifest = argv[++i];
     else throw new Error(`unknown argument: ${argv[i]}`);
   }
   if (options.in === null) throw new Error("--in is required");
@@ -106,7 +133,13 @@ function main() {
     : {};
   const summary = summarise({ clips, rows });
   writeFileSync(join(directory, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
-  const report = renderReport(summary, { skipped: build.skipped, unmatched: build.unmatched });
+  const datasets = options.manifest === null ? undefined
+    : JSON.parse(readFileSync(resolve(options.manifest), "utf8"))
+      .filter((entry) => entry.used && entry.clipsSeen !== undefined)
+      .map((entry) => ({ id: entry.id, clipsSeen: entry.clipsSeen, clipsUsed: entry.clipsUsed,
+        downloadedAt: entry.downloadedAt }))
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+  const report = renderReport(summary, { skipped: build.skipped, unmatched: build.unmatched, datasets });
   writeFileSync(join(directory, "report.md"), report);
   if (options.doc !== null) writeFileSync(resolve(options.doc), report);
   process.stdout.write(`wave 1: ${summary.total} rows, ${summary.lowBandShare} below 0.1 band share\n`);
@@ -114,4 +147,11 @@ function main() {
 
 const invokedDirectly = process.argv[1] !== undefined
   && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
-if (invokedDirectly) main();
+if (invokedDirectly) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exit(1);
+  }
+}

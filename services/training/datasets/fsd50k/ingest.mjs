@@ -20,6 +20,18 @@ export function groupForLabel(label) {
   return { ...MAP.fallback };
 }
 
+// The type and the group must come from the same source label: with "Male_speech…, Hi-hat" the
+// first label names the type (hat), and taking the group from the first label would train a hat
+// inside the voice group.
+export function pickLabelAndGroup(labels) {
+  for (const candidate of labels) {
+    const type = typeForLabel(candidate);
+    if (type !== null) return { label: type, ...groupForLabel(candidate) };
+  }
+  if (labels.length === 0) return { label: null, ...MAP.fallback };
+  return { label: null, ...groupForLabel(labels[0]) };
+}
+
 // FSD50K ground truth is a quoted CSV: labels and mids are comma-separated inside quotes.
 export function parseCsv(text) {
   const rows = [];
@@ -96,26 +108,16 @@ export function ingest({ root, split }) {
       continue;
     }
     const labels = row.labels.split(",").map((label) => label.trim()).filter((label) => label.length > 0);
-    let label = null;
-    for (const candidate of labels) {
-      const type = typeForLabel(candidate);
-      if (type !== null) {
-        label = type;
-        break;
-      }
-    }
+    const { label, group, domain } = pickLabelAndGroup(labels);
     if (label === null) skipped.unmappedLabel += 1;
-    const mapped = labels.map((candidate) => groupForLabel(candidate));
-    const chosen = mapped.find((entry) => entry.group !== MAP.fallback.group) ?? mapped[0] ??
-      { group: MAP.fallback.group, domain: MAP.fallback.domain };
     clips.push(makeClip({
       source: "fsd50k",
       clipId,
       file,
       label,
       labelRaw: labels.join(","),
-      group: chosen.group,
-      domain: chosen.domain,
+      group,
+      domain,
       licenseUrl: details.license,
       split: split === "dev" ? row.split : "test",
       extras: { labels, uploader: details.uploader ?? "unknown" },

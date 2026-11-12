@@ -22,3 +22,9 @@ test("a row that carries the clip fields is used as it is", () => {
   assert.equal(report.perGroup.tonal, 1);
   assert.equal(report.labels.bass, 1);
 });
+
+test("unmapped raw labels are enumerated per source", () => {
+  const report = summarise({ clips: [{ ...clipB, labelRaw: "mallet", extras: { labels: ["mallet"] } }],
+    rows: [{ inBandEnergyShare: 0.9 }] });
+  assert.equal(report.unmappedLabels["nsynth|mallet"], 1);
+});

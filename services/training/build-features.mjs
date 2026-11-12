@@ -35,6 +35,7 @@ export function validateFeatureLine(line) {
 export function joinRows({ lines, clipsByPath }) {
   const rows = [];
   const unmatched = [];
+  let unlabelled = 0;
   for (const line of lines) {
     validateFeatureLine(line);
     const clip = clipsByPath.get(line.path);
@@ -44,8 +45,9 @@ export function joinRows({ lines, clipsByPath }) {
     }
     const { path: _path, ...features } = line;
     rows.push({ ...clip, ...features });
+    if (clip.label === null) unlabelled += 1;
   }
-  return { rows, unmatched };
+  return { rows, unmatched, unlabelled };
 }
 
 export function planShards(clips) {
@@ -74,7 +76,12 @@ export function isShardDone({ out, shard, expected }) {
   return countLines(file) === expected;
 }
 
-function parseArgs(argv) {
+export function checkShardCount({ shard, lines, expected }) {
+  if (expected !== null && lines !== expected)
+    throw new Error(`shard ${shard}: the CLI wrote ${lines} of ${expected} lines`);
+}
+
+export function parseArgs(argv) {
   const options = { root: process.env.SONICATOR_DATASETS_ROOT ?? DEFAULT_ROOT, out: null, jobs: Math.min(4, cpus().length),
     source: "all", cli: process.env.SONICATOR_FEATURES_CLI ?? DEFAULT_CLI, full: false };
   for (let i = 0; i < argv.length; i += 1) {
@@ -92,6 +99,7 @@ function parseArgs(argv) {
     else throw new Error(`unknown argument: ${argument}`);
   }
   if (options.out === null) throw new Error("--out is required");
+  if (!Number.isInteger(options.jobs) || options.jobs < 1) throw new Error("--jobs must be a positive integer");
   return options;
 }
 
@@ -117,9 +125,11 @@ function ingestSources({ root, source }) {
   return collected;
 }
 
-function datasetDirectory(root, source, split) {
-  if (source === "nsynth") return join(root, "nsynth", `nsynth-${split}`);
-  if (source === "fsd50k") return join(root, "fsd50k", `FSD50K.${split}_audio`);
+// The canonical split names in clips (train/val/test) differ from the directories on disk:
+// NSynth calls its validation split "valid", FSD50K keeps dev audio in one directory.
+export function datasetDirectory(root, source, split) {
+  if (source === "nsynth") return join(root, "nsynth", `nsynth-${split === "val" ? "valid" : split}`);
+  if (source === "fsd50k") return join(root, "fsd50k", split === "test" ? "FSD50K.eval_audio" : "FSD50K.dev_audio");
   return join(root, "freesound-one-shot-percussive", "one_shot_percussive_sounds");
 }
 
@@ -205,7 +215,8 @@ async function main() {
 
   await runPool(shards, options.jobs, async (shard) => {
     const output = join(out, `${shard.name}.features.jsonl`);
-    if (isShardDone({ out, shard: shard.name, expected: expected.get(shard.name) })) {
+    const shardExpected = options.full ? null : expected.get(shard.name);
+    if (!options.full && isShardDone({ out, shard: shard.name, expected: shardExpected })) {
       process.stderr.write(`shard ${shard.name}: already done\n`);
       return;
     }
@@ -213,20 +224,23 @@ async function main() {
     process.stderr.write(`shard ${shard.name}: ${shard.clips.length} files\n`);
     await runCli({ cli: options.cli, input: shard.directory, output });
     const lines = countLines(output);
-    if (lines !== expected.get(shard.name))
-      process.stderr.write(`shard ${shard.name}: CLI wrote ${lines} of ${expected.get(shard.name)} lines\n`);
+    // The CLI exits 0 when it skipped files, so a short shard must stop the run: a marker here
+    // would make every later run recompute the same truncated file.
+    checkShardCount({ shard: shard.name, lines, expected: shardExpected });
     writeFileSync(join(out, `${shard.name}.done`), `${lines}\n`);
     process.stderr.write(`shard ${shard.name}: done in ${Math.round((Date.now() - started) / 1000)}s\n`);
   });
 
   const rows = [];
   const unmatched = [];
+  let unlabelled = 0;
   for (const shard of shards) {
     const file = join(out, `${shard.name}.features.jsonl`);
-    if (!existsSync(file)) continue;
+    if (!existsSync(file)) throw new Error(`shard ${shard.name}: no feature file at ${file}`);
     const joined = joinRows({ lines: parseJsonLines(file), clipsByPath: paths });
     rows.push(...joined.rows);
     unmatched.push(...joined.unmatched);
+    unlabelled += joined.unlabelled;
   }
   rows.sort((a, b) => {
     if (a.source !== b.source) return a.source < b.source ? -1 : 1;
@@ -239,7 +253,9 @@ async function main() {
     generatedFrom: root,
     clips: clips.length,
     rows: rows.length,
+    missing: clips.length - rows.length,
     unmatched: unmatched.length,
+    unlabelled,
     perSource: Object.fromEntries(Object.entries(collected.seen)),
     skipped: collected.skipped,
     dimensions: FEATURE_DIMENSIONS_V2,
