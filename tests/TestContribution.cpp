@@ -536,11 +536,15 @@ TEST_CASE("A batch may carry tags without a type", "[contribute]")
 
 TEST_CASE("A type offered by the Type menu counts as standard", "[contribute]")
 {
+    // Pluck is offered by the Type menu but is not inferred from a filename, so it exercises
+    // the menu-only path; Piano is now both a menu entry and a filename token.
+    CHECK(standardSampleTypeNames().contains("Pluck", true));
+    CHECK_FALSE(canonicalSmartTypeNames().contains("Pluck", true));
     CHECK(standardSampleTypeNames().contains("Piano", true));
-    CHECK_FALSE(canonicalSmartTypeNames().contains("Piano", true));
+    CHECK(canonicalSmartTypeNames().contains("Piano", true));
 
     auto records = oneRecord();
-    records[0].type = "Piano";
+    records[0].type = "Pluck";
     Vocabulary shipped;
     shipped.types = standardSampleTypeNames();
     shipped.tags = vocabulary().tags;
