@@ -9,6 +9,7 @@
     "build": "node build-prototypes.mjs",
     "evaluate": "node evaluate.mjs",
     "candidates": "node candidates.mjs",
-    "credits": "node generate-credits.mjs"
+    "credits": "node generate-credits.mjs",
+    "train": "node train.mjs"
   }
 }

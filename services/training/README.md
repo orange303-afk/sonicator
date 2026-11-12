@@ -90,3 +90,25 @@ metadata, which the ingest step will read.
 
 A future plan adds `featureSchema 2`, a feature extraction CLI for the datasets above and `--max-tier`
 for rebuilding without level B sources.
+
+## Stage 5: gold sample, ablation and model choice
+
+The v2 path is separate from the schema-1 prototypes above: `v2/` holds the feature groups, the shared
+scaler and the two candidate models, and `train.mjs` drives them.
+
+```bash
+# 1. one read-only pass over the owner's catalog, outside the repository
+~/Library/Caches/sonicator-build/release/tools/sonicator-features/sonicator-features_artefacts/Release/sonicator-features \
+    --catalog "$HOME/Library/Sonicator/sonicator.sqlite" \
+    --out "$HOME/Library/Application Support/Sonicator/training/gold-v2.jsonl" \
+    --paths "$HOME/Library/Application Support/Sonicator/training/gold-v2.paths.jsonl"
+
+# 2. train, ablate, evaluate and write the report
+node train.mjs --public out/wave1/features.jsonl \
+    --gold "$HOME/Library/Application Support/Sonicator/training/gold-v2.jsonl" \
+    --out out/model-v2 --doc ../../docs/TRAINING_REPORT_V2.md
+```
+
+The gold file never carries a path (only `gold-v2.paths.jsonl` does, locally). The model candidate
+stays in `out/model-v2/`; `resources/` is not touched. `train.mjs` exits 0 once it has written both
+files, even when a criterion fails: the numbers are the owner's decision.
