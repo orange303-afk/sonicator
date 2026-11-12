@@ -86,8 +86,9 @@ std::vector<unsigned char> akaiImage()
     putFileRecord(image, 4 * block, 0, "KICK", 0x73, 9000, 6);
     putFileRecord(image, 4 * block, 1, "PROG", 0x70, 0, 0);
     putFileRecord(image, 9 * block, 0, "SNARE", 0xf3, 100, 4);
-    putFileRecord(image, 9 * block, 1, "PAIR .L", 0x73, 158, 5);
-    putFileRecord(image, 9 * block, 2, "PAIR .R", 0x73, 158, 6);
+    // VOL TWO is an S3000 volume, so its sample headers are 192 bytes (192 + 4 frames * 2).
+    putFileRecord(image, 9 * block, 1, "PAIR .L", 0x73, 200, 5);
+    putFileRecord(image, 9 * block, 2, "PAIR .R", 0x73, 200, 6);
     putFatAt(image, 0, 6, 7);
     putFatAt(image, 0, 7, 0x00c0);
     putFatAt(image, 8 * block, 4, 0x00c0);
@@ -110,7 +111,7 @@ std::vector<unsigned char> akaiImage()
         const short values[4] = { (short) (i == 0 ? 1000 : -1000), (short) (i == 0 ? 2000 : -2000),
                                   (short) (i == 0 ? 3000 : -3000), (short) (i == 0 ? 4000 : -4000) };
         for (int f = 0; f < 4; ++f)
-            putLe16(image, at + 150 + (size_t) f * 2, (uint16_t) values[f]);
+            putLe16(image, at + 192 + (size_t) f * 2, (uint16_t) values[f]);
     }
     return image;
 }

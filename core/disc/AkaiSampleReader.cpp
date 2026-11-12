@@ -19,7 +19,8 @@ uint32_t le32(const std::byte* p)
 } // namespace
 
 DiscResult<AkaiSampleHeader> readAkaiSampleHeader(const ReadOnlyByteSource& source,
-                                                  uint64_t declaredBytes, CancelCheck cancel)
+                                                  uint64_t declaredBytes, CancelCheck cancel,
+                                                  uint32_t expectedHeaderBytes)
 {
     DiscResult<AkaiSampleHeader> result;
     if (cancel && cancel()) { result.status = DiscStatus::cancelled; return result; }
@@ -67,8 +68,30 @@ DiscResult<AkaiSampleHeader> readAkaiSampleHeader(const ReadOnlyByteSource& sour
         result.error = "unverified Akai sample header variant (header/data size mismatch)";
         return result;
     }
-    if (declaredBytes == s1000HeaderBytes + dataBytes) parsed.headerBytes = s1000HeaderBytes;
-    else if (declaredBytes == s3000HeaderBytes + dataBytes) parsed.headerBytes = s3000HeaderBytes;
+    const bool fitsS1000 = declaredBytes == s1000HeaderBytes + dataBytes;
+    const bool fitsS3000 = declaredBytes == s3000HeaderBytes + dataBytes;
+    if (expectedHeaderBytes == s3000HeaderBytes)
+    {
+        if (! fitsS3000)
+        {
+            result.status = DiscStatus::unsupported;
+            result.error = "unverified Akai sample header variant (S3000 volume, header/data size mismatch)";
+            return result;
+        }
+        parsed.headerBytes = s3000HeaderBytes;
+    }
+    else if (expectedHeaderBytes == s1000HeaderBytes)
+    {
+        if (! fitsS1000)
+        {
+            result.status = DiscStatus::unsupported;
+            result.error = "unverified Akai sample header variant (S1000 volume, header/data size mismatch)";
+            return result;
+        }
+        parsed.headerBytes = s1000HeaderBytes;
+    }
+    else if (fitsS1000) parsed.headerBytes = s1000HeaderBytes;
+    else if (fitsS3000) parsed.headerBytes = s3000HeaderBytes;
     else
     {
         result.status = DiscStatus::unsupported;
@@ -90,10 +113,17 @@ DiscResult<AkaiSampleHeader> readAkaiSampleHeader(const ReadOnlyByteSource& sour
 }
 
 DiscResult<std::vector<int16_t>> readAkaiPcm16(const ReadOnlyByteSource& source,
-                                               const AkaiSampleHeader& header, CancelCheck cancel)
+                                               const AkaiSampleHeader& header, CancelCheck cancel,
+                                               uint64_t maxDecodedBytes)
 {
     DiscResult<std::vector<int16_t>> result;
     if (cancel && cancel()) { result.status = DiscStatus::cancelled; return result; }
+    if ((uint64_t) header.frames * sizeof(int16_t) > maxDecodedBytes)
+    {
+        result.status = DiscStatus::limitExceeded;
+        result.error = "Akai sample exceeds the decoded memory limit";
+        return result;
+    }
     const uint64_t needed = (uint64_t) header.headerBytes + (uint64_t) header.frames * 2;
     if (header.frames == 0 || needed > source.size())
     {
@@ -125,12 +155,13 @@ DiscResult<std::vector<int16_t>> readAkaiPcm16(const ReadOnlyByteSource& source,
 }
 
 DiscResult<SampleAudioPtr> decodeAkaiSample(ByteSourcePtr source, uint64_t declaredBytes,
-                                            const DiscLimits& limits, CancelCheck cancel)
+                                            const DiscLimits& limits, CancelCheck cancel,
+                                            uint32_t expectedHeaderBytes)
 {
     DiscResult<SampleAudioPtr> result;
     if (source == nullptr) { result.status = DiscStatus::ioError; result.error = "no sample source"; return result; }
     if (cancel && cancel()) { result.status = DiscStatus::cancelled; return result; }
-    const auto header = readAkaiSampleHeader(*source, declaredBytes, cancel);
+    const auto header = readAkaiSampleHeader(*source, declaredBytes, cancel, expectedHeaderBytes);
     if (! header.ok()) { result.status = header.status; result.error = header.error; return result; }
     const uint64_t headerLength = header.value.headerBytes;
     const uint64_t frames = header.value.frames;

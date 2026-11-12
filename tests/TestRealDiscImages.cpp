@@ -100,7 +100,6 @@ struct RecordDecode
     DiscEntryId id;
     juce::String name;
     AkaiSampleHeader header;
-    SampleAudioPtr audio;
     bool stereoPartner = false;
     uint64_t declaredBytes = 0;
 };
@@ -110,10 +109,13 @@ struct RecordDecode
 // name field at bytes 3..14 instead.
 std::vector<RecordDecode> decodeAllRecords(AkaiFilesystem& fs, int& failures,
                                            juce::StringArray& failureLines, int& invalidHeaders,
-                                           int& partitions,
-                                           int& volumes, int& programs, int& mergedSamples,
-                                           int& stereoEntries, int& header150, int& header192,
-                                           bool decodeAudio = true)
+                                           int& partitions, int& volumes, int& programs,
+                                           int& mergedSamples, int& stereoEntries, int& header150,
+                                           int& header192, int& audible, int& unsupportedEntries,
+                                           int& invalidSampleRecords, juce::StringArray& invalidNames,
+                                           juce::StringArray& unsupportedNames,
+                                           bool decodeAudio = true,
+                                           SampleAudioPtr* firstAudio = nullptr)
 {
     std::vector<RecordDecode> records;
     auto decodeOne = [&](DiscEntryId id, bool partner, const juce::String& label)
@@ -151,13 +153,35 @@ std::vector<RecordDecode> decodeAllRecords(AkaiFilesystem& fs, int& failures,
             if (failureLines.size() < 20) failureLines.add(label + ": " + header.error + detail);
             return;
         }
-        const auto audio = decodeAudio ? decodeAkaiSample(extent.value, extent.value->size(), {}, {})
-                                       : DiscResult<SampleAudioPtr> { DiscStatus::ready, {}, {} };
-        if (! audio.ok())
+        if (decodeAudio)
         {
-            ++failures;
-            if (failureLines.size() < 20) failureLines.add(label + ": " + audio.error);
-            return;
+            // Decode one record at a time and keep only its verdict, so a large disc does not
+            // hold every sample at once. The first decoded source is kept for the app-path check.
+            const auto audio = decodeAkaiSample(extent.value, extent.value->size(), {}, {});
+            if (! audio.ok())
+            {
+                ++failures;
+                if (failureLines.size() < 20) failureLines.add(label + ": " + audio.error);
+                return;
+            }
+            float peak = 0;
+            bool finite = true, inRange = true;
+            for (float value : audio.value->left)
+            {
+                finite = finite && std::isfinite(value);
+                inRange = inRange && std::abs(value) <= 1.0f;
+                peak = juce::jmax(peak, std::abs(value));
+            }
+            if (! finite || ! inRange || audio.value->frames <= 0 || audio.value->sampleRate <= 0
+                || audio.value->channels != 1
+                || audio.value->left.size() != (size_t) audio.value->frames)
+            {
+                ++failures;
+                if (failureLines.size() < 20) failureLines.add(label + ": decoded audio is not valid");
+                return;
+            }
+            if (peak > 0.001f) ++audible;
+            if (firstAudio != nullptr && *firstAudio == nullptr) *firstAudio = audio.value;
         }
         std::array<std::byte, 16> head {};
         juce::String name = label;
@@ -165,7 +189,7 @@ std::vector<RecordDecode> decodeAllRecords(AkaiFilesystem& fs, int& failures,
             name = AkaiFilesystem::decodeName(head.data() + 3, 12);
         if (header.value.headerBytes == 150) ++header150;
         else if (header.value.headerBytes == 192) ++header192;
-        records.push_back({ id, name, header.value, audio.value, partner, extent.value->size() });
+        records.push_back({ id, name, header.value, partner, extent.value->size() });
     };
     const auto roots = fs.list(fs.root(), {});
     REQUIRE(roots.ok());
@@ -186,7 +210,19 @@ std::vector<RecordDecode> decodeAllRecords(AkaiFilesystem& fs, int& failures,
                     ++programs;
                     continue;
                 }
-                if (entry.kind != DiscEntryKind::file || entry.capability.isNotEmpty()) continue;
+                if (entry.kind == DiscEntryKind::unknown || entry.capability.isNotEmpty())
+                {
+                    ++unsupportedEntries;
+                    if (entry.capability.containsIgnoreCase("invalid start"))
+                    {
+                        ++invalidSampleRecords;
+                        if (invalidNames.size() < 10) invalidNames.add(entry.displayName);
+                    }
+                    if (unsupportedNames.size() < 10)
+                        unsupportedNames.add(entry.displayName + " (" + entry.capability + ")");
+                    continue;
+                }
+                if (entry.kind != DiscEntryKind::file) continue;
                 ++mergedSamples;
                 if (entry.stereo) ++stereoEntries;
                 const auto label = volume.displayName + "/" + entry.displayName;
@@ -290,15 +326,20 @@ TEST_CASE("Opt-in real disc image catalogue", "[.disc-corpus]")
 
         int failures = 0, partitions = 0, volumes = 0, programs = 0, mergedSamples = 0;
         int stereoEntries = 0, header150 = 0, header192 = 0, invalidHeaders = 0;
-        juce::StringArray failureLines;
+        int audible = 0, unsupportedEntries = 0, invalidSampleRecords = 0;
+        juce::StringArray unsupportedNames, invalidNames, failureLines;
+        SampleAudioPtr firstAudio;
         const auto records = decodeAllRecords(fs, failures, failureLines, invalidHeaders, partitions,
                                               volumes, programs, mergedSamples, stereoEntries,
-                                              header150, header192);
+                                              header150, header192, audible, unsupportedEntries,
+                                              invalidSampleRecords, invalidNames, unsupportedNames,
+                                              true, &firstAudio);
         INFO("failures:\n" << failureLines.joinIntoString("\n"));
         INFO("partitions=" << partitions << " volumes=" << volumes << " programs=" << programs
              << " samples=" << mergedSamples << " records=" << records.size()
              << " stereo=" << stereoEntries << " headers150=" << header150
-             << " headers192=" << header192 << " invalidHeaders=" << invalidHeaders);
+             << " headers192=" << header192 << " invalidHeaders=" << invalidHeaders
+             << " unsupportedEntries=" << unsupportedEntries << " audible=" << audible);
         REQUIRE(failures == 0);
         // A handful of records on a real disc carry a zero rate field: invalid in the source.
         const auto allRecords = (int) records.size() + invalidHeaders;
@@ -306,28 +347,13 @@ TEST_CASE("Opt-in real disc image catalogue", "[.disc-corpus]")
         REQUIRE(partitions >= 1);
         REQUIRE(volumes >= 1);
         REQUIRE_FALSE(records.empty());
-
-        int audible = 0;
-        for (const auto& record : records)
-        {
-            INFO(record.name << ": " << record.audio->frames << " frames at "
-                 << record.audio->sampleRate);
-            REQUIRE(record.audio->frames > 0);
-            REQUIRE(record.audio->sampleRate > 0);
-            REQUIRE(record.audio->channels == 1);
-            REQUIRE(record.audio->left.size() == (size_t) record.audio->frames);
-            float peak = 0;
-            bool finite = true, inRange = true;
-            for (float value : record.audio->left)
-            {
-                finite = finite && std::isfinite(value);
-                inRange = inRange && std::abs(value) <= 1.0f;
-                peak = juce::jmax(peak, std::abs(value));
-            }
-            REQUIRE(finite);
-            REQUIRE(inRange);
-            if (peak > 0.001f) ++audible;
-        }
+        INFO("unsupported: " << unsupportedNames.joinIntoString(" | "));
+        INFO("sample records with an invalid start or size: " << invalidNames.joinIntoString(", "));
+        // Other Akai file types (QL1, TL1, effects and drum files) are expected here; a sample
+        // record with an invalid start or size is not.
+        // Real discs carry a few damaged records (Real Mega Rhythm has 59 of 1,911); a change
+        // that invalidates a large share of the catalogue must still fail here.
+        REQUIRE(invalidSampleRecords * 10 <= mergedSamples);
         REQUIRE(audible * 100 >= (int) records.size() * 95);
 
         // A verified stereo pair decodes as two channels through the merged entry.
@@ -390,10 +416,12 @@ TEST_CASE("Opt-in real disc image catalogue", "[.disc-corpus]")
             PreviewPanel preview(engine, exports.dir.getChildFile("cache"),
                                  exports.dir.getChildFile("exports"));
             const auto& sample = records.front();
-            REQUIRE(preview.loadDiscSample(file, sample.name, sample.audio, false, 0, 0, false, false));
+            REQUIRE(firstAudio != nullptr);
+            REQUIRE(preview.loadDiscSample(file, firstAudio != nullptr ? sample.name : juce::String(),
+                                           firstAudio, false, 0, 0, false, false));
             REQUIRE(engine.isDiscMode());
             REQUIRE(preview.waveformLength()
-                    == Catch::Approx((double) sample.audio->frames / sample.audio->sampleRate).margin(1.0e-6));
+                    == Catch::Approx((double) firstAudio->frames / firstAudio->sampleRate).margin(1.0e-6));
             preview.selectRange(0.0, preview.waveformLength());
             REQUIRE(preview.waitForSelectionPreparation(10000));
             REQUIRE(preview.isSelectionReady());
@@ -401,15 +429,15 @@ TEST_CASE("Opt-in real disc image catalogue", "[.disc-corpus]")
             formats.registerBasicFormats();
             std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(preview.preparedSelection()));
             REQUIRE(reader != nullptr);
-            REQUIRE(reader->lengthInSamples == sample.audio->frames);
-            REQUIRE(reader->sampleRate == sample.audio->sampleRate);
-            juce::AudioBuffer<float> decoded(1, (int) sample.audio->frames);
-            REQUIRE(reader->read(&decoded, 0, (int) sample.audio->frames, 0, true, false));
+            REQUIRE(reader->lengthInSamples == firstAudio->frames);
+            REQUIRE(reader->sampleRate == firstAudio->sampleRate);
+            juce::AudioBuffer<float> decoded(1, (int) firstAudio->frames);
+            REQUIRE(reader->read(&decoded, 0, (int) firstAudio->frames, 0, true, false));
             // The WAV writer quantises to 16 bits, so a round trip may differ by one LSB.
             float maxDifference = 0;
-            for (int i = 0; i < (int) sample.audio->frames; ++i)
+            for (int i = 0; i < (int) firstAudio->frames; ++i)
                 maxDifference = juce::jmax(maxDifference,
-                                           std::abs(decoded.getSample(0, i) - sample.audio->left[(size_t) i]));
+                                           std::abs(decoded.getSample(0, i) - firstAudio->left[(size_t) i]));
             REQUIRE(maxDifference <= 1.0f / 32768.0f);
             preview.clearDiscSource();
             REQUIRE_FALSE(engine.isDiscMode());
@@ -443,7 +471,8 @@ TEST_CASE("Opt-in Akai PCM matches a reference conversion", "[.disc-reference]")
     REQUIRE_FALSE(references.empty());
 
     int compared = 0, mismatches = 0, missingReference = 0, ambiguous = 0, lengthOther = 0;
-    int stereoReferences = 0, truncated = 0, truncatedByConverter = 0;
+    int stereoReferences = 0, truncatedByConverter = 0, emptyComparisons = 0;
+    juce::StringArray stereoReferenceNames;
     juce::StringArray mismatchLines;
 
     // A name repeated on any image makes the reference match ambiguous, so names are counted
@@ -457,10 +486,13 @@ TEST_CASE("Opt-in Akai PCM matches a reference conversion", "[.disc-reference]")
         REQUIRE(opened.ok());
         int failures = 0, partitions = 0, volumes = 0, programs = 0, mergedSamples = 0;
         int stereoEntries = 0, header150 = 0, header192 = 0, invalidHeaders = 0;
-        juce::StringArray failureLines;
+        int audible = 0, unsupportedEntries = 0, invalidSampleRecords = 0;
+        juce::StringArray unsupportedNames, invalidNames, failureLines;
         const auto records = decodeAllRecords(*opened.value, failures, failureLines, invalidHeaders,
                                               partitions, volumes, programs, mergedSamples,
-                                              stereoEntries, header150, header192, false);
+                                              stereoEntries, header150, header192, audible,
+                                              unsupportedEntries, invalidSampleRecords, invalidNames,
+                                              unsupportedNames, false);
         REQUIRE(failures == 0);
         for (const auto& record : records) ++globalNameCounts[record.name.trim().toUpperCase()];
     }
@@ -476,16 +508,16 @@ TEST_CASE("Opt-in Akai PCM matches a reference conversion", "[.disc-reference]")
 
         int failures = 0, partitions = 0, volumes = 0, programs = 0, mergedSamples = 0;
         int stereoEntries = 0, header150 = 0, header192 = 0, invalidHeaders = 0;
-        juce::StringArray failureLines;
+        int audible = 0, unsupportedEntries = 0, invalidSampleRecords = 0;
+        juce::StringArray unsupportedNames, invalidNames, failureLines;
         const auto records = decodeAllRecords(fs, failures, failureLines, invalidHeaders,
                                               partitions, volumes, programs, mergedSamples,
-                                              stereoEntries, header150, header192, false);
+                                              stereoEntries, header150, header192, audible,
+                                              unsupportedEntries, invalidSampleRecords, invalidNames,
+                                              unsupportedNames, false);
         INFO("failures:\n" << failureLines.joinIntoString("\n"));
         REQUIRE(failures == 0);
 
-        std::map<juce::String, int> nameCounts;
-        for (const auto& record : records) ++nameCounts[record.name.trim().toUpperCase()];
-        juce::ignoreUnused(nameCounts);
 
         for (const auto& record : records)
         {
@@ -495,7 +527,14 @@ TEST_CASE("Opt-in Akai PCM matches a reference conversion", "[.disc-reference]")
             if (found == references.end()) { ++missingReference; continue; }
             if (found->second.size() > 1 || globalNameCounts[key] > 1) { ++ambiguous; continue; }
             const auto& reference = found->second.front();
-            if (reference.channels != 1) { ++stereoReferences; continue; }
+            if (reference.channels != 1)
+            {
+                // A stereo reference would need both halves of a pair under one name; the disc
+                // names each half, so there is nothing to pair it with here.
+                ++stereoReferences;
+                if (stereoReferenceNames.size() < 10) stereoReferenceNames.add(key);
+                continue;
+            }
             const auto start = record.header.startFrame;
             const auto end = record.header.endFrame;
             if (end <= start || end > record.header.frames)
@@ -511,12 +550,6 @@ TEST_CASE("Opt-in Akai PCM matches a reference conversion", "[.disc-reference]")
             const auto pcm = readAkaiPcm16(*extent.value, record.header, {});
             INFO(key << ": " << pcm.error);
             REQUIRE(pcm.ok());
-            if (pcm.value.size() < (size_t) end)
-            {
-                ++truncated;
-                if (mismatchLines.size() < 20) mismatchLines.add(key + ": pcm shorter than end");
-                continue;
-            }
             const auto frames = (size_t) (end - start);
             const auto referenceFrames = reference.data.size();
             if (referenceFrames != frames && referenceFrames != frames + 1) ++lengthOther;
@@ -537,6 +570,7 @@ TEST_CASE("Opt-in Akai PCM matches a reference conversion", "[.disc-reference]")
             size_t firstDifference = count;
             for (size_t i = 0; i < count; ++i)
                 if (pcm.value[(size_t) start + i] != reference.data[i]) { firstDifference = i; break; }
+            if (count == 0) { ++emptyComparisons; continue; }
             ++compared;
             if (firstDifference != count)
             {
@@ -550,10 +584,16 @@ TEST_CASE("Opt-in Akai PCM matches a reference conversion", "[.disc-reference]")
     }
     INFO("compared=" << compared << " mismatches=" << mismatches << " missingReference=" << missingReference
          << " ambiguous=" << ambiguous << " lengthOther=" << lengthOther
-         << " stereoReferences=" << stereoReferences << " truncated=" << truncated
-         << " truncatedByConverter=" << truncatedByConverter);
+         << " stereoReferences=" << stereoReferences
+         << " truncatedByConverter=" << truncatedByConverter
+         << " emptyComparisons=" << emptyComparisons);
+    INFO("stereo references skipped: " << stereoReferenceNames.joinIntoString(", "));
     INFO("mismatches:\n" << mismatchLines.joinIntoString("\n"));
     REQUIRE(compared >= 500);
+    // A reference whose audio would start after its whole-block cut is unverifiable; a few of
+    // them exist and are counted, not compared.
+    REQUIRE(emptyComparisons * 100 <= compared);
+    REQUIRE(lengthOther == 0);
     // The reference directory is a mixed conversion of several libraries, so a same-named WAV can
     // be a different take: those pairs differ from the start of their audio, while a decoder
     // regression would break most pairs. The exact-match share is the guard.

@@ -16,8 +16,8 @@ repacked.
 | WAV/AIFF/FLAC/MP3 inside ISO (mono/stereo) | decoded from the entry stream; no temporary files or fake paths |
 | Raw Akai S1000/S3000 catalogue | yes: validated partitions → volumes → records |
 | Akai program records | metadata-only containers; keygroups, filters, envelopes are not emulated |
-| Akai sample PCM | yes for the two verified variants: S1000 150-byte and S3000 192-byte header + signed 16-bit little-endian; the length must satisfy `L + 2*frames == declaredBytes` exactly, any other header is refused, not guessed |
-| Akai sample rates | any nonzero rate field; real discs carry 1280 and 6000 Hz samples. A zero rate field is reported as an invalid record |
+| Akai sample PCM | yes for the two verified variants: S1000 150-byte and S3000 192-byte header + signed 16-bit little-endian; the length must satisfy `L + 2*frames == declaredBytes` exactly, any other header is refused, not guessed. The volume family (type 1 → 150, type 3 → 192) resolves the 42-byte ambiguity: a record whose size fits only the other family is refused as damaged |
+| Akai sample rates | any nonzero rate field; real discs carry 1280 and 6000 Hz samples. A zero rate field makes the record malformed, so it is not decodable |
 | Stereo pairs | Akai and ISO L/R records with the same base name and equal size merge into one stereo entry; physical mono WAVs with L/R markers play and export as one stereo file |
 | BIN/CUE | yes for `FILE ... BINARY`, MODE1/2048, MODE1/2352, MODE2/2352 (XA Form 1), AUDIO tracks (metadata-only), INDEX 00/01, PREGAP/POSTGAP; a sibling `.cue` is found for a BIN, and a multi-data-track cue offers a track choice |
 | MDX | unsupported; separate decoder/licence gate |
@@ -108,6 +108,9 @@ reference), the decoded frames `[start, end)` were compared with the reference a
 - 18 same-named pairs differ from the start of their audio. `Converted` is a mixed conversion of
   several libraries, so these are different takes under the same name, not a decode difference; the
   test prints them. The exact-match share (≥ 98 %) is the regression guard.
+- 4 stereo reference WAVs and 5 references whose whole-block cut ends before the sample start are
+  listed and skipped: the disc names each half of a pair, and a cut that short leaves nothing to
+  compare.
 - Export: the preview writes the source frames as 16-bit WAV; a read-back differs by at most one
   LSB, and the corpus test checks this on a real sample.
 

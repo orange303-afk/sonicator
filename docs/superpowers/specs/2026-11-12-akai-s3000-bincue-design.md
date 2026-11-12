@@ -125,3 +125,21 @@ Sonicator уже читает образы Akai S1000/S3000, но звук де�
 - Есть хотя бы одно несовпадение байтов в эталонной сверке.
 - Конвертер, судя по данным, менял сами значения PCM (нормализация, дизеринг), а не только
   обрезал.
+
+## Final decisions (recorded during implementation, 2026-11-12)
+
+- Header family: the volume type binds it (type 1 → 150-byte S1000, type 3 → 192-byte S3000), which
+  also covers the 42-byte ambiguity where a frame count that is 21 too high makes a 192-byte record
+  fit the 150-byte equation. Without a family the old either-equation rule still applies.
+- Rates: the 8000..96000 window was replaced by "rate > 0", matching `DiscAudioReader` and
+  `StereoPair`. The Robert Miles discs carry 1280 and 6000 Hz samples. A zero rate field is a
+  malformed record, not a decoder failure; the corpus test counts it separately and prints it.
+- Partition tables may declare more blocks than the image holds (disc 2 is a trimmed copy,
+  61,514 of 65,535 blocks): partitions that start inside the image are kept, unreadable ones are
+  dropped, and an image with no surviving volume table is still refused.
+- Reference check: the converter reads whole 8192-byte blocks up to the block holding the playback
+  end and zero-pads the rest, so the comparison covers the frames it produced. 1,487 of 1,505 pairs
+  are bit-exact; up to 2 % same-named pairs may differ because the reference folder mixes several
+  libraries. The 18 differing names are printed.
+- Regression: the original Real Mega Rhythm image still passes with 13 partitions, 60 volumes and
+  253 program records.

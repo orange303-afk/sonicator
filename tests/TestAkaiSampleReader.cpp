@@ -121,6 +121,35 @@ TEST_CASE("Akai header fields are parsed", "[disc-akai-pcm]")
     REQUIRE(flatHeader.value.frames == 10);
 }
 
+TEST_CASE("The volume family refuses a header that fits only the other family", "[disc-akai-pcm]")
+{
+    // A 192-byte record whose frame field is 21 too high makes the declared size satisfy the
+    // 150-byte equation as well: 150 + 2*(frames+21) == 192 + 2*frames. Without the volume
+    // family the record is read as S1000 with 21 header bytes played as audio; with the family
+    // bound to S3000 it is refused instead of guessed.
+    TestDirectory t;
+    auto file = makeSample(t, "ambiguous.aki", 10, 44100, 192, true, 0, 10, 60, 31);
+    const auto source = openRawDisc(file, {});
+    REQUIRE(source.ok());
+    const auto unbound = readAkaiSampleHeader(*source.value, file.getSize(), {}, 0);
+    REQUIRE(unbound.ok());
+    REQUIRE(unbound.value.headerBytes == 150);
+    REQUIRE(unbound.value.frames == 31);
+
+    const auto bound = readAkaiSampleHeader(*source.value, file.getSize(), {}, 192);
+    REQUIRE_FALSE(bound.ok());
+    REQUIRE(bound.status == DiscStatus::unsupported);
+    REQUIRE(bound.error.containsIgnoreCase("unverified"));
+
+    // A genuine record of the bound family still decodes.
+    auto genuine = makeSample(t, "genuine.aki", 10, 44100, 192);
+    const auto genuineSource = openRawDisc(genuine, {});
+    REQUIRE(genuineSource.ok());
+    const auto genuineHeader = readAkaiSampleHeader(*genuineSource.value, genuine.getSize(), {}, 192);
+    REQUIRE(genuineHeader.ok());
+    REQUIRE(genuineHeader.value.headerBytes == 192);
+}
+
 TEST_CASE("An S3000 header with inconsistent frames is refused", "[disc-akai-pcm]")
 {
     TestDirectory t;
@@ -133,7 +162,7 @@ TEST_CASE("An S3000 header with inconsistent frames is refused", "[disc-akai-pcm
     REQUIRE(decoded.error.containsIgnoreCase("unverified"));
 }
 
-TEST_CASE("A zero rate, truncated data and cancellation fail locally", "[disc-akai-pcm]")
+TEST_CASE("A zero rate, a declared size beyond the source and cancellation fail locally", "[disc-akai-pcm]")
 {
     TestDirectory t;
     auto badRate = makeSample(t, "bad-rate.aki", 6, 0, 150);

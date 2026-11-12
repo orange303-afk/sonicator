@@ -19,16 +19,24 @@ struct AkaiSampleHeader
 
 // Reads and validates the header. The header length is not guessed: it must be 150 or 192 and
 // equal declaredBytes - frames*2 exactly; every other variant is refused as unverified.
+// `expectedHeaderBytes` (150 or 192, 0 for none) binds the record to the volume family. The two
+// equations can be confused by a frame count that is off by exactly 21, which is a 42-byte shift;
+// when a family is known, a record whose size fits only the other family is refused instead of
+// decoded with a 21-frame offset.
 DiscResult<AkaiSampleHeader> readAkaiSampleHeader(const ReadOnlyByteSource& source,
-                                                  uint64_t declaredBytes, CancelCheck cancel);
+                                                  uint64_t declaredBytes, CancelCheck cancel,
+                                                  uint32_t expectedHeaderBytes = 0);
 // Raw signed 16-bit frames from the header's data offset, without float conversion. Used where
-// the exact stored values matter, such as byte-for-byte verification against another decoder.
+// the exact stored values matter, such as byte-for-byte verification against another decoder, so
+// it keeps its own decoded-size guard.
 DiscResult<std::vector<int16_t>> readAkaiPcm16(const ReadOnlyByteSource& source,
-                                               const AkaiSampleHeader& header, CancelCheck cancel);
+                                               const AkaiSampleHeader& header, CancelCheck cancel,
+                                               uint64_t maxDecodedBytes = 128u << 20);
 
 // Decodes the verified raw Akai sample variants: a 150- or 192-byte header followed by signed
 // 16-bit little-endian mono frames. All declared frames are returned, without trimming to the
 // header's start/end points.
 DiscResult<SampleAudioPtr> decodeAkaiSample(ByteSourcePtr source, uint64_t declaredBytes,
-                                            const DiscLimits& limits, CancelCheck cancel);
+                                            const DiscLimits& limits, CancelCheck cancel,
+                                            uint32_t expectedHeaderBytes = 0);
 } // namespace sonicator

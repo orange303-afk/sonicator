@@ -149,6 +149,7 @@ DiscResult<std::unique_ptr<AkaiFilesystem>> AkaiFilesystem::open(ByteSourcePtr b
 
     std::array<std::byte, 6> fatProbe {};
     std::array<std::byte, 16 * 100> volumeTable {};
+    juce::String droppedPartitionProblem;
     for (auto& partition : fs->partitions)
     {
         if (cancel && cancel()) { result.status = DiscStatus::cancelled; return result; }
@@ -163,6 +164,7 @@ DiscResult<std::unique_ptr<AkaiFilesystem>> AkaiFilesystem::open(ByteSourcePtr b
         {
             // A partition that lies mostly outside a truncated image has no usable FAT; it is
             // dropped here, and the image is refused below only if no partition survives.
+            if (droppedPartitionProblem.isEmpty()) droppedPartitionProblem = "partition FAT reserved markers are missing";
             continue;
         }
         if (! fits(base + volumeTableOffset, volumeTable.size(), fs->source->size())) continue;
@@ -189,6 +191,7 @@ DiscResult<std::unique_ptr<AkaiFilesystem>> AkaiFilesystem::open(ByteSourcePtr b
     {
         result.status = DiscStatus::unsupported;
         result.error = "no partition holds a readable volume table";
+        if (droppedPartitionProblem.isNotEmpty()) result.error += " (" + droppedPartitionProblem + ")";
         return result;
     }
     result.status = DiscStatus::ready;
@@ -439,11 +442,19 @@ DiscResult<SampleAudioPtr> AkaiFilesystem::decodeSample(DiscEntryId file, Cancel
         result.error = "not a known sample extent";
         return result;
     }
-    auto decodeOne = [this, cancel](const FileRecord& record)
+    // The volume family (S1000 or S3000) resolves the 42-byte header-size ambiguity: a record
+    // whose size fits only the other family is a damaged header, not a 21-frame offset.
+    auto familyOf = [this](const FileRecord& record) -> uint32_t
+    {
+        const auto volume = volumeById.find(volumeId(record.partition, record.slot).value);
+        if (volume == volumeById.end()) return 0;
+        return volume->second.type == 3 ? 192u : 150u;
+    };
+    auto decodeOne = [this, cancel, &familyOf](const FileRecord& record)
     {
         const auto extent = openChain(record, cancel);
         if (! extent.ok()) return DiscResult<SampleAudioPtr> { extent.status, {}, extent.error };
-        return decodeAkaiSample(extent.value, record.bytes, budget, cancel);
+        return decodeAkaiSample(extent.value, record.bytes, budget, cancel, familyOf(record));
     };
     auto left = decodeOne(found->second);
     if (! left.ok()) return left;
