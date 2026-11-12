@@ -2,6 +2,7 @@
 #include "DiscTypes.h"
 #include "ReadOnlyByteSource.h"
 #include "core/sampler/SamplerTypes.h"
+#include <vector>
 namespace sonicator {
 // Structural facts of a raw Akai sample header, as stored by the two verified families: S1000
 // (150-byte header) and S3000 (192-byte header), both followed by signed 16-bit LE mono frames.
@@ -20,6 +21,10 @@ struct AkaiSampleHeader
 // equal declaredBytes - frames*2 exactly; every other variant is refused as unverified.
 DiscResult<AkaiSampleHeader> readAkaiSampleHeader(const ReadOnlyByteSource& source,
                                                   uint64_t declaredBytes, CancelCheck cancel);
+// Raw signed 16-bit frames from the header's data offset, without float conversion. Used where
+// the exact stored values matter, such as byte-for-byte verification against another decoder.
+DiscResult<std::vector<int16_t>> readAkaiPcm16(const ReadOnlyByteSource& source,
+                                               const AkaiSampleHeader& header, CancelCheck cancel);
 
 // Decodes the verified raw Akai sample variants: a 150- or 192-byte header followed by signed
 // 16-bit little-endian mono frames. All declared frames are returned, without trimming to the
