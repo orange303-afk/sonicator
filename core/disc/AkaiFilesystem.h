@@ -31,6 +31,9 @@ public:
     DiscResult<ByteSourcePtr> openFile(DiscEntryId file, CancelCheck cancel) override;
     // Verified raw variants: 150-byte S1000 or 192-byte S3000 header + signed 16-bit LE mono.
     DiscResult<SampleAudioPtr> decodeSample(DiscEntryId file, CancelCheck cancel);
+    // Akai character set → text. Pure function, also used by callers that read record names
+    // from a raw header.
+    static juce::String decodeName(const std::byte* bytes, size_t count);
 private:
     struct Partition { uint32_t index = 0; uint64_t startBlock = 0; uint64_t blockCount = 0; };
     struct Volume { uint32_t partition = 0, slot = 0; uint16_t startBlock = 0, type = 0; juce::String name; };
@@ -49,7 +52,6 @@ private:
     bool readFat(uint32_t partition, uint16_t relativeBlock, CancelCheck cancel, uint16_t& little,
                  uint16_t& big, juce::String& error) const;
     DiscResult<ByteSourcePtr> openChain(const FileRecord&, CancelCheck cancel);
-    static juce::String decodeName(const std::byte* bytes, size_t count);
     static DiscEntryId volumeId(uint32_t partition, uint32_t slot)
     { return { (1ull << 32) | ((uint64_t) partition << 8) | slot }; }
     static DiscEntryId fileId(uint32_t partition, uint32_t slot, uint32_t record)

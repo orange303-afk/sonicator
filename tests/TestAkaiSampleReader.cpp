@@ -133,10 +133,10 @@ TEST_CASE("An S3000 header with inconsistent frames is refused", "[disc-akai-pcm
     REQUIRE(decoded.error.containsIgnoreCase("unverified"));
 }
 
-TEST_CASE("A wrong rate, truncated data and cancellation fail locally", "[disc-akai-pcm]")
+TEST_CASE("A zero rate, truncated data and cancellation fail locally", "[disc-akai-pcm]")
 {
     TestDirectory t;
-    auto badRate = makeSample(t, "bad-rate.aki", 6, 100, 150);
+    auto badRate = makeSample(t, "bad-rate.aki", 6, 0, 150);
     const auto rateSource = openRawDisc(badRate, {});
     REQUIRE(decodeAkaiSample(rateSource.value, badRate.getSize(), {}, {}).status == DiscStatus::malformed);
 

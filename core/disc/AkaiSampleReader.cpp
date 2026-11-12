@@ -75,14 +75,52 @@ DiscResult<AkaiSampleHeader> readAkaiSampleHeader(const ReadOnlyByteSource& sour
         result.error = "unverified Akai sample header variant (header/data size mismatch)";
         return result;
     }
-    if (parsed.sampleRate < 8000 || parsed.sampleRate > 96000)
+    // The project-wide audio policy elsewhere (DiscAudioReader, StereoPair) accepts any positive
+    // rate; a zero rate field is not a sample rate, and the S3000 field is 16-bit, so the upper
+    // bound needs no separate check. Low rates such as 1280 Hz occur on real Akai discs.
+    if (parsed.sampleRate == 0)
     {
         result.status = DiscStatus::malformed;
-        result.error = "Akai sample rate is outside the supported range";
+        result.error = "Akai sample rate is zero";
         return result;
     }
     result.status = DiscStatus::ready;
     result.value = parsed;
+    return result;
+}
+
+DiscResult<std::vector<int16_t>> readAkaiPcm16(const ReadOnlyByteSource& source,
+                                               const AkaiSampleHeader& header, CancelCheck cancel)
+{
+    DiscResult<std::vector<int16_t>> result;
+    if (cancel && cancel()) { result.status = DiscStatus::cancelled; return result; }
+    const uint64_t needed = (uint64_t) header.headerBytes + (uint64_t) header.frames * 2;
+    if (header.frames == 0 || needed > source.size())
+    {
+        result.status = DiscStatus::malformed;
+        result.error = "sample extent is shorter than its header declares";
+        return result;
+    }
+    result.value.resize(header.frames);
+    constexpr int64_t chunk = 65536;
+    std::vector<std::byte> bytes((size_t) juce::jmin<int64_t>(chunk, (int64_t) header.frames) * 2);
+    for (int64_t offset = 0; offset < (int64_t) header.frames; offset += chunk)
+    {
+        if (cancel && cancel()) { result.status = DiscStatus::cancelled; result.value.clear(); return result; }
+        const auto count = juce::jmin<int64_t>(chunk, (int64_t) header.frames - offset);
+        const auto read = source.readAt((uint64_t) header.headerBytes + (uint64_t) offset * 2,
+                                        std::span<std::byte>(bytes.data(), (size_t) count * 2), cancel);
+        if (! read.ok() || read.value != (size_t) count * 2)
+        {
+            result.status = read.ok() ? DiscStatus::malformed : read.status;
+            result.error = read.ok() ? "sample data is truncated" : read.error;
+            result.value.clear();
+            return result;
+        }
+        for (int64_t i = 0; i < count; ++i)
+            result.value[(size_t) (offset + i)] = (int16_t) le16(bytes.data() + (size_t) i * 2);
+    }
+    result.status = DiscStatus::ready;
     return result;
 }
 

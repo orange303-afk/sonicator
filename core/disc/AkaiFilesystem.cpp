@@ -128,10 +128,14 @@ DiscResult<std::unique_ptr<AkaiFilesystem>> AkaiFilesystem::open(ByteSourcePtr b
                 if (total > UINT64_MAX - size) { valid = false; break; }
                 total += size;
             }
-            if (valid && total <= fs->blockCount)
+            // An image may be shorter than the declared partition table (a partial or trimmed
+            // copy): keep the partitions that start inside it instead of refusing the whole
+            // table, and drop the rest.
+            if (valid)
                 for (unsigned i = 0; i < count; ++i)
                 {
-                    fs->partitions.push_back({ i, start, sizes[i] });
+                    if (start >= fs->blockCount) break;
+                    fs->partitions.push_back({ i, start, juce::jmin<uint64_t>(sizes[i], fs->blockCount - start) });
                     start += sizes[i];
                 }
         }
@@ -157,9 +161,9 @@ DiscResult<std::unique_ptr<AkaiFilesystem>> AkaiFilesystem::open(ByteSourcePtr b
         const bool markers = fatLe == 0x0040 || fatLe == 0x4000 || fatBe == 0x0040;
         if (! fatRead.ok() || fatRead.value != 6 || ! markers)
         {
-            result.status = DiscStatus::malformed;
-            result.error = "partition FAT reserved markers are missing";
-            return result;
+            // A partition that lies mostly outside a truncated image has no usable FAT; it is
+            // dropped here, and the image is refused below only if no partition survives.
+            continue;
         }
         if (! fits(base + volumeTableOffset, volumeTable.size(), fs->source->size())) continue;
         const auto volumeRead = fs->source->readAt(base + volumeTableOffset, volumeTable, cancel);
@@ -180,6 +184,12 @@ DiscResult<std::unique_ptr<AkaiFilesystem>> AkaiFilesystem::open(ByteSourcePtr b
             fs->volumes.push_back(volume);
             fs->volumeById[volumeId(partition.index, slot).value] = volume;
         }
+    }
+    if (fs->volumes.empty())
+    {
+        result.status = DiscStatus::unsupported;
+        result.error = "no partition holds a readable volume table";
+        return result;
     }
     result.status = DiscStatus::ready;
     result.value = std::move(fs);
