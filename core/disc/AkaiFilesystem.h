@@ -29,7 +29,7 @@ public:
     DiscEntryId root() const override { return {}; }
     DiscResult<DiscListing> list(DiscEntryId directory, CancelCheck cancel) override;
     DiscResult<ByteSourcePtr> openFile(DiscEntryId file, CancelCheck cancel) override;
-    // Verified raw variant only: 150-byte header + signed 16-bit LE mono.
+    // Verified raw variants: 150-byte S1000 or 192-byte S3000 header + signed 16-bit LE mono.
     DiscResult<SampleAudioPtr> decodeSample(DiscEntryId file, CancelCheck cancel);
 private:
     struct Partition { uint32_t index = 0; uint64_t startBlock = 0; uint64_t blockCount = 0; };

@@ -9,15 +9,22 @@ using namespace sonicator;
 
 namespace
 {
+void putLe32(std::vector<unsigned char>& bytes, size_t at, uint32_t value)
+{
+    for (int i = 0; i < 4; ++i) bytes[at + (size_t) i] = (unsigned char) ((value >> (8 * i)) & 0xff);
+}
+
 juce::File makeSample(TestDirectory& t, const juce::String& name, uint32_t frames,
-                      uint16_t rate, uint64_t headerBytes, bool includeData = true)
+                      uint16_t rate, uint64_t headerBytes, bool includeData = true,
+                      uint32_t startFrame = 0, uint32_t endFrame = 0, uint8_t root = 60,
+                      int32_t headerFrames = -1)
 {
     std::vector<unsigned char> bytes((size_t) (headerBytes + (includeData ? frames * 2 : 0)), 0);
     bytes[0] = 3;
-    bytes[0x1a] = (unsigned char) (frames & 0xff);
-    bytes[0x1b] = (unsigned char) ((frames >> 8) & 0xff);
-    bytes[0x1c] = (unsigned char) ((frames >> 16) & 0xff);
-    bytes[0x1d] = (unsigned char) ((frames >> 24) & 0xff);
+    bytes[2] = root;
+    putLe32(bytes, 0x1a, (uint32_t) (headerFrames >= 0 ? headerFrames : (int32_t) frames));
+    putLe32(bytes, 0x1e, startFrame);
+    putLe32(bytes, 0x22, endFrame > 0 ? endFrame : frames);
     bytes[0x8a] = (unsigned char) (rate & 0xff);
     bytes[0x8b] = (unsigned char) (rate >> 8);
     if (includeData)
@@ -62,6 +69,62 @@ TEST_CASE("An unverified header variant is refused, not guessed", "[disc-akai-pc
 {
     TestDirectory t;
     auto file = makeSample(t, "doc190.aki", 10, 44100, 190);
+    const auto source = openRawDisc(file, {});
+    REQUIRE(source.ok());
+    const auto decoded = decodeAkaiSample(source.value, file.getSize(), {}, {});
+    REQUIRE_FALSE(decoded.ok());
+    REQUIRE(decoded.status == DiscStatus::unsupported);
+    REQUIRE(decoded.error.containsIgnoreCase("unverified"));
+}
+
+TEST_CASE("An S3000 192-byte header decodes from offset 192", "[disc-akai-pcm]")
+{
+    TestDirectory t;
+    auto file = makeSample(t, "s3000.aki", 6, 44100, 192);
+    const auto source = openRawDisc(file, {});
+    REQUIRE(source.ok());
+    const auto decoded = decodeAkaiSample(source.value, file.getSize(), {}, {});
+    INFO(decoded.error);
+    REQUIRE(decoded.ok());
+    REQUIRE(decoded.value->frames == 6);
+    REQUIRE(decoded.value->sampleRate == 44100);
+    REQUIRE(decoded.value->channels == 1);
+    REQUIRE(decoded.value->left[0] == Catch::Approx(0.0f));
+    REQUIRE(decoded.value->left[1] == Catch::Approx(32767.0f / 32768.0f));
+    REQUIRE(decoded.value->left[2] == Catch::Approx(-1.0f));
+    REQUIRE(decoded.value->left[5] == Catch::Approx(-0.5f));
+}
+
+TEST_CASE("Akai header fields are parsed", "[disc-akai-pcm]")
+{
+    TestDirectory t;
+    auto s3000 = makeSample(t, "fields.aki", 10, 48000, 192, true, 2, 8, 60);
+    const auto source = openRawDisc(s3000, {});
+    REQUIRE(source.ok());
+    const auto header = readAkaiSampleHeader(*source.value, s3000.getSize(), {});
+    INFO(header.error);
+    REQUIRE(header.ok());
+    REQUIRE(header.value.id == 3);
+    REQUIRE(header.value.headerBytes == 192);
+    REQUIRE(header.value.frames == 10);
+    REQUIRE(header.value.startFrame == 2);
+    REQUIRE(header.value.endFrame == 8);
+    REQUIRE(header.value.rootNote == 60);
+    REQUIRE(header.value.sampleRate == 48000);
+
+    auto s1000 = makeSample(t, "fields150.aki", 10, 44100, 150);
+    const auto flat = openRawDisc(s1000, {});
+    REQUIRE(flat.ok());
+    const auto flatHeader = readAkaiSampleHeader(*flat.value, s1000.getSize(), {});
+    REQUIRE(flatHeader.ok());
+    REQUIRE(flatHeader.value.headerBytes == 150);
+    REQUIRE(flatHeader.value.frames == 10);
+}
+
+TEST_CASE("An S3000 header with inconsistent frames is refused", "[disc-akai-pcm]")
+{
+    TestDirectory t;
+    auto file = makeSample(t, "badframes.aki", 10, 44100, 192, true, 0, 10, 60, 11);
     const auto source = openRawDisc(file, {});
     REQUIRE(source.ok());
     const auto decoded = decodeAkaiSample(source.value, file.getSize(), {}, {});
