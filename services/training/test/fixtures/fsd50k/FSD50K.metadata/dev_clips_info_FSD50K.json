@@ -1,0 +1,6 @@
+{
+  "1": { "title": "kick", "license": "http://creativecommons.org/publicdomain/zero/1.0/", "uploader": "alice", "tags": ["kick"] },
+  "2": { "title": "door", "license": "http://creativecommons.org/licenses/by/3.0/", "uploader": "bob", "tags": ["door"] },
+  "3": { "title": "rain", "license": "http://creativecommons.org/licenses/by-nc/3.0/", "uploader": "carol", "tags": ["rain"] },
+  "4": { "title": "door again", "license": "http://creativecommons.org/publicdomain/zero/1.0/", "uploader": "dave", "tags": ["door"] }
+}

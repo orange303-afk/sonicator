@@ -42,6 +42,14 @@ test("per-clip licensing is stated explicitly for Freesound-derived datasets", (
   }
 });
 
+test("counts are optional but must be consistent when present", () => {
+  const base = loadManifest()[0];
+  assert.doesNotThrow(() => validateManifest([{ ...base, clipsSeen: 10, clipsUsed: 4, downloadedAt: "2026-11-12" }]));
+  assert.throws(() => validateManifest([{ ...base, clipsSeen: 1, clipsUsed: 2 }]), /clipsUsed exceeds clipsSeen/);
+  assert.throws(() => validateManifest([{ ...base, clipsUsed: 1.5 }]), /clipsUsed must be a non-negative integer/);
+  assert.throws(() => validateManifest([{ ...base, downloadedAt: "12.11.2026" }]), /downloadedAt/);
+});
+
 test("the manifest path points inside the repository", () => {
   assert.match(MANIFEST_PATH, /services\/training\/datasets\/manifest\.json$/);
 });

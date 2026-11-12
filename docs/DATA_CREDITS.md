@@ -5,21 +5,21 @@ Generated from `services/training/datasets/manifest.json` by
 
 ## Datasets used for the shipped model and its evaluation
 
-| id | Title | Version | Licence | Level |
-| --- | --- | --- | --- | --- |
-| bbc-sfx | BBC Sound Effects | archive | RemArc licence, non-commercial use only | B |
-| enst-drums | ENST-Drums | 1.0 | research user licence | B |
-| esc50 | ESC-50 | 1.0 | CC BY-NC 4.0 | B |
-| freesound-one-shot-percussive | Freesound One-Shot Percussive Sounds | 1.0 | per-clip Creative Commons: CC0, CC BY, CC BY-NC | B |
-| fsd50k | FSD50K | 1.0 | per-clip Creative Commons: CC0, CC BY, CC BY-NC, CC Sampling+ | B |
-| idmt-smt-drums | IDMT-SMT-Drums | 1.0 | CC BY-NC-ND 4.0 | B |
-| medley-solos-db | Medley-solos-DB | 1.0 | research use only | B |
-| medleydb | MedleyDB | 2.0 | CC BY-NC-SA 4.0 | B |
-| nsynth | NSynth | 1.0.3 (full) | CC BY 4.0 | A |
-| philharmonia | Philharmonia Orchestra Sound Samples | web release | CC BY-SA 3.0 | B |
-| slakh2100 | Slakh2100 | 2100 | CC BY 4.0 | A |
-| sonyc-ust | SONYC-UST | 2.0 | CC BY 4.0 | A |
-| urbansound8k | UrbanSound8K | 1.0 | CC BY-NC 3.0 | B |
+| id | Title | Version | Licence | Level | Clips used |
+| --- | --- | --- | --- | --- | --- |
+| bbc-sfx | BBC Sound Effects | archive | RemArc licence, non-commercial use only | B | — |
+| enst-drums | ENST-Drums | 1.0 | research user licence | B | — |
+| esc50 | ESC-50 | 1.0 | CC BY-NC 4.0 | B | — |
+| freesound-one-shot-percussive | Freesound One-Shot Percussive Sounds | 1.0 | per-clip Creative Commons: CC0, CC BY, CC BY-NC | B | 6928 |
+| fsd50k | FSD50K | 1.0 | per-clip Creative Commons: CC0, CC BY, CC BY-NC, CC Sampling+ | B | 43379 |
+| idmt-smt-drums | IDMT-SMT-Drums | 1.0 | CC BY-NC-ND 4.0 | B | — |
+| medley-solos-db | Medley-solos-DB | 1.0 | research use only | B | — |
+| medleydb | MedleyDB | 2.0 | CC BY-NC-SA 4.0 | B | — |
+| nsynth | NSynth | 1.0.3 (full) | CC BY 4.0 | A | 5295 |
+| philharmonia | Philharmonia Orchestra Sound Samples | web release | CC BY-SA 3.0 | B | — |
+| slakh2100 | Slakh2100 | 2100 | CC BY 4.0 | A | — |
+| sonyc-ust | SONYC-UST | 2.0 | CC BY 4.0 | A | — |
+| urbansound8k | UrbanSound8K | 1.0 | CC BY-NC 3.0 | B | — |
 
 ## Attribution
 

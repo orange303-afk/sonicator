@@ -1,0 +1,5 @@
+fname,labels,mids,split
+1,"Bass_drum,Drum","/m/0,/m/1",train
+2,"Door","/m/2",val
+3,"Rain,Raindrop","/m/3,/m/4",train
+4,"Door","/m/2",train

@@ -188,7 +188,6 @@ async function main() {
     const directory = options.full
       ? datasetDirectory(root, shard.source, shard.split)
       : join(out, "links", shard.name);
-    if (!existsSync(directory)) throw new Error(`no directory ${directory}`);
     if (!options.full) {
       rmSync(directory, { recursive: true, force: true });
       mkdirSync(directory, { recursive: true });
@@ -198,6 +197,7 @@ async function main() {
         paths.set(link, clip);
       });
     } else {
+      if (!existsSync(directory)) throw new Error(`no directory ${directory}`);
       for (const clip of shard.clips) paths.set(clip.file, clip);
     }
     shard.directory = directory;

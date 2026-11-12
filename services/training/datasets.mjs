@@ -23,6 +23,14 @@ export function validateManifest(entries) {
     if (typeof entry.licensePerClip !== "boolean")
       throw new Error(`manifest: ${entry.id}: licensePerClip must be boolean`);
     if (entry.used && entry.tier === "C") throw new Error(`manifest: ${entry.id}: level C dataset cannot be used`);
+    if (entry.clipsSeen !== undefined && (!Number.isInteger(entry.clipsSeen) || entry.clipsSeen < 0))
+      throw new Error(`manifest: ${entry.id}: clipsSeen must be a non-negative integer`);
+    if (entry.clipsUsed !== undefined && (!Number.isInteger(entry.clipsUsed) || entry.clipsUsed < 0))
+      throw new Error(`manifest: ${entry.id}: clipsUsed must be a non-negative integer`);
+    if (entry.clipsSeen !== undefined && entry.clipsUsed !== undefined && entry.clipsUsed > entry.clipsSeen)
+      throw new Error(`manifest: ${entry.id}: clipsUsed exceeds clipsSeen`);
+    if (entry.downloadedAt !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(entry.downloadedAt))
+      throw new Error(`manifest: ${entry.id}: downloadedAt must be YYYY-MM-DD`);
     if (seen.has(entry.id)) throw new Error(`manifest: duplicate id ${entry.id}`);
     seen.add(entry.id);
   }

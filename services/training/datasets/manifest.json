@@ -9,6 +9,9 @@
     "tier": "A",
     "used": true,
     "creditLine": "NSynth (Engel et al., 2017), Google Magenta, CC BY 4.0",
+    "downloadedAt": "2026-11-12",
+    "clipsSeen": 305979,
+    "clipsUsed": 5295,
     "audio": { "format": "wav", "sampleRateHz": 16000 },
     "notes": "305 979 notes from 1006 instruments, 11 families, 4 s each; labels acoustic, electronic, synthetic"
   },
@@ -22,6 +25,9 @@
     "tier": "B",
     "used": true,
     "creditLine": "Freesound One-Shot Percussive Sounds (Caillon and Esling, 2020), Zenodo, per-clip Creative Commons licences; authors in licenses.json",
+    "downloadedAt": "2026-11-12",
+    "clipsSeen": 10254,
+    "clipsUsed": 6928,
     "audio": { "format": "wav", "sampleRateHz": 16000 },
     "notes": "10 254 one-shots, 1 s each; verify the Zenodo record id at download"
   },
@@ -35,6 +41,9 @@
     "tier": "B",
     "used": true,
     "creditLine": "FSD50K (Fonseca et al., 2022), MTG-UPF, Zenodo, per-clip Creative Commons licences; authors in dev_clips_info_FSD50K.json and eval_clips_info_FSD50K.json",
+    "downloadedAt": "2026-11-12",
+    "clipsSeen": 51197,
+    "clipsUsed": 43379,
     "audio": { "format": "wav", "sampleRateHz": 44100 },
     "notes": "51 197 clips, 200 AudioSet classes; dev 40 966, eval 10 231; about 85% of clips are CC0 or CC BY"
   },

@@ -20,6 +20,11 @@ export function renderCredits(entries) {
   const byId = [...entries].sort((a, b) => COMPARE(a.id, b.id));
   const used = byId.filter((entry) => entry.used);
   const unused = byId.filter((entry) => !entry.used);
+  const withCounts = used.some((entry) => entry.clipsUsed !== undefined);
+  const header = withCounts
+    ? ["id", "Title", "Version", "Licence", "Level", "Clips used"]
+    : ["id", "Title", "Version", "Licence", "Level"];
+  const separator = header.map(() => "---");
 
   const lines = [
     "# Data credits",
@@ -29,9 +34,11 @@ export function renderCredits(entries) {
     "",
     "## Datasets used for the shipped model and its evaluation",
     "",
-    "| id | Title | Version | Licence | Level |",
-    "| --- | --- | --- | --- | --- |",
-    ...used.map((entry) => tableRow([entry.id, entry.title, entry.version, entry.license, entry.tier])),
+    tableRow(header),
+    tableRow(separator),
+    ...used.map((entry) => tableRow(withCounts
+      ? [entry.id, entry.title, entry.version, entry.license, entry.tier, String(entry.clipsUsed ?? "—")]
+      : [entry.id, entry.title, entry.version, entry.license, entry.tier])),
     "",
     "## Attribution",
     "",

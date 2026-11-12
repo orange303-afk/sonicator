@@ -21,6 +21,7 @@ export function familyLabel(family) {
 // (acoustic / electronic / synthetic). The audio sits next to it as audio/<note_str>.wav.
 export function readExamples(root, split, log = () => {}) {
   const splitDir = join(root, "nsynth", `nsynth-${split}`);
+  const canonicalSplit = split === "valid" ? "val" : split;
   const examples = JSON.parse(readFileSync(join(splitDir, "examples.json"), "utf8"));
   const map = familyMap();
   const clips = [];
@@ -44,7 +45,7 @@ export function readExamples(root, split, log = () => {}) {
       group: mapped.group,
       domain: map.domain,
       licenseUrl: map.licenseUrl,
-      split,
+      split: canonicalSplit,
       instrument: example.instrument_str,
       extras: { source: example.instrument_source_str, pitch: example.pitch },
     }));
