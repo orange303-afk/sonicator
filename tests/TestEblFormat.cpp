@@ -1,9 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include "core/audio/SonicatorFormats.h"
 #include "core/dsp/AnalysisAudio.h"
 #include "core/database/Database.h"
 #include "core/indexing/IndexingService.h"
 #include "core/scanner/FileScanner.h"
+#include "core/smart/SmartAnalysisService.h"
+#include "core/smart/SmartResolver.h"
 #include "EblTestFile.h"
 #include "TestHelpers.h"
 #include <cmath>
@@ -120,4 +123,50 @@ TEST_CASE("EBL catalog rows are named from the header", "[ebl][catalog]")
     CHECK(page.total == 1);
     REQUIRE(page.samples.size() == 1);
     CHECK(page.samples.front().fileName == "org nod C +36");
+}
+
+TEST_CASE("EBL reaches the smart DSP pass instead of being unsupported", "[smart][ebl]")
+{
+    TestDirectory t;
+    auto o = ebltest::monoOptions();
+    o.rate = 44100;
+    const int frames = 4 * 44100;
+    o.left.assign((size_t) frames, 0);
+    const double interval = 60.0 / 120.0;
+    for (double time = 0.05; time < 4.0; time += interval)
+    {
+        const int start = (int) std::lround(time * 44100.0);
+        for (int i = 0; i < 1058 && start + i < frames; ++i)
+        {
+            const double x = (double) i / 44100.0;
+            const auto value = 0.8 * std::exp(-x / 0.03)
+                * std::sin(2.0 * juce::MathConstants<double>::pi * 1200.0 * x);
+            o.left[(size_t) (start + i)] = (int16_t) std::lround(value * 32767.0);
+        }
+    }
+    const auto file = t.dir.getChildFile("drum_pattern.ebl");
+    const auto bytes = ebltest::makeEbl(o);
+    REQUIRE(file.replaceWithData(bytes.data(), bytes.size()));
+
+    sonicator::SampleRecord record;
+    record.filePath = file.getFullPathName();
+    record.fileName = file.getFileName();
+    record.fileSize = file.getSize();
+    record.dateModified = file.getLastModificationTime().toMilliseconds();
+    record.fileHash = "ebl";
+    const auto collection = sonicator::SmartAnalysisService::collect(record);
+    bool dspSeen = false;
+    for (const auto& extraction : collection.extractions)
+        if (extraction.source == "dsp")
+        {
+            dspSeen = true;
+            INFO(extraction.error);
+            CHECK(extraction.status == "ok");
+        }
+    CHECK(dspSeen);
+    const auto result = sonicator::resolveSmart(collection.candidates);
+    CHECK(result.structureSource == "dsp");
+    CHECK(result.structure == "loop");
+    CHECK(result.hasBpm);
+    CHECK(result.bpm == Catch::Approx(120.0).epsilon(0.02));
 }

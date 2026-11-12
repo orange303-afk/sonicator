@@ -16,7 +16,8 @@ bool hasDecodableAudioExtension(const juce::String& extensionWithoutDot)
     return extension == "wav" || extension == "aif" || extension == "aiff"
         || extension == "aifc" || extension == "mp3" || extension == "flac"
         || extension == "ogg" || extension == "oga" || extension == "m4a"
-        || extension == "aac" || extension == "caf" || extension == "w64";
+        || extension == "aac" || extension == "caf" || extension == "w64"
+        || extension == "ebl"; // E-mu EBL is decoded through the shared format manager
 }
 RhythmExtraction rhythmCandidatesFrom(const RhythmAnalysis& analysis, bool truncated,
                                       double analysedSeconds)
