@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/disc/AkaiFilesystem.h"
+#include "core/disc/CueSheet.h"
 #include "core/disc/DiscBrowserService.h"
 #include "core/disc/DiscImageProbe.h"
 #include "core/disc/RawDiscSource.h"
+#include "core/disc/SectorLayout.h"
+#include "core/scanner/FileScanner.h"
 #include "core/extract/DiscExtract.h"
 #include "core/extract/ExtractService.h"
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -227,4 +230,101 @@ TEST_CASE("Cancelling image extraction keeps finished files", "[extract][disc]")
         REQUIRE(wavFiles(folder).size() == progress.written);
         REQUIRE(folder.findChildFiles(juce::File::findFiles, false, "*.part").isEmpty());
     }
+}
+
+// Opt-in ([.] tag): extracts five records of a real image into a temporary folder and compares
+// every written WAV with the decoder, byte for byte. The image is opened read-only.
+TEST_CASE("Opt-in real image extraction matches the decoder", "[.extract-corpus]")
+{
+    const auto path = juce::SystemStats::getEnvironmentVariable("SONICATOR_DISC_IMAGE", {});
+    REQUIRE(path.isNotEmpty());
+    const juce::File image(path);
+    REQUIRE(image.existsAsFile());
+    const auto size = image.getSize();
+    const auto modified = image.getLastModificationTime();
+    const auto hash = FileScanner::computeFileHash(image);
+
+    DiscResult<ByteSourcePtr> raw;
+    if (image.hasFileExtension("cue"))
+    {
+        const auto sheet = openCueSheet(image, {}, {});
+        REQUIRE(sheet.ok());
+        const auto tracks = sheet.value.dataTrackIndices();
+        REQUIRE(tracks.size() == 1);
+        const auto layout = cueTrackLayout(sheet.value, tracks.front());
+        REQUIRE(layout.ok());
+        const auto bin = openRawDisc(layout.value.file, {});
+        REQUIRE(bin.ok());
+        TrackLayout track;
+        track.fileOffset = layout.value.fileOffset;
+        track.sectorCount = layout.value.sectorCount;
+        track.profile = layout.value.profile;
+        auto blocks = makeTrackSource(bin.value, track, {});
+        REQUIRE(blocks.ok());
+        raw.status = DiscStatus::ready;
+        raw.value = std::make_shared<BlockByteSource>(blocks.value);
+    }
+    REQUIRE(raw.ok());
+    const auto opened = AkaiFilesystem::open(raw.value, {}, {});
+    REQUIRE(opened.ok());
+    auto& fs = *opened.value;
+    const auto partitions = fs.list(fs.root(), {});
+    REQUIRE(partitions.ok());
+    std::vector<DiscExtractEntry> entries;
+    for (const auto& partition : partitions.value.entries)
+    {
+        const auto volumes = fs.list(partition.id, {});
+        for (const auto& volume : volumes.value.entries)
+        {
+            const auto listed = fs.list(volume.id, {});
+            for (const auto& entry : listed.value.entries)
+                if (entry.kind == DiscEntryKind::file && entry.capability.isEmpty()
+                    && entries.size() < 5)
+                    entries.push_back({ entry.id, entry.partner, entry.displayName });
+            if (entries.size() >= 5) break;
+        }
+        if (entries.size() >= 5) break;
+    }
+    REQUIRE(entries.size() == 5);
+
+    TestDirectory output;
+    ExtractOptions options;
+    options.sameFolder = false;
+    options.outputFolder = output.dir;
+    ExtractService service;
+    REQUIRE(service.startDisc({ { image, entries } }, options));
+    REQUIRE(service.waitUntilFinished(120000));
+    const auto results = service.results();
+    REQUIRE(results.size() == 1);
+    INFO(results.front().error << " " << results.front().problems.joinIntoString(" | "));
+    REQUIRE(results.front().failed == 0);
+    const auto folder = results.front().folder;
+    REQUIRE(folder.isDirectory());
+
+    juce::AudioFormatManager formats; formats.registerBasicFormats();
+    int compared = 0;
+    for (size_t i = 0; i < entries.size(); ++i)
+    {
+        const auto decoded = fs.decodeSample(entries[i].id, {});
+        REQUIRE(decoded.ok());
+        const auto expected = folder.getChildFile(extractSampleFileName((int) i + 1, entries[i].name));
+        if (! expected.existsAsFile()) continue; // silent samples are not written
+        std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(expected));
+        REQUIRE(reader != nullptr);
+        REQUIRE(reader->lengthInSamples == decoded.value->frames);
+        REQUIRE((int) reader->numChannels == decoded.value->channels);
+        juce::AudioBuffer<float> data((int) reader->numChannels, (int) reader->lengthInSamples);
+        REQUIRE(reader->read(&data, 0, (int) reader->lengthInSamples, 0, true, true));
+        for (int channel = 0; channel < (int) reader->numChannels; ++channel)
+            for (int frame = 0; frame < (int) reader->lengthInSamples; ++frame)
+            {
+                const auto& reference = channel == 1 ? decoded.value->right : decoded.value->left;
+                REQUIRE(std::abs(data.getSample(channel, frame) - reference[(size_t) frame]) <= 1.0f / 32768.0f);
+            }
+        ++compared;
+    }
+    REQUIRE(compared >= 3);
+    REQUIRE(image.getSize() == size);
+    REQUIRE(image.getLastModificationTime() == modified);
+    REQUIRE(FileScanner::computeFileHash(image) == hash);
 }

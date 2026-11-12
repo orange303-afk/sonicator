@@ -137,6 +137,25 @@ Integer 8/16-bit sources export as 16-bit, 24-bit as 24-bit, float32 as float32 
 decoders (MP3) declare 24-bit decoded precision; integer above 24 bits is refused rather than
 truncated.
 
+
+## Extract
+
+Right-click a disc image row in the library (`.iso`, `.cue`, `.bin`), right-click one or more of its
+sample rows, or drop the image file on the window. The existing Extract dialog writes the samples as
+`<image stem> samples/001 Name.wav` next to the image or into a chosen folder:
+
+- one WAV per listed sample, stereo pairs as one stereo file, programs and other record types skipped;
+  empty and entirely silent samples are counted and left out;
+- the source image is opened read-only and never changed; existing WAVs are never overwritten;
+- a private `DiscBrowserService` decodes each record (the same path the preview uses), so the written
+  audio is exactly what plays;
+- after the batch, the output folder is registered as a library root when it lies outside every
+  existing root, scanned for new files (`startFoldersNewOnly`), and then smart-analysed
+  (`startFolder`). A cancelled batch still indexes what was written.
+
+Opt-in check: `SONICATOR_DISC_IMAGE=<cue> SonicatorTests "[.extract-corpus]"` extracts five records of
+a real image into a temporary folder and compares every written WAV with the decoder (bit-exact).
+
 ## Not established
 
 - Bit-exact equivalence with a third-party *decoder* for the whole corpus: the reference check
