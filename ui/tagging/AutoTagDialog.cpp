@@ -1,6 +1,34 @@
 #include "AutoTagDialog.h"
 #include "ui/shell/Theme.h"
+#include <algorithm>
 namespace sonicator {
+void AutoTagDialog::sortProposals(std::vector<AutoTagProposal>& proposals, int columnId, bool forwards)
+{
+    if (columnId < 2 || columnId > 6) return;
+    const auto folder = [](const AutoTagProposal& proposal)
+    {
+        return juce::File(proposal.filePath).getParentDirectory().getFullPathName();
+    };
+    const auto compare = [&](const AutoTagProposal& a, const AutoTagProposal& b)
+    {
+        switch (columnId)
+        {
+            case 2: return a.fileName.compareIgnoreCase(b.fileName);
+            case 3: return folder(a).compareIgnoreCase(folder(b));
+            case 4: return a.canonicalType.compareIgnoreCase(b.canonicalType);
+            case 5: return a.reason.compareIgnoreCase(b.reason);
+            case 6: return (int) a.alreadyAssigned - (int) b.alreadyAssigned;
+            default: return 0;
+        }
+    };
+    std::stable_sort(proposals.begin(), proposals.end(), [&](const AutoTagProposal& a, const AutoTagProposal& b)
+    {
+        const auto order = compare(a, b);
+        if (order != 0) return forwards ? order < 0 : order > 0;
+        return forwards ? a.filePath < b.filePath : a.filePath > b.filePath;
+    });
+}
+
 class AutoTagDialog::ProposalModel final : public juce::TableListBoxModel
 {
 public:
@@ -55,6 +83,11 @@ public:
     void cellClicked(int row, int columnId, const juce::MouseEvent&) override
     {
         if (columnId == 1) owner.toggleRow(row);
+    }
+    void sortOrderChanged(int newSortColumnId, bool isForwards) override
+    {
+        AutoTagDialog::sortProposals(owner.result.proposals, newSortColumnId, isForwards);
+        owner.proposals.updateContent();
     }
 private:
     AutoTagDialog& owner;

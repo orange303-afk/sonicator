@@ -68,8 +68,17 @@ public:
     // Header clicks also change the whole-catalog order; the owner re-runs the SQL query.
     std::function<void(int,bool)> onSortChanged;
     std::function<void(const std::vector<SampleRecord>&, const SampleRecord&, juce::Point<int>)> onContextMenu;
+    // Alt+click on a tag in the TAGS cell: remove that tag from that sample.
+    std::function<void(int64_t sampleId, int64_t tagId)> onTagAltClicked;
     std::function<void(juce::String)> onDragMessage;
 private:
+    struct TagHit
+    {
+        juce::Rectangle<int> bounds; // cell coordinates
+        juce::String name;
+        int64_t tagId = 0;
+    };
+    std::vector<TagHit> tagHits(const std::vector<Tag>& tags, int width) const;
     // Rows are child components, so a plain TableListBox override never sees their mouse events.
     // A recursive listener receives the row gesture and maps it into table coordinates.
     struct RowDragListener final : public juce::MouseListener

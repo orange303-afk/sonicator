@@ -170,6 +170,8 @@ private:
     EnterKeyListener enterKeyListener { *this };
     void updateSelectionStatus(const SampleRecord&);
     void updateSelectedTags();
+    // Removes one tag from every given sample; alt+click uses the current selection.
+    void removeTagFromSamples(const std::vector<int64_t>& sampleIds, int64_t tagId);
     void showAudioSettings();
     void showSettings();
     void applySettings(const AppSettings&);

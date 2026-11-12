@@ -13,6 +13,8 @@ public:
     ~AutoTagDialog() override;
     void paint(juce::Graphics&) override;
     void resized() override;
+    // Sorts the review table by a header column; exposed so the UI test covers every column.
+    static void sortProposals(std::vector<AutoTagProposal>& proposals, int columnId, bool forwards);
 private:
     class ProposalModel;
     class SkipModel;

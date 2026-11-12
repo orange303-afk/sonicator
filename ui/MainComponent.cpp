@@ -283,6 +283,24 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     selectionStatus.setJustificationType(juce::Justification::centredLeft);
     selectionStatus.setText("No sample selected",juce::dontSendNotification);
     library.onSelected = [this](const SampleRecord& r) { selectSample(r); };
+    library.onTagAltClicked = [this](int64_t sampleId, int64_t tagId)
+    {
+        std::vector<int64_t> ids { sampleId };
+        if (library.isRowSelected(library.getSelectedRow()))
+        {
+            ids.clear();
+            for (const auto& sample : library.getSelectedSamples()) ids.push_back(sample.id);
+        }
+        removeTagFromSamples(ids, tagId);
+    };
+    selectedTags.onTagClicked = [this](const Tag& tag, const juce::ModifierKeys& mods)
+    {
+        if (! mods.isAltDown()) return;
+        std::vector<int64_t> ids;
+        for (const auto& sample : library.getSelectedSamples()) ids.push_back(sample.id);
+        if (ids.empty() && selectedSampleId > 0) ids.push_back(selectedSampleId);
+        removeTagFromSamples(ids, tag.id);
+    };
     library.onOpen = [this](const SampleRecord& r) { openDiscImage(r); };
     library.onDragMessage = [this](const juce::String& message) { status.setText(message,juce::dontSendNotification); };
     library.onContextMenu = [this](const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> position)
@@ -1294,6 +1312,17 @@ void MainComponent::updateSelectedTags()
     editTags.setEnabled(true);
     resized();
 }
+void MainComponent::removeTagFromSamples(const std::vector<int64_t>& sampleIds, int64_t tagId)
+{
+    if (writeRepo == nullptr || sampleIds.empty() || tagId <= 0) return;
+    const auto visible = writeRepo->visibleIds(sampleIds);
+    if (visible.empty()) return;
+    writeRepo->setSampleTag(visible, tagId, false);
+    triggerAdaptiveLearning(visible);
+    status.setText("Tag removed from " + juce::String(visible.size()) + " sample(s)",
+                   juce::dontSendNotification);
+    reloadLibrary();
+}
 void MainComponent::selectSample(const SampleRecord& r)
 {
     const int selectedRows = library.getSelectedRowCount();
@@ -1305,9 +1334,24 @@ void MainComponent::selectSample(const SampleRecord& r)
         sessionSamplePath.clear();
         markSessionStateDirty();
         preview.clearSource();
-        updateSelectedTags();
-        analysisDetails.setText("Multiple samples selected. Select one sample to inspect its "
-                                "measured audio features.", juce::dontSendNotification);
+        // The selection still has a useful answer: every tag on any selected file, once.
+        std::vector<int64_t> ids;
+        for (const auto& sample : library.getSelectedSamples()) ids.push_back(sample.id);
+        std::map<int64_t, Tag> unique;
+        if (readRepo != nullptr)
+            for (const auto& [sampleId, tags] : readRepo->tagsForSamples(ids))
+                for (const auto& tag : tags) unique[tag.id] = tag;
+        std::vector<Tag> unionTags;
+        for (const auto& [id, tag] : unique) { juce::ignoreUnused(id); unionTags.push_back(tag); }
+        std::sort(unionTags.begin(), unionTags.end(),
+                  [](const Tag& a, const Tag& b) { return a.name.compareIgnoreCase(b.name) < 0; });
+        selectedTags.setTags(unionTags);
+        editTags.setEnabled(false); // editing a batch would need its own menu; display only
+        resized();
+        analysisDetails.setText("Multiple samples selected (" + juce::String(ids.size())
+            + "). Tags on the selection: " + juce::String(unionTags.size()) + " unique."
+            + (unionTags.empty() ? "" : " Alt+click a tag to remove it from every selected file."),
+            juce::dontSendNotification);
         selectionStatus.setText(juce::String(selectedRows) + " samples selected",
                                 juce::dontSendNotification);
         selectionStatus.setTooltip({});

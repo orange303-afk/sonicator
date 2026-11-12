@@ -44,6 +44,17 @@ void TagStrip::layout(int width)
         x += w + gap;
     }
 }
+void TagStrip::mouseDown(const juce::MouseEvent& event)
+{
+    if (onTagClicked == nullptr) return;
+    for (size_t i = 0; i < tags.size() && i < chipBounds.size(); ++i)
+        if (chipBounds[i].contains(event.getPosition()))
+        {
+            onTagClicked(tags[i], event.mods);
+            return;
+        }
+}
+
 void TagStrip::paint(juce::Graphics& g)
 {
     if (tags.empty())

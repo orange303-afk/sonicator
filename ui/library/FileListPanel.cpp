@@ -191,6 +191,29 @@ int FileListPanel::prepareRowDrag(int row, bool addToSelection)
 void FileListPanel::handlePress(const juce::MouseEvent& e)
 {
     const auto pos = e.getEventRelativeTo(&table).getPosition();
+    if (e.mods.isAltDown() && onTagAltClicked != nullptr)
+    {
+        const int row = table.getRowContainingPosition(pos.x, pos.y);
+        const int column = table.getHeader().getColumnIdAtX(pos.x);
+        if (row >= 0 && column == 7)
+        {
+            if (const auto* record = recordAt(row))
+            {
+                const auto found = rowTags.find(record->id);
+                if (found != rowTags.end())
+                {
+                    const auto cell = table.getCellPosition(row, 7, true);
+                    for (const auto& hit : tagHits(found->second, cell.getWidth()))
+                        if (hit.bounds.translated(cell.getX(), cell.getY()).contains(pos))
+                        {
+                            dragArmed = false;
+                            onTagAltClicked(record->id, hit.tagId);
+                            return;
+                        }
+                }
+            }
+        }
+    }
     dragOrigin = pos;
     dragStarted = false;
     pressedRow = table.getRowContainingPosition(pos.x, pos.y);
@@ -404,6 +427,22 @@ void FileListPanel::paintRowBackground(juce::Graphics& g,int row,int width,int h
     }
     g.setColour(theme::line.withAlpha(0.25f)); g.drawHorizontalLine(height-1,0,(float) width);
 }
+std::vector<FileListPanel::TagHit> FileListPanel::tagHits(const std::vector<Tag>& tags, int width) const
+{
+    std::vector<TagHit> hits;
+    int x = 8;
+    for (const auto& tag : tags)
+    {
+        if (x >= width - 12) break;
+        const int textWidth = juce::GlyphArrangement::getStringWidthInt(juce::FontOptions(11), tag.name);
+        const int textArea = juce::jmax(0, width - x - 6);
+        const int drawn = juce::jmin(textWidth, textArea);
+        hits.push_back({ { x, 0, 10 + drawn, 22 }, tag.name, tag.id });
+        x += juce::jmin(textWidth + 10, juce::jmax(0, width - x));
+    }
+    return hits;
+}
+
 void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool)
 {
     const auto* record = recordAt(row);
@@ -467,17 +506,18 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
             return;
         }
         g.setFont(juce::FontOptions(11));
-        int x = 8;
-        for (const auto& tag : found->second)
+        const auto hits = tagHits(found->second, w);
+        for (const auto& hit : hits)
         {
-            if (x >= w - 12) break;
+            auto tag = found->second.front();
+            for (const auto& candidate : found->second)
+                if (candidate.id == hit.tagId) { tag = candidate; break; }
             const auto colour = juce::Colour(tag.colour);
-            g.setColour(colour); g.fillEllipse((float) x, h / 2.0f - 3.0f, 6.0f, 6.0f);
-            x += 10;
-            const int textWidth = juce::GlyphArrangement::getStringWidthInt(juce::FontOptions(11), tag.name);
+            g.setColour(colour);
+            g.fillEllipse((float) hit.bounds.getX(), h / 2.0f - 3.0f, 6.0f, 6.0f);
             g.setColour(theme::tagText(colour));
-            g.drawText(tag.name, x, 0, juce::jmax(0, w - x - 6), h, juce::Justification::centredLeft, true);
-            x += juce::jmin(textWidth + 10, juce::jmax(0, w - x));
+            g.drawText(tag.name, hit.bounds.getX() + 10, 0, juce::jmax(0, hit.bounds.getWidth() - 10), h,
+                       juce::Justification::centredLeft, true);
         }
         return;
     }

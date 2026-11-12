@@ -761,3 +761,26 @@ TEST_CASE("Embedded settings stay inside the editor and survive a theme change",
         if (auto* button = dynamic_cast<juce::TextButton*>(panel->getChildComponent(i)))
             CHECK_FALSE((button->getButtonText() == "Audio/MIDI Settings" && button->isVisible()));
 }
+
+TEST_CASE("AutoTag proposal sorting follows the clicked header", "[ui][autotag]")
+{
+    AutoTagProposal a;
+    a.fileName = "zeta.wav"; a.filePath = "/b/zeta.wav"; a.canonicalType = "Pad"; a.reason = "token z";
+    AutoTagProposal b;
+    b.fileName = "alpha.wav"; b.filePath = "/a/alpha.wav"; b.canonicalType = "Kick"; b.reason = "token a";
+    b.alreadyAssigned = true;
+    std::vector<AutoTagProposal> proposals { a, b };
+
+    AutoTagDialog::sortProposals(proposals, 2, true);
+    CHECK(proposals[0].fileName == "alpha.wav");
+    AutoTagDialog::sortProposals(proposals, 2, false);
+    CHECK(proposals[0].fileName == "zeta.wav");
+    AutoTagDialog::sortProposals(proposals, 3, true);
+    CHECK(proposals[0].filePath == "/a/alpha.wav");
+    AutoTagDialog::sortProposals(proposals, 4, true);
+    CHECK(proposals[0].canonicalType == "Kick");
+    AutoTagDialog::sortProposals(proposals, 6, true);
+    CHECK_FALSE(proposals[0].alreadyAssigned);
+    AutoTagDialog::sortProposals(proposals, 6, false);
+    CHECK(proposals[0].alreadyAssigned);
+}
