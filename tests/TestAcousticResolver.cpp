@@ -70,6 +70,20 @@ TEST_CASE("Case 4: Disagreement where high-confidence acoustic overrides filenam
     REQUIRE(res.explanation.contains("interpretations differ"));
 }
 
+TEST_CASE("A filename instrument outranks a learned prototype guess", "[smart][resolver][acoustic]")
+{
+    // A file whose name says "bd07" is a bass drum even when the nearest learned prototypes
+    // happen to be congas: the explicit name is evidence about this file, the prototype is not.
+    auto fn = makeCandidate(SmartField::Type, "filename", "kick", smartExtractorsVersion);
+    auto learned = makeCandidate(SmartField::Type, "user_adaptive", "Conga", smartDspVersion);
+    auto res = resolveSmart({ learned, fn });
+    REQUIRE(res.type == "kick");
+    REQUIRE(res.typeSource == "filename");
+    REQUIRE(res.typeState == SmartState::Ambiguous);
+    REQUIRE(res.explanation.contains("user_adaptive"));
+    REQUIRE(res.explanation.contains("interpretations differ"));
+}
+
 TEST_CASE("SmartResolver: Genre candidate (source=path) does not conflict with instrument type", "[smart][resolver][acoustic][genre]")
 {
     auto ac = makeCandidate(SmartField::Type, "dsp_acoustic", "Kick");

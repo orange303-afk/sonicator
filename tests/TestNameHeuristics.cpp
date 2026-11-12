@@ -47,7 +47,13 @@ TEST_CASE("Type and structure use exact tokens", "[smart][names]")
 {
     auto kick = extractNameCandidates("/lib/PTV1_Kick_15.wav");
     REQUIRE(first(kick, SmartField::Type).textValue == "kick");
-    REQUIRE(only(extractNameCandidates("/lib/SD_MPC60_Vinnie_009.wav"), SmartField::Type).empty());
+    // Drum abbreviations are whole tokens, the same table AutoTag uses; a numeric index
+    // glued to the abbreviation ("bd07") is split off before matching.
+    REQUIRE(first(extractNameCandidates("/lib/technox_bd07.wav"), SmartField::Type).textValue == "kick");
+    REQUIRE(first(extractNameCandidates("/lib/SD_MPC60_Vinnie_009.wav"), SmartField::Type).textValue == "snare");
+    REQUIRE(first(extractNameCandidates("/lib/hh_01.wav"), SmartField::Type).textValue == "hat");
+    REQUIRE(only(extractNameCandidates("/lib/abdx.wav"), SmartField::Type).empty());
+    REQUIRE(only(extractNameCandidates("/lib/bdroom.wav"), SmartField::Type).empty());
     REQUIRE(first(extractNameCandidates("/lib/Uplifting_Vocal_Loop_128bpm.wav"), SmartField::Type)
                 .textValue == "vocal");
     auto structure = extractNameCandidates("/lib/One_Shot_Kick.wav");

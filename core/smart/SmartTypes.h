@@ -17,8 +17,8 @@ std::optional<SmartField> smartFieldFromKey(const juce::String&);
 // - resolver: bump when selection rules change; results can then be recomputed from the stored
 //   candidates without reading any audio again.
 // - DSP: bump when the DSP stage changes (1 = rhythm structure and BPM).
-inline constexpr int smartExtractorsVersion = 2;
-inline constexpr int smartResolverVersion = 2;
+inline constexpr int smartExtractorsVersion = 3;
+inline constexpr int smartResolverVersion = 3;
 inline constexpr int smartDspVersion = 2; // 1 = rhythm; 2 = rhythm + key + one-shot pitch
 
 // Invalid means "the field was present but its value is not usable"; Unsupported means the

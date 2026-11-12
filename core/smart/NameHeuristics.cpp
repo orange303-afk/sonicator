@@ -4,11 +4,12 @@
 namespace sonicator {
 namespace {
 struct Alias { const char* canonical; const char* tokens; };
-// Exact tokens, never substrings: "bd"/"sd"/"hh" are deliberately absent because the spike
-// showed they match unrelated abbreviations inside this library.
+// Whole tokens only, never substrings. The drum abbreviations match the AutoTag table: a
+// numeric index glued to the token ("bd07") is split off before matching, while "bdroom" stays
+// one word and is not a kick.
 constexpr Alias typeAliases[] = {
-    { "kick", "kick|kickdrum|kik" },
-    { "snare", "snare|snr" },
+    { "kick", "kick|kickdrum|kik|bd|bassdrum|bdl|bdr" },
+    { "snare", "snare|snr|sd|snaredrum|snrl|snrr|sdl|sdr" },
     { "rim", "rim|rimshot|sidestick" },
     { "clap", "clap|claps|handclap" },
     { "snap", "snap|snaps|fingersnap" },
@@ -16,7 +17,7 @@ constexpr Alias typeAliases[] = {
     { "blip", "blip|blips|bleep" },
     { "zap", "zap|zaps|laser" },
     { "glitch", "glitch|stutter" },
-    { "hat", "hihat|hat|hats|openhat|closedhat" },
+    { "hat", "hihat|hat|hats|openhat|closedhat|hh|hhl|hhr" },
     { "shaker", "shaker|shakers" },
     { "tamb", "tamb|tambourine" },
     { "cowbell", "cowbell|cbell" },
@@ -69,6 +70,33 @@ juce::StringArray splitTokens(const juce::String& text)
     if (current.isNotEmpty()) out.add(current);
     return out;
 }
+// "bd07" and "snare01" carry an index; try the letter/digit runs when the whole token is not an
+// alias. A token of one run ("bdroom", "abdx") has nothing to split and stays unmatched.
+juce::String typeForToken(const juce::String& token);
+juce::String typeForSplitToken(const juce::String& token)
+{
+    bool hasLetter = false, hasDigit = false;
+    for (auto c : token)
+    {
+        if (juce::CharacterFunctions::isLetter(c)) hasLetter = true;
+        else if (juce::CharacterFunctions::isDigit(c)) hasDigit = true;
+    }
+    if (! hasLetter || ! hasDigit) return {};
+    juce::String run;
+    bool lastWasDigit = false;
+    for (int i = 0; i < token.length(); ++i)
+    {
+        const bool isDigit = juce::CharacterFunctions::isDigit(token[i]);
+        if (i > 0 && isDigit != lastWasDigit && run.isNotEmpty())
+        {
+            if (auto type = typeForToken(run); type.isNotEmpty()) return type;
+            run.clear();
+        }
+        run += juce::String::charToString(token[i]);
+        lastWasDigit = isDigit;
+    }
+    return run.isNotEmpty() ? typeForToken(run) : juce::String();
+}
 juce::String typeForToken(const juce::String& token)
 {
     auto match = [](const juce::String& value)
@@ -118,7 +146,9 @@ void collect(const juce::String& text, const juce::String& source, std::vector<S
     for (int i = 0; i < tokens.size(); ++i)
     {
         const auto& token = tokens[(size_t) i];
-        if (auto type = typeForToken(token); type.isNotEmpty())
+        auto type = typeForToken(token);
+        if (type.isEmpty()) type = typeForSplitToken(token);
+        if (type.isNotEmpty())
         {
             SmartCandidate c; c.field = SmartField::Type; c.source = source;
             c.textValue = type; c.detail = token; out.push_back(c);

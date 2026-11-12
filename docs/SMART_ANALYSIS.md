@@ -99,6 +99,13 @@ visible underneath, including when it is stale.
 - A DSP pass with competing grids stores the tempo as an `invalid` candidate: the
   resolved BPM becomes `ambiguous`, never an invented single number. A valid
   metadata BPM still wins over it by source priority.
+- Type evidence is ordered: container metadata (sampler chunk, REX2, AIFF BASC, ACID), then a
+  confident acoustic rule, then an explicit filename token, then learned prototypes
+  (`user_adaptive`, `global_adaptive`, `global_model`) and the ML classifier, then DSP structure.
+  A name such as `bd07` is direct evidence about that file, so it outranks a nearest-prototype
+  guess; disagreement is reported as `ambiguous`. The smart filename parser uses the same whole
+  drum abbreviations as AutoTag (`bd`, `sd`, `hh` and their L/R forms) and splits a glued numeric
+  index (`bd07` → `bd`), while `bdroom` stays one word and is not a kick.
 - DSP structure (`loop` / `one-shot`) is a normal text candidate. A name or container
   value with stronger priority wins, and disagreement is reported as `ambiguous`.
 - Variable tempo does not resolve to a single BPM.
