@@ -1,4 +1,5 @@
 #include "WaveformDisplay.h"
+#include "core/audio/SonicatorFormats.h"
 #include <algorithm>
 #include "ui/shell/Theme.h"
 #include <cmath>
@@ -12,7 +13,7 @@ bool sameRange(selection::Range a, selection::Range b)
 }
 WaveformDisplay::WaveformDisplay(const juce::File& folder) : cacheFile(folder.getChildFile("waveforms.cache"))
 {
-    formats.registerBasicFormats(); thumbnail.addChangeListener(this);
+    registerSonicatorFormats(formats); thumbnail.addChangeListener(this);
     folder.createDirectory();
     if (auto stream = cacheFile.createInputStream()) cache.readFromStream(*stream);
 }

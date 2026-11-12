@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "core/audio/SonicatorFormats.h"
 #include "ContainerValidation.h"
 #include "core/legacy/LegacyFormatProbe.h"
 #include <algorithm>
@@ -18,7 +19,7 @@ bool AudioEngine::selectReasonReference(int index)
 }
 AudioEngine::AudioEngine(bool openDevice) : deviceMode(openDevice)
 {
-    formats.registerBasicFormats();
+    registerSonicatorFormats(formats);
     if (deviceMode)
     {
         readAhead.startThread();

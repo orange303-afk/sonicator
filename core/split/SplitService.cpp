@@ -1,4 +1,5 @@
 #include "SplitService.h"
+#include "core/audio/SonicatorFormats.h"
 #include "core/export/AudioExporter.h"
 #include "core/scanner/FileScanner.h"
 #include <algorithm>
@@ -138,7 +139,7 @@ void SplitService::run()
             continue;
         }
         juce::AudioFormatManager formats;
-        formats.registerBasicFormats();
+        registerSonicatorFormats(formats);
         std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(source));
         if (reader == nullptr)
         {

@@ -1,4 +1,5 @@
 #include "AudioExporter.h"
+#include "core/audio/SonicatorFormats.h"
 #include <cmath>
 namespace sonicator {
 namespace
@@ -56,7 +57,7 @@ ExportResult AudioExporter::exportRange(const juce::File& source, double start, 
     try
     {
         juce::AudioFormatManager formats;
-        formats.registerBasicFormats();
+        registerSonicatorFormats(formats);
         std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(source));
         if (reader == nullptr) return failure(part, "Cannot decode source audio: " + source.getFileName());
         const auto rate = reader->sampleRate;

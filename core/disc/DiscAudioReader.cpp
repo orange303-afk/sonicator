@@ -1,4 +1,5 @@
 #include "DiscAudioReader.h"
+#include "core/audio/SonicatorFormats.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <array>
 #include <cmath>
@@ -99,7 +100,7 @@ DiscResult<SampleAudioPtr> decodeDiscAudio(ByteSourcePtr source, const juce::Str
     }
 
     juce::AudioFormatManager formats;
-    formats.registerBasicFormats();
+    registerSonicatorFormats(formats);
     auto stream = std::make_unique<ByteSourceInputStream>(source);
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(std::move(stream)));
     if (reader == nullptr)

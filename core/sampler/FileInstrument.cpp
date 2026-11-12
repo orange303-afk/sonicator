@@ -1,4 +1,5 @@
 #include "FileInstrument.h"
+#include "core/audio/SonicatorFormats.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <cmath>
@@ -416,7 +417,7 @@ bool loadFileInstrument(const juce::File& file, FileInstrumentFormat format,
     instrument.name = parsed.name;
     instrument.warnings = parsed.warnings;
     juce::AudioFormatManager formats;
-    formats.registerBasicFormats();
+    registerSonicatorFormats(formats);
     int64_t decodedBytes = 0;
     std::map<juce::String, int> sourceByPath;
     std::vector<int> refToSource(parsed.sampleNames.size(), -1);

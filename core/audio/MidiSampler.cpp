@@ -1,4 +1,5 @@
 #include "MidiSampler.h"
+#include "core/audio/SonicatorFormats.h"
 #include "ContainerValidation.h"
 #include <cmath>
 namespace sonicator {
@@ -60,7 +61,7 @@ juce::String MidiSampler::decode(const juce::File& file, Decoded& decoded)
     decoded = {};
     auto error = validateContainer(file);
     if (error.isNotEmpty()) return error;
-    juce::AudioFormatManager formats; formats.registerBasicFormats();
+    juce::AudioFormatManager formats; registerSonicatorFormats(formats);
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
     if (! reader || reader->lengthInSamples <= 0 || ! std::isfinite(reader->sampleRate) || reader->sampleRate <= 0) return "Cannot decode MIDI sample";
     if (reader->numChannels < 1 || reader->numChannels > 2) return "MIDI Preview supports mono/stereo samples";

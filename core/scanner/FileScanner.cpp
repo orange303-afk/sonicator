@@ -12,7 +12,7 @@ bool FileScanner::isMetadataOnlyFormat(const juce::File& f)
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {
     if (isMetadataOnlyFormat(f)) return true;
-    if (! f.hasFileExtension("wav;aif;aiff;flac;mp3;ogg")) return false;
+    if (! f.hasFileExtension("wav;aif;aiff;flac;mp3;ogg;ebl")) return false;
     // Ableton factory AIFC samples use the closed "able" codec and only Live can decode them.
     if (isAbletonProtectedSample(f)) return false;
     if (f.getFileName().startsWith("._"))

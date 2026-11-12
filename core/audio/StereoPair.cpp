@@ -1,4 +1,5 @@
 #include "StereoPair.h"
+#include "core/audio/SonicatorFormats.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <cmath>
 #include <vector>
@@ -29,7 +30,7 @@ std::unique_ptr<juce::AudioFormatReader> openMono(const juce::File& file, int64_
                                                  juce::String& error)
 {
     juce::AudioFormatManager formats;
-    formats.registerBasicFormats();
+    registerSonicatorFormats(formats);
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
     if (reader == nullptr) { error = "Cannot decode " + file.getFileName(); return nullptr; }
     if (reader->numChannels != 1) { error = file.getFileName() + " is not mono"; return nullptr; }

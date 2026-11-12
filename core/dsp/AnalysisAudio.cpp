@@ -1,4 +1,5 @@
 #include "AnalysisAudio.h"
+#include "core/audio/SonicatorFormats.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <cmath>
@@ -9,7 +10,7 @@ AnalysisAudio readAnalysisAudio(const juce::File& file, const AnalysisAudioOptio
     AnalysisAudio out;
     if (cancel && cancel()) { out.error = "Cancelled"; return out; }
     juce::AudioFormatManager formats;
-    formats.registerBasicFormats();
+    registerSonicatorFormats(formats);
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
     if (reader == nullptr || reader->sampleRate <= 0 || reader->lengthInSamples <= 0
         || reader->numChannels == 0 || reader->numChannels > 64)

@@ -1,4 +1,5 @@
 #include "BasicAnalyzer.h"
+#include "core/audio/SonicatorFormats.h"
 #include "core/audio/ContainerValidation.h"
 #include <array>
 #include <cmath>
@@ -11,7 +12,7 @@ SampleRecord BasicAnalyzer::analyze(const juce::File& file, CancelCheck cancel) 
     r.fileSize = file.getSize(); r.dateModified = file.getLastModificationTime().toMilliseconds();
     r.error = validateContainer(file, &r.compatibility);
     if (r.error.isNotEmpty()) return r;
-    juce::AudioFormatManager formats; formats.registerBasicFormats();
+    juce::AudioFormatManager formats; registerSonicatorFormats(formats);
     std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
     if (! reader || reader->sampleRate <= 0 || reader->lengthInSamples <= 0
         || reader->numChannels == 0 || reader->numChannels > 64)
