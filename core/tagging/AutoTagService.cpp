@@ -1,6 +1,7 @@
 #include "AutoTagService.h"
 #include "core/smart/AcousticClassifierService.h"
 #include "core/dsp/AnalysisAudio.h"
+#include "core/dsp/FeatureExtractorV2.h"
 #include <algorithm>
 #include <set>
 namespace sonicator {
@@ -512,19 +513,29 @@ void AutoTagService::apply()
             if (! f.existsAsFile()) continue;
 
             std::vector<float> features;
+            int featureSchema = 0;
             for (const auto& fb : repo.allFeedback())
-            {
-                if (fb.sampleId == id) { features = fb.features; break; }
-            }
-            if (features.empty())
+                if (fb.sampleId == id)
+                {
+                    features = fb.features;
+                    featureSchema = fb.featureSchema;
+                    break;
+                }
+            const bool needV1 = features.empty();
+            const bool needV2 = featureSchema < 2;
+            AnalysisAudio audio;
+            if (needV1 || needV2)
             {
                 AnalysisAudioOptions opts;
                 opts.maxSeconds = 30.0;
-                const auto audio = readAnalysisAudio(f, opts);
-                if (audio.buffer.getNumSamples() > 0 && audio.sampleRate > 0.0)
-                    features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+                audio = readAnalysisAudio(f, opts);
+                if (needV1 && ! audio.ok()) continue;
             }
-            if (features.empty()) continue;
+            if (needV1)
+            {
+                features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+                if (features.empty()) continue;
+            }
 
             const auto sampleTags = repo.tagsForSample(id);
             juce::StringArray tagNames;
@@ -543,6 +554,11 @@ void AutoTagService::apply()
             // only its tag list refreshes.
             const bool userRow = repo.hasUserFeedback(id);
             repo.recordFeedback(id, type, tagNames, features, SampleRepository::FeedbackOrigin::approved);
+            if (needV2 && audio.ok())
+            {
+                const auto vector = FeatureExtractorV2::extract(audio.buffer, audio.sampleRate);
+                if (vector.ok()) repo.setFeedbackV2(id, vector.values);
+            }
             if (userRow)
                 AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototypeTags(id, tagNames);
             else

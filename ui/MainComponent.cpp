@@ -1,4 +1,6 @@
 #include "MainComponent.h"
+#include "core/dsp/FeatureExtractorV2.h"
+#include "core/ml/FeatureV2Backfill.h"
 #include "core/ableton/AbletonPacks.h"
 #include "core/reason/ReasonPatch.h"
 #include "ui/tagging/AutoTagDialog.h"
@@ -625,6 +627,11 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     sendLookAndFeelChange();
     addKeyListener(&enterKeyListener);
     startTimerHz(10);
+    if (writeRepo != nullptr)
+        featureV2Worker = std::make_unique<std::thread>([this, repo = writeRepo.get()]
+        {
+            backfillFeatureV2(*repo, [this] { return cancelFeatureV2.load(); });
+        });
     juce::Desktop::getInstance().addDarkModeSettingListener(this);
     if (persistSessionState && ! embeddedUi)
     {
@@ -669,6 +676,8 @@ MainComponent::~MainComponent()
     contributionUploader.reset();
     cancelFeedback = true;
     if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
+    cancelFeatureV2 = true;
+    if (featureV2Worker && featureV2Worker->joinable()) featureV2Worker->join();
     smart.reset(); indexer.reset(); tagging.reset(); autoTag.reset(); splitter.reset(); extractor.reset();
     setLookAndFeel(nullptr);
 }
@@ -2967,19 +2976,29 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
             if (! f.existsAsFile()) continue;
 
             std::vector<float> features;
+            int featureSchema = 0;
             for (const auto& fb : repo->allFeedback())
-            {
-                if (fb.sampleId == id) { features = fb.features; break; }
-            }
-            if (features.empty())
+                if (fb.sampleId == id)
+                {
+                    features = fb.features;
+                    featureSchema = fb.featureSchema;
+                    break;
+                }
+            const bool needV1 = features.empty();
+            const bool needV2 = featureSchema < 2;
+            AnalysisAudio audio;
+            if (needV1 || needV2)
             {
                 AnalysisAudioOptions opts;
                 opts.maxSeconds = 30.0;
-                const auto audio = readAnalysisAudio(f, opts);
-                if (audio.buffer.getNumSamples() == 0 || audio.sampleRate <= 0.0) continue;
-                features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+                audio = readAnalysisAudio(f, opts);
+                if (needV1 && ! audio.ok()) continue;
             }
-            if (features.empty()) continue;
+            if (needV1)
+            {
+                features = AdaptiveClassifier::extractFeatures(audio.buffer, audio.sampleRate);
+                if (features.empty()) continue;
+            }
             if (cancelFeedback.load()) break;
 
             const auto sampleTags = repo->tagsForSample(id);
@@ -3003,6 +3022,11 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
             {
                 repo->recordFeedback(id, type, tagNames, features,
                                      SampleRepository::FeedbackOrigin::user);
+                if (needV2 && audio.ok())
+                {
+                    const auto vector = FeatureExtractorV2::extract(audio.buffer, audio.sampleRate);
+                    if (vector.ok()) repo->setFeedbackV2(id, vector.values);
+                }
                 AcousticClassifierService::getSharedAdaptiveClassifier().updatePrototype(id, type, tagNames, features);
             }
         }

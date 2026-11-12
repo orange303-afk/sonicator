@@ -109,7 +109,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/rex/Rex2Decoder.cpp core/rex/Rex2SlicePlayer.cpp
     core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp
     core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
-    core/ml/AdaptiveClassifier.cpp)
+    core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1

@@ -34,3 +34,4 @@ target_sources(SonicatorTests PRIVATE TestFeatureJson.cpp)
 # The catalog reader is compiled into the test binary directly: the training tools stay optional.
 target_sources(SonicatorTests PRIVATE TestFeaturesCatalog.cpp ${CMAKE_SOURCE_DIR}/tools/sonicator-features/CatalogReader.cpp)
 target_sources(SonicatorTests PRIVATE TestFeatureSchema16.cpp)
+target_sources(SonicatorTests PRIVATE TestFeatureV2Backfill.cpp)

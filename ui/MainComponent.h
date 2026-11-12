@@ -225,5 +225,7 @@ private:
     static void toggle(std::vector<int64_t>& values, int64_t id);
     std::unique_ptr<std::thread> typeFeedbackWorker;
     std::atomic<bool> cancelFeedback{ false };
+    std::unique_ptr<std::thread> featureV2Worker;
+    std::atomic<bool> cancelFeatureV2{ false };
 };
 } // namespace sonicator
