@@ -233,7 +233,13 @@ void FileListPanel::handleDrag(const juce::MouseEvent& e)
         if (onDragMessage) onDragMessage("Selected files are missing or unavailable");
         return;
     }
-    ExternalFileDrag::start(paths, &table, externalDrag);
+    // EBL rows have no audio the OS can read, so they become WAVs in the drag cache first.
+    juce::StringArray problems;
+    const auto files = ExternalFileDrag::materialiseForDrag(paths, ExternalFileDrag::dragCacheFolder(),
+                                                            problems);
+    if (! problems.isEmpty() && onDragMessage) onDragMessage(problems.joinIntoString("; "));
+    if (files.isEmpty()) return;
+    ExternalFileDrag::start(files, &table, externalDrag);
 }
 void FileListPanel::handleRelease()
 {

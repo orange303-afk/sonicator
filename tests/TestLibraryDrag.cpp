@@ -2,6 +2,8 @@
 #include "core/export/ExternalFileDrag.h"
 #include "ui/library/FileListPanel.h"
 #include "TestHelpers.h"
+#include "EblTestFile.h"
+#include <cmath>
 using namespace sonicator;
 TEST_CASE("External file drag keeps only existing paths in order", "[drag][library]")
 {
@@ -189,4 +191,59 @@ TEST_CASE("A stereo pair row drags both mono files", "[drag][library][stereo-pai
     REQUIRE(paths.size() == 2);
     REQUIRE(paths.contains(left.getFullPathName()));
     REQUIRE(paths.contains(right.getFullPathName()));
+}
+
+TEST_CASE("EBL rows drag out as WAV and failed conversions are reported", "[ebl][drag]")
+{
+    using ebltest::monoOptions;
+    TestDirectory t;
+    auto looped = monoOptions();
+    looped.name = "Loop Name";
+    looped.loop = std::pair<uint32_t, uint32_t> { 2, 6 };
+    auto ebl = t.dir.getChildFile("Looped.ebl");
+    {
+        const auto bytes = ebltest::makeEbl(looped);
+        REQUIRE(ebl.replaceWithData(bytes.data(), bytes.size()));
+    }
+    auto wav = t.wave("plain.wav");
+    auto broken = t.dir.getChildFile("broken.ebl");
+    REQUIRE(broken.replaceWithText("not an ebl"));
+    const auto cache = t.dir.getChildFile("drag");
+
+    juce::StringArray problems;
+    const auto files = ExternalFileDrag::materialiseForDrag(
+        { ebl.getFullPathName(), wav.getFullPathName(), broken.getFullPathName() }, cache, problems);
+    REQUIRE(files.size() == 2);
+    CHECK(files[1] == wav.getFullPathName());
+    CHECK(problems.size() == 1);
+    CHECK(problems[0].contains("broken.ebl"));
+
+    const juce::File cached(files[0]);
+    REQUIRE(cached.existsAsFile());
+    CHECK(cached.getParentDirectory() == cache);
+    CHECK(cached.getFileName().startsWith("Loop_Name-"));
+    CHECK(cached.hasFileExtension("wav"));
+
+    juce::WavAudioFormat format;
+    std::unique_ptr<juce::AudioFormatReader> reader(format.createReaderFor(cached.createInputStream().release(), true));
+    REQUIRE(reader != nullptr);
+    CHECK(reader->sampleRate == 47360);
+    CHECK(reader->numChannels == 1);
+    REQUIRE(reader->lengthInSamples == 8);
+    juce::AudioBuffer<float> buffer(1, 8);
+    REQUIRE(reader->read(&buffer, 0, 8, 0, true, true));
+    for (int i = 0; i < 8; ++i)
+        CHECK(std::abs(buffer.getSample(0, i) - (float) looped.left[(size_t) i] / 32768.0f) <= 1e-6f);
+    CHECK(reader->metadataValues.getValue("NumSampleLoops", "0") == "1");
+    CHECK(reader->metadataValues.getValue("Loop0Start", "") == "2");
+    CHECK(reader->metadataValues.getValue("Loop0End", "") == "5"); // exclusive 6 becomes inclusive 5
+    reader.reset();
+
+    const auto firstWrite = cached.getLastModificationTime();
+    juce::StringArray secondProblems;
+    const auto again = ExternalFileDrag::materialiseForDrag({ ebl.getFullPathName() }, cache, secondProblems);
+    REQUIRE(again.size() == 1);
+    CHECK(again[0] == cached.getFullPathName());
+    CHECK(secondProblems.isEmpty());
+    CHECK(cached.getLastModificationTime() == firstWrite);
 }
