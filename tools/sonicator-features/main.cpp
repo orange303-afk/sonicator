@@ -2,6 +2,7 @@
 // training set needs to group and split records. Labels come from the dataset's own metadata, so
 // this tool knows nothing about them.
 
+#include "CatalogReader.h"
 #include "core/dsp/AnalysisAudio.h"
 #include "core/dsp/FeatureExtractorV2.h"
 #include "core/dsp/FeatureJson.h"
@@ -14,13 +15,16 @@ struct Options
 {
     juce::String input;
     juce::String output;
+    juce::String catalog;
+    juce::String paths;
     bool walk = false;
     int limit = 0;
 };
 
 void usage()
 {
-    std::cerr << "usage: sonicator-features --in <file|directory> [--out <file.jsonl>] [--walk] [--limit N]\n";
+    std::cerr << "usage: sonicator-features --in <file|directory> [--out <file.jsonl>] [--walk] [--limit N]\n"
+                 "       sonicator-features --catalog <catalog.sqlite> --out <gold.jsonl> [--paths <gold.paths.jsonl>]\n";
 }
 
 bool parse(Options& options, int argc, char** argv)
@@ -35,6 +39,8 @@ bool parse(Options& options, int argc, char** argv)
         };
         if (argument == "--in") options.input = value();
         else if (argument == "--out") options.output = value();
+        else if (argument == "--catalog") options.catalog = value();
+        else if (argument == "--paths") options.paths = value();
         else if (argument == "--walk") options.walk = true;
         else if (argument == "--limit") options.limit = value().getIntValue();
         else
@@ -43,9 +49,9 @@ bool parse(Options& options, int argc, char** argv)
             return false;
         }
     }
-    if (options.input.isEmpty())
+    if (options.input.isEmpty() && options.catalog.isEmpty())
     {
-        std::cerr << "--in is required\n";
+        std::cerr << "--in or --catalog is required\n";
         return false;
     }
     return true;
@@ -65,6 +71,25 @@ int main(int argc, char** argv)
     {
         usage();
         return 2;
+    }
+
+    if (options.catalog.isNotEmpty())
+    {
+        if (options.output.isEmpty())
+        {
+            std::cerr << "--out is required with --catalog\n";
+            return 2;
+        }
+        const auto result = sonicator::writeCatalogGold(juce::File(options.catalog), juce::File(options.output),
+                                                        options.paths.isEmpty() ? juce::File() : juce::File(options.paths));
+        if (result.error.isNotEmpty())
+        {
+            std::cerr << result.error << "\n";
+            return 2;
+        }
+        std::cerr << "wrote " << result.written << ", missingFile " << result.missingFile
+                  << ", unreadable " << result.unreadable << "\n";
+        return result.written > 0 ? 0 : 1;
     }
 
     const juce::File input(options.input);
