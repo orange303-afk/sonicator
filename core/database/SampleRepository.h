@@ -230,6 +230,9 @@ public:
         juce::String targetType;
         juce::StringArray tags;
         std::vector<float> features;
+        // Schema 16: the v2 vector sits next to the v1 one until a background pass fills it.
+        int featureSchema = 1;
+        std::vector<float> featuresV2;
         int64_t updatedAt = 0;
     };
     std::vector<juce::String> customTypes() const;
@@ -237,6 +240,8 @@ public:
     void recordFeedback(int64_t sampleId, const juce::String& targetType,
                         const juce::StringArray& tags, const std::vector<float>& features,
                         FeedbackOrigin origin);
+    // Stores the featureSchema-2 vector and marks the row as schema 2. The v1 vector stays.
+    void setFeedbackV2(int64_t sampleId, const std::vector<float>& features);
     // True when the row was written by a person; a later machine write leaves it untouched.
     bool hasUserFeedback(int64_t sampleId) const;
     // Marks changed rows so the contribution watermark re-sends their current labels.
@@ -253,6 +258,8 @@ public:
         bool typeConfirmed = false;  // true only when a person set the type
         juce::StringArray tags;
         std::vector<float> features;
+        int featureSchema = 1;
+        std::vector<float> featuresV2;
         juce::String key;            // empty when unknown
         double bpm = 0.0;
         bool hasBpm = false;

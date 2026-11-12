@@ -330,7 +330,7 @@ TEST_CASE("Rows written before schema 14 count as legacy and are not contributed
     Database db(file);
     SampleRepository repo(db);
     repo.createTables();
-    CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 15);
+    CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 16);
     CHECK(repo.allFeedback().size() == 1);            // legacy rows stay on disk
     CHECK(repo.contributionRecords(0, 10).empty());   // and out of the dataset
 }
@@ -433,7 +433,7 @@ TEST_CASE("Tag history starts at schema 15 but local prototypes keep old tags", 
         Database db(file);
         SampleRepository repo(db);
         repo.createTables();
-        CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 15);
+        CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 16);
         REQUIRE(repo.allFeedback().size() == 1);
         CHECK(repo.allFeedback()[0].tags.contains("OldTag")); // local prototype still learns it
         const auto rows = repo.contributionRecords(0, 10);

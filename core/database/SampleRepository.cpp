@@ -11,7 +11,9 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
-constexpr int schemaVersion = 15;
+constexpr int schemaVersion = 16;
+// Tag history started at schema 15 and must not follow later database bumps.
+constexpr int tagHistorySchemaVersion = 15;
 SampleRecord read(const detail::Statement& s)
 {
     SampleRecord r;
@@ -719,6 +721,10 @@ void SampleRepository::createTables()
         // Schema 15: tag history starts here. Rows written earlier keep their local prototype but
         // are not exported with tags, so a rewrite of the dataset does not upload old assignments.
         ensureColumn(db.handle, "ml_feedback_samples", "tag_history_schema", "INTEGER NOT NULL DEFAULT 0");
+        // Schema 16: the v2 vector and its schema, filled by a background pass. Existing rows keep
+        // schema 1 and an empty v2 blob, so nothing has to be recomputed before the app can run.
+        ensureColumn(db.handle, "ml_feedback_samples", "feature_schema", "INTEGER NOT NULL DEFAULT 1");
+        ensureColumn(db.handle, "ml_feedback_samples", "features_v2", "BLOB");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS smart_results_pipeline"
                                 " ON smart_results(pipeline_state, sample_id);");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_pair_key ON samples(pair_key) WHERE pair_key != '';");
@@ -793,7 +799,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=15;");
+        detail::exec(db.handle, "PRAGMA user_version=16;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -3008,7 +3014,7 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
         if (s.step()) existingOrigin = s.text(0);
     }
     const auto tagsStr = tags.joinIntoString(",");
-    const auto tagSchema = origin == FeedbackOrigin::legacy ? 0 : schemaVersion;
+    const auto tagSchema = origin == FeedbackOrigin::legacy ? 0 : tagHistorySchemaVersion;
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
     try
     {
@@ -3053,6 +3059,17 @@ void SampleRepository::recordFeedback(int64_t sampleId, const juce::String& targ
         try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
         throw;
     }
+}
+
+void SampleRepository::setFeedbackV2(int64_t sampleId, const std::vector<float>& features)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "UPDATE ml_feedback_samples SET features_v2=?, feature_schema=2, updated_at=? WHERE sample_id=?");
+    s.blob(1, features.data(), static_cast<int>(features.size() * sizeof(float)));
+    s.integer(2, juce::Time::currentTimeMillis());
+    s.integer(3, sampleId);
+    s.step();
 }
 
 bool SampleRepository::hasUserFeedback(int64_t sampleId) const
@@ -3103,7 +3120,8 @@ std::vector<SampleRepository::FeedbackRecord> SampleRepository::allFeedback() co
 {
     std::lock_guard lock(db.mutex);
     detail::Statement s(db.handle,
-        "SELECT sample_id, file_hash, target_type, tags, features, updated_at FROM ml_feedback_samples ORDER BY sample_id");
+        "SELECT sample_id, file_hash, target_type, tags, features, updated_at, feature_schema, features_v2"
+        " FROM ml_feedback_samples ORDER BY sample_id");
     std::vector<FeedbackRecord> out;
     while (s.step())
     {
@@ -3122,6 +3140,14 @@ std::vector<SampleRepository::FeedbackRecord> SampleRepository::allFeedback() co
             r.features.assign(blobData, blobData + numFloats);
         }
         r.updatedAt = s.integer(5);
+        r.featureSchema = (int) s.integer(6);
+        const auto* v2Data = reinterpret_cast<const float*>(s.blob(7));
+        const int v2Bytes = s.bytes(7);
+        if (v2Data != nullptr && v2Bytes > 0)
+        {
+            const size_t numFloats = v2Bytes / sizeof(float);
+            r.featuresV2.assign(v2Data, v2Data + numFloats);
+        }
         out.push_back(std::move(r));
     }
     return out;
@@ -3141,9 +3167,10 @@ std::vector<SampleRepository::ContributionRecord> SampleRepository::contribution
         " EXISTS(SELECT 1 FROM smart_overrides o WHERE o.sample_id=f.sample_id"
         " AND o.field='type' AND o.cleared=0 AND o.not_applicable=0 AND o.text_value != ''),"
         " CASE WHEN f.tag_history_schema >= ")
-        + juce::String(schemaVersion)
+        + juce::String(tagHistorySchemaVersion)
         + " THEN (SELECT group_concat(t.name, ',') FROM sample_tags st"
-          " JOIN tags t ON t.id=st.tag_id WHERE st.sample_id=f.sample_id) ELSE '' END"
+          " JOIN tags t ON t.id=st.tag_id WHERE st.sample_id=f.sample_id) ELSE '' END,"
+          " f.feature_schema, f.features_v2"
           " FROM ml_feedback_samples f LEFT JOIN smart_results r ON r.sample_id=f.sample_id"
           " WHERE f.updated_at > ? AND f.origin IN ('user','approved')"
           " ORDER BY f.updated_at, f.sample_id LIMIT ?").toRawUTF8());
@@ -3172,6 +3199,14 @@ std::vector<SampleRepository::ContributionRecord> SampleRepository::contribution
         r.tags.trim();
         r.tags.removeEmptyStrings();
         r.tags.sort(true);
+        r.featureSchema = (int) s.integer(10);
+        const auto* v2Data = reinterpret_cast<const float*>(s.blob(11));
+        const int v2Bytes = s.bytes(11);
+        if (v2Data != nullptr && v2Bytes > 0)
+        {
+            const size_t numFloats = v2Bytes / sizeof(float);
+            r.featuresV2.assign(v2Data, v2Data + numFloats);
+        }
         out.push_back(std::move(r));
     }
     return out;
