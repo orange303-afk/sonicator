@@ -106,6 +106,32 @@ sample field rather than a tag, so the two annotations stay independent. Copy us
 file URLs on macOS and newline-separated paths elsewhere; no decoder or database work happens on
 the audio thread.
 
+## Waveform editing
+
+The preview waveform doubles as a destructively saving editor. `core/edit/AudioEditBuffer` decodes
+one mono/stereo source into float channels and keeps undo snapshots (capped at 256 MB; the oldest
+snapshot is dropped first). Every operation takes a half-open frame range: selection when the user
+made one, otherwise the whole buffer. Deleting, cropping, reversing and silence trimming move loop
+and cue markers through `AudioEditMarkers`, which drops a loop that would become invalid. Fades,
+normalize (-0.1 dBFS), gain, DC removal and mono conversion leave the markers alone. Playback of the
+edited PCM reuses the decoded-sample engine path, so Play, MIDI Preview, loop and WAV export work
+while a buffer exists, and `PreviewPanel::afterEditApplied` re-prepares the selection export from
+the snapshot.
+
+Saving is explicit. Cmd/Ctrl+S asks Overwrite / Save copy / Cancel; only WAV, AIFF and FLAC can be
+overwritten, and everything else (decoded disc, instrument and tracker sources, MP3/OGG files) can
+only be copied. `core/edit/AudioEditWriter` writes a temporary file beside the target, validates
+WAV, copies POSIX permissions and macOS extended attributes, then renames over the original, so a
+failed write leaves the file byte-identical. Copies are named `<stem> edit<ext>` and numbered, and
+never overwrite. Sampler chunk fields (`smpl` root and loop, cue points) travel with the audio.
+
+After a save, `core/indexing/CatalogFileSync` updates the catalog off the message thread. An
+overwrite reanalyzes the same row, which keeps its id, tags and star, and recomputes the audio-derived
+columns of an existing ML feedback row (hash, v1, v2) so the contribution pass re-sends the label.
+A copy becomes a new row that inherits the template's tags and star but not its feedback. Switching
+samples, opening a disc image, clearing the selection or quitting while edits are unsaved asks
+Save / Discard / Cancel; Cancel puts the library selection back on the edited file.
+
 ## Smart metadata (Phase 2, metadata-first)
 
 `core/smart` parses metadata read-only and never decodes PCM for it. Extractors cover WAV chunks (full container, including chunks after `data`), AIFF Apple Loops (`basc`, `cate`, `INST`), Ableton `.asd` (v6 warp markers and `AufTaktData`), REX2 (`GLOB`, `RECY`, `SINF`, `SLCE`) and file/folder names. Every extractor is bounds-checked and returns candidates plus a structural error; a truncated chunk stops parsing and keeps what was already read. The service adds provenance to each candidate: the source file, its size/mtime fingerprint, the extractor id and version that produced it, and a limitation note where the value is not the musical truth (for example a REX2 preview tempo or a sampler root). Fingerprints are taken before and after reading; if they differ, nothing is published and the previous generation is marked stale.
