@@ -1,4 +1,5 @@
 #include "FileListPanel.h"
+#include "core/export/DragMetadata.h"
 #include "ui/shell/Theme.h"
 #include <algorithm>
 #include <cmath>
@@ -233,9 +234,38 @@ void FileListPanel::handleDrag(const juce::MouseEvent& e)
         if (onDragMessage) onDragMessage("Selected files are missing or unavailable");
         return;
     }
-    // EBL rows have no audio the OS can read, so they become WAVs in the drag cache first.
+    // Known tempo/root travel with the file: WAV is copied and spliced, other readable formats are
+    // encoded to WAV in the cache. EBL rows skip this and are converted below.
     juce::StringArray problems;
-    const auto files = ExternalFileDrag::materialiseForDrag(paths, ExternalFileDrag::dragCacheFolder(),
+    std::map<juce::String, DragMetadata> metadataByPath;
+    for (const auto& record : getSelectedSamples())
+    {
+        const auto display = smartDisplays.find(record.id);
+        if (display == smartDisplays.end()) continue;
+        const auto metadata = dragMetadataForDisplay(display->second);
+        if (! hasDragMetadata(metadata)) continue;
+        metadataByPath[record.filePath] = metadata;
+        const auto partner = stereoPartners.find(record.id);
+        if (partner != stereoPartners.end()) metadataByPath[partner->second] = metadata;
+    }
+    juce::StringArray prepared;
+    for (const auto& path : paths)
+    {
+        const auto metadata = metadataByPath.find(path);
+        if (metadata == metadataByPath.end())
+        {
+            prepared.add(path);
+            continue;
+        }
+        juce::String error;
+        const auto copy = materialiseWithMetadata(juce::File(path), metadata->second,
+                                                  ExternalFileDrag::dragCacheFolder(), error);
+        if (copy == juce::File())
+            problems.add(juce::File(path).getFileName() + ": " + error);
+        else
+            prepared.add(copy.getFullPathName());
+    }
+    const auto files = ExternalFileDrag::materialiseForDrag(prepared, ExternalFileDrag::dragCacheFolder(),
                                                             problems);
     if (! problems.isEmpty() && onDragMessage) onDragMessage(problems.joinIntoString("; "));
     if (files.isEmpty()) return;

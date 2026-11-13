@@ -174,3 +174,59 @@ TEST_CASE("An unreadable file reports an error", "[bpm][drag]")
     REQUIRE_FALSE(result.existsAsFile());
     REQUIRE(error.isNotEmpty());
 }
+
+namespace
+{
+SmartDisplay displayWith(const juce::String& key, double bpm, SmartState bpmState,
+                         SmartState keyState)
+{
+    SmartDisplay display;
+    display.key = key;
+    display.bpm = bpm;
+    display.hasBpm = bpm > 0;
+    display.bpmState = bpmState;
+    display.keyState = keyState;
+    return display;
+}
+} // namespace
+
+TEST_CASE("Resolved tempo and key become drag metadata", "[bpm][drag]")
+{
+    const auto metadata = dragMetadataForDisplay(displayWith("F#", 128.0, SmartState::Resolved,
+                                                             SmartState::Resolved));
+    REQUIRE(metadata.hasBpm);
+    REQUIRE(metadata.bpm == Approx(128.0));
+    REQUIRE(metadata.hasRoot);
+    REQUIRE(metadata.rootMidi == 66);
+}
+
+TEST_CASE("A manual BPM is written even when the analysed state conflicts", "[bpm][drag]")
+{
+    auto display = displayWith("C", 90.0, SmartState::Conflicting, SmartState::Ambiguous);
+    display.bpmOverride = OverrideState::Value;
+    display.keyOverride = OverrideState::Value;
+    const auto metadata = dragMetadataForDisplay(display);
+    REQUIRE(metadata.hasBpm);
+    REQUIRE(metadata.bpm == Approx(90.0));
+    REQUIRE(metadata.hasRoot);
+    REQUIRE(metadata.rootMidi == 60);
+}
+
+TEST_CASE("Conflicting and stale values are not written", "[bpm][drag]")
+{
+    for (const auto state : { SmartState::Conflicting, SmartState::Ambiguous, SmartState::Unknown,
+                              SmartState::Stale })
+    {
+        const auto metadata = dragMetadataForDisplay(displayWith("C", 128.0, state, state));
+        REQUIRE_FALSE(metadata.hasBpm);
+        REQUIRE_FALSE(metadata.hasRoot);
+    }
+}
+
+TEST_CASE("An unknown key writes no root", "[bpm][drag]")
+{
+    const auto metadata = dragMetadataForDisplay(displayWith("", 120.0, SmartState::Resolved,
+                                                             SmartState::Resolved));
+    REQUIRE(metadata.hasBpm);
+    REQUIRE_FALSE(metadata.hasRoot);
+}
