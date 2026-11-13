@@ -1,4 +1,9 @@
 #include "PreviewPanel.h"
+#include "core/edit/AudioEditWriter.h"
+#include "core/audio/SonicatorFormats.h"
+#include "ui/shell/ThemedDialogs.h"
+#include <cmath>
+#include <optional>
 #include "core/ableton/AbletonPacks.h"
 #include "core/audio/StereoPair.h"
 #include "core/audio/SelectionPlayback.h"
@@ -201,6 +206,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     waveform.onSelectionChanging = [this](selection::Range range) { selectionChanging(range); };
     waveform.onSelectionChanged = [this](selection::Range range) { selectionChanged(range); };
     waveform.onExternalDragRequested = [this] { beginExternalDrag(); };
+    waveform.onContextMenu = [this](juce::Point<int> position) { showWaveformMenu(position); };
     play.onClick = [this] { togglePlayback(); };
     stop.onClick = [this] { engine.stop(); };
     loop.onClick = [this]
@@ -520,6 +526,7 @@ bool PreviewPanel::applyInstrumentSample(SampleId id, bool manual)
 }
 void PreviewPanel::refreshMidiFollow()
 {
+    if (editBuffer.has_value()) return;
     if (! engine.isSamplerInstrumentMode() || waveform.selection().valid()) return;
     const auto trigger = engine.lastInstrumentTrigger();
     if (! trigger.valid || trigger.generation != engine.instrumentGeneration()
@@ -1019,6 +1026,30 @@ void PreviewPanel::updateSelectionPlayback()
 }
 bool PreviewPanel::keyPressed(const juce::KeyPress& k)
 {
+    const auto mods = k.getModifiers();
+    const bool command = mods.isCommandDown() || mods.isCtrlDown();
+    if (command && (k.getKeyCode() == 'S' || k.getKeyCode() == 's'))
+    {
+        saveEdits();
+        return true;
+    }
+    if (command && (k.getKeyCode() == 'Z' || k.getKeyCode() == 'z'))
+    {
+        applyEditCommand(mods.isShiftDown() ? EditCommand::redo : EditCommand::undo);
+        return true;
+    }
+    if (command && k.getKeyCode() == '0')
+    {
+        applyEditCommand(EditCommand::zoomToFit);
+        return true;
+    }
+    if ((k.getKeyCode() == juce::KeyPress::deleteKey
+         || k.getKeyCode() == juce::KeyPress::backspaceKey)
+        && waveform.selection().valid() && (editBuffer.has_value() || sourceIsEditable()))
+    {
+        applyEditCommand(EditCommand::deleteRegion);
+        return true;
+    }
     if (k.getKeyCode() == juce::KeyPress::spaceKey) { togglePlayback(); return true; }
     if (k.getKeyCode() == juce::KeyPress::leftKey) { engine.seek(engine.position()-1); return true; }
     if (k.getKeyCode() == juce::KeyPress::rightKey) { engine.seek(engine.position()+1); return true; }
@@ -1160,5 +1191,353 @@ void PreviewPanel::resized()
     if (sampleDragButton.isVisible()) { sampleDragButton.setBounds(selection.removeFromRight(96)); selection.removeFromRight(6); }
     clearSelectionButton.setBounds(selection.removeFromRight(58)); selection.removeFromRight(8);
     selectionStatus.setBounds(selection);
+}
+
+bool PreviewPanel::sourceIsEditable() const
+{
+    if (engine.isReasonMode() || engine.isRex2Mode() || waveform.totalLength() <= 0) return false;
+    if (engine.isTrackerMode() && ! engine.isTrackerSampleSelected()) return false;
+    if (const auto audio = currentEditableAudio())
+        return audio->channels <= 2 && audio->frames > 0 && audio->sampleRate > 0;
+    if (engine.isDiscMode() || engine.isSamplerInstrumentMode() || engine.isTrackerMode()) return false;
+    if (! loadedFile.existsAsFile()) return false;
+    juce::AudioFormatManager formats;
+    registerSonicatorFormats(formats);
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(loadedFile));
+    return reader != nullptr && reader->numChannels <= 2 && reader->lengthInSamples > 0;
+}
+
+SampleAudioPtr PreviewPanel::currentEditableAudio() const
+{
+    if (engine.isDiscMode()) return engine.discSampleAudio();
+    if (engine.isSamplerInstrumentMode()) return engine.instrumentSampleAudio();
+    if (engine.isTrackerMode() && engine.isTrackerSampleSelected()) return engine.trackerSampleAudio();
+    return nullptr;
+}
+
+juce::String PreviewPanel::editingName() const
+{
+    if (editTarget != juce::File()) return editTarget.getFileName();
+    if (editStem.isNotEmpty()) return editStem;
+    return filename.getText();
+}
+
+bool PreviewPanel::ensureEditBuffer()
+{
+    if (editBuffer.has_value()) return true;
+    if (engine.isReasonMode() || engine.isRex2Mode())
+    {
+        selectionStatus.setText("This source cannot be edited", juce::dontSendNotification);
+        return false;
+    }
+    if (const auto audio = currentEditableAudio())
+    {
+        if (audio->channels > 2 || audio->frames <= 0)
+        {
+            selectionStatus.setText("Editing supports mono and stereo only", juce::dontSendNotification);
+            return false;
+        }
+        editBuffer = edit::AudioEditBuffer::fromSampleAudio(*audio);
+        editTarget = juce::File();
+        editStem = discStem.isNotEmpty() ? discStem
+            : engine.isTrackerMode() ? trackerSampleStem() : juce::String();
+        if (editStem.isEmpty())
+            for (const auto& descriptor : instrumentSamples)
+                if (descriptor.id == currentSampleId) editStem = descriptor.name;
+        if (editStem.isEmpty()) editStem = loadedFile.getFileNameWithoutExtension();
+        if (editStem.isEmpty()) editStem = "Sample";
+        return true;
+    }
+    if (engine.isDiscMode() || engine.isSamplerInstrumentMode() || engine.isTrackerMode()
+        || ! loadedFile.existsAsFile())
+    {
+        selectionStatus.setText("This source cannot be edited", juce::dontSendNotification);
+        return false;
+    }
+    juce::String error;
+    auto loaded = edit::AudioEditBuffer::load(loadedFile, error);
+    if (! loaded.has_value())
+    {
+        selectionStatus.setText(error, juce::dontSendNotification);
+        return false;
+    }
+    editBuffer = std::move(*loaded);
+    editTarget = loadedFile;
+    editStem = loadedFile.getFileNameWithoutExtension();
+    return true;
+}
+
+void PreviewPanel::afterEditApplied()
+{
+    if (! editBuffer.has_value()) return;
+    const auto snapshot = editBuffer->snapshot();
+    engine.setDiscSample(snapshot, false, 0, 0, false);
+    waveform.setEditedAudio(snapshot, {});
+    waveform.setVisible(true);
+    waveform.setSampleRateForZoom(editBuffer->sampleRate());
+    const auto length = waveform.totalLength();
+    const auto selection = waveform.selection();
+    if (selection.valid() && selection.end > length)
+        waveform.setSelection({ juce::jmin(selection.start, length), juce::jmin(selection.end, length) });
+    const auto stem = editStem;
+    const auto identity = editTarget != juce::File() ? editTarget : loadedFile;
+    exporter.prepare(identity, 0.0, length,
+        [snapshot, stem](const juce::File&, double start, double end, const juce::File& folder,
+                         CancelCheck cancel)
+        {
+            return AudioExporter().exportSampleSelection(*snapshot, stem, start, end, folder, cancel);
+        });
+    refreshDirtyMark();
+    selectionStatus.setText(juce::String(length, 3) + " s  ·  edited in memory",
+                            juce::dontSendNotification);
+}
+
+void PreviewPanel::refreshDirtyMark()
+{
+    const juce::String mark(" \u2022");
+    auto text = filename.getText();
+    if (text.endsWith(mark)) text = text.dropLastCharacters(mark.length());
+    if (hasUnsavedEdits()) text += mark;
+    filename.setText(text, juce::dontSendNotification);
+}
+
+void PreviewPanel::applyEditCommand(EditCommand command)
+{
+    switch (command)
+    {
+        case EditCommand::zoomToFit: waveform.zoomToFit(); return;
+        case EditCommand::zoomToSelection: waveform.zoomToSelection(); return;
+        case EditCommand::save: saveEdits(); return;
+        case EditCommand::undo:
+        case EditCommand::redo:
+            if (! editBuffer.has_value()) return;
+            if (command == EditCommand::undo ? editBuffer->undo() : editBuffer->redo())
+                afterEditApplied();
+            return;
+        case EditCommand::gain:
+        {
+            auto safe = juce::Component::SafePointer<PreviewPanel>(this);
+            dialogs::showPrompt(*this, "Gain", "Decibels (-24 to +24)", "0.0",
+                [safe](const juce::String& text)
+                {
+                    if (safe == nullptr) return;
+                    if (! safe->ensureEditBuffer()) return;
+                    const auto selection = safe->waveform.selection();
+                    edit::EditRequest request;
+                    request.operation = edit::EditOperation::gain;
+                    request.gainDb = juce::jlimit(-24.0f, 24.0f, text.getFloatValue());
+                    if (selection.valid())
+                    {
+                        const auto rate = (double) safe->editBuffer->sampleRate();
+                        request.range = { (int64_t) std::llround(selection.start * rate),
+                                          (int64_t) std::llround(selection.end * rate) };
+                    }
+                    if (safe->editBuffer->apply(request)) safe->afterEditApplied();
+                });
+            return;
+        }
+        default: break;
+    }
+
+    const auto selection = waveform.selection();
+    const bool needsSelection = command == EditCommand::deleteRegion || command == EditCommand::crop
+        || command == EditCommand::silence;
+    if (needsSelection && ! selection.valid()) return;
+    if (! ensureEditBuffer()) return;
+    edit::EditRequest request;
+    const auto rate = (double) editBuffer->sampleRate();
+    if (selection.valid() && rate > 0)
+        request.range = { (int64_t) std::llround(selection.start * rate),
+                          (int64_t) std::llround(selection.end * rate) };
+    switch (command)
+    {
+        case EditCommand::deleteRegion: request.operation = edit::EditOperation::deleteRegion; break;
+        case EditCommand::crop: request.operation = edit::EditOperation::cropToSelection; break;
+        case EditCommand::silence: request.operation = edit::EditOperation::silenceRegion; break;
+        case EditCommand::reverse: request.operation = edit::EditOperation::reverse; break;
+        case EditCommand::fadeIn: request.operation = edit::EditOperation::fadeIn; break;
+        case EditCommand::fadeOut: request.operation = edit::EditOperation::fadeOut; break;
+        case EditCommand::normalize: request.operation = edit::EditOperation::normalize; break;
+        case EditCommand::toMono: request.operation = edit::EditOperation::toMono; break;
+        case EditCommand::removeDc: request.operation = edit::EditOperation::removeDcOffset; break;
+        case EditCommand::trimSilence: request.operation = edit::EditOperation::trimSilence; break;
+        default: return;
+    }
+    if (editBuffer->apply(request)) afterEditApplied();
+}
+
+void PreviewPanel::showWaveformMenu(juce::Point<int> screenPosition)
+{
+    const bool editing = editBuffer.has_value();
+    const bool editable = editing || sourceIsEditable();
+    const bool selection = waveform.selection().valid();
+    const bool undo = editing && editBuffer->canUndo();
+    const bool redo = editing && editBuffer->canRedo();
+    juce::PopupMenu menu;
+    menu.addItem(1, "Undo", undo);
+    menu.addItem(2, "Redo", redo);
+    menu.addSeparator();
+    menu.addItem(3, "Delete region", editable && selection);
+    menu.addItem(4, "Crop to selection", editable && selection);
+    menu.addItem(5, "Silence region", editable && selection);
+    menu.addSeparator();
+    menu.addItem(6, "Reverse", editable);
+    menu.addItem(7, "Fade in", editable);
+    menu.addItem(8, "Fade out", editable);
+    menu.addItem(9, "Normalize (-0.1 dBFS)", editable);
+    menu.addItem(10, "Gain...", editable);
+    menu.addItem(11, "Convert to mono", editable && waveform.totalLength() > 0);
+    menu.addItem(12, "Remove DC offset", editable);
+    menu.addItem(13, "Trim silence", editable);
+    menu.addSeparator();
+    menu.addItem(14, "Zoom to selection", selection);
+    menu.addItem(15, "Zoom to fit", waveform.totalLength() > 0);
+    menu.addSeparator();
+    menu.addItem(16, "Save...", hasUnsavedEdits());
+    auto safe = juce::Component::SafePointer<PreviewPanel>(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
+                           juce::Rectangle<int>(screenPosition.x, screenPosition.y, 1, 1)),
+        [safe](int result)
+        {
+            if (safe == nullptr || result <= 0) return;
+            safe->applyEditCommand((EditCommand) (result - 1));
+        });
+}
+
+void PreviewPanel::saveEdits(std::function<void(bool)> done)
+{
+    if (! hasUnsavedEdits())
+    {
+        if (done) done(true);
+        return;
+    }
+    const auto name = editingName();
+    auto safe = juce::Component::SafePointer<PreviewPanel>(this);
+    const bool canOverwrite = editTarget != juce::File() && edit::canOverwriteInPlace(editTarget);
+    if (canOverwrite)
+        dialogs::showAlert(*this, "Save changes to \u201c" + name + "\u201d?", {},
+            { { "Overwrite", 1 }, { "Save copy", 2 }, { "Cancel", 0 } },
+            [safe, done](int id)
+            {
+                if (safe == nullptr) { if (done) done(false); return; }
+                if (id == 1) safe->overwriteEdits(done);
+                else if (id == 2) safe->saveCopyAndSwitch(done);
+                else if (done) done(false);
+            });
+    else
+        dialogs::showAlert(*this, "Save changes to \u201c" + name + "\u201d?", {},
+            { { "Save copy", 2 }, { "Cancel", 0 } },
+            [safe, done](int id)
+            {
+                if (safe == nullptr) { if (done) done(false); return; }
+                if (id == 2) safe->saveCopyAndSwitch(done);
+                else if (done) done(false);
+            });
+}
+
+void PreviewPanel::overwriteEdits(std::function<void(bool)> done)
+{
+    if (! editBuffer.has_value() || editTarget == juce::File())
+    {
+        if (done) done(false);
+        return;
+    }
+    const auto result = edit::overwrite(editTarget, *editBuffer);
+    if (! result.success)
+    {
+        selectionStatus.setText(result.error, juce::dontSendNotification);
+        if (done) done(false);
+        return;
+    }
+    const auto target = editTarget;
+    const auto sampleId = editingSampleId;
+    editBuffer.reset();
+    editTarget = juce::File();
+    editStem.clear();
+    waveform.clearEditedAudio();
+    refreshDirtyMark();
+    loadFile(target, false);
+    if (onFileSavedInPlace) onFileSavedInPlace(target, sampleId);
+    if (done) done(true);
+}
+
+void PreviewPanel::saveCopyAndSwitch(std::function<void(bool)> done)
+{
+    if (! editBuffer.has_value())
+    {
+        if (done) done(false);
+        return;
+    }
+    const auto source = editTarget != juce::File() ? editTarget : loadedFile;
+    const auto stem = editStem.isNotEmpty() ? editStem : source.getFileNameWithoutExtension();
+    const auto result = edit::saveCopy(source, stem, *editBuffer);
+    if (! result.success)
+    {
+        selectionStatus.setText(result.error, juce::dontSendNotification);
+        if (done) done(false);
+        return;
+    }
+    const auto sampleId = editingSampleId;
+    editBuffer.reset();
+    editTarget = juce::File();
+    editStem.clear();
+    waveform.clearEditedAudio();
+    refreshDirtyMark();
+    loadFile(result.file, false);
+    if (onCopySaved) onCopySaved(result.file, sampleId);
+    if (done) done(true);
+}
+
+void PreviewPanel::saveEditsAsCopyForTest() { saveCopyAndSwitch({}); }
+void PreviewPanel::overwriteEditsForTest() { overwriteEdits({}); }
+
+void PreviewPanel::discardEdits()
+{
+    editBuffer.reset();
+    editTarget = juce::File();
+    editStem.clear();
+    waveform.clearEditedAudio();
+    if (discAudioRef != nullptr)
+    {
+        engine.setDiscSample(discAudioRef, false, 0, 0, false);
+        waveform.setPeaks(discAudioRef->left, discAudioRef->sampleRate, {});
+    }
+    else if (engine.isSamplerInstrumentMode())
+    {
+        if (const auto audio = engine.instrumentSampleAudio())
+            waveform.setPeaks(audio->left, audio->sampleRate, {});
+    }
+    else if (engine.isTrackerMode() && engine.isTrackerSampleSelected())
+    {
+        if (const auto audio = engine.trackerSampleAudio())
+            waveform.setPeaks(audio->left, audio->sampleRate, {});
+    }
+    else if (loadedFile.existsAsFile())
+        loadFile(loadedFile, false);
+    refreshDirtyMark();
+}
+
+void PreviewPanel::withUnsavedEditsConfirmed(std::function<void()> proceed)
+{
+    if (! hasUnsavedEdits())
+    {
+        proceed();
+        return;
+    }
+    auto safe = juce::Component::SafePointer<PreviewPanel>(this);
+    const auto name = editingName();
+    dialogs::showAlert(*this, "Unsaved edits", "\u201c" + name + "\u201d has unsaved edits.",
+        { { "Save...", 1 }, { "Discard", 2 }, { "Cancel", 0 } },
+        [safe, proceed](int id)
+        {
+            if (safe == nullptr) return;
+            if (id == 2)
+            {
+                safe->discardEdits();
+                proceed();
+            }
+            else if (id == 1)
+                safe->saveEdits([proceed](bool saved) { if (saved) proceed(); });
+        });
 }
 } // namespace sonicator

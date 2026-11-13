@@ -3,6 +3,7 @@
 #include "core/settings/AppSettings.h"
 #include "core/export/SelectionExporter.h"
 #include "ui/waveform/WaveformDisplay.h"
+#include "core/edit/AudioEditBuffer.h"
 #include "SongProgress.h"
 namespace sonicator {
 // Selector that also steps with Up/Down and the mouse wheel while closed. The popup keeps its
@@ -91,6 +92,21 @@ public:
     selection::Range selectedRange() const { return waveform.selection(); }
     void clearSelection() { waveform.clearSelection(); }
     bool isSelectionReady() const;
+    // Waveform editing. The buffer lives in memory; the file changes only on an explicit save.
+    bool hasUnsavedEdits() const { return editBuffer.has_value() && editBuffer->isModified(); }
+    bool sourceIsEditable() const;
+    enum class EditCommand { undo, redo, deleteRegion, crop, silence, reverse, fadeIn, fadeOut,
+                             normalize, gain, toMono, removeDc, trimSilence, zoomToSelection,
+                             zoomToFit, save };
+    void applyEditCommand(EditCommand);
+    void saveEdits(std::function<void(bool)> done = {});
+    // Runs `proceed` now when nothing is unsaved, otherwise asks Save/Discard/Cancel.
+    void withUnsavedEditsConfirmed(std::function<void()> proceed);
+    void saveEditsAsCopyForTest();
+    void overwriteEditsForTest();
+    int64_t editingSampleId = 0;
+    std::function<void(const juce::File& target, int64_t sampleId)> onFileSavedInPlace;
+    std::function<void(const juce::File& copy, int64_t templateSampleId)> onCopySaved;
     // True when the transport owns a decoded disc-image sample (used to ignore stale previews).
     bool isDiscPreview() const { return engine.isDiscMode(); }
     // Applies the last source that really started on the instrument when no selection pins the
@@ -141,6 +157,18 @@ private:
     juce::ToggleButton autoPreview { "Auto Preview" };
     juce::Slider volume;
     SelectionExporter exporter;
+    std::optional<edit::AudioEditBuffer> editBuffer;
+    juce::File editTarget;
+    juce::String editStem;
+    bool ensureEditBuffer();
+    SampleAudioPtr currentEditableAudio() const;
+    void afterEditApplied();
+    void refreshDirtyMark();
+    void showWaveformMenu(juce::Point<int> screenPosition);
+    void overwriteEdits(std::function<void(bool)> done);
+    void saveCopyAndSwitch(std::function<void(bool)> done);
+    void discardEdits();
+    juce::String editingName() const;
     juce::TextButton clearSelectionButton { "Clear" };
     juce::Label selectionStatus;
     void timerCallback() override;
