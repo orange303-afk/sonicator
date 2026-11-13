@@ -113,6 +113,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/disc/DiscContentIndexer.cpp
     core/rex/Rex2Decoder.cpp core/rex/Rex2SlicePlayer.cpp
     core/export/RiffChunks.cpp
+    core/export/DragMetadata.cpp
     core/edit/AudioEditBuffer.cpp
     core/edit/AudioEditMarkers.cpp
     core/edit/AudioEditWriter.cpp

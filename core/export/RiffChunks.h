@@ -8,6 +8,8 @@ namespace sonicator::riff
 // Returns false for anything that is not a RIFF/WAVE file with well-formed chunks (RF64 included).
 bool insertOrReplaceChunk(const juce::File& wav, const char* id, const juce::MemoryBlock& payload);
 bool removeChunk(const juce::File& wav, const char* id);
+// Copies the payload of the first chunk with `id`; false when the file or chunk is missing.
+bool readChunk(const juce::File& wav, const char* id, juce::MemoryBlock& payload);
 
 // 24-byte ACID payload: flags, root, reserved, beats, 4/4 meter and the tempo float.
 // A negative `rootMidi` leaves the root bit clear.

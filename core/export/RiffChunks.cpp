@@ -86,6 +86,30 @@ bool removeChunk(const juce::File& wav, const char* id)
     return rewrite(wav, id, nullptr);
 }
 
+bool readChunk(const juce::File& wav, const char* id, juce::MemoryBlock& payload)
+{
+    juce::MemoryBlock data;
+    if (! wav.loadFileAsData(data) || data.getSize() < 12) return false;
+    const auto* bytes = static_cast<const juce::uint8*>(data.getData());
+    if (juce::String::fromUTF8((const char*) bytes, 4) != "RIFF") return false;
+    const juce::String target(id, 4);
+    size_t offset = 12;
+    while (offset + 8 <= data.getSize())
+    {
+        const juce::String chunkId((const char*) bytes + offset, 4);
+        const auto size = (size_t) read32(bytes, offset + 4);
+        if (offset + 8 + size > data.getSize()) return false;
+        if (chunkId == target)
+        {
+            payload.setSize(0);
+            payload.append(bytes + offset + 8, size);
+            return true;
+        }
+        offset += 8 + size + (size & 1u);
+    }
+    return false;
+}
+
 juce::MemoryBlock buildAcid(const double bpm, const int beats, const int rootMidi)
 {
     juce::MemoryBlock payload(24, true);
