@@ -12,6 +12,11 @@ const std::vector<float>& emptyChannel()
     static const std::vector<float> empty;
     return empty;
 }
+// -60 dBFS, the threshold used to decide that a frame carries no audio.
+constexpr float silenceThreshold = 0.001f;
+// -0.1 dBFS, the headroom target shared with AudioExporter::exportSampleFile.
+constexpr float normalizeTarget = 0.9885531f;
+constexpr double trimMarginSeconds = 0.005;
 }
 
 const std::vector<float>& AudioEditBuffer::channel(int index) const
@@ -160,6 +165,96 @@ bool AudioEditBuffer::apply(const EditRequest& request)
                 if (! data->empty())
                     std::fill(data->begin() + range.start, data->begin() + range.end, 0.0f);
             break;
+        case EditOperation::fadeIn:
+        case EditOperation::fadeOut:
+        {
+            if (! range.valid()) return false;
+            const auto length = (float) range.length();
+            for (int c = 0; c < channels(); ++c)
+            {
+                auto& data = c == 0 ? left : right;
+                for (int64_t i = range.start; i < range.end; ++i)
+                {
+                    const auto position = (float) (i - range.start) / length;
+                    data[(size_t) i] *= request.operation == EditOperation::fadeIn
+                        ? position : 1.0f - position;
+                }
+            }
+            break;
+        }
+        case EditOperation::normalize:
+        {
+            if (! range.valid()) return false;
+            float peak = 0.0f;
+            for (int c = 0; c < channels(); ++c)
+                for (int64_t i = range.start; i < range.end; ++i)
+                    peak = juce::jmax(peak, std::abs(channel(c)[(size_t) i]));
+            if (peak <= 0.0f) return false;
+            const auto gain = normalizeTarget / peak;
+            for (int c = 0; c < channels(); ++c)
+            {
+                auto& data = c == 0 ? left : right;
+                for (int64_t i = range.start; i < range.end; ++i) data[(size_t) i] *= gain;
+            }
+            break;
+        }
+        case EditOperation::gain:
+        {
+            if (! range.valid()) return false;
+            const auto gain = std::pow(10.0f, request.gainDb / 20.0f);
+            if (gain == 1.0f) return false;
+            for (int c = 0; c < channels(); ++c)
+            {
+                auto& data = c == 0 ? left : right;
+                for (int64_t i = range.start; i < range.end; ++i) data[(size_t) i] *= gain;
+            }
+            break;
+        }
+        case EditOperation::toMono:
+        {
+            if (channels() == 1) return false;
+            for (size_t i = 0; i < left.size(); ++i) left[i] = 0.5f * (left[i] + right[i]);
+            right.clear();
+            break;
+        }
+        case EditOperation::removeDcOffset:
+        {
+            if (! range.valid()) return false;
+            for (int c = 0; c < channels(); ++c)
+            {
+                auto& data = c == 0 ? left : right;
+                double sum = 0;
+                for (int64_t i = range.start; i < range.end; ++i) sum += data[(size_t) i];
+                const auto mean = (float) (sum / (double) range.length());
+                for (int64_t i = range.start; i < range.end; ++i) data[(size_t) i] -= mean;
+            }
+            break;
+        }
+        case EditOperation::trimSilence:
+        {
+            int64_t first = -1, last = -1;
+            for (int64_t i = 0; i < frames(); ++i)
+            {
+                bool audible = false;
+                for (int c = 0; c < channels() && ! audible; ++c)
+                    audible = std::abs(channel(c)[(size_t) i]) >= silenceThreshold;
+                if (! audible) continue;
+                if (first < 0) first = i;
+                last = i;
+            }
+            if (first < 0) return false;
+            const auto margin = (int64_t) std::lround(trimMarginSeconds * (double) sampleRateValue);
+            const auto head = juce::jmax<int64_t>(0, first - margin);
+            const auto tail = juce::jmin<int64_t>(frames(), last + 1 + margin);
+            if (head <= 0 && tail >= frames()) return false;
+            for (auto* data : { &left, &right })
+            {
+                if (data->empty()) continue;
+                data->erase(data->begin() + tail, data->end());
+                data->erase(data->begin(), data->begin() + head);
+            }
+            break;
+        }
         default:
             return false; // operations added by the next tasks
     }

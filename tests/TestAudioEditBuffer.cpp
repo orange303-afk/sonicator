@@ -144,3 +144,107 @@ TEST_CASE("Undo memory stays under its cap", "[edit]")
     REQUIRE(buffer.canUndo());
     REQUIRE(buffer.undo());
 }
+
+namespace
+{
+AudioEditBuffer bufferWith(std::vector<float> values, std::vector<float> second = {})
+{
+    SampleAudio audio;
+    audio.sampleRate = 44100;
+    audio.channels = second.empty() ? 1 : 2;
+    audio.frames = (int64_t) values.size();
+    audio.left = std::move(values);
+    audio.right = std::move(second);
+    return AudioEditBuffer::fromSampleAudio(audio);
+}
+} // namespace
+
+TEST_CASE("Fade in ramps from zero to one", "[edit]")
+{
+    auto buffer = bufferWith(std::vector<float>(101, 1.0f));
+    REQUIRE(buffer.apply({ EditOperation::fadeIn, { 0, 100 } }));
+    REQUIRE(buffer.channel(0)[0] == Approx(0.0f));
+    REQUIRE(buffer.channel(0)[99] == Approx(0.99f));
+    REQUIRE(buffer.channel(0)[100] == Approx(1.0f));
+}
+
+TEST_CASE("Fade out ramps from one to zero", "[edit]")
+{
+    auto buffer = bufferWith(std::vector<float>(101, 1.0f));
+    REQUIRE(buffer.apply({ EditOperation::fadeOut, { 0, 100 } }));
+    REQUIRE(buffer.channel(0)[0] == Approx(1.0f));
+    REQUIRE(buffer.channel(0)[99] == Approx(0.01f));
+}
+
+TEST_CASE("Normalize scales the peak to -0.1 dBFS", "[edit]")
+{
+    std::vector<float> left(100, 0.1f), right(100, 0.05f);
+    left[42] = -0.1f;
+    right[42] = -0.05f;
+    auto buffer = bufferWith(left, right);
+    REQUIRE(buffer.apply({ EditOperation::normalize, {} }));
+    float peak = 0.0f;
+    for (int i = 0; i < 100; ++i)
+        peak = juce::jmax(peak, std::abs(buffer.channel(0)[(size_t) i]));
+    REQUIRE(peak == Approx(0.9885531f).margin(1e-4));
+    REQUIRE(buffer.channel(1)[0] / buffer.channel(0)[0] == Approx(0.5f));
+}
+
+TEST_CASE("Gain applies decibels to the range only", "[edit]")
+{
+    auto buffer = bufferWith(std::vector<float>(100, 1.0f));
+    REQUIRE(buffer.apply({ EditOperation::gain, { 0, 10 }, 6.0f }));
+    REQUIRE(buffer.channel(0)[0] == Approx(1.9953f).margin(1e-3));
+    REQUIRE(buffer.channel(0)[10] == Approx(1.0f));
+}
+
+TEST_CASE("Convert to mono averages both channels", "[edit]")
+{
+    auto buffer = bufferWith(std::vector<float>(10, 0.5f), std::vector<float>(10, -0.5f));
+    REQUIRE(buffer.apply({ EditOperation::toMono, {} }));
+    REQUIRE(buffer.channels() == 1);
+    REQUIRE(buffer.channel(0)[0] == Approx(0.0f));
+    REQUIRE(buffer.channel(1).empty());
+
+    auto mono = bufferWith(std::vector<float>(10, 0.5f));
+    REQUIRE_FALSE(mono.apply({ EditOperation::toMono, {} }));
+    REQUIRE_FALSE(mono.isModified());
+}
+
+TEST_CASE("Remove DC offset subtracts each channel mean", "[edit]")
+{
+    std::vector<float> left(1000), right(1000);
+    for (int i = 0; i < 1000; ++i)
+    {
+        left[(size_t) i] = 0.25f + 0.1f * std::sin(0.01f * (float) i);
+        right[(size_t) i] = -0.25f + 0.1f * std::sin(0.01f * (float) i);
+    }
+    auto buffer = bufferWith(left, right);
+    REQUIRE(buffer.apply({ EditOperation::removeDcOffset, {} }));
+    for (int channel = 0; channel < 2; ++channel)
+    {
+        double sum = 0;
+        for (int i = 0; i < 1000; ++i) sum += buffer.channel(channel)[(size_t) i];
+        REQUIRE(std::abs(sum / 1000.0) < 1e-4);
+    }
+}
+
+TEST_CASE("Trim silence keeps five milliseconds of margin", "[edit]")
+{
+    std::vector<float> values(1000 + 44100 + 1000, 0.0f);
+    for (int i = 1000; i < 1000 + 44100; ++i) values[(size_t) i] = 0.5f;
+    auto buffer = bufferWith(values);
+    REQUIRE(buffer.apply({ EditOperation::trimSilence, {} }));
+    REQUIRE(buffer.frames() >= 44100 + 2 * 220);
+    REQUIRE(buffer.frames() <= 44100 + 2 * 222);
+    // The kept margin is silent by definition: the first audible frame follows it.
+    REQUIRE(buffer.channel(0)[0] == Approx(0.0f));
+    REQUIRE(buffer.channel(0)[221] == Approx(0.5f));
+}
+
+TEST_CASE("Trim silence on fully silent audio leaves it unchanged", "[edit]")
+{
+    auto buffer = bufferWith(std::vector<float>(1000, 0.0f));
+    REQUIRE_FALSE(buffer.apply({ EditOperation::trimSilence, {} }));
+    REQUIRE(buffer.frames() == 1000);
+}
