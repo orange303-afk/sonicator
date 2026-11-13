@@ -240,7 +240,10 @@ WavMetadataResult extractWavMetadata(const juce::File& file)
             addBpm(result.candidates, "wav_acid", tempo,
                    "acid:tempo=" + juce::String(tempo, 2) + ",beats=" + juce::String((int) le32(12))
                    + "," + juce::String(le16(16)) + "/" + juce::String(le16(18)));
-            addRootNote(result.candidates, "wav_acid", root, "acid:root=" + juce::String(root), root == 60);
+            // The root only means something when the root-set flag is on.
+            if ((le16(0) & 0x02) != 0)
+                addRootNote(result.candidates, "wav_acid", root, "acid:root=" + juce::String(root),
+                            root == 60);
         }
         else if (idIs(id, "LIST"))
         {

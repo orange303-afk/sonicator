@@ -252,16 +252,21 @@ void FileListPanel::handleDrag(const juce::MouseEvent& e)
     for (const auto& path : paths)
     {
         const auto metadata = metadataByPath.find(path);
-        if (metadata == metadataByPath.end())
+        const juce::File source(path);
+        if (metadata == metadataByPath.end() || ! canMaterialiseWithMetadata(source))
         {
             prepared.add(path);
             continue;
         }
         juce::String error;
-        const auto copy = materialiseWithMetadata(juce::File(path), metadata->second,
+        const auto copy = materialiseWithMetadata(source, metadata->second,
                                                   ExternalFileDrag::dragCacheFolder(), error);
         if (copy == juce::File())
-            problems.add(juce::File(path).getFileName() + ": " + error);
+        {
+            // A failed metadata copy must not drop the file from the drag.
+            problems.add(source.getFileName() + ": " + error);
+            prepared.add(path);
+        }
         else
             prepared.add(copy.getFullPathName());
     }

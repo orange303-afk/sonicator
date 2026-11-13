@@ -230,3 +230,62 @@ TEST_CASE("An unknown key writes no root", "[bpm][drag]")
     REQUIRE(metadata.hasBpm);
     REQUIRE_FALSE(metadata.hasRoot);
 }
+
+TEST_CASE("Only readable formats are materialised", "[bpm][drag]")
+{
+    REQUIRE(canMaterialiseWithMetadata(juce::File("/x/a.wav")));
+    REQUIRE(canMaterialiseWithMetadata(juce::File("/x/a.AIF")));
+    REQUIRE(canMaterialiseWithMetadata(juce::File("/x/a.mp3")));
+    REQUIRE(canMaterialiseWithMetadata(juce::File("/x/a.flac")));
+    REQUIRE_FALSE(canMaterialiseWithMetadata(juce::File("/x/a.rex")));
+    REQUIRE_FALSE(canMaterialiseWithMetadata(juce::File("/x/a.rx2")));
+    REQUIRE_FALSE(canMaterialiseWithMetadata(juce::File("/x/a.ebl")));
+    REQUIRE_FALSE(canMaterialiseWithMetadata(juce::File("/x/a.sf2")));
+    REQUIRE_FALSE(canMaterialiseWithMetadata(juce::File("/x/a.xm")));
+    REQUIRE_FALSE(canMaterialiseWithMetadata(juce::File("/x/a.iso")));
+}
+
+TEST_CASE("An unsupported format is returned unchanged", "[bpm][drag]")
+{
+    TestDirectory t;
+    const auto source = t.dir.getChildFile("loop.rx2");
+    source.replaceWithText("not audio");
+    DragMetadata metadata;
+    metadata.hasBpm = true;
+    metadata.bpm = 128.0;
+    juce::String error;
+    REQUIRE(materialiseWithMetadata(source, metadata, t.dir.getChildFile("cache"), error) == source);
+    REQUIRE(error.isEmpty());
+}
+
+TEST_CASE("The drag cache prunes old siblings", "[bpm][drag]")
+{
+    TestDirectory t;
+    const auto cache = t.dir.getChildFile("drag");
+    const auto keep = cache.getChildFile("keep");
+    const auto old = cache.getChildFile("old");
+    keep.createDirectory();
+    old.createDirectory();
+    old.setLastModificationTime(juce::Time::getCurrentTime() - juce::RelativeTime::days(30));
+    pruneDragCache(cache, keep, 7);
+    REQUIRE(keep.isDirectory());
+    REQUIRE_FALSE(old.isDirectory());
+}
+
+TEST_CASE("JUCE reads the tempo we write", "[bpm][drag]")
+{
+    TestDirectory t;
+    juce::WavAudioFormat wav;
+    const auto source = writeAudio(t.dir.getChildFile("loop.wav"), wav, 44100, 16);
+    DragMetadata metadata;
+    metadata.hasBpm = true;
+    metadata.bpm = 128.0;
+    juce::String error;
+    const auto copy = materialiseWithMetadata(source, metadata, t.dir.getChildFile("cache"), error);
+    REQUIRE(error.isEmpty());
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(copy));
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->metadataValues.getValue("acid tempo", "").getFloatValue() == Catch::Approx(128.0).margin(0.01));
+}

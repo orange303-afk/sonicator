@@ -1359,10 +1359,19 @@ void MainComponent::startCatalogSync(const juce::File& file, int64_t sampleId, b
 void MainComponent::setBpmForRows(const std::vector<int64_t>& ids, double bpm)
 {
     if (writeRepo == nullptr || ids.empty()) return;
+    bpm = juce::jlimit(20.0, 300.0, bpm);
     SmartOverride value;
     value.numericValue = bpm;
-    for (const auto id : ids) writeRepo->setSmartOverride(id, SmartField::Bpm, value);
-    writeRepo->touchFeedback(ids);
+    try
+    {
+        for (const auto id : ids) writeRepo->setSmartOverride(id, SmartField::Bpm, value);
+        writeRepo->touchFeedback(ids);
+    }
+    catch (const std::exception& error)
+    {
+        status.setText(juce::String::fromUTF8(error.what()), juce::dontSendNotification);
+        return;
+    }
     reloadLibrary();
     status.setText("BPM " + juce::String(bpm, bpm == std::round(bpm) ? 0 : 1)
         + " set for " + juce::String((int) ids.size()) + " sample(s)", juce::dontSendNotification);
@@ -1371,10 +1380,27 @@ void MainComponent::setBpmForRows(const std::vector<int64_t>& ids, double bpm)
 void MainComponent::clearBpmForRows(const std::vector<int64_t>& ids)
 {
     if (writeRepo == nullptr || ids.empty()) return;
-    for (const auto id : ids) writeRepo->clearSmartOverride(id, SmartField::Bpm);
-    writeRepo->touchFeedback(ids);
+    int cleared = 0;
+    try
+    {
+        for (const auto id : ids)
+        {
+            const auto displays = writeRepo->smartDisplays({ id });
+            const auto found = displays.find(id);
+            if (found == displays.end() || found->second.bpmOverride != OverrideState::Value) continue;
+            writeRepo->clearSmartOverride(id, SmartField::Bpm);
+            ++cleared;
+        }
+        if (cleared == 0) return;
+        writeRepo->touchFeedback(ids);
+    }
+    catch (const std::exception& error)
+    {
+        status.setText(juce::String::fromUTF8(error.what()), juce::dontSendNotification);
+        return;
+    }
     reloadLibrary();
-    status.setText("Manual BPM cleared for " + juce::String((int) ids.size()) + " sample(s)",
+    status.setText("Manual BPM cleared for " + juce::String(cleared) + " sample(s)",
                    juce::dontSendNotification);
 }
 

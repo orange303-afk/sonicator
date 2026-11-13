@@ -39,7 +39,13 @@ double TapTempo::bpm() const
         sum += interval;
         ++kept;
     }
-    if (kept < 2 || ! (sum > 0.0)) return 0.0;
-    return 60000.0 / (sum / (double) kept);
+    if (kept >= 2 && sum > 0.0) return 60000.0 / (sum / (double) kept);
+    // Two intervals and one of them a slip: the shorter one is the tap, not the accident.
+    if (intervals.size() >= 2)
+    {
+        const auto shortest = *std::min_element(intervals.begin(), intervals.end());
+        if (shortest > 0.0) return 60000.0 / shortest;
+    }
+    return 0.0;
 }
 } // namespace sonicator

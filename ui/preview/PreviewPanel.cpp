@@ -1575,6 +1575,10 @@ void PreviewPanel::startTapLoop()
     if (! canLoopForTap()) return;
     loop.setToggleState(true, juce::dontSendNotification);
     applyTransportLooping();
+    const auto selection = waveform.selection();
+    if (selection.valid()
+        && (engine.position() < selection.start || engine.position() >= selection.end))
+        engine.seek(selection.start);
     engine.play();
 }
 

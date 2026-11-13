@@ -144,3 +144,13 @@ TEST_CASE("removeChunk drops only the requested chunk", "[bpm][riff]")
     REQUIRE((int) after.size() == beforeCount - 1);
     REQUIRE(findChunk(after, "data") != nullptr);
 }
+
+TEST_CASE("A BPM-only acid chunk writes no root", "[bpm][riff]")
+{
+    TestDirectory t;
+    const auto file = writeWav(t.dir.getChildFile("noroot.wav"));
+    REQUIRE(riff::insertOrReplaceChunk(file, "acid", riff::buildAcid(128.0, 4, -1)));
+    const auto result = extractWavMetadata(file);
+    REQUIRE(hasValidBpm(result, 128.0));
+    REQUIRE(rootCandidate(result) < 0);
+}

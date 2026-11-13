@@ -28,12 +28,19 @@ juce::uint32 read32(const juce::uint8* data, size_t offset)
 
 bool rewrite(const juce::File& wav, const char* id, const juce::MemoryBlock* payload)
 {
+    // Check the container before reading the whole file: an RF64 sample can be gigabytes.
+    {
+        juce::FileInputStream header(wav);
+        if (! header.openedOk() || header.getTotalLength() < 12) return false;
+        char magic[12] {};
+        if (header.read(magic, 12) != 12) return false;
+        if (std::memcmp(magic, "RIFF", 4) != 0) return false;
+        if (std::memcmp(magic + 8, "WAVE", 4) != 0) return false;
+    }
     juce::MemoryBlock data;
     if (! wav.loadFileAsData(data)) return false;
     const auto* bytes = static_cast<const juce::uint8*>(data.getData());
     if (data.getSize() < 12) return false;
-    if (juce::String::fromUTF8((const char*) bytes, 4) != "RIFF") return false;
-    if (juce::String::fromUTF8((const char*) bytes + 8, 4) != "WAVE") return false;
     const juce::String target(id, 4);
 
     juce::MemoryBlock out;

@@ -67,3 +67,13 @@ TEST_CASE("Key names map to root notes", "[bpm]")
     REQUIRE(rootMidiFromKey("") == -1);
     REQUIRE(rootMidiFromKey("?") == -1);
 }
+
+TEST_CASE("A late third tap still gives a value", "[bpm]")
+{
+    TapTempo tempo;
+    tempo.tap(0);
+    tempo.tap(500);
+    tempo.tap(1600);
+    REQUIRE(tempo.hasValue());
+    REQUIRE(tempo.bpm() == Approx(120.0).margin(1.0));
+}

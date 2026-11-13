@@ -150,11 +150,14 @@ no audio.
 
 Dragging a row whose BPM or key is trusted (`Resolved` or a manual override) materialises a copy in
 `ExternalFileDrag::dragCacheFolder()/<hash>/<stem>.wav`. A WAV source is byte-copied and only the
-RIFF `acid` and `smpl` chunks are spliced in (`core/export/RiffChunks`), so RF64, unknown chunks,
-bit depth and an existing loop survive; other readable formats are decoded to WAV first. BPM writes
+RIFF `acid` and `smpl` chunks are spliced in (`core/export/RiffChunks`), so unknown chunks, bit
+depth and an existing loop survive; other readable formats are decoded to WAV first. A container the
+splicer cannot rewrite safely (RF64, unusual chunk layouts) drags unchanged without metadata rather
+than disappearing from the drag. The cache prunes hash folders older than seven days. BPM writes
 `acid` (tempo, beats, 4/4 meter) and a root writes the `smpl` unity note, each independently: a
 BPM-only drag invents no root, a key-only drag writes no tempo. Conflicting, ambiguous and stale
-values are not written. REX2, EBL and disc samples keep their previous drag behaviour.
+values are not written. Only formats the shared decoder reads are re-encoded; REX2, EBL, soundfonts,
+tracker modules and disc images keep their previous drag behaviour.
 
 ## Smart metadata (Phase 2, metadata-first)
 

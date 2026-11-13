@@ -1,4 +1,5 @@
 #include "DragMetadata.h"
+#include "RiffChunks.h"
 #include "core/audio/SonicatorFormats.h"
 #include "AudioExporter.h"
 #include "core/smart/KeyNames.h"
@@ -10,6 +11,11 @@ namespace sonicator
 namespace
 {
 constexpr int chunkFrames = 65536;
+
+juce::String extensionOf(const juce::File& file)
+{
+    return file.getFileExtension().toLowerCase();
+}
 
 juce::String hashOf(const juce::File& source, const DragMetadata& metadata)
 {
@@ -76,6 +82,29 @@ bool hasDragMetadata(const DragMetadata& metadata)
     return metadata.hasBpm || metadata.hasRoot;
 }
 
+bool canMaterialiseWithMetadata(const juce::File& source)
+{
+    const auto extension = extensionOf(source);
+    return extension == ".wav" || extension == ".wave" || extension == ".aif"
+        || extension == ".aiff" || extension == ".aifc" || extension == ".mp3"
+        || extension == ".flac" || extension == ".ogg" || extension == ".caf"
+        || extension == ".w64";
+}
+
+void pruneDragCache(const juce::File& cacheDir, const juce::File& keep, const int maxAgeDays)
+{
+    if (! cacheDir.isDirectory()) return;
+    const auto cutoff = juce::Time::currentTimeMillis() - (juce::int64) maxAgeDays * 24 * 60 * 60 * 1000;
+    juce::Array<juce::File> folders;
+    cacheDir.findChildFiles(folders, juce::File::findDirectories, false);
+    for (const auto& folder : folders)
+    {
+        if (folder == keep) continue;
+        if (folder.getLastModificationTime().toMilliseconds() < cutoff)
+            folder.deleteRecursively();
+    }
+}
+
 DragMetadata dragMetadataForDisplay(const SmartDisplay& display)
 {
     DragMetadata metadata;
@@ -113,6 +142,9 @@ juce::File materialiseWithMetadata(const juce::File& source, const DragMetadata&
 {
     error.clear();
     if (! hasDragMetadata(metadata)) return source;
+    // Formats the shared decoder cannot read keep their previous drag behaviour rather than being
+    // re-encoded or dropped.
+    if (! canMaterialiseWithMetadata(source)) return source;
     if (! source.existsAsFile())
     {
         error = "File not found: " + source.getFileName();
@@ -121,7 +153,11 @@ juce::File materialiseWithMetadata(const juce::File& source, const DragMetadata&
     const auto destination = dragCopyPath(source, metadata, cacheDir);
     if (destination.existsAsFile()
         && destination.getLastModificationTime() >= source.getLastModificationTime())
+    {
+        pruneDragCache(cacheDir, destination.getParentDirectory());
         return destination;
+    }
+    pruneDragCache(cacheDir, destination.getParentDirectory());
     if (! destination.getParentDirectory().createDirectory())
     {
         error = "Cannot create the drag cache";

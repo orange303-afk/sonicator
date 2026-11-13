@@ -12,13 +12,17 @@ class TapTempoDialog final : public juce::Component
 {
 public:
     explicit TapTempoDialog(juce::String titleText);
-    ~TapTempoDialog() override = default;
+    ~TapTempoDialog() override;
 
     std::function<void()> onStartLoop, onStopLoop, onCancel;
     std::function<void(double bpm)> onApply;
 
     void tap();
     void setClockForTest(std::function<int64_t()> testClock) { clock = std::move(testClock); }
+    // A batch has no audio to loop, so the button is disabled rather than flipping to "Stop" while
+    // nothing plays.
+    void setLoopAvailable(bool available);
+    bool isLoopAvailable() const { return loopAvailable; }
     double currentBpm() const { return tempo.bpm(); }
     bool keyPressed(const juce::KeyPress&) override;
     void resized() override;
@@ -35,7 +39,7 @@ private:
     juce::Label title, value;
     juce::TextButton tapButton { "Tap" }, loopButton { "Start loop" },
                      applyButton { "Apply" }, cancelButton { "Cancel" };
-    bool loopRunning = false;
+    bool loopRunning = false, loopAvailable = true;
 
     void updateLabels();
     void apply();

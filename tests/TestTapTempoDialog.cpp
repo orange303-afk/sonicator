@@ -56,3 +56,23 @@ TEST_CASE("Apply does nothing before three taps", "[bpm][ui]")
     dialog.keyPressed(juce::KeyPress(juce::KeyPress::returnKey));
     REQUIRE_FALSE(applied);
 }
+
+TEST_CASE("Closing the dialog stops the loop", "[bpm][ui]")
+{
+    bool stopped = false;
+    {
+        TapTempoDialog dialog("kick.wav");
+        dialog.onStopLoop = [&stopped] { stopped = true; };
+        dialog.onStartLoop = [] {};
+    }
+    REQUIRE(stopped);
+}
+
+TEST_CASE("A batch disables the loop button", "[bpm][ui]")
+{
+    TapTempoDialog dialog("2 samples");
+    dialog.setLoopAvailable(false);
+    REQUIRE_FALSE(dialog.isLoopAvailable());
+    dialog.setLoopAvailable(true);
+    REQUIRE(dialog.isLoopAvailable());
+}

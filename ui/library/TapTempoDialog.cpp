@@ -25,6 +25,7 @@ TapTempoDialog::TapTempoDialog(juce::String titleText)
     tapButton.onClick = [this] { tap(); };
     loopButton.onClick = [this]
     {
+        if (! loopAvailable) return;
         loopRunning = ! loopRunning;
         loopButton.setButtonText(loopRunning ? "Stop" : "Start loop");
         if (loopRunning)
@@ -40,9 +41,23 @@ TapTempoDialog::TapTempoDialog(juce::String titleText)
     updateLabels();
 }
 
+TapTempoDialog::~TapTempoDialog()
+{
+    // Any way of closing the window (Esc, Apply, the title-bar X) must not leave the preview
+    // looping with no window to stop it.
+    if (onStopLoop) onStopLoop();
+}
+
+void TapTempoDialog::setLoopAvailable(const bool available)
+{
+    loopAvailable = available;
+    loopButton.setEnabled(available);
+    if (! available) loopButton.setButtonText("Start loop");
+}
+
 void TapTempoDialog::tap()
 {
-    const auto now = clock ? clock() : (int64_t) juce::Time::getMillisecondCounter();
+    const auto now = clock ? clock() : (int64_t) juce::Time::getMillisecondCounterHiRes();
     tempo.tap(now);
     updateLabels();
 }
@@ -133,6 +148,7 @@ void TapTempoDialog::launch(juce::Component* owner, juce::String titleText,
     dialog->onStartLoop = std::move(startLoop);
     dialog->onStopLoop = std::move(stopLoop);
     dialog->onApply = std::move(apply);
+    dialog->setLoopAvailable(static_cast<bool>(dialog->onStartLoop) || static_cast<bool>(dialog->onStopLoop));
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned(dialog.release());
     options.dialogTitle = "Tap BPM";
