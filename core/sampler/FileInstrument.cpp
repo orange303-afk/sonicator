@@ -1,6 +1,7 @@
 #include "FileInstrument.h"
 #include "core/audio/SonicatorFormats.h"
 #include "core/kurzweil/KrzInstrument.h"
+#include "core/sfz/SfzInstrument.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <cmath>
@@ -409,6 +410,7 @@ bool loadFileInstrument(const juce::File& file, FileInstrumentFormat format,
                         FileInstrument& instrument, juce::String& error)
 {
     if (format == FileInstrumentFormat::krz) return loadKrzInstrument(file, instrument, error);
+    if (format == FileInstrumentFormat::sfz) return loadSfzInstrument(file, instrument, error);
     error.clear();
     instrument = {};
     instrument.file = file;

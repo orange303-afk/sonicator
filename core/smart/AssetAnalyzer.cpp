@@ -7,6 +7,7 @@
 #include "core/sampler/FileInstrument.h"
 #include "core/reason/ReasonPatch.h"
 #include "core/kurzweil/KrzFile.h"
+#include "core/sfz/SfzInstrument.h"
 #include <cmath>
 namespace sonicator {
 namespace {
@@ -85,6 +86,16 @@ SampleRecord analyzeMetadataAsset(const juce::File& file, CancelCheck cancel)
         if (! krz::isKrzFile(file))
         {
             r.error = "Not a Kurzweil K2000/K2500/K2600 bank";
+            r.compatibility = AssetCompatibility::invalid;
+            return r;
+        }
+    }
+    else if (r.format == "SFZ")
+    {
+        juce::String detail;
+        if (! isSfzFile(file, &detail))
+        {
+            r.error = detail.isNotEmpty() ? detail : "Not a recognised SFZ instrument";
             r.compatibility = AssetCompatibility::invalid;
             return r;
         }

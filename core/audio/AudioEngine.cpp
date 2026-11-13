@@ -160,7 +160,7 @@ bool AudioEngine::loadFile(const juce::File& file)
         return previewRex2(file);
     }
     if (extension == ".exs" || extension == ".nki" || extension == ".krz"
-        || extension == ".k25" || extension == ".k26")
+        || extension == ".k25" || extension == ".k26" || extension == ".sfz")
     {
         attachRender();
         return previewFileInstrument(file);
@@ -391,7 +391,7 @@ bool AudioEngine::previewFileInstrument(const juce::File& file)
     const auto extension = file.getFileExtension().toLowerCase();
     const auto format = extension == ".exs" ? FileInstrumentFormat::exs24
         : (extension == ".krz" || extension == ".k25" || extension == ".k26" ? FileInstrumentFormat::krz
-                                                                           : FileInstrumentFormat::nki);
+        : (extension == ".sfz" ? FileInstrumentFormat::sfz : FileInstrumentFormat::nki));
     juce::String error;
     if (! loadFileInstrument(file, format, externalInstrument, error))
     {

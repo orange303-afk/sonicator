@@ -39,6 +39,8 @@ artefacts of folder names, not formats.
 
 ### 1. SFZ — 4 105 instruments, cheapest real coverage
 
+*Status 2026-11-13: implemented — see `docs/SFZ.md` (4 100/4 105 load).*
+
 `<region> sample=… lokey=… hikey=… lovel=… hivel=… pitch_keycenter=… loop_start=… end=…` maps
 directly onto `ExternalZone`. It is the same shape of work as the existing NKI reader: parse text,
 resolve relative paths (backslashes and `..\..` are common), decode WAVs into `SampleAudio`,

@@ -40,7 +40,7 @@ Upsert by path preserves sample ID. Two files with the same content keep indepen
 
 `basicFeaturesVersion = 1` describes the measured feature set stored in `SampleRecord`: duration, rate, bits, channels, peak, RMS, centroid, rolloff, flatness and hash. The earlier bump to 2 was reverted: every stored version-1 row already contains that full set, so keeping 2 would have invalidated 298,899 valid results without adding data. Future analyzers get their own versioned storage instead of forcing a global bump.
 
-Metadata-only containers (`.rx2`, `.sf2`, `.exs`, `.nki` and the tracker candidates `.mod`, `.xm`, `.s3m`) are catalogued through `core/smart/AssetAnalyzer` with `version = metadataOnlyVersion` (-1): file identity and readable container metadata, no DSP descriptors, and the unchanged-file skip accepts that version. Legacy `.rex`/`.rcy` are not indexed. Tracker candidates are confirmed by `core/legacy/LegacyFormatProbe`; an unrecognised candidate keeps a precise error instead of an audio row, and the detected format (for example an S3M renamed to `.mod`) is stored in the format column.
+Metadata-only containers (`.rx2`, `.sf2`, `.exs`, `.nki`, `.sfz` and the tracker candidates `.mod`, `.xm`, `.s3m`) are catalogued through `core/smart/AssetAnalyzer` with `version = metadataOnlyVersion` (-1): file identity and readable container metadata, no DSP descriptors, and the unchanged-file skip accepts that version. Legacy `.rex`/`.rcy` are not indexed. Tracker candidates are confirmed by `core/legacy/LegacyFormatProbe`; an unrecognised candidate keeps a precise error instead of an audio row, and the detected format (for example an S3M renamed to `.mod`) is stored in the format column.
 
 Tracker documents are an independent path: `TrackerDocument` reads a bounded module and exposes sample slots plus lazily decoded immutable PCM; `TrackerSongRenderer` owns libxmp on its worker and a two-second ring; `SampleVoicePlayer` renders the selected source chromatically. Source PCM extraction is deliberately separate from playback, so a format libxmp can play is not automatically claimed as extractable. PCM offsets, frame counts and conversions are checked 64-bit arithmetic, and one source is capped at 128 MiB decoded with a 256 MiB document cache cap.
 
@@ -128,6 +128,20 @@ model: one source per RAM sample header, one program per K2000 program, zones fr
 keys and velocity levels. Playback therefore reuses `ExternalKitSampler`. Extract lists the sample
 objects through `EmbeddedSampleSet` and writes root key and loop into the WAV `smpl` chunk.
 `docs/KURZWEIL_KRZ.md` records the layout and every corpus-derived decision.
+
+## SFZ instruments (`.sfz`)
+
+`core/sfz/SfzInstrument` reads the text sections `<control>`, `<master>/<global>`, `<group>` and
+`<region>`, inherits opcodes from master to group to region and turns each region into an
+`ExternalZone` of the shared external-instrument model. It resolves external samples through
+`default_path` and the instrument folder's ancestors (Windows separators and unquoted paths with
+spaces are normalised), decodes them with the registered Sonicator formats, and maps key/velocity
+ranges, root key, tuning, volume, pan, offset/end and loop points. Missing samples are named in the
+warnings and the rest of the instrument still plays; an instrument with no playable region fails
+with that list instead of opening as silence. Playback and preview therefore reuse
+`ExternalKitSampler` and the existing MIDI/waveform UI. `.sfz` is indexed as a metadata-only row;
+nothing is embedded, so it is not an Extract source. `docs/SFZ.md` records the mapping and the
+corpus findings.
 
 ## REX2 preview
 

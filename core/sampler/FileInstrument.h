@@ -3,7 +3,7 @@
 #include <juce_core/juce_core.h>
 #include <vector>
 namespace sonicator {
-enum class FileInstrumentFormat { exs24, nki, krz };
+enum class FileInstrumentFormat { exs24, nki, krz, sfz };
 // One zone of an external-file instrument. `sampleIndex` addresses FileInstrument::sources and
 // ::audio; start/end and loop bounds are frame positions inside that decoded source.
 struct ExternalZone

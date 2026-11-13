@@ -66,6 +66,7 @@ must keep those notices next to the binary.
 | [samplerdisc](https://github.com/bmxcode/samplerdisc) | E-mu Emulator X `.ebl` format documentation only (`docs/formats/emu-ebl.md`, `sample/emu_ebl.py`); the C++ decoder in `core/emu/` is an independent implementation, no code copied, linked or executed | MIT |
 | Kurzweil «KurzFile» notes (Geoffrey Mayer) | Kurzweil K2000/K2500/K2600 `.krz` object layout, keymap entry methods and sample header fields, recorded in `docs/KURZWEIL_KRZ.md`; the reader in `core/kurzweil/` is an independent implementation, no code copied | Publicly circulated format notes |
 | [acidcat «krz anatomy»](https://hed0rah.github.io/audio_files_anatomy/krz-anatomy.html) | Object framing, keymap methods, program segment table and the sample-period encoding; documentation only | Reference documentation |
+| [SFZ format reference](https://sfzformat.com/opcodes/) | SFZ opcode names, value ranges and loop-mode semantics recorded in `docs/SFZ.md`; the reader in `core/sfz/` is an independent implementation, no code copied | Public format documentation |
 
 No other source code was copied into this repository. Format specifications and public documentation were
 used as references; they are not redistributed.
