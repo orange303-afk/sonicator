@@ -33,6 +33,7 @@ void WaveformDisplay::setFile(const juce::File& file)
     position = 0;
     peakMin.clear(); peakMax.clear(); sliceTimes.clear(); activeSlices.clear(); customLength = 0;
     clearSelection();
+    viewRange = {};
     if (file.existsAsFile()) thumbnail.setSource(new juce::FileInputSource(file,true));
     else thumbnail.setSource(nullptr);
     repaint();
@@ -42,6 +43,7 @@ void WaveformDisplay::setPeaks(const std::vector<float>& samples, int sampleRate
 {
     position = 0;
     clearSelection();
+    viewRange = {};
     thumbnail.setSource(nullptr);
     peakMin.clear(); peakMax.clear(); sliceTimes.clear(); activeSlices.clear();
     customLength = sampleRate > 0 ? (double) samples.size() / sampleRate : 0;
@@ -105,6 +107,57 @@ void WaveformDisplay::clearSelection()
     repaint();
     notifySelection();
 }
+waveview::View WaveformDisplay::effectiveView() const
+{
+    const auto total = totalLength();
+    if (! viewRange.valid()) return waveview::whole(total);
+    return waveview::clampView(viewRange, total);
+}
+
+double WaveformDisplay::minimumViewLength() const
+{
+    const auto total = totalLength();
+    if (zoomSampleRate > 0 && getWidth() > 0) return (double) getWidth() / (double) zoomSampleRate;
+    return total > 0 ? total / 1000.0 : 0.0;
+}
+
+void WaveformDisplay::setView(waveview::View view)
+{
+    const auto total = totalLength();
+    viewRange = waveview::clampView(view, total);
+    repaint();
+}
+
+void WaveformDisplay::zoomToFit()
+{
+    viewRange = waveview::whole(totalLength());
+    repaint();
+}
+
+void WaveformDisplay::zoomToSelection()
+{
+    if (! currentSelection.valid()) return;
+    setView({ currentSelection.start, currentSelection.end });
+}
+
+void WaveformDisplay::zoomAtTime(double seconds, double factor)
+{
+    const auto total = totalLength();
+    if (! (total > 0) || ! (factor > 0)) return;
+    setView(waveview::zoomAround(effectiveView(), seconds, factor, total, minimumViewLength()));
+}
+
+void WaveformDisplay::panBySeconds(double seconds)
+{
+    setView(waveview::panBy(effectiveView(), seconds, totalLength()));
+}
+
+bool WaveformDisplay::isOverviewPoint(juce::Point<int> point) const
+{
+    return point.y >= getHeight() - 14
+        && ! waveview::isWholeFile(effectiveView(), totalLength());
+}
+
 void WaveformDisplay::notifySelection()
 {
     if (onSelectionChanged) onSelectionChanged(currentSelection);
@@ -126,9 +179,9 @@ void WaveformDisplay::notifySelectionChanging()
 }
 double WaveformDisplay::secondsPerPixel() const
 {
-    const auto total = totalLength();
+    const auto view = effectiveView();
     const double track = (double) getWidth() - 2.0 * selection::inset;
-    return track > 0 && total > 0 ? total / track : 0.0;
+    return track > 0 && view.length() > 0 ? view.length() / track : 0.0;
 }
 double WaveformDisplay::minimumSelectionLength() const
 {
@@ -143,6 +196,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
     {
         g.setColour(theme::muted); g.drawText("Select a sample to preview",getLocalBounds(),juce::Justification::centred); return;
     }
+    const auto view = effectiveView();
     const auto area = getLocalBounds().reduced(6,10).toFloat();
     if (! peakMin.empty())
     {
@@ -151,19 +205,22 @@ void WaveformDisplay::paint(juce::Graphics& g)
         g.setColour(theme::accent);
         for (int bin = 0; bin < (int) peakMin.size(); ++bin)
         {
-            const auto x = area.getX() + area.getWidth() * ((float) bin + 0.5f) / (float) peakMin.size();
+            const auto binStart = total * bin / (double) peakMin.size();
+            const auto binEnd = total * (bin + 1) / (double) peakMin.size();
+            if (binEnd <= view.start || binStart >= view.end) continue;
+            const auto x = waveview::xAtTime((binStart + binEnd) * 0.5, getWidth(), view);
             g.drawVerticalLine((int) x, centre - peakMax[(size_t) bin] * half,
                                centre - peakMin[(size_t) bin] * half);
         }
         for (size_t i = 0; i < sliceTimes.size(); ++i)
         {
-            const auto x = selection::xAtTime(sliceTimes[i], getWidth(), total);
+            const auto x = waveview::xAtTime(sliceTimes[i], getWidth(), view);
             g.setColour(theme::muted.withAlpha(0.55f));
             g.drawVerticalLine((int) x, area.getY(), area.getBottom());
             if (std::find(activeSlices.begin(), activeSlices.end(), (int) i) != activeSlices.end())
             {
                 const auto next = i + 1 < sliceTimes.size() ? sliceTimes[i + 1] : total;
-                const auto x2 = selection::xAtTime(next, getWidth(), total);
+                const auto x2 = waveview::xAtTime(next, getWidth(), view);
                 g.setColour(theme::accent.withAlpha(0.28f));
                 g.fillRect(juce::Rectangle<float>(x, area.getY(), juce::jmax(1.0f, x2 - x), area.getHeight()));
             }
@@ -173,12 +230,12 @@ void WaveformDisplay::paint(juce::Graphics& g)
     else
     {
         g.setColour(theme::accent);
-        thumbnail.drawChannels(g,area.toNearestInt(),0,total,0.85f);
+        thumbnail.drawChannels(g,area.toNearestInt(),view.start,view.end,0.85f);
     }
     if (currentSelection.valid())
     {
-        const auto x1 = selection::xAtTime(currentSelection.start, getWidth(), total);
-        const auto x2 = selection::xAtTime(currentSelection.end, getWidth(), total);
+        const auto x1 = waveview::xAtTime(currentSelection.start, getWidth(), view);
+        const auto x2 = waveview::xAtTime(currentSelection.end, getWidth(), view);
         g.setColour(theme::accent.withAlpha(0.20f));
         g.fillRect(juce::Rectangle<float>(x1, 6.0f, juce::jmax(1.0f, x2 - x1), (float) getHeight() - 12.0f));
         g.setColour(theme::accent.withAlpha(0.85f));
@@ -194,8 +251,19 @@ void WaveformDisplay::paint(juce::Graphics& g)
         g.setColour(theme::text);
         g.drawText(label, labelBounds, juce::Justification::centred);
     }
-    float progress = 6 + (float) juce::jlimit(0.0,1.0,position/total) * (getWidth()-12);
+    const auto progress = waveview::xAtTime(position, getWidth(), view);
     g.setColour(theme::accent); g.drawVerticalLine((int) progress,5,(float) getHeight()-5);
+    if (! waveview::isWholeFile(view, total))
+    {
+        const juce::Rectangle<float> strip((float) selection::inset, (float) getHeight() - 12.0f,
+                                           (float) getWidth() - 2.0f * (float) selection::inset, 8.0f);
+        g.setColour(theme::panel); g.fillRoundedRectangle(strip, 2.0f);
+        const auto frameStart = strip.getX() + strip.getWidth() * (float) (view.start / total);
+        const auto frameEnd = strip.getX() + strip.getWidth() * (float) (view.end / total);
+        g.setColour(theme::accent.withAlpha(0.55f));
+        g.fillRoundedRectangle(juce::Rectangle<float>(frameStart, strip.getY(),
+            juce::jmax(2.0f, frameEnd - frameStart), strip.getHeight()), 2.0f);
+    }
 }
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {
@@ -207,7 +275,14 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     dragMode = DragMode::none;
     const auto total = totalLength();
     if (total <= 0) return;
-    dragAnchor = selection::timeAtX(e.position.x, getWidth(), total);
+    const auto view = effectiveView();
+    if (isOverviewPoint(e.getPosition()))
+    {
+        dragMode = DragMode::overview;
+        overviewDragStart = view.start;
+        return;
+    }
+    dragAnchor = waveview::timeAtX(e.position.x, getWidth(), view);
     pressInsideSelection = selection::contains(currentSelection, dragAnchor);
     if (! pressWasPrimary || ! loopArmed || ! currentSelection.valid()) return;
     // Cmd/Ctrl-drag still starts the external file drag that plain dragging inside used to do.
@@ -228,17 +303,27 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
     if (dragMode == DragMode::move)
     {
         if (! selection::exceedsDragThreshold(delta.x, delta.y)) return;
-        const double movedBy = selection::timeAtX(e.position.x, getWidth(), total) - dragStartTime;
+        const double movedBy = waveview::timeAtX(e.position.x, getWidth(), effectiveView()) - dragStartTime;
         const double length = dragStartRange.length();
         const double start = juce::jlimit(0.0, juce::jmax(0.0, total - length),
                                           dragStartRange.start + movedBy);
         publishLiveSelection({ start, start + length });
         return;
     }
+    if (dragMode == DragMode::overview)
+    {
+        const auto track = juce::jmax(1.0f, (float) getWidth() - 2.0f * (float) selection::inset);
+        const auto moved = (double) delta.x / (double) track * total;
+        auto view = effectiveView();
+        view.start = overviewDragStart + moved;
+        view.end = view.start + view.length();
+        setView(view);
+        return;
+    }
     if (dragMode == DragMode::resizeStart || dragMode == DragMode::resizeEnd)
     {
         if (! selection::exceedsDragThreshold(delta.x, delta.y)) return;
-        const double time = selection::timeAtX(e.position.x, getWidth(), total);
+        const double time = waveview::timeAtX(e.position.x, getWidth(), effectiveView());
         const double minLength = minimumSelectionLength();
         selection::Range r = dragStartRange;
         if (dragMode == DragMode::resizeStart)
@@ -263,7 +348,7 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
         selectionDragActive = true;
         dragMode = DragMode::select;
     }
-    updateSelectionDuringDrag(selection::timeAtX(e.position.x, getWidth(), total));
+    updateSelectionDuringDrag(waveview::timeAtX(e.position.x, getWidth(), effectiveView()));
 }
 void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 {
@@ -272,11 +357,11 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
     // recorded. That release must not seek or clear the range mouseDoubleClick is about to make.
     const bool completesDoubleClick = pressWasPrimary && e.getNumberOfClicks() >= 2;
     const bool editedRange = dragMode == DragMode::move || dragMode == DragMode::resizeStart
-        || dragMode == DragMode::resizeEnd;
+        || dragMode == DragMode::resizeEnd || dragMode == DragMode::overview;
     if (total > 0 && ! completesDoubleClick && ! selectionDragActive && ! editedRange
         && ! externalDragTriggered)
     {
-        if (onSeek) onSeek(selection::timeAtX(e.position.x, getWidth(), total));
+        if (onSeek) onSeek(waveview::timeAtX(e.position.x, getWidth(), effectiveView()));
         // A click inside an armed loop seeks within it; dragging is how the range itself is moved.
         if (! (loopArmed && pressInsideSelection)) clearSelection();
     }
@@ -294,7 +379,7 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 {
     const auto total = totalLength();
     if (total <= 0) { setMouseCursor(juce::MouseCursor::NormalCursor); return; }
-    updateCursorFor(selection::timeAtX(e.position.x, getWidth(), total));
+    updateCursorFor(waveview::timeAtX(e.position.x, getWidth(), effectiveView()));
 }
 void WaveformDisplay::updateCursorFor(double time)
 {
@@ -312,12 +397,28 @@ void WaveformDisplay::updateCursorFor(double time)
     else
         setMouseCursor(juce::MouseCursor::NormalCursor);
 }
-void WaveformDisplay::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& wheel)
+void WaveformDisplay::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
 {
     const auto total = totalLength();
-    if (! (total > 0) || ! currentSelection.valid()) return;
+    if (! (total > 0)) return;
     const auto delta = wheel.deltaY != 0.0f ? wheel.deltaY : wheel.deltaX;
     if (std::abs(delta) < 0.0001f) return;
+    if (event.mods.isCtrlDown() || event.mods.isCommandDown())
+    {
+        const auto factor = juce::jlimit(0.5, 2.0, std::pow(1.5, (double) delta));
+        zoomAtTime(waveview::timeAtX(event.position.x, getWidth(), effectiveView()), factor);
+        return;
+    }
+    if (event.mods.isShiftDown() || std::abs(wheel.deltaX) > std::abs(wheel.deltaY))
+    {
+        panBySeconds(-(double) delta * effectiveView().length() * 0.5);
+        return;
+    }
+    if (! currentSelection.valid())
+    {
+        panBySeconds(-(double) delta * effectiveView().length() * 0.5);
+        return;
+    }
     // One notch is a moderate step; smooth trackpads send many small events, so the exponent keeps
     // the gesture proportional instead of snapping the range to the whole file.
     const auto factor = juce::jlimit(0.8, 1.25, std::pow(1.5, (double) delta));
@@ -326,6 +427,13 @@ void WaveformDisplay::mouseWheelMove(const juce::MouseEvent&, const juce::MouseW
     const auto start = juce::jlimit(0.0, juce::jmax(0.0, total - length), centre - length * 0.5);
     publishLiveSelection({ start, start + length });
 }
+void WaveformDisplay::mouseMagnify(const juce::MouseEvent& event, float scaleFactor)
+{
+    if (totalLength() <= 0 || ! (scaleFactor > 0)) return;
+    zoomAtTime(waveview::timeAtX(event.position.x, getWidth(), effectiveView()),
+               (double) scaleFactor);
+}
+
 void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
 {
     // The whole displayed source, end exclusive. setSelection publishes only a real change, so a

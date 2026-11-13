@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include "ui/preview/PreviewPanel.h"
 #include "ui/library/FolderTree.h"
+#include "ui/waveform/WaveformDisplay.h"
+#include "ui/waveform/WaveformView.h"
 #include "TestHelpers.h"
 using namespace sonicator;
 
@@ -42,4 +45,53 @@ TEST_CASE("Images and their virtual directories expand in the folder tree", "[ui
     folders.onDiscFolder = [&](const juce::String& path, DiscEntryId id) { REQUIRE(path == image); selected = id; };
     drums->getSubItem(0)->setSelected(true, true);
     REQUIRE(selected == nested.id);
+}
+
+TEST_CASE("Waveform view starts at the whole file and zoom selection narrows it", "[waveform][ui]")
+{
+    TestDirectory t;
+    WaveformDisplay display(t.dir.getChildFile("cache"));
+    display.setSize(600, 120);
+    std::vector<float> samples(44100, 0.5f);
+    display.setPeaks(samples, 44100, {});
+    display.setSampleRateForZoom(44100);
+    REQUIRE(display.totalLength() == Catch::Approx(1.0));
+    REQUIRE(display.view().start == Catch::Approx(0.0));
+    REQUIRE(display.view().end == Catch::Approx(1.0));
+    display.setSelection({ 0.25, 0.5 });
+    display.zoomToSelection();
+    REQUIRE(display.view().start == Catch::Approx(0.25));
+    REQUIRE(display.view().end == Catch::Approx(0.5));
+    display.zoomToFit();
+    REQUIRE(display.view().end == Catch::Approx(1.0));
+}
+
+TEST_CASE("Zoom at a time keeps that time under the same pixel", "[waveform][ui]")
+{
+    TestDirectory t;
+    WaveformDisplay display(t.dir.getChildFile("cache"));
+    display.setSize(600, 120);
+    std::vector<float> samples(44100, 0.5f);
+    display.setPeaks(samples, 44100, {});
+    display.setSampleRateForZoom(44100);
+    display.zoomAtTime(0.4, 2.0);
+    const auto x = sonicator::waveview::xAtTime(0.4, 600, display.view());
+    REQUIRE(sonicator::waveview::timeAtX(x, 600, display.view()) == Catch::Approx(0.4).margin(1e-6));
+    REQUIRE(display.view().length() < 1.0);
+}
+
+TEST_CASE("Panning clamps the view and leaves the selection in file time", "[waveform][ui]")
+{
+    TestDirectory t;
+    WaveformDisplay display(t.dir.getChildFile("cache"));
+    display.setSize(600, 120);
+    std::vector<float> samples(44100, 0.5f);
+    display.setPeaks(samples, 44100, {});
+    display.setSampleRateForZoom(44100);
+    display.zoomAtTime(0.5, 4.0);
+    display.panBySeconds(-10.0);
+    REQUIRE(display.view().start == Catch::Approx(0.0));
+    display.setSelection({ 0.1, 0.2 });
+    REQUIRE(display.selection().start == Catch::Approx(0.1));
+    REQUIRE(display.selection().end == Catch::Approx(0.2));
 }

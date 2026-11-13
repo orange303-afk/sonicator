@@ -2,6 +2,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <vector>
 #include "WaveformSelection.h"
+#include "WaveformView.h"
 namespace sonicator {
 class WaveformDisplay final : public juce::Component, private juce::ChangeListener
 {
@@ -22,6 +23,17 @@ public:
     // instead of starting the external DAW drag. The wheel always resizes the range around its
     // centre. Live edits call onSelectionChanging; the final range calls onSelectionChanged.
     void setLoopArmed(bool armed) { loopArmed = armed; }
+    waveview::View view() const { return effectiveView(); }
+    void setView(waveview::View);
+    void zoomToFit();
+    void zoomToSelection();
+    // Zoom around one time position; factor > 1 zooms in. The gesture wrappers below are thin, so
+    // the geometry stays testable without synthesising mouse events.
+    void zoomAtTime(double seconds, double factor);
+    void panBySeconds(double seconds);
+    void setSampleRateForZoom(int rate) { zoomSampleRate = rate; }
+    int sampleRate() const { return zoomSampleRate; }
+    void mouseMagnify(const juce::MouseEvent&, float scaleFactor) override;
     double totalLength() const { return customLength > 0 ? customLength : thumbnail.getTotalLength(); }
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -43,13 +55,15 @@ private:
     std::vector<double> sliceTimes;
     std::vector<int> activeSlices;
     double customLength = 0;
+    waveview::View viewRange;
+    int zoomSampleRate = 0;
     double position = 0;
     selection::Range currentSelection;
     juce::Point<int> dragOrigin;
     double dragAnchor = 0;
     bool pressInsideSelection = false, selectionDragActive = false, externalDragTriggered = false;
     bool pressWasPrimary = false, loopArmed = false;
-    enum class DragMode { none, select, move, resizeStart, resizeEnd };
+    enum class DragMode { none, select, move, resizeStart, resizeEnd, overview };
     DragMode dragMode = DragMode::none;
     selection::Range dragStartRange;
     double dragStartTime = 0;
@@ -58,6 +72,10 @@ private:
     void notifySelection();
     void notifySelectionChanging();
     double secondsPerPixel() const;
+    waveview::View effectiveView() const;
+    double minimumViewLength() const;
+    double overviewDragStart = 0;
+    bool isOverviewPoint(juce::Point<int>) const;
     double minimumSelectionLength() const;
     void updateCursorFor(double time);
     void changeListenerCallback(juce::ChangeBroadcaster*) override { repaint(); }
