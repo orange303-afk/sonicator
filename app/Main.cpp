@@ -39,7 +39,11 @@ public:
         juce::Logger::writeToLog("SONICATOR shutting down");
         sonicator::diagnostics::uninstall();
     }
-    void systemRequestedQuit() override { quit(); }
+    void systemRequestedQuit() override
+    {
+        if (window != nullptr) window->requestQuit();
+        else quit();
+    }
 private:
     class Window final : public juce::DocumentWindow, private juce::Timer
     {
@@ -79,7 +83,23 @@ private:
         void closeButtonPressed() override
         {
             persistGeometry();
-            juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            requestQuit();
+        }
+        // Unsaved waveform edits are asked about before the application leaves.
+        void requestQuit()
+        {
+            if (quitInProgress) return;
+            quitInProgress = true;
+            auto* content = dynamic_cast<sonicator::MainComponent*>(getContentComponent());
+            if (content == nullptr)
+            {
+                juce::JUCEApplication::getInstance()->quit();
+                return;
+            }
+            content->prepareForQuit([]
+            {
+                juce::JUCEApplication::getInstance()->quit();
+            });
         }
     private:
         void moved() override { if (geometryReady) startTimer(500); }
@@ -92,7 +112,7 @@ private:
         void timerCallback() override { stopTimer(); persistGeometry(); }
         sonicator::SettingsStore store;
         sonicator::AppSettings appSettings;
-        bool geometryReady = false;
+        bool geometryReady = false, quitInProgress = false;
     };
     std::unique_ptr<Window> window;
 };

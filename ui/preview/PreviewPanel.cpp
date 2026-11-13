@@ -256,6 +256,11 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
 }
 bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
 {
+    if (hasUnsavedEdits())
+    {
+        selectionStatus.setText("Save or discard the current edits first", juce::dontSendNotification);
+        return false;
+    }
     if (file == loadedFile && file != juce::File() && file.getSize() == loadedSize
         && file.getLastModificationTime().toMilliseconds() == loadedModified) return true;
     // Preview provenance belongs to one loaded file only; never leak it to the next selection.
@@ -670,6 +675,11 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
                                   SampleAudioPtr audio, bool looping, int64_t loopStart,
                                   int64_t loopEnd, bool pingPong, bool allowAutoPlay)
 {
+    if (hasUnsavedEdits())
+    {
+        selectionStatus.setText("Save or discard the current edits first", juce::dontSendNotification);
+        return false;
+    }
     if (! engine.setDiscSample(audio, looping, loopStart, loopEnd, pingPong))
     {
         selectionStatus.setText(engine.error(), juce::dontSendNotification);
@@ -1489,6 +1499,7 @@ void PreviewPanel::saveCopyAndSwitch(std::function<void(bool)> done)
 }
 
 void PreviewPanel::saveEditsAsCopyForTest() { saveCopyAndSwitch({}); }
+void PreviewPanel::discardEditsForTest() { discardEdits(); }
 void PreviewPanel::overwriteEditsForTest() { overwriteEdits({}); }
 
 void PreviewPanel::discardEdits()
@@ -1517,27 +1528,28 @@ void PreviewPanel::discardEdits()
     refreshDirtyMark();
 }
 
-void PreviewPanel::withUnsavedEditsConfirmed(std::function<void()> proceed)
+void PreviewPanel::withUnsavedEditsConfirmed(std::function<void(bool)> done)
 {
     if (! hasUnsavedEdits())
     {
-        proceed();
+        if (done) done(true);
         return;
     }
     auto safe = juce::Component::SafePointer<PreviewPanel>(this);
     const auto name = editingName();
     dialogs::showAlert(*this, "Unsaved edits", "\u201c" + name + "\u201d has unsaved edits.",
         { { "Save...", 1 }, { "Discard", 2 }, { "Cancel", 0 } },
-        [safe, proceed](int id)
+        [safe, done](int id)
         {
-            if (safe == nullptr) return;
+            if (safe == nullptr) { if (done) done(false); return; }
             if (id == 2)
             {
                 safe->discardEdits();
-                proceed();
+                if (done) done(true);
             }
             else if (id == 1)
-                safe->saveEdits([proceed](bool saved) { if (saved) proceed(); });
+                safe->saveEdits([done](bool saved) { if (done) done(saved); });
+            else if (done) done(false);
         });
 }
 } // namespace sonicator

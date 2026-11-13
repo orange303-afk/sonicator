@@ -114,3 +114,42 @@ TEST_CASE("Overwriting refreshes from the file and clears dirty", "[ui][edit]")
     REQUIRE(reader != nullptr);
     REQUIRE(reader->lengthInSamples == 22050);
 }
+
+TEST_CASE("Loading another source while dirty is refused", "[ui][edit]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("a.wav"), false));
+    preview.selectRange(0.1, 0.2);
+    preview.applyEditCommand(PreviewPanel::EditCommand::deleteRegion);
+    REQUIRE(preview.hasUnsavedEdits());
+    REQUIRE_FALSE(preview.loadFile(t.wave("b.wav"), false));
+    REQUIRE(preview.hasUnsavedEdits());
+}
+
+TEST_CASE("Discarding restores the source length", "[ui][edit]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("a.wav"), false));
+    preview.selectRange(0.1, 0.2);
+    preview.applyEditCommand(PreviewPanel::EditCommand::deleteRegion);
+    REQUIRE(preview.hasUnsavedEdits());
+    preview.discardEditsForTest();
+    REQUIRE_FALSE(preview.hasUnsavedEdits());
+    REQUIRE(preview.waveformLength() == Approx(1.0).margin(0.01));
+}
+
+TEST_CASE("The leave hook proceeds immediately when nothing is unsaved", "[ui][edit]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    bool ran = false;
+    bool proceeded = false;
+    preview.withUnsavedEditsConfirmed([&](bool ok) { ran = true; proceeded = ok; });
+    REQUIRE(ran);
+    REQUIRE(proceeded);
+}

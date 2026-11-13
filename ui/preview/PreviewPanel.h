@@ -100,10 +100,12 @@ public:
                              zoomToFit, save };
     void applyEditCommand(EditCommand);
     void saveEdits(std::function<void(bool)> done = {});
-    // Runs `proceed` now when nothing is unsaved, otherwise asks Save/Discard/Cancel.
-    void withUnsavedEditsConfirmed(std::function<void()> proceed);
+    // Calls `done(true)` now when nothing is unsaved; otherwise asks Save/Discard/Cancel and calls
+    // `done(true)` only after a successful save or an explicit discard, `done(false)` on Cancel.
+    void withUnsavedEditsConfirmed(std::function<void(bool)> done);
     void saveEditsAsCopyForTest();
     void overwriteEditsForTest();
+    void discardEditsForTest();
     int64_t editingSampleId = 0;
     std::function<void(const juce::File& target, int64_t sampleId)> onFileSavedInPlace;
     std::function<void(const juce::File& copy, int64_t templateSampleId)> onCopySaved;

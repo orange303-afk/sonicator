@@ -24,6 +24,7 @@
 #include <cmath>
 #include <iterator>
 #include <map>
+#include "core/indexing/CatalogFileSync.h"
 #include <thread>
 namespace sonicator {
 namespace {
@@ -530,6 +531,10 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     previousPage.onClick = [this] { pageOffset = juce::jmax(0,pageOffset-pageSize); reloadLibrary(); };
     nextPage.onClick = [this] { pageOffset += pageSize; reloadLibrary(); };
+    preview.onFileSavedInPlace = [this](const juce::File& target, int64_t sampleId)
+    { startCatalogSync(target, sampleId, false); };
+    preview.onCopySaved = [this](const juce::File& copy, int64_t templateId)
+    { startCatalogSync(copy, templateId, true); };
     preview.onAction = [this] { if (isShowing()) library.focusForNavigation(); };
     preview.onSettingsChanged = [this] { persistPreviewSettings(); };
     preview.applyPersistedSettings(appSettings);
@@ -700,6 +705,7 @@ MainComponent::~MainComponent()
     }
     contributionUploader.reset();
     cancelFeedback = true;
+    if (catalogSyncWorker && catalogSyncWorker->joinable()) catalogSyncWorker->join();
     if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
     cancelFeatureV2 = true;
     if (featureV2Worker && featureV2Worker->joinable()) featureV2Worker->join();
@@ -1324,7 +1330,61 @@ void MainComponent::removeTagFromSamples(const std::vector<int64_t>& sampleIds, 
                    juce::dontSendNotification);
     reloadLibrary();
 }
+void MainComponent::startCatalogSync(const juce::File& file, int64_t sampleId, bool isCopy)
+{
+    auto* repo = writeRepo.get();
+    if (repo == nullptr) return;
+    if (catalogSyncWorker && catalogSyncWorker->joinable()) catalogSyncWorker->join();
+    status.setText(isCopy ? "Adding the copy to the catalog..." : "Updating the catalog...",
+                   juce::dontSendNotification);
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+    catalogSyncWorker = std::make_unique<std::thread>([safe, repo, file, sampleId, isCopy]()
+    {
+        const auto result = isCopy ? addCatalogCopy(*repo, file, sampleId)
+                                   : refreshCatalogFile(*repo, file);
+        const auto name = file.getFileName();
+        juce::MessageManager::callAsync([safe, result, isCopy, name]()
+        {
+            if (safe == nullptr) return;
+            safe->status.setText(result.ok
+                    ? (isCopy ? "Added to the catalog: " : "Catalog updated: ") + name
+                    : result.error,
+                juce::dontSendNotification);
+            if (result.ok && isCopy) safe->reloadLibrary();
+        });
+    });
+}
+
+void MainComponent::prepareForQuit(std::function<void()> proceed)
+{
+    preview.withUnsavedEditsConfirmed([proceed](bool ok) { if (ok) proceed(); });
+}
+
 void MainComponent::selectSample(const SampleRecord& r)
+{
+    if (preview.hasUnsavedEdits())
+    {
+        pendingSample = r;
+        const auto editingId = selectedSampleId;
+        auto safe = juce::Component::SafePointer<MainComponent>(this);
+        preview.withUnsavedEditsConfirmed([safe, editingId](bool proceed)
+        {
+            if (safe == nullptr) return;
+            if (! proceed)
+            {
+                if (editingId != 0) safe->library.selectSampleById(editingId);
+                safe->pendingSample.reset();
+                return;
+            }
+            auto next = safe->pendingSample;
+            safe->pendingSample.reset();
+            if (next.has_value()) safe->loadSelectedSample(*next);
+        });
+        return;
+    }
+    loadSelectedSample(r);
+}
+void MainComponent::loadSelectedSample(const SampleRecord& r)
 {
     const int selectedRows = library.getSelectedRowCount();
     if (selectedRows > 1)
@@ -1414,6 +1474,14 @@ void MainComponent::selectSample(const SampleRecord& r)
 }
 void MainComponent::clearSampleSelection()
 {
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+    preview.withUnsavedEditsConfirmed([safe](bool proceed)
+    {
+        if (safe != nullptr && proceed) safe->clearSampleSelectionNow();
+    });
+}
+void MainComponent::clearSampleSelectionNow()
+{
     library.selectRows({});
     selectedSampleId = 0;
     sessionSamplePath.clear();
@@ -1494,6 +1562,15 @@ void MainComponent::ensureDiscBrowser()
     addChildComponent(*discBrowser);
 }
 void MainComponent::openDiscImage(const SampleRecord& r)
+{
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+    const auto record = r;
+    preview.withUnsavedEditsConfirmed([safe, record](bool proceed)
+    {
+        if (safe != nullptr && proceed) safe->openDiscImageNow(record);
+    });
+}
+void MainComponent::openDiscImageNow(const SampleRecord& r)
 {
     if (r.isDiscEntry())
     {
@@ -3848,6 +3925,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     }
     contributionUploader.reset();
     cancelFeedback = true;
+    if (catalogSyncWorker && catalogSyncWorker->joinable()) catalogSyncWorker->join();
     if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
     cancelFeedback = false;
     writeRepo.reset(); writeDb.reset(); readRepo.reset(); readDb.reset();

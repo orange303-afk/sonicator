@@ -166,7 +166,14 @@ private:
     void reloadLibrary();
     void updateTagControls();
     void selectSample(const SampleRecord&);
+    void loadSelectedSample(const SampleRecord&);
+    void clearSampleSelectionNow();
+    std::optional<SampleRecord> pendingSample;
+    // Asks about unsaved edits before quitting; `proceed` runs only when it is safe to leave.
+    void prepareForQuit(std::function<void()> proceed);
+    void startCatalogSync(const juce::File&, int64_t sampleId, bool isCopy);
     void openDiscImage(const SampleRecord&);
+    void openDiscImageNow(const SampleRecord&);
     void ensureDiscBrowser();
     bool openSelectedDiscIfAny();
     struct EnterKeyListener final : public juce::KeyListener
@@ -241,6 +248,7 @@ private:
     void triggerAdaptiveLearning(const std::vector<int64_t>& ids);
     static bool contains(const std::vector<int64_t>& values, int64_t id);
     static void toggle(std::vector<int64_t>& values, int64_t id);
+    std::unique_ptr<std::thread> catalogSyncWorker;
     std::unique_ptr<std::thread> typeFeedbackWorker;
     std::atomic<bool> cancelFeedback{ false };
     std::unique_ptr<std::thread> featureV2Worker;
