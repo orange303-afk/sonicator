@@ -1,4 +1,5 @@
 #include "AudioEditBuffer.h"
+#include "AudioEditMarkers.h"
 #include "core/audio/SonicatorFormats.h"
 #include <algorithm>
 #include <cmath>
@@ -131,7 +132,9 @@ FrameRange AudioEditBuffer::resolve(const FrameRange& selection) const
 bool AudioEditBuffer::apply(const EditRequest& request)
 {
     if (frames() == 0) return false;
+    const auto framesBefore = frames();
     const auto range = resolve(request.range);
+    auto markerRange = range;
     auto eraseRange = [&range](std::vector<float>& data)
     {
         if (data.empty()) return;
@@ -253,11 +256,13 @@ bool AudioEditBuffer::apply(const EditRequest& request)
                 data->erase(data->begin() + tail, data->end());
                 data->erase(data->begin(), data->begin() + head);
             }
+            markerRange = { head, tail };
             break;
         }
         default:
             return false; // operations added by the next tasks
     }
+    markerData = transformMarkers(markerData, request.operation, markerRange, framesBefore);
     recordState();
     return true;
 }
