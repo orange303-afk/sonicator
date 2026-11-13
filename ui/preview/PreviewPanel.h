@@ -152,6 +152,9 @@ private:
     SampleId currentSampleId = invalidSampleId;
     SampleAudioPtr discAudioRef;
     juce::String discStem;
+    bool discLooping = false;
+    int64_t discLoopStart = 0, discLoopEnd = 0;
+    bool clearSelectionAfterEdit = false, checkClipping = false;
     juce::ToggleButton rexGate { "Gate" };
     juce::Label rexInfo;
     juce::ToggleButton loop { "Loop" };
@@ -170,7 +173,9 @@ private:
     void overwriteEdits(std::function<void(bool)> done);
     void saveCopyAndSwitch(std::function<void(bool)> done);
     void discardEdits();
+    void resetEditSession();
     juce::String editingName() const;
+    bool sourceIsMono() const;
     juce::TextButton clearSelectionButton { "Clear" };
     juce::Label selectionStatus;
     void timerCallback() override;

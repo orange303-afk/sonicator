@@ -248,3 +248,14 @@ TEST_CASE("Trim silence on fully silent audio leaves it unchanged", "[edit]")
     REQUIRE_FALSE(buffer.apply({ EditOperation::trimSilence, {} }));
     REQUIRE(buffer.frames() == 1000);
 }
+
+TEST_CASE("An edit stays modified after the base snapshot is evicted", "[edit]")
+{
+    auto buffer = rampBuffer(1000);
+    buffer.setHistoryLimitForTest(1024);   // one 8 KB snapshot already exceeds the limit
+    REQUIRE(buffer.apply({ EditOperation::reverse, { 0, 10 } }));
+    REQUIRE(buffer.isModified());
+    REQUIRE_FALSE(buffer.canUndo());
+    REQUIRE_FALSE(buffer.undo());
+    REQUIRE(buffer.isModified());
+}

@@ -62,6 +62,7 @@ private:
     juce::AudioFormatManager formats;
     juce::AudioThumbnailCache cache { 64 };
     juce::AudioThumbnail thumbnail { 512, formats, cache };
+    std::unique_ptr<juce::AudioFormatReader> zoomReader;
     std::vector<float> peakMin, peakMax;
     SampleAudioPtr editedAudio;
     std::vector<int64_t> editedSlices;
@@ -79,7 +80,7 @@ private:
     juce::Point<int> dragOrigin;
     double dragAnchor = 0;
     bool pressInsideSelection = false, selectionDragActive = false, externalDragTriggered = false;
-    bool pressWasPrimary = false, loopArmed = false;
+    bool pressWasPrimary = false, loopArmed = false, contextMenuClick = false;
     enum class DragMode { none, select, move, resizeStart, resizeEnd, overview };
     DragMode dragMode = DragMode::none;
     selection::Range dragStartRange;
@@ -96,6 +97,7 @@ private:
     double minimumSelectionLength() const;
     void updateCursorFor(double time);
     void drawEditedPeaks(juce::Graphics&, juce::Rectangle<float> area, waveview::View);
+    void drawFileSamples(juce::Graphics&, juce::Rectangle<float> area, waveview::View);
     void changeListenerCallback(juce::ChangeBroadcaster*) override { repaint(); }
 };
 } // namespace sonicator

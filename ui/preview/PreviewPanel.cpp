@@ -126,15 +126,26 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     {
         const int index = presetBox.getSelectedId() - 1;
         if (index < 0) return;
-        const bool switched = engine.isSoundFontMode() ? engine.selectSoundFontPreset(index)
-                                                       : engine.selectInstrumentProgram(index);
-        if (switched)
+        withUnsavedEditsConfirmed([this, index](bool proceed)
         {
-            filename.setText(loadedFile.getFileName() + "  —  " + engine.instrumentName(),juce::dontSendNotification);
-            refreshInstrumentSamples();
-        }
-        else
-            filename.setText(engine.error(),juce::dontSendNotification);
+            if (! proceed)
+            {
+                presetBox.setSelectedId(engine.isSoundFontMode() ? engine.soundFontPresetIndex() + 1
+                                                                 : engine.instrumentProgramIndex() + 1,
+                                        juce::dontSendNotification);
+                return;
+            }
+            if (editBuffer.has_value()) discardEdits();
+            const bool switched = engine.isSoundFontMode() ? engine.selectSoundFontPreset(index)
+                                                           : engine.selectInstrumentProgram(index);
+            if (switched)
+            {
+                filename.setText(loadedFile.getFileName() + "  —  " + engine.instrumentName(),juce::dontSendNotification);
+                refreshInstrumentSamples();
+            }
+            else
+                filename.setText(engine.error(),juce::dontSendNotification);
+        });
     };
     sampleBox.setComponentID("instrumentSample");
     sampleBox.setTooltip("Audio source used by the selected preset; ordinary Play and waveform use it, MIDI keeps the preset map");
@@ -142,7 +153,17 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     {
         const int row = sampleBox.getSelectedId() - 1;
         if (row < 0 || row >= (int) instrumentSamples.size()) return;
-        applyInstrumentSample(instrumentSamples[(size_t) row].id, true);
+        const auto id = instrumentSamples[(size_t) row].id;
+        withUnsavedEditsConfirmed([this, id](bool proceed)
+        {
+            if (! proceed)
+            {
+                sampleBox.setSelectedId(sampleBox.getSelectedItemIndex() + 1, juce::dontSendNotification);
+                return;
+            }
+            if (editBuffer.has_value()) discardEdits();
+            applyInstrumentSample(id, true);
+        });
     };
     for (auto* box : std::array<StepComboBox*,3>{&presetBox, &sampleBox, &trackerBox})
     {
@@ -155,8 +176,17 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     {
         const int id = trackerBox.getSelectedId();
         if (id <= 0) return;
-        if (id == 1) applyTrackerWholeSong(true);
-        else applyTrackerSample(id - 2, true);
+        withUnsavedEditsConfirmed([this, id](bool proceed)
+        {
+            if (! proceed)
+            {
+                trackerBox.setSelectedId(trackerBox.getSelectedItemIndex() + 1, juce::dontSendNotification);
+                return;
+            }
+            if (editBuffer.has_value()) discardEdits();
+            if (id == 1) applyTrackerWholeSong(true);
+            else applyTrackerSample(id - 2, true);
+        });
     };
     sampleDragButton.setComponentID("dragTrackerSample");
     sampleDragButton.setTooltip("Drags the whole selected sample as WAV; preparation runs first if needed");
@@ -261,6 +291,7 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
         selectionStatus.setText("Save or discard the current edits first", juce::dontSendNotification);
         return false;
     }
+    resetEditSession();
     if (file == loadedFile && file != juce::File() && file.getSize() == loadedSize
         && file.getLastModificationTime().toMilliseconds() == loadedModified) return true;
     // Preview provenance belongs to one loaded file only; never leak it to the next selection.
@@ -680,6 +711,7 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
         selectionStatus.setText("Save or discard the current edits first", juce::dontSendNotification);
         return false;
     }
+    resetEditSession();
     if (! engine.setDiscSample(audio, looping, loopStart, loopEnd, pingPong))
     {
         selectionStatus.setText(engine.error(), juce::dontSendNotification);
@@ -690,6 +722,9 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
     play.setEnabled(true);
     midi.setEnabled(true);
     discStem = stem;
+    discLooping = looping;
+    discLoopStart = loopStart;
+    discLoopEnd = loopEnd;
     loadedFile = container;
     currentSampleId = invalidSampleId;
     presetBox.setSelectedId(0, juce::dontSendNotification);
@@ -717,6 +752,7 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
 
 void PreviewPanel::clearSource()
 {
+    resetEditSession();
     engine.stop();
     engine.loadFile(juce::File());
     engine.clearDiscSample();
@@ -1225,6 +1261,17 @@ SampleAudioPtr PreviewPanel::currentEditableAudio() const
     return nullptr;
 }
 
+bool PreviewPanel::sourceIsMono() const
+{
+    if (editBuffer.has_value()) return editBuffer->channels() == 1;
+    if (const auto audio = currentEditableAudio()) return audio->channels == 1;
+    if (! loadedFile.existsAsFile()) return false;
+    juce::AudioFormatManager formats;
+    registerSonicatorFormats(formats);
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(loadedFile));
+    return reader != nullptr && reader->numChannels == 1;
+}
+
 juce::String PreviewPanel::editingName() const
 {
     if (editTarget != juce::File()) return editTarget.getFileName();
@@ -1247,7 +1294,19 @@ bool PreviewPanel::ensureEditBuffer()
             selectionStatus.setText("Editing supports mono and stereo only", juce::dontSendNotification);
             return false;
         }
-        editBuffer = edit::AudioEditBuffer::fromSampleAudio(*audio);
+        edit::FileMarkers markers;
+        markers.hasLoop = discLooping && discLoopEnd > discLoopStart;
+        markers.loopStart = discLoopStart;
+        markers.loopEndExclusive = discLoopEnd;
+        for (const auto& descriptor : instrumentSamples)
+            if (descriptor.id == currentSampleId && descriptor.looping
+                && descriptor.loopEnd > descriptor.loopStart)
+            {
+                markers.hasLoop = true;
+                markers.loopStart = descriptor.loopStart;
+                markers.loopEndExclusive = descriptor.loopEnd;
+            }
+        editBuffer = edit::AudioEditBuffer::fromSampleAudio(*audio, markers);
         editTarget = juce::File();
         editStem = discStem.isNotEmpty() ? discStem
             : engine.isTrackerMode() ? trackerSampleStem() : juce::String();
@@ -1297,9 +1356,19 @@ void PreviewPanel::afterEditApplied()
         {
             return AudioExporter().exportSampleSelection(*snapshot, stem, start, end, folder, cancel);
         });
+    if (clearSelectionAfterEdit) waveform.clearSelection();
     refreshDirtyMark();
-    selectionStatus.setText(juce::String(length, 3) + " s  ·  edited in memory",
-                            juce::dontSendNotification);
+    juce::String status = juce::String(waveform.totalLength(), 3) + " s  ·  edited in memory";
+    if (checkClipping)
+    {
+        float peak = 0.0f;
+        for (int c = 0; c < editBuffer->channels(); ++c)
+            for (const auto sample : editBuffer->channel(c)) peak = juce::jmax(peak, std::abs(sample));
+        if (peak > 1.0f) status += "  ·  clipping";
+    }
+    selectionStatus.setText(status, juce::dontSendNotification);
+    clearSelectionAfterEdit = false;
+    checkClipping = false;
 }
 
 void PreviewPanel::refreshDirtyMark()
@@ -1373,6 +1442,9 @@ void PreviewPanel::applyEditCommand(EditCommand command)
         case EditCommand::trimSilence: request.operation = edit::EditOperation::trimSilence; break;
         default: return;
     }
+    clearSelectionAfterEdit = command == EditCommand::deleteRegion || command == EditCommand::crop
+        || command == EditCommand::trimSilence;
+    checkClipping = command == EditCommand::gain || command == EditCommand::normalize;
     if (editBuffer->apply(request)) afterEditApplied();
 }
 
@@ -1396,7 +1468,7 @@ void PreviewPanel::showWaveformMenu(juce::Point<int> screenPosition)
     menu.addItem(8, "Fade out", editable);
     menu.addItem(9, "Normalize (-0.1 dBFS)", editable);
     menu.addItem(10, "Gain...", editable);
-    menu.addItem(11, "Convert to mono", editable && waveform.totalLength() > 0);
+    menu.addItem(11, "Convert to mono", editable && waveform.totalLength() > 0 && ! sourceIsMono());
     menu.addItem(12, "Remove DC offset", editable);
     menu.addItem(13, "Trim silence", editable);
     menu.addSeparator();
@@ -1502,30 +1574,41 @@ void PreviewPanel::saveEditsAsCopyForTest() { saveCopyAndSwitch({}); }
 void PreviewPanel::discardEditsForTest() { discardEdits(); }
 void PreviewPanel::overwriteEditsForTest() { overwriteEdits({}); }
 
-void PreviewPanel::discardEdits()
+void PreviewPanel::resetEditSession()
 {
+    if (! editBuffer.has_value()) return;
     editBuffer.reset();
     editTarget = juce::File();
     editStem.clear();
     waveform.clearEditedAudio();
-    if (discAudioRef != nullptr)
-    {
-        engine.setDiscSample(discAudioRef, false, 0, 0, false);
-        waveform.setPeaks(discAudioRef->left, discAudioRef->sampleRate, {});
-    }
-    else if (engine.isSamplerInstrumentMode())
-    {
-        if (const auto audio = engine.instrumentSampleAudio())
-            waveform.setPeaks(audio->left, audio->sampleRate, {});
-    }
-    else if (engine.isTrackerMode() && engine.isTrackerSampleSelected())
-    {
-        if (const auto audio = engine.trackerSampleAudio())
-            waveform.setPeaks(audio->left, audio->sampleRate, {});
-    }
-    else if (loadedFile.existsAsFile())
-        loadFile(loadedFile, false);
     refreshDirtyMark();
+}
+
+void PreviewPanel::discardEdits()
+{
+    const auto wasFile = editTarget != juce::File();
+    const auto file = loadedFile;
+    const auto sampleId = currentSampleId;
+    const auto disc = discAudioRef;
+    resetEditSession();
+    if (wasFile && file.existsAsFile())
+    {
+        loadedSize = 0; loadedModified = 0;
+        loadFile(file, false);
+        return;
+    }
+    if (disc != nullptr)
+    {
+        engine.setDiscSample(disc, false, 0, 0, false);
+        waveform.setPeaks(disc->left, disc->sampleRate, {});
+        return;
+    }
+    if (file.existsAsFile())
+    {
+        loadedSize = 0; loadedModified = 0;
+        loadFile(file, false);
+        if (sampleId != invalidSampleId) applyInstrumentSample(sampleId, false);
+    }
 }
 
 void PreviewPanel::withUnsavedEditsConfirmed(std::function<void(bool)> done)

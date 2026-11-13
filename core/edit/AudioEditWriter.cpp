@@ -31,11 +31,24 @@ int writerBits(const AudioEditBuffer& buffer, bool floatingSupported)
     return buffer.bitsPerSample() <= 16 ? 16 : 24;
 }
 
-juce::StringPairArray writerMetadata(const FileMarkers& markers, const juce::String& extension)
+bool isSamplerKey(const juce::String& key)
 {
+    return key.startsWith("Loop") || key == "NumSampleLoops" || key == "MidiUnityNote"
+        || key == "SamplerData" || key == "Manufacturer" || key == "Product"
+        || key == "SamplePeriod" || key == "MidiPitchFraction" || key == "SmpteFormat"
+        || key == "SmpteOffset" || key == "NumCuePoints" || key.startsWith("Cue");
+}
+
+juce::StringPairArray writerMetadata(const AudioEditBuffer& buffer, const juce::String& extension)
+{
+    const auto& markers = buffer.markers();
     juce::StringPairArray values;
+    const auto& source = buffer.sourceMetadata();
+    for (int i = 0; i < source.size(); ++i)
+        if (! isSamplerKey(source.getAllKeys()[i]))
+            values.set(source.getAllKeys()[i], source.getAllValues()[i]);
     if (extension != ".wav" && extension != ".wave") return values;
-    values.set("MidiUnityNote", juce::String(markers.rootKey));
+    if (markers.hasRootKey) values.set("MidiUnityNote", juce::String(markers.rootKey));
     if (markers.hasLoop && markers.loopEndExclusive > markers.loopStart)
     {
         values.set("NumSampleLoops", "1");
@@ -105,7 +118,7 @@ SaveResult writeAudioFile(const juce::File& destination, const AudioEditBuffer& 
         .withNumChannels(channels).withBitsPerSample(bits)
         .withSampleFormat(floating ? juce::AudioFormatWriterOptions::SampleFormat::floatingPoint
                                    : juce::AudioFormatWriterOptions::SampleFormat::integral);
-    const auto metadata = writerMetadata(buffer.markers(), extension);
+    const auto metadata = writerMetadata(buffer, extension);
     for (int i = 0; i < metadata.size(); ++i) options = options.withMetadata(metadata.getAllKeys()[i],
                                                                              metadata.getAllValues()[i]);
 

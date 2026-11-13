@@ -78,7 +78,12 @@ std::optional<AudioEditBuffer> AudioEditBuffer::load(const juce::File& file, juc
 
     // JUCE exposes the sampler chunk and cue points through the reader's metadata keys.
     const auto& meta = reader->metadataValues;
-    if (meta.containsKey("MidiUnityNote")) buffer.markerData.rootKey = meta.getValue("MidiUnityNote", "60").getIntValue();
+    buffer.metadata = meta;
+    if (meta.containsKey("MidiUnityNote"))
+    {
+        buffer.markerData.hasRootKey = true;
+        buffer.markerData.rootKey = meta.getValue("MidiUnityNote", "60").getIntValue();
+    }
     if (meta.getValue("NumSampleLoops", "0").getIntValue() > 0)
     {
         buffer.markerData.hasLoop = true;
@@ -264,6 +269,7 @@ bool AudioEditBuffer::apply(const EditRequest& request)
     }
     markerData = transformMarkers(markerData, request.operation, markerRange, framesBefore);
     recordState();
+    modified = true;
     return true;
 }
 
@@ -272,6 +278,7 @@ bool AudioEditBuffer::undo()
     if (! canUndo()) return false;
     --historyIndex;
     restore(history[historyIndex]);
+    if (historyIndex == 0) modified = false;
     return true;
 }
 
@@ -280,6 +287,7 @@ bool AudioEditBuffer::redo()
     if (! canRedo()) return false;
     ++historyIndex;
     restore(history[historyIndex]);
+    modified = true;
     return true;
 }
 
@@ -288,6 +296,7 @@ void AudioEditBuffer::clearHistory()
     history.clear();
     history.push_back(currentState());
     historyIndex = 0;
+    modified = false;
 }
 
 size_t AudioEditBuffer::historyBytes() const
@@ -316,7 +325,7 @@ void AudioEditBuffer::recordState()
     history.push_back(currentState());
     historyIndex = history.size() - 1;
     // The oldest snapshot is the cheapest to lose: the newest edits stay undoable.
-    while (history.size() > 1 && historyBytes() > maxHistoryBytes)
+    while (history.size() > 1 && historyBytes() > historyLimit)
     {
         history.erase(history.begin());
         --historyIndex;

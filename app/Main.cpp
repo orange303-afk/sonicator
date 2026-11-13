@@ -96,9 +96,11 @@ private:
                 juce::JUCEApplication::getInstance()->quit();
                 return;
             }
-            content->prepareForQuit([]
+            auto* app = juce::JUCEApplication::getInstance();
+            content->prepareForQuit([this, app](bool proceed)
             {
-                juce::JUCEApplication::getInstance()->quit();
+                if (proceed) app->quit();
+                else quitInProgress = false;
             });
         }
     private:

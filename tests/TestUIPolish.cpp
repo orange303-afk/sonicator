@@ -153,3 +153,56 @@ TEST_CASE("Edited peaks follow the zoom", "[waveform][ui]")
     display.paint(g);
     REQUIRE(true);
 }
+
+TEST_CASE("Releasing a right-click keeps the selection and the playhead", "[waveform][ui]")
+{
+    TestDirectory t;
+    WaveformDisplay display(t.dir.getChildFile("cache"));
+    display.setSize(600, 120);
+    display.setPeaks(std::vector<float>(44100, 0.5f), 44100, {});
+    display.setSampleRateForZoom(44100);
+    display.setSelection({ 0.2, 0.4 });
+    display.onContextMenu = [](juce::Point<int>) {};
+    double sought = -1.0;
+    display.onSeek = [&sought](double time) { sought = time; };
+    const auto now = juce::Time::getCurrentTime();
+    const auto makeEvent = [&](juce::ModifierKeys mods)
+    {
+        return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(),
+            juce::Point<float>(120.0f, 40.0f), mods, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+            &display, &display, now, juce::Point<float>(120.0f, 40.0f), now, 1, false);
+    };
+    const auto right = juce::ModifierKeys(juce::ModifierKeys::rightButtonModifier);
+    display.mouseDown(makeEvent(right));
+    display.mouseUp(makeEvent(right));
+    REQUIRE(display.selection().valid());
+    REQUIRE(sought < 0.0);
+}
+
+TEST_CASE("A loaded file gives the zoom its sample rate", "[waveform][ui]")
+{
+    TestDirectory t;
+    WaveformDisplay display(t.dir.getChildFile("cache"));
+    display.setSize(600, 120);
+    display.setFile(t.wave("one.wav"));
+    REQUIRE(display.sampleRate() == 44100);
+    for (int i = 0; i < 40; ++i) display.zoomAtTime(0.5, 2.0);
+    REQUIRE(display.view().length() >= 600.0 / 44100.0 - 1e-9);
+}
+
+TEST_CASE("An edit keeps the zoomed view", "[waveform][ui]")
+{
+    TestDirectory t;
+    WaveformDisplay display(t.dir.getChildFile("cache"));
+    display.setSize(600, 120);
+    display.setPeaks(std::vector<float>(44100, 0.5f), 44100, {});
+    display.setView({ 0.2, 0.4 });
+    auto audio = std::make_shared<sonicator::SampleAudio>();
+    audio->sampleRate = 44100;
+    audio->channels = 1;
+    audio->frames = 44100;
+    audio->left.assign(44100, 0.5f);
+    display.setEditedAudio(audio);
+    REQUIRE(display.view().start == Catch::Approx(0.2).margin(1e-9));
+    REQUIRE(display.view().end == Catch::Approx(0.4).margin(1e-9));
+}

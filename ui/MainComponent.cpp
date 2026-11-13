@@ -1355,9 +1355,9 @@ void MainComponent::startCatalogSync(const juce::File& file, int64_t sampleId, b
     });
 }
 
-void MainComponent::prepareForQuit(std::function<void()> proceed)
+void MainComponent::prepareForQuit(std::function<void(bool)> done)
 {
-    preview.withUnsavedEditsConfirmed([proceed](bool ok) { if (ok) proceed(); });
+    preview.withUnsavedEditsConfirmed(std::move(done));
 }
 
 void MainComponent::selectSample(const SampleRecord& r)
@@ -1392,6 +1392,7 @@ void MainComponent::loadSelectedSample(const SampleRecord& r)
         // A batch is a library operation, not an audition: no single waveform or sound should
         // look as if it belonged to the whole selection.
         selectedSampleId = 0;
+        preview.editingSampleId = 0;
         sessionSamplePath.clear();
         markSessionStateDirty();
         preview.clearSource();
@@ -1419,6 +1420,7 @@ void MainComponent::loadSelectedSample(const SampleRecord& r)
         return;
     }
     selectedSampleId = r.id;
+    preview.editingSampleId = r.id;
     sessionSamplePath = r.filePath;
     markSessionStateDirty();
     auto dbfs = [](double v) { return v > 0 ? juce::String(juce::Decibels::gainToDecibels(v),1) + " dBFS" : "-inf dBFS"; };
@@ -1484,6 +1486,7 @@ void MainComponent::clearSampleSelectionNow()
 {
     library.selectRows({});
     selectedSampleId = 0;
+    preview.editingSampleId = 0;
     sessionSamplePath.clear();
     markSessionStateDirty();
     preview.clearSource();

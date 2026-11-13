@@ -153,3 +153,63 @@ TEST_CASE("The leave hook proceeds immediately when nothing is unsaved", "[ui][e
     REQUIRE(ran);
     REQUIRE(proceeded);
 }
+
+namespace
+{
+juce::int64 fileFrames(const juce::File& file)
+{
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
+    return reader == nullptr ? -1 : reader->lengthInSamples;
+}
+} // namespace
+
+TEST_CASE("A clean edit session does not survive a source change", "[ui][edit]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    const auto a = t.wave("a.wav");
+    REQUIRE(preview.loadFile(a, false));
+    // Convert to mono is a no-op on a mono file: it may open a buffer but must leave it clean.
+    preview.applyEditCommand(PreviewPanel::EditCommand::toMono);
+    REQUIRE_FALSE(preview.hasUnsavedEdits());
+    const auto b = t.wave("b.wav");
+    REQUIRE(preview.loadFile(b, false));
+    preview.selectRange(0.0, 0.5);
+    preview.applyEditCommand(PreviewPanel::EditCommand::deleteRegion);
+    REQUIRE(preview.hasUnsavedEdits());
+    preview.overwriteEditsForTest();
+    REQUIRE(fileFrames(a) == 44100);
+    REQUIRE(fileFrames(b) == 22050);
+}
+
+TEST_CASE("Discard restores the original audio before the next edit", "[ui][edit]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("a.wav"), false));
+    preview.selectRange(0.1, 0.2);
+    preview.applyEditCommand(PreviewPanel::EditCommand::deleteRegion);
+    REQUIRE(preview.waveformLength() == Approx(0.9).margin(0.01));
+    preview.discardEditsForTest();
+    preview.selectRange(0.0, 0.5);
+    preview.applyEditCommand(PreviewPanel::EditCommand::deleteRegion);
+    // 0.5 s only if the discarded 0.9 s state is gone; otherwise it would be 0.45 s.
+    REQUIRE(preview.waveformLength() == Approx(0.5).margin(0.01));
+}
+
+TEST_CASE("Delete clears the selection and a mono file cannot be converted", "[ui][edit]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("a.wav"), false));
+    preview.selectRange(0.1, 0.2);
+    preview.applyEditCommand(PreviewPanel::EditCommand::deleteRegion);
+    REQUIRE_FALSE(preview.selectedRange().valid());
+    preview.applyEditCommand(PreviewPanel::EditCommand::toMono);
+    REQUIRE(preview.waveformLength() == Approx(0.9).margin(0.01));
+}

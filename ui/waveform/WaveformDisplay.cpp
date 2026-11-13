@@ -35,8 +35,16 @@ void WaveformDisplay::setFile(const juce::File& file)
     editedAudio.reset(); editedSlices.clear(); columnCache.clear(); cachedWidth = 0;
     clearSelection();
     viewRange = {};
-    if (file.existsAsFile()) thumbnail.setSource(new juce::FileInputSource(file,true));
-    else thumbnail.setSource(nullptr);
+    zoomReader.reset();
+    zoomSampleRate = 0;
+    if (file.existsAsFile())
+    {
+        thumbnail.setSource(new juce::FileInputSource(file, true));
+        zoomReader.reset(formats.createReaderFor(file));
+        if (zoomReader != nullptr) zoomSampleRate = (int) std::lround(zoomReader->sampleRate);
+    }
+    else
+        thumbnail.setSource(nullptr);
     repaint();
 }
 void WaveformDisplay::setPeaks(const std::vector<float>& samples, int sampleRate,
@@ -48,6 +56,8 @@ void WaveformDisplay::setPeaks(const std::vector<float>& samples, int sampleRate
     thumbnail.setSource(nullptr);
     peakMin.clear(); peakMax.clear(); sliceTimes.clear(); activeSlices.clear();
     editedAudio.reset(); editedSlices.clear(); columnCache.clear(); cachedWidth = 0;
+    zoomReader.reset();
+    zoomSampleRate = sampleRate;
     customLength = sampleRate > 0 ? (double) samples.size() / sampleRate : 0;
     if (samples.empty() || customLength <= 0) { repaint(); return; }
     constexpr int bins = 2048;
@@ -75,7 +85,8 @@ void WaveformDisplay::setEditedAudio(SampleAudioPtr audio, const std::vector<int
     editedAudio = std::move(audio);
     editedSlices = sliceStarts;
     columnCache.clear(); cachedWidth = 0;
-    viewRange = {};
+    // An edit keeps the zoomed view (clamped to the new length); only a source change resets it.
+    if (viewRange.valid()) viewRange = waveview::clampView(viewRange, totalLength());
     if (editedAudio != nullptr && editedAudio->sampleRate > 0)
         setSampleRateForZoom(editedAudio->sampleRate);
     repaint();
@@ -87,6 +98,47 @@ void WaveformDisplay::clearEditedAudio()
     editedSlices.clear();
     columnCache.clear(); cachedWidth = 0;
     repaint();
+}
+
+void WaveformDisplay::drawFileSamples(juce::Graphics& g, juce::Rectangle<float> area,
+                                     waveview::View view)
+{
+    if (zoomReader == nullptr || zoomSampleRate <= 0 || ! view.valid()) return;
+    const auto rate = (double) zoomSampleRate;
+    const auto totalFrames = zoomReader->lengthInSamples;
+    const auto first = juce::jlimit<int64_t>(0, totalFrames - 1, (int64_t) std::floor(view.start * rate));
+    const auto last = juce::jlimit<int64_t>(first + 1, totalFrames, (int64_t) std::ceil(view.end * rate));
+    const auto count = last - first;
+    if (count <= 0 || count > 2 * 1024 * 1024) return;
+    const int channels = juce::jmin(2, (int) zoomReader->numChannels);
+    if (channels <= 0) return;
+    juce::AudioBuffer<float> buffer(channels, (int) count);
+    if (! zoomReader->read(&buffer, 0, (int) count, first, true, channels > 1)) return;
+    const int width = juce::jmax(1, (int) area.getWidth());
+    const bool stereo = channels > 1;
+    const auto laneHeight = area.getHeight() * (stereo ? 0.5f : 1.0f);
+    const auto leftCentre = stereo ? area.getY() + laneHeight * 0.5f : area.getCentreY();
+    const auto rightCentre = area.getY() + laneHeight * 1.5f;
+    const auto scale = laneHeight * 0.5f;
+    g.setColour(theme::accent);
+    for (int x = 0; x < width; ++x)
+    {
+        const auto from = (int64_t) ((int64_t) count * x / width);
+        const auto to = juce::jmax<int64_t>(from + 1, (int64_t) count * (x + 1) / width);
+        float minLeft = 0, maxLeft = 0, minRight = 0, maxRight = 0;
+        for (int64_t i = from; i < to; ++i)
+        {
+            minLeft = juce::jmin(minLeft, buffer.getSample(0, (int) i));
+            maxLeft = juce::jmax(maxLeft, buffer.getSample(0, (int) i));
+            if (! stereo) continue;
+            minRight = juce::jmin(minRight, buffer.getSample(1, (int) i));
+            maxRight = juce::jmax(maxRight, buffer.getSample(1, (int) i));
+        }
+        const auto px = area.getX() + (float) x;
+        g.drawVerticalLine((int) px, leftCentre - maxLeft * scale, leftCentre - minLeft * scale);
+        if (stereo)
+            g.drawVerticalLine((int) px, rightCentre - maxRight * scale, rightCentre - minRight * scale);
+    }
 }
 
 void WaveformDisplay::drawEditedPeaks(juce::Graphics& g, juce::Rectangle<float> area, waveview::View view)
@@ -317,7 +369,12 @@ void WaveformDisplay::paint(juce::Graphics& g)
     else
     {
         g.setColour(theme::accent);
-        thumbnail.drawChannels(g,area.toNearestInt(),view.start,view.end,0.85f);
+        const auto framesPerPixel = zoomSampleRate > 0
+            ? view.length() * (double) zoomSampleRate / (double) juce::jmax(1, getWidth()) : 0.0;
+        if (zoomReader != nullptr && framesPerPixel < 16.0)
+            drawFileSamples(g, area, view);
+        else
+            thumbnail.drawChannels(g,area.toNearestInt(),view.start,view.end,0.85f);
     }
     if (currentSelection.valid())
     {
@@ -356,6 +413,7 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {
     if (e.mods.isPopupMenu() || e.mods.isRightButtonDown())
     {
+        contextMenuClick = true;
         if (onContextMenu) onContextMenu(e.getScreenPosition());
         return;
     }
@@ -444,6 +502,15 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 }
 void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 {
+    // A right-click opens the menu; its release must not seek, clear the selection or start a
+    // selection drag that the popup already consumed.
+    if (contextMenuClick || e.mods.isPopupMenu() || e.mods.isRightButtonDown())
+    {
+        contextMenuClick = false;
+        dragMode = DragMode::none;
+        pressWasPrimary = false;
+        return;
+    }
     const auto total = totalLength();
     // JUCE delivers the second mouseUp of a double-click before mouseDoubleClick, with two clicks
     // recorded. That release must not seek or clear the range mouseDoubleClick is about to make.

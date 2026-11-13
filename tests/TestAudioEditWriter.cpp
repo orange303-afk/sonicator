@@ -73,7 +73,8 @@ TEST_CASE("A failed overwrite leaves the original byte-identical", "[edit][write
     const auto folder = t.dir.getChildFile("locked");
     folder.createDirectory();
     const auto file = writeAudio(folder.getChildFile("keep.wav"), wav, 1, 1000, 44100.0, 16);
-    const auto originalBytes = file.loadFileAsString();
+    juce::MemoryBlock originalBytes;
+    REQUIRE(file.loadFileAsData(originalBytes));
     auto buffer = loadBuffer(file);
     REQUIRE(buffer.apply({ EditOperation::silenceRegion, { 0, 100 } }));
 
@@ -87,7 +88,9 @@ TEST_CASE("A failed overwrite leaves the original byte-identical", "[edit][write
                                  std::filesystem::perm_options::replace);
     REQUIRE_FALSE(result.success);
     REQUIRE(result.error.isNotEmpty());
-    REQUIRE(file.loadFileAsString() == originalBytes);
+    juce::MemoryBlock currentBytes;
+    REQUIRE(file.loadFileAsData(currentBytes));
+    REQUIRE(currentBytes == originalBytes);
     auto reader = openReader(file);
     REQUIRE(reader != nullptr);
     REQUIRE(reader->lengthInSamples == 1000);
@@ -178,6 +181,7 @@ TEST_CASE("Writer metadata carries root key and loop", "[edit][writer]")
     juce::WavAudioFormat wav;
     const auto file = writeAudio(t.dir.getChildFile("loop.wav"), wav, 1, 2000, 44100.0, 16);
     FileMarkers markers;
+    markers.hasRootKey = true;
     markers.rootKey = 48;
     markers.hasLoop = true;
     markers.loopStart = 100;
@@ -203,4 +207,76 @@ TEST_CASE("Writer metadata carries root key and loop", "[edit][writer]")
     REQUIRE(reader->metadataValues.getValue("NumCuePoints", "") == "2");
     REQUIRE(reader->metadataValues.getValue("Cue0Offset", "") == "250");
     REQUIRE(reader->metadataValues.getValue("Cue1Offset", "") == "750");
+}
+
+TEST_CASE("Overwrite passes through metadata it does not move", "[edit][writer]")
+{
+    TestDirectory t;
+    juce::WavAudioFormat wav;
+    const auto tagged = t.dir.getChildFile("tagged.wav");
+    tagged.deleteFile();
+    {
+        std::unique_ptr<juce::OutputStream> stream(tagged.createOutputStream());
+        auto options = juce::AudioFormatWriterOptions{}.withSampleRate(44100.0)
+            .withNumChannels(1).withBitsPerSample(16).withMetadata("INAM", "Kick");
+        auto writer = wav.createWriterFor(stream, options);
+        REQUIRE(writer != nullptr);
+        juce::AudioBuffer<float> buffer(1, 1000);
+        buffer.clear();
+        writer->writeFromAudioSampleBuffer(buffer, 0, 1000);
+    }
+    auto buffer = loadBuffer(tagged);
+    REQUIRE(buffer.apply({ EditOperation::silenceRegion, { 0, 10 } }));
+    REQUIRE(overwrite(tagged, buffer).success);
+    auto reader = openReader(tagged);
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->metadataValues.getValue("INAM", "") == "Kick");
+}
+
+TEST_CASE("Overwrite invents no sampler root for a plain WAV", "[edit][writer]")
+{
+    TestDirectory t;
+    juce::WavAudioFormat wav;
+    const auto plain = writeAudio(t.dir.getChildFile("plain.wav"), wav, 1, 1000, 44100.0, 16);
+    auto buffer = loadBuffer(plain);
+    REQUIRE_FALSE(buffer.markers().hasRootKey);
+    REQUIRE(buffer.apply({ EditOperation::silenceRegion, { 0, 10 } }));
+    REQUIRE(overwrite(plain, buffer).success);
+    auto reader = openReader(plain);
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->metadataValues.getValue("MidiUnityNote", "").isEmpty());
+    REQUIRE(reader->metadataValues.getValue("NumSampleLoops", "0").getIntValue() == 0);
+}
+
+TEST_CASE("Overwrite and copy preserve 32-bit float WAVs", "[edit][writer]")
+{
+    TestDirectory t;
+    const auto file = t.dir.getChildFile("float.wav");
+    file.deleteFile();
+    {
+        std::unique_ptr<juce::OutputStream> stream(file.createOutputStream());
+        juce::WavAudioFormat wav;
+        auto options = juce::AudioFormatWriterOptions{}.withSampleRate(44100.0)
+            .withNumChannels(1).withBitsPerSample(32)
+            .withSampleFormat(juce::AudioFormatWriterOptions::SampleFormat::floatingPoint);
+        auto writer = wav.createWriterFor(stream, options);
+        REQUIRE(writer != nullptr);
+        juce::AudioBuffer<float> buffer(1, 1000);
+        for (int i = 0; i < 1000; ++i) buffer.setSample(0, i, 0.5f);
+        writer->writeFromAudioSampleBuffer(buffer, 0, 1000);
+    }
+    auto buffer = loadBuffer(file);
+    REQUIRE(buffer.floatingPoint());
+    REQUIRE(buffer.apply({ EditOperation::silenceRegion, { 0, 10 } }));
+    REQUIRE(overwrite(file, buffer).success);
+    auto reader = openReader(file);
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->usesFloatingPointData);
+    REQUIRE(reader->bitsPerSample == 32);
+    const auto copy = saveCopy(file, "float", buffer);
+    REQUIRE(copy.success);
+    auto copyReader = openReader(copy.file);
+    REQUIRE(copyReader != nullptr);
+    REQUIRE(copyReader->usesFloatingPointData);
+    REQUIRE(copyReader->bitsPerSample == 32);
 }

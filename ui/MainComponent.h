@@ -52,6 +52,8 @@ public:
                            bool embeddedUi = false);
     ~MainComponent() override;
     void paint(juce::Graphics& g) override;
+    // Asks about unsaved edits before quitting; `done(true)` means it is safe to leave.
+    void prepareForQuit(std::function<void(bool)> done);
     void resized() override;
     void lookAndFeelChanged() override;
     bool keyPressed(const juce::KeyPress& k) override;
@@ -169,8 +171,6 @@ private:
     void loadSelectedSample(const SampleRecord&);
     void clearSampleSelectionNow();
     std::optional<SampleRecord> pendingSample;
-    // Asks about unsaved edits before quitting; `proceed` runs only when it is safe to leave.
-    void prepareForQuit(std::function<void()> proceed);
     void startCatalogSync(const juce::File&, int64_t sampleId, bool isCopy);
     void openDiscImage(const SampleRecord&);
     void openDiscImageNow(const SampleRecord&);
