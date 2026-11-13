@@ -132,6 +132,30 @@ A copy becomes a new row that inherits the template's tags and star but not its 
 samples, opening a disc image, clearing the selection or quitting while edits are unsaved asks
 Save / Discard / Cancel; Cancel puts the library selection back on the edited file.
 
+## Manual BPM and drag metadata
+
+Tempo can be corrected by hand. The sample context menu has a `BPM` submenu: `Set BPM...` (20-300,
+batch over the selection), `Tap BPM...` and `Clear manual BPM`. A value is stored as a `bpm` entry in
+`smart_overrides`; `setSmartOverride` re-resolves the row, so `smart_results` and the list show the
+manual value with "(manual)" and a later analysis keeps it. Contribution reads the resolved row, so
+the manual tempo reaches the model for samples that already have feedback (a type or tags); an
+unlabelled sample still sends nothing, and clearing the override restores the analysed tempo.
+
+`core/smart/TapTempo` is a pure counter: the last eight intervals, outliers beyond 25 % of the
+median dropped, a value only after two valid intervals (three taps), reset after three seconds
+without a tap. `ui/library/TapTempoDialog` owns the window: Space taps (it never starts playback),
+Return applies, Esc cancels, and a `Start loop` button asks the preview to loop the waveform
+selection or the whole source. For a batch the loop button is unavailable because the preview holds
+no audio.
+
+Dragging a row whose BPM or key is trusted (`Resolved` or a manual override) materialises a copy in
+`ExternalFileDrag::dragCacheFolder()/<hash>/<stem>.wav`. A WAV source is byte-copied and only the
+RIFF `acid` and `smpl` chunks are spliced in (`core/export/RiffChunks`), so RF64, unknown chunks,
+bit depth and an existing loop survive; other readable formats are decoded to WAV first. BPM writes
+`acid` (tempo, beats, 4/4 meter) and a root writes the `smpl` unity note, each independently: a
+BPM-only drag invents no root, a key-only drag writes no tempo. Conflicting, ambiguous and stale
+values are not written. REX2, EBL and disc samples keep their previous drag behaviour.
+
 ## Smart metadata (Phase 2, metadata-first)
 
 `core/smart` parses metadata read-only and never decodes PCM for it. Extractors cover WAV chunks (full container, including chunks after `data`), AIFF Apple Loops (`basc`, `cate`, `INST`), Ableton `.asd` (v6 warp markers and `AufTaktData`), REX2 (`GLOB`, `RECY`, `SINF`, `SLCE`) and file/folder names. Every extractor is bounds-checked and returns candidates plus a structural error; a truncated chunk stops parsing and keeps what was already read. The service adds provenance to each candidate: the source file, its size/mtime fingerprint, the extractor id and version that produced it, and a limitation note where the value is not the musical truth (for example a REX2 preview tempo or a sampler root). Fingerprints are taken before and after reading; if they differ, nothing is published and the previous generation is marked stale.
