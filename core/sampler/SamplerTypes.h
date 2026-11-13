@@ -26,6 +26,14 @@ struct SampleDescriptor
         return id >= 0 && error.isEmpty() && sampleRate > 0 && channels > 0 && frameCount > 0;
     }
 };
+// Root key and loop of a sampler source, written into the WAV `smpl` chunk on export. Offsets are
+// frames; `loopEndExclusive` follows JUCE's exclusive convention.
+struct SamplerChunk
+{
+    int rootKey = 60;
+    bool looping = false;
+    int64_t loopStart = 0, loopEndExclusive = 0;
+};
 // Immutable decoded PCM snapshot shared by the waveform, audition and export. Channel vectors
 // always hold exactly `frames` values; right is empty for mono.
 struct SampleAudio

@@ -1,5 +1,6 @@
 #pragma once
 #include "core/sampler/SamplerTypes.h"
+#include "core/kurzweil/KrzFile.h"
 #include <juce_core/juce_core.h>
 #include <memory>
 #include <vector>
@@ -41,11 +42,20 @@ public:
     SampleAudioPtr read(int index, juce::String& error) const;
     // 1.0 when the sample is never triggered or the source is an SF2 bank.
     double playbackRatio(int index) const;
+    // Root key and loop of a Kurzweil entry; empty for tracker modules and SoundFonts.
+    std::optional<SamplerChunk> samplerChunk(int index) const;
 private:
-    enum class Kind { none, tracker, sf2 };
+    struct KrzEntry
+    {
+        int sampleObject = 0, header = 0;
+        bool stereo = false;
+    };
+    enum class Kind { none, tracker, sf2, krz };
     Kind kind = Kind::none;
     std::unique_ptr<class TrackerDocument> tracker;
     std::unique_ptr<class Sf2Bank> bank;
+    std::unique_ptr<krz::Bank> kurzweil;
+    std::vector<KrzEntry> kurzweilEntries;
     std::vector<EmbeddedSampleEntry> listed;
     std::vector<int> firstNotes;
     int empties = 0;

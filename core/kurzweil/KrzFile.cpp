@@ -505,9 +505,10 @@ bool decodeHeader(const Bank& bank, const SampleObject& sample, int headerIndex,
     // audio ends where the next span begins (or where the sample data ends).
     int64_t audioEnd = header.looping ? (int64_t) bank.pcm.size() - 1 : header.endWord;
     if (header.looping)
-        for (const auto& other : sample.headers)
-            if (other.startWord > header.startWord && other.startWord - 1 < audioEnd)
-                audioEnd = std::min(audioEnd, other.startWord - 1);
+        for (const auto& object : bank.samples)
+            for (const auto& other : object.headers)
+                if (other.startWord > header.startWord && other.startWord - 1 < audioEnd)
+                    audioEnd = std::min(audioEnd, other.startWord - 1);
     if (header.startWord < 0 || header.endWord < header.startWord
         || header.startWord >= (int64_t) bank.pcm.size()
         || header.endWord >= (int64_t) bank.pcm.size()

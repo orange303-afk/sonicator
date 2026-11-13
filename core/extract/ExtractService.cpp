@@ -301,8 +301,9 @@ void ExtractService::runEmbedded()
                 publishFraction((int) index, ordinal, entryCount);
                 continue;
             }
+            const auto chunk = set.samplerChunk(entry.index);
             const auto exported = exporter.exportSampleFile(*audible, destination, options.normalize,
-                [this] { return cancelled.load(); });
+                [this] { return cancelled.load(); }, chunk.has_value() ? &*chunk : nullptr);
             if (! exported.success)
             {
                 if (exported.error.containsIgnoreCase("cancel"))

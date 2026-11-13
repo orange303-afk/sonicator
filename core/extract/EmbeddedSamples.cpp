@@ -1,4 +1,5 @@
 #include "EmbeddedSamples.h"
+#include <algorithm>
 #include "core/sf2/Sf2Bank.h"
 #include "core/tracker/TrackerDocument.h"
 #include <xmp.h>
@@ -109,7 +110,7 @@ EmbeddedSampleSet::EmbeddedSampleSet() = default;
 EmbeddedSampleSet::~EmbeddedSampleSet() = default;
 bool isEmbeddedSampleSource(const juce::File& file)
 {
-    return file.hasFileExtension("mod;xm;s3m;sf2");
+    return file.hasFileExtension("mod;xm;s3m;sf2;krz;k25;k26");
 }
 bool isTrackerModuleSource(const juce::File& file)
 {
@@ -128,6 +129,8 @@ bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
     kind = Kind::none;
     tracker.reset();
     bank.reset();
+    kurzweil.reset();
+    kurzweilEntries.clear();
     listed.clear();
     firstNotes.clear();
     empties = 0;
@@ -169,7 +172,32 @@ bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
         bank = std::move(loaded);
         return true;
     }
-    error = "Extract samples supports only MOD, XM, S3M and SF2";
+    if (file.hasFileExtension("krz;k25;k26"))
+    {
+        auto loaded = std::make_unique<krz::Bank>();
+        if (! krz::readBank(file, *loaded, error)) return false;
+        for (const auto& sample : loaded->samples)
+        {
+            if (sample.stereo && sample.headers.size() >= 2)
+            {
+                listed.push_back({ entryName(sample.name, (int) listed.size() + 1), (int) listed.size() });
+                kurzweilEntries.push_back({ sample.id, 0, true });
+                continue;
+            }
+            for (int header = 0; header < (int) sample.headers.size(); ++header)
+            {
+                if (! sample.headers[(size_t) header].ramBased) { ++empties; continue; }
+                const auto name = sample.headers.size() > 1
+                    ? sample.name + " " + juce::String(header + 1) : sample.name;
+                listed.push_back({ entryName(name, (int) listed.size() + 1), (int) listed.size() });
+                kurzweilEntries.push_back({ sample.id, header, false });
+            }
+        }
+        kind = Kind::krz;
+        kurzweil = std::move(loaded);
+        return true;
+    }
+    error = "Extract samples supports only MOD, XM, S3M, SF2 and Kurzweil banks";
     return false;
 }
 SampleAudioPtr EmbeddedSampleSet::read(int index, juce::String& error) const
@@ -177,8 +205,55 @@ SampleAudioPtr EmbeddedSampleSet::read(int index, juce::String& error) const
     error.clear();
     if (kind == Kind::tracker && tracker != nullptr) return tracker->sampleAudio(index, error);
     if (kind == Kind::sf2 && bank != nullptr) return bank->sampleAudio((SampleId) index, error);
+    if (kind == Kind::krz && kurzweil != nullptr)
+    {
+        if (index < 0 || index >= (int) kurzweilEntries.size())
+        {
+            error = "Sample index is out of range";
+            return {};
+        }
+        const auto& entry = kurzweilEntries[(size_t) index];
+        const auto found = std::find_if(kurzweil->samples.begin(), kurzweil->samples.end(),
+                                        [&] (const krz::SampleObject& sample)
+                                        { return sample.id == entry.sampleObject; });
+        if (found == kurzweil->samples.end())
+        {
+            error = "Sample " + juce::String(entry.sampleObject) + " is not in the bank";
+            return {};
+        }
+        krz::DecodedSample decoded;
+        if (entry.stereo)
+            return krz::decodeStereo(*kurzweil, *found, decoded, error) ? decoded.audio : SampleAudioPtr {};
+        return krz::decodeHeader(*kurzweil, *found, entry.header, decoded, error) ? decoded.audio
+                                                                                 : SampleAudioPtr {};
+    }
     error = "No embedded sample set is open";
     return {};
+}
+std::optional<SamplerChunk> EmbeddedSampleSet::samplerChunk(int index) const
+{
+    if (kind != Kind::krz || kurzweil == nullptr) return std::nullopt;
+    if (index < 0 || index >= (int) kurzweilEntries.size()) return std::nullopt;
+    const auto& entry = kurzweilEntries[(size_t) index];
+    const auto found = std::find_if(kurzweil->samples.begin(), kurzweil->samples.end(),
+                                    [&] (const krz::SampleObject& sample)
+                                    { return sample.id == entry.sampleObject; });
+    if (found == kurzweil->samples.end()) return std::nullopt;
+    const int headerIndex = entry.stereo || found->headers.empty() ? 0 : entry.header;
+    if (headerIndex >= (int) found->headers.size()) return std::nullopt;
+    const auto& header = found->headers[(size_t) headerIndex];
+    SamplerChunk chunk;
+    chunk.rootKey = header.rootKey;
+    chunk.looping = header.looping;
+    if (header.looping)
+    {
+        chunk.loopStart = std::max<int64_t>(0, header.loopWord - header.startWord);
+        const auto endWord = entry.stereo && found->headers.size() > 1
+            ? std::min(header.endWord, found->headers[1].startWord - 1) : header.endWord;
+        const auto loopEnd = endWord - header.startWord + 1;
+        chunk.loopEndExclusive = std::max(chunk.loopStart, loopEnd);
+    }
+    return chunk;
 }
 double EmbeddedSampleSet::playbackRatio(int index) const
 {

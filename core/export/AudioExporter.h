@@ -44,7 +44,9 @@ public:
     // Writes one whole decoded embedded sample to an exact path. No start/end range and no naming
     // policy: the caller owns the file name. With `normalize`, the peak of both channels is
     // scaled together to -0.1 dBFS. Never overwrites an existing destination.
+    // `sampler` adds the root key and the loop to the WAV `smpl` chunk; null leaves the file bare.
     ExportResult exportSampleFile(const SampleAudio& audio, const juce::File& destination,
-                                  bool normalize, CancelCheck cancel = {}) const;
+                                  bool normalize, CancelCheck cancel = {},
+                                  const SamplerChunk* sampler = nullptr) const;
 };
 } // namespace sonicator

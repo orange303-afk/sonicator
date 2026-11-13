@@ -347,7 +347,8 @@ bool AudioExporter::isEntirelySilent(const SampleAudio& audio)
     return true;
 }
 ExportResult AudioExporter::exportSampleFile(const SampleAudio& audio, const juce::File& destination,
-                                             bool normalize, CancelCheck cancel) const
+                                             bool normalize, CancelCheck cancel,
+                                             const SamplerChunk* sampler) const
 {
     const auto part = juce::File(destination.getFullPathName() + ".part");
     if (audio.sampleRate <= 0 || audio.frames <= 0)
@@ -381,6 +382,16 @@ ExportResult AudioExporter::exportSampleFile(const SampleAudio& audio, const juc
         .withNumChannels(channels).withBitsPerSample(bits)
         .withSampleFormat(floating ? juce::AudioFormatWriterOptions::SampleFormat::floatingPoint
                                    : juce::AudioFormatWriterOptions::SampleFormat::integral);
+    if (sampler != nullptr)
+    {
+        // Root key and loop live in RIFF `smpl`. The loop end is stored as the last frame played.
+        options = options.withMetadata("MidiUnityNote", juce::String(sampler->rootKey));
+        if (sampler->looping && sampler->loopEndExclusive > sampler->loopStart)
+            options = options.withMetadata("NumSampleLoops", "1")
+                             .withMetadata("Loop0Start", juce::String(sampler->loopStart))
+                             .withMetadata("Loop0End", juce::String(sampler->loopEndExclusive - 1))
+                             .withMetadata("Loop0Type", "0");
+    }
     auto writer = wav.createWriterFor(stream, options);
     if (writer == nullptr)
     {
