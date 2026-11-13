@@ -159,7 +159,23 @@ A part beyond the first is never shown as its own library row.
 
 Official Kurzweil archives (`kurzweil.com/k2000`, downloaded to
 `/Volumes/1TBSSD/samples/_Kurzweil/Factory`; not part of the repository) — 138 `.krz`/`.k25`
-files: 137 PRAM, 1 SROM, 23 with sample data, 114 presets only.
+files: 137 PRAM, 1 SROM, 23 with sample objects, 114 presets only.
+
+## Verification runs (2026-11-13)
+
+`SONICATOR_KRZ_DIR` over the user's folder:
+
+- 238 files, 13 files skipped as later parts of a set.
+- 221 banks open, 1591 RAM sample headers decode, 29 banks have no own sample data
+  (25 presets-only + 4 SROM).
+- 0 unexplained rejections. Two explained defects: `hrd2kill.krz` is a renamed first part
+  whose second half is absent (`hrd2kill.kr2.krz`), and `realbass.krz` stores a sample period
+  of `0xFFFFFFFF` on its 10 bass samples, so they have no usable rate.
+- `oboercdr.krz` genuinely stores 4893 Hz on its nine oboe samples, hence the accepted range of
+  1 kHz–192 kHz in the corpus check.
+
+`SONICATOR_KRZ_FACTORY_DIR` over the official archives: 138 files, 137 banks, **3 playable**,
+**134 report the factory-ROM message**, 1 SROM, 0 unexplained rejections.
 
 ## Extract and playback behaviour
 

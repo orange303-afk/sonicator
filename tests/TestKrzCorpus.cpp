@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/kurzweil/KrzFile.h"
+#include "core/kurzweil/KrzInstrument.h"
 #include "TestHelpers.h"
 #include <map>
 
@@ -76,4 +77,38 @@ TEST_CASE("Every Kurzweil bank in the local corpus opens and decodes", "[.krz-co
     INFO(problems.joinIntoString("\n"));
     CHECK(rejected == 0);
     CHECK(problems.isEmpty());
+}
+
+TEST_CASE("Official Kurzweil archives open or explain why not", "[.krz-factory]")
+{
+    const auto root = environmentDirectory("SONICATOR_KRZ_FACTORY_DIR");
+    if (! root.isDirectory()) SKIP("SONICATOR_KRZ_FACTORY_DIR is not set to a directory");
+    const auto files = bankFiles(root);
+    REQUIRE(files.size() > 50);
+    int banks = 0, romOnly = 0, playable = 0, srom = 0, rejected = 0;
+    juce::StringArray problems;
+    for (const auto& file : files)
+    {
+        if (sonicator::krz::continuationPartNumber(file) > 1) continue;
+        sonicator::krz::Bank bank;
+        juce::String error;
+        if (! sonicator::krz::readBank(file, bank, error))
+        {
+            if (error.containsIgnoreCase("SROM")) { ++srom; continue; }
+            ++rejected;
+            problems.add(file.getFileName() + ": " + error);
+            continue;
+        }
+        ++banks;
+        sonicator::FileInstrument instrument;
+        if (sonicator::loadKrzInstrument(file, instrument, error)) { ++playable; continue; }
+        if (error.startsWith("This bank uses the K2000 factory ROM samples")) { ++romOnly; continue; }
+        problems.add(file.getFileName() + ": " + error);
+    }
+    INFO("files " << files.size() << ", banks " << banks << ", playable " << playable
+                  << ", ROM only " << romOnly << ", SROM " << srom << ", rejected " << rejected);
+    INFO(problems.joinIntoString("\n"));
+    CHECK(rejected == 0);
+    CHECK(problems.isEmpty());
+    CHECK(banks > 100);
 }
