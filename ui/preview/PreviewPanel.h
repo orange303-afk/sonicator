@@ -103,6 +103,10 @@ public:
     // Calls `done(true)` now when nothing is unsaved; otherwise asks Save/Discard/Cancel and calls
     // `done(true)` only after a successful save or an explicit discard, `done(false)` on Cancel.
     void withUnsavedEditsConfirmed(std::function<void(bool)> done);
+    // Tap-tempo playback: loops the waveform selection (or the whole source) while the user taps.
+    void startTapLoop();
+    void stopTapLoop();
+    bool canLoopForTap() const;
     void saveEditsAsCopyForTest();
     void overwriteEditsForTest();
     void discardEditsForTest();

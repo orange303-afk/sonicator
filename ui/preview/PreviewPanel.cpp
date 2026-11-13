@@ -1570,6 +1570,24 @@ void PreviewPanel::saveCopyAndSwitch(std::function<void(bool)> done)
     if (done) done(true);
 }
 
+void PreviewPanel::startTapLoop()
+{
+    if (! canLoopForTap()) return;
+    loop.setToggleState(true, juce::dontSendNotification);
+    applyTransportLooping();
+    engine.play();
+}
+
+void PreviewPanel::stopTapLoop()
+{
+    engine.stop();
+}
+
+bool PreviewPanel::canLoopForTap() const
+{
+    return engine.length() > 0;
+}
+
 void PreviewPanel::saveEditsAsCopyForTest() { saveCopyAndSwitch({}); }
 void PreviewPanel::discardEditsForTest() { discardEdits(); }
 void PreviewPanel::overwriteEditsForTest() { overwriteEdits({}); }

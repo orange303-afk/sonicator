@@ -25,6 +25,7 @@
 #include <iterator>
 #include <map>
 #include "core/indexing/CatalogFileSync.h"
+#include "ui/library/TapTempoDialog.h"
 #include <thread>
 namespace sonicator {
 namespace {
@@ -1353,6 +1354,28 @@ void MainComponent::startCatalogSync(const juce::File& file, int64_t sampleId, b
             if (result.ok && isCopy) safe->reloadLibrary();
         });
     });
+}
+
+void MainComponent::setBpmForRows(const std::vector<int64_t>& ids, double bpm)
+{
+    if (writeRepo == nullptr || ids.empty()) return;
+    SmartOverride value;
+    value.numericValue = bpm;
+    for (const auto id : ids) writeRepo->setSmartOverride(id, SmartField::Bpm, value);
+    writeRepo->touchFeedback(ids);
+    reloadLibrary();
+    status.setText("BPM " + juce::String(bpm, bpm == std::round(bpm) ? 0 : 1)
+        + " set for " + juce::String((int) ids.size()) + " sample(s)", juce::dontSendNotification);
+}
+
+void MainComponent::clearBpmForRows(const std::vector<int64_t>& ids)
+{
+    if (writeRepo == nullptr || ids.empty()) return;
+    for (const auto id : ids) writeRepo->clearSmartOverride(id, SmartField::Bpm);
+    writeRepo->touchFeedback(ids);
+    reloadLibrary();
+    status.setText("Manual BPM cleared for " + juce::String((int) ids.size()) + " sample(s)",
+                   juce::dontSendNotification);
 }
 
 void MainComponent::prepareForQuit(std::function<void(bool)> done)
@@ -2908,6 +2931,18 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     typeMenu.addItem(9020, "Reset type override", anyTypeOverride);
     menu.addSubMenu("Type", typeMenu);
 
+    bool anyManualBpm = false;
+    for (const auto id : ids)
+    {
+        const auto it = displays.find(id);
+        if (it != displays.end() && it->second.bpmOverride == OverrideState::Value) anyManualBpm = true;
+    }
+    juce::PopupMenu bpmMenu;
+    bpmMenu.addItem(25001, "Set BPM...");
+    bpmMenu.addItem(25002, "Tap BPM...");
+    bpmMenu.addItem(25003, "Clear manual BPM", anyManualBpm);
+    menu.addSubMenu("BPM", bpmMenu);
+
     menu.addItem(9001, allStarred ? "Unstar" : "Star", true, false, starMenuImage());
     const bool smartAvailable = smart != nullptr && ! (indexer && indexer->progress().running);
     menu.addItem(9005, selection.size() > 1 ? "Analyze selected (" + juce::String(selection.size()) + ")"
@@ -2952,6 +2987,53 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
             }
             try
             {
+                if (result == 25001)
+                {
+                    juce::String initial = "120";
+                    if (ids.size() == 1)
+                    {
+                        const auto bpmDisplays = safe->readRepo->smartDisplays(ids);
+                        if (! bpmDisplays.empty() && bpmDisplays.begin()->second.hasBpm)
+                            initial = juce::String(bpmDisplays.begin()->second.bpm, 2);
+                    }
+                    auto captured = ids;
+                    dialogs::showPrompt(*safe, "Set BPM", "Tempo (20 to 300)", initial,
+                        [safe, captured](const juce::String& text)
+                        {
+                            if (safe == nullptr) return;
+                            const auto bpm = text.getDoubleValue();
+                            if (! (bpm >= 20.0 && bpm <= 300.0))
+                            {
+                                safe->status.setText("BPM must be between 20 and 300",
+                                                     juce::dontSendNotification);
+                                return;
+                            }
+                            safe->setBpmForRows(captured, bpm);
+                        });
+                    return;
+                }
+                if (result == 25002)
+                {
+                    const bool single = files.size() == 1;
+                    const auto title = single ? files.front().fileName
+                        : juce::String((int) files.size()) + " samples";
+                    auto captured = ids;
+                    TapTempoDialog::launch(safe.getComponent(), title,
+                        single ? std::function<void()>([safe] { if (safe != nullptr) safe->preview.startTapLoop(); })
+                               : std::function<void()> {},
+                        single ? std::function<void()>([safe] { if (safe != nullptr) safe->preview.stopTapLoop(); })
+                               : std::function<void()> {},
+                        [safe, captured](double bpm)
+                        {
+                            if (safe != nullptr) safe->setBpmForRows(captured, bpm);
+                        });
+                    return;
+                }
+                if (result == 25003)
+                {
+                    safe->clearBpmForRows(ids);
+                    return;
+                }
                 if (result == 9020)
                 {
                     safe->cancelFeedback = true;

@@ -172,6 +172,8 @@ private:
     void clearSampleSelectionNow();
     std::optional<SampleRecord> pendingSample;
     void startCatalogSync(const juce::File&, int64_t sampleId, bool isCopy);
+    void setBpmForRows(const std::vector<int64_t>&, double bpm);
+    void clearBpmForRows(const std::vector<int64_t>&);
     void openDiscImage(const SampleRecord&);
     void openDiscImageNow(const SampleRecord&);
     void ensureDiscBrowser();
