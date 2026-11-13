@@ -116,6 +116,19 @@ Measured library evidence (see `docs/superpowers/specs/2026-11-07-phase2-metadat
 
 `core/sf2/Sf2Bank` parses RIFF/sfbk, INFO name, sdta 16-bit PCM and pdta headers/bags/generators. Instrument zones become preset zones after intersecting preset key/velocity ranges; empty stub banks are rejected as having no samples. `Sf2KitSampler` copies the preset zones and PCM, preallocates 32 voices, and renders note-on/off from MIDI messages with key/velocity matching, root-key transposition, tuning, loop and exclusive-class choke. Loading and `prepare` run on the message thread; `render` allocates nothing and never reads files.
 
+## Kurzweil banks (`.krz`, `.k25`, `.k26`)
+
+`core/kurzweil/KrzFile` parses the big-endian object bank: the 32-byte `PRAM` header and its PCM
+offset, blocks with negative lengths, sample objects (sound block plus 32-byte sound file headers),
+keymaps (method and entry size drive the entry layout) and programs (tagged segments; the layer's
+`CAL` segment names its keymaps). Every offset is bounded by the block and the file, split sets are
+joined from their `.krN` parts (PCM of later parts starts at `0x24`), and sample data is
+big-endian 16-bit. `core/kurzweil/KrzInstrument` turns a bank into the shared external-instrument
+model: one source per RAM sample header, one program per K2000 program, zones from the keymaps'
+keys and velocity levels. Playback therefore reuses `ExternalKitSampler`. Extract lists the sample
+objects through `EmbeddedSampleSet` and writes root key and loop into the WAV `smpl` chunk.
+`docs/KURZWEIL_KRZ.md` records the layout and every corpus-derived decision.
+
 ## REX2 preview
 
 `core/rex/Rex2Decoder` ports the documented DWOP predictive decoder: five cumulative predictors, per-channel delta/average state, MSB-first 32-bit words, mono and mid-stereo layouts, 16- and 24-bit output. It reads the SDAT payload recorded by `Rex2Metadata`, decodes in blocks of up to 0x100000 frames and converts to float. `Rex2SlicePlayer` maps visible SLCE boundaries onto consecutive MIDI notes from 36, preallocates 16 voices, applies velocity, a 2 ms attack, 20 ms release in Gate mode and a 5 ms tail fade; one-shot mode ignores NoteOff. At most 128 slices are mapped. Both containers are published with the output detached, so `render` never touches files or allocates.
