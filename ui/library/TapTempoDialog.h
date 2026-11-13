@@ -8,7 +8,7 @@ namespace sonicator
 // Tap-tempo window. Space taps (it never starts playback by itself), Return applies, Esc cancels.
 // The owner supplies the loop callbacks, so a batch selection can open the same window without
 // loading audio into the preview.
-class TapTempoDialog final : public juce::Component
+class TapTempoDialog final : public juce::Component, private juce::KeyListener
 {
 public:
     explicit TapTempoDialog(juce::String titleText);
@@ -25,6 +25,7 @@ public:
     bool isLoopAvailable() const { return loopAvailable; }
     double currentBpm() const { return tempo.bpm(); }
     bool keyPressed(const juce::KeyPress&) override;
+    bool keyPressed(const juce::KeyPress&, juce::Component*) override;
     void resized() override;
     void parentHierarchyChanged() override;
     void visibilityChanged() override;
@@ -40,6 +41,7 @@ private:
     juce::TextButton tapButton { "Tap" }, loopButton { "Start loop" },
                      applyButton { "Apply" }, cancelButton { "Cancel" };
     bool loopRunning = false, loopAvailable = true;
+    juce::Component::SafePointer<juce::Component> keyTarget;
 
     void updateLabels();
     void apply();

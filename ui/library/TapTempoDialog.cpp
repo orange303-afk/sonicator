@@ -43,6 +43,7 @@ TapTempoDialog::TapTempoDialog(juce::String titleText)
 
 TapTempoDialog::~TapTempoDialog()
 {
+    if (keyTarget != nullptr) keyTarget->removeKeyListener(this);
     // Any way of closing the window (Esc, Apply, the title-bar X) must not leave the preview
     // looping with no window to stop it.
     if (onStopLoop) onStopLoop();
@@ -132,7 +133,23 @@ void TapTempoDialog::resized()
 
 void TapTempoDialog::parentHierarchyChanged()
 {
-    if (isShowing()) grabKeyboardFocus();
+    // The modal window itself takes focus, and its default keyPressed does not reach the content.
+    // Listening on the top-level component makes Space/Return/Esc work regardless of who holds it.
+    if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
+    {
+        if (keyTarget != top)
+        {
+            if (keyTarget != nullptr) keyTarget->removeKeyListener(this);
+            keyTarget = top;
+            top->addKeyListener(this);
+        }
+    }
+    grabKeyboardFocus();
+}
+
+bool TapTempoDialog::keyPressed(const juce::KeyPress& key, juce::Component*)
+{
+    return keyPressed(key);
 }
 
 void TapTempoDialog::visibilityChanged()
@@ -157,6 +174,14 @@ void TapTempoDialog::launch(juce::Component* owner, juce::String titleText,
     options.useNativeTitleBar = false;
     options.resizable = false;
     options.componentToCentreAround = owner;
-    options.launchAsync();
+    auto* window = options.launchAsync();
+    if (window != nullptr)
+    {
+        juce::Component::SafePointer<TapTempoDialog> safe(dialog.get());
+        juce::MessageManager::callAsync([safe]
+        {
+            if (safe != nullptr) safe->grabKeyboardFocus();
+        });
+    }
 }
 } // namespace sonicator

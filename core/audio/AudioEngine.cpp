@@ -121,9 +121,12 @@ void AudioEngine::renderPreviewBlock(juce::AudioBuffer<float>& buffer, int numSa
 void AudioEngine::attach()
 {
     const bool streaming = deviceMode || hostMode;
-    // A live range loop must read straight from the reader: the read-ahead buffer would replay
-    // material outside the range while the selection is being dragged. Everything else keeps it.
-    const int readAheadSamples = streaming && ! readerRangeLoop ? 32768 : 0;
+    // Looping reads straight from the reader. The read-ahead buffer keeps its own position modulo
+    // the file length while the reader also wraps, and the two disagree after the first pass: the
+    // buffer stops serving audio and the loop appears to stick. A live range loop has the same
+    // reason to bypass it. Everything else keeps the read-ahead.
+    const int readAheadSamples = streaming && ! readerRangeLoop && ! looping ? 32768 : 0;
+    jassert (readAheadSamples == 0 || ! looping);
     source.setSource(reader.get(), readAheadSamples,
                      readAheadSamples > 0 ? &readAhead : nullptr, inputRate);
 }
