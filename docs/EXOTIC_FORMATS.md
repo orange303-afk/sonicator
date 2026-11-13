@@ -59,6 +59,8 @@ Effort: `.xi` medium (one reader), the other modules low. **Recommended second.*
 
 ### 3. VOC — 2 090 audio files
 
+*Status 2026-11-13: implemented — see `docs/VOC.md` (2 072/2 090 decode).*
+
 `Creative Voice File` blocks: 8-bit, 16-bit and Creative 2/3/4-bit ADPCM, plus silence and repeat
 blocks. A reader is a few hundred lines; the sample becomes a normal audio source through the same
 format-manager registration as EBL. Effort: one stage, small. **Cheap win, vintage material.**

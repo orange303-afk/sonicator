@@ -83,6 +83,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/database/Database.cpp core/database/PathRelocation.cpp core/database/SearchSyntax.cpp core/database/SampleRepository.cpp core/settings/AppSettings.cpp
     core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/dsp/RhythmAnalyzer.cpp core/dsp/AnalysisAudio.cpp core/dsp/TonalAnalyzer.cpp core/dsp/AcousticFeatures.cpp core/dsp/FastAcousticRules.cpp core/dsp/FeatureExtractorV2.cpp core/dsp/FeatureJson.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/SonicatorFormats.cpp core/audio/PreviewReaderSource.cpp core/audio/SampleAudition.cpp core/audio/ContainerValidation.cpp
     core/emu/EblReader.cpp core/emu/EblAudioFormat.cpp
+    core/voc/VocAudioFormat.cpp
     core/kurzweil/KrzFile.cpp core/kurzweil/KrzInstrument.cpp
     core/sfz/SfzInstrument.cpp
     core/export/AudioExporter.cpp core/export/SelectionExporter.cpp core/export/ExternalFileDrag.cpp

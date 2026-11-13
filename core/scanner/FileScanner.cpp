@@ -15,7 +15,7 @@ bool FileScanner::isSupportedFormat(const juce::File& f)
     // A Kurzweil set is one row: its later parts are data only and are joined on load.
     if (krz::continuationPartNumber(f) >= 2) return false;
     if (isMetadataOnlyFormat(f)) return true;
-    if (! f.hasFileExtension("wav;aif;aiff;flac;mp3;ogg;ebl")) return false;
+    if (! f.hasFileExtension("wav;aif;aiff;flac;mp3;ogg;ebl;voc")) return false;
     // Ableton factory AIFC samples use the closed "able" codec and only Live can decode them.
     if (isAbletonProtectedSample(f)) return false;
     if (f.getFileName().startsWith("._"))

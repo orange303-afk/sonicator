@@ -143,6 +143,18 @@ with that list instead of opening as silence. Playback and preview therefore reu
 nothing is embedded, so it is not an Extract source. `docs/SFZ.md` records the mapping and the
 corpus findings.
 
+## Creative Voice files (`.voc`)
+
+`core/voc/VocAudioFormat` is a JUCE `AudioFormat` registered by `registerSonicatorFormats` next to
+the basic formats and EBL, so VOC files use the ordinary audio paths: scanning, waveform, transport,
+MIDI preview, analysis, export and drag. The decoder reads the 19-byte signature and offset, then
+bounds-checks every block: 8-bit PCM and Creative 4/3/2-bit ADPCM sound data, continuation blocks,
+silence, marker/text, bounded repeats, block 8 stereo attributes and block 9 new-format 8/16-bit PCM
+or ADPCM. A file that concatenates clips at different rates is resampled linearly to one stream;
+A-law/u-law, Multi-DAC, endless repeats and malformed/truncated files are refused with a reason.
+`decodeVoc` is a pure function used by the reader and the tests; `docs/VOC.md` records the layout,
+the ADPCM rule and the corpus findings.
+
 ## REX2 preview
 
 `core/rex/Rex2Decoder` ports the documented DWOP predictive decoder: five cumulative predictors, per-channel delta/average state, MSB-first 32-bit words, mono and mid-stereo layouts, 16- and 24-bit output. It reads the SDAT payload recorded by `Rex2Metadata`, decodes in blocks of up to 0x100000 frames and converts to float. `Rex2SlicePlayer` maps visible SLCE boundaries onto consecutive MIDI notes from 36, preallocates 16 voices, applies velocity, a 2 ms attack, 20 ms release in Gate mode and a 5 ms tail fade; one-shot mode ignores NoteOff. At most 128 slices are mapped. Both containers are published with the output detached, so `render` never touches files or allocates.
