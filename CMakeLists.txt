@@ -115,6 +115,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/edit/AudioEditBuffer.cpp
     core/edit/AudioEditMarkers.cpp
     core/edit/AudioEditWriter.cpp
+    core/indexing/CatalogFileSync.cpp
     core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp
     core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
     core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp)

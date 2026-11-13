@@ -3089,6 +3089,51 @@ void SampleRepository::setFeedbackV2(int64_t sampleId, const std::vector<float>&
     s.step();
 }
 
+std::optional<SampleRepository::FeedbackRecord> SampleRepository::feedbackForSample(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT sample_id, file_hash, target_type, tags, features, updated_at, feature_schema, features_v2"
+        " FROM ml_feedback_samples WHERE sample_id=?");
+    s.integer(1, sampleId);
+    if (! s.step()) return std::nullopt;
+    FeedbackRecord r;
+    r.sampleId = s.integer(0);
+    r.fileHash = s.text(1);
+    r.targetType = s.text(2);
+    r.tags.addTokens(s.text(3), ",", "");
+    r.tags.trim();
+    r.tags.removeEmptyStrings();
+    const auto* blobData = reinterpret_cast<const float*>(s.blob(4));
+    const int numBytes = s.bytes(4);
+    if (blobData != nullptr && numBytes > 0)
+        r.features.assign(blobData, blobData + numBytes / (int) sizeof(float));
+    r.updatedAt = s.integer(5);
+    r.featureSchema = (int) s.integer(6);
+    const auto* v2Data = reinterpret_cast<const float*>(s.blob(7));
+    const int v2Bytes = s.bytes(7);
+    if (v2Data != nullptr && v2Bytes > 0)
+        r.featuresV2.assign(v2Data, v2Data + v2Bytes / (int) sizeof(float));
+    return r;
+}
+
+bool SampleRepository::refreshFeedbackAudio(int64_t sampleId, const juce::String& fileHash,
+                                            const std::vector<float>& featuresV1,
+                                            const std::vector<float>& featuresV2)
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "UPDATE ml_feedback_samples SET file_hash=?, features=?, features_v2=?, feature_schema=2,"
+        " updated_at=? WHERE sample_id=?");
+    s.text(1, fileHash);
+    s.blob(2, featuresV1.data(), (int) (featuresV1.size() * sizeof(float)));
+    s.blob(3, featuresV2.data(), (int) (featuresV2.size() * sizeof(float)));
+    s.integer(4, juce::Time::currentTimeMillis());
+    s.integer(5, sampleId);
+    s.step();
+    return sqlite3_changes(db.handle) > 0;
+}
+
 bool SampleRepository::hasUserFeedback(int64_t sampleId) const
 {
     std::lock_guard lock(db.mutex);

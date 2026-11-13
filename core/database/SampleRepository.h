@@ -245,6 +245,12 @@ public:
                         FeedbackOrigin origin);
     // Stores the featureSchema-2 vector and marks the row as schema 2. The v1 vector stays.
     void setFeedbackV2(int64_t sampleId, const std::vector<float>& features);
+    std::optional<FeedbackRecord> feedbackForSample(int64_t sampleId) const;
+    // Rewrites the audio-derived columns of an existing feedback row: file hash, v1 vector, v2
+    // vector and updated_at. Labels, target type and origin stay untouched. False when no row.
+    bool refreshFeedbackAudio(int64_t sampleId, const juce::String& fileHash,
+                              const std::vector<float>& featuresV1,
+                              const std::vector<float>& featuresV2);
     // True when the row was written by a person; a later machine write leaves it untouched.
     bool hasUserFeedback(int64_t sampleId) const;
     // Marks changed rows so the contribution watermark re-sends their current labels.
