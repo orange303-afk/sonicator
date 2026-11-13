@@ -176,12 +176,17 @@ bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
     {
         auto loaded = std::make_unique<krz::Bank>();
         if (! krz::readBank(file, *loaded, error)) return false;
+        if (! loaded->hasPcm())
+        {
+            error = "This bank uses the K2000 factory ROM samples; the file contains no samples of its own";
+            return false;
+        }
         for (const auto& sample : loaded->samples)
         {
             if (sample.stereo && sample.headers.size() >= 2)
             {
                 listed.push_back({ entryName(sample.name, (int) listed.size() + 1), (int) listed.size() });
-                kurzweilEntries.push_back({ sample.id, 0, true });
+                kurzweilEntries.push_back({ (int) listed.size() - 1, sample.id, 0, true });
                 continue;
             }
             for (int header = 0; header < (int) sample.headers.size(); ++header)
@@ -190,7 +195,7 @@ bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
                 const auto name = sample.headers.size() > 1
                     ? sample.name + " " + juce::String(header + 1) : sample.name;
                 listed.push_back({ entryName(name, (int) listed.size() + 1), (int) listed.size() });
-                kurzweilEntries.push_back({ sample.id, header, false });
+                kurzweilEntries.push_back({ (int) listed.size() - 1, sample.id, header, false });
             }
         }
         kind = Kind::krz;
@@ -213,18 +218,17 @@ SampleAudioPtr EmbeddedSampleSet::read(int index, juce::String& error) const
             return {};
         }
         const auto& entry = kurzweilEntries[(size_t) index];
-        const auto found = std::find_if(kurzweil->samples.begin(), kurzweil->samples.end(),
-                                        [&] (const krz::SampleObject& sample)
-                                        { return sample.id == entry.sampleObject; });
-        if (found == kurzweil->samples.end())
+        if (entry.sampleObject < 0 || entry.sampleObject >= (int) kurzweil->samples.size()
+            || kurzweil->samples[(size_t) entry.sampleObject].id != entry.objectId)
         {
-            error = "Sample " + juce::String(entry.sampleObject) + " is not in the bank";
+            error = "Sample " + juce::String(entry.objectId) + " is not in the bank";
             return {};
         }
+        const auto& sample = kurzweil->samples[(size_t) entry.sampleObject];
         krz::DecodedSample decoded;
         if (entry.stereo)
-            return krz::decodeStereo(*kurzweil, *found, decoded, error) ? decoded.audio : SampleAudioPtr {};
-        return krz::decodeHeader(*kurzweil, *found, entry.header, decoded, error) ? decoded.audio
+            return krz::decodeStereo(*kurzweil, sample, decoded, error) ? decoded.audio : SampleAudioPtr {};
+        return krz::decodeHeader(*kurzweil, sample, entry.header, decoded, error) ? decoded.audio
                                                                                  : SampleAudioPtr {};
     }
     error = "No embedded sample set is open";
@@ -235,21 +239,26 @@ std::optional<SamplerChunk> EmbeddedSampleSet::samplerChunk(int index) const
     if (kind != Kind::krz || kurzweil == nullptr) return std::nullopt;
     if (index < 0 || index >= (int) kurzweilEntries.size()) return std::nullopt;
     const auto& entry = kurzweilEntries[(size_t) index];
-    const auto found = std::find_if(kurzweil->samples.begin(), kurzweil->samples.end(),
-                                    [&] (const krz::SampleObject& sample)
-                                    { return sample.id == entry.sampleObject; });
-    if (found == kurzweil->samples.end()) return std::nullopt;
-    const int headerIndex = entry.stereo || found->headers.empty() ? 0 : entry.header;
-    if (headerIndex >= (int) found->headers.size()) return std::nullopt;
-    const auto& header = found->headers[(size_t) headerIndex];
+    if (entry.sampleObject < 0 || entry.sampleObject >= (int) kurzweil->samples.size()) return std::nullopt;
+    const auto& sample = kurzweil->samples[(size_t) entry.sampleObject];
+    if (sample.id != entry.objectId) return std::nullopt;
+    const int headerIndex = entry.stereo || sample.headers.empty() ? 0 : entry.header;
+    if (headerIndex >= (int) sample.headers.size()) return std::nullopt;
+    const auto& header = sample.headers[(size_t) headerIndex];
     SamplerChunk chunk;
     chunk.rootKey = header.rootKey;
     chunk.looping = header.looping;
     if (header.looping)
     {
         chunk.loopStart = std::max<int64_t>(0, header.loopWord - header.startWord);
-        const auto endWord = entry.stereo && found->headers.size() > 1
-            ? std::min(header.endWord, found->headers[1].startWord - 1) : header.endWord;
+        int64_t endWord = header.endWord;
+        for (const auto& other : sample.headers)
+            if (other.startWord > header.startWord && other.startWord - 1 < endWord)
+                endWord = other.startWord - 1;
+        for (const auto& object : kurzweil->samples)
+            for (const auto& other : object.headers)
+                if (other.startWord > header.startWord && other.startWord - 1 < endWord)
+                    endWord = other.startWord - 1;
         const auto loopEnd = endWord - header.startWord + 1;
         chunk.loopEndExclusive = std::max(chunk.loopStart, loopEnd);
     }

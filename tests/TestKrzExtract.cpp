@@ -153,3 +153,22 @@ TEST_CASE("A sample exported without sampler metadata has no smpl chunk", "[krz]
     CHECK(reader->metadataValues.getValue("Loop0Start", {}) == "");
     CHECK(reader->metadataValues.getValue("MidiUnityNote", {}) == "");
 }
+
+TEST_CASE("KRZ Extract explains a bank that only references the factory ROM", "[krz][extract]")
+{
+    TestDirectory dir;
+    BankSpec spec;
+    SampleSpec rom; rom.id = 200; rom.name = "Rom Sample";
+    HeaderSpec header; header.startWord = 0; header.endWord = 100;
+    rom.headers = { header };
+    spec.samples = { rom };
+    auto file = writeBank(dir.dir, "rom.krz", spec);
+    ExtractOptions options;
+    ExtractService service;
+    REQUIRE(service.start({ file }, options));
+    REQUIRE(service.waitUntilFinished(20000));
+    const auto results = service.results();
+    REQUIRE(results.size() == 1);
+    CHECK(results[0].written == 0);
+    CHECK(results[0].problems.joinIntoString("|").containsIgnoreCase("factory ROM"));
+}

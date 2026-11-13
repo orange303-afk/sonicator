@@ -47,7 +47,9 @@ public:
 private:
     struct KrzEntry
     {
-        int sampleObject = 0, header = 0;
+        int sampleObject = 0;   // index into Bank::samples
+        int objectId = 0;       // the object's id, to detect a stale index
+        int header = 0;
         bool stereo = false;
     };
     enum class Kind { none, tracker, sf2, krz };

@@ -239,3 +239,91 @@ TEST_CASE("KRZ bank without programs falls back to keymaps and samples", "[krz][
         CHECK(instrument.programs[0].zones[0].rootKey == 60);
     }
 }
+
+TEST_CASE("KRZ looping samples keep their loop and keep sounding", "[krz][sampler]")
+{
+    TestDirectory dir;
+    BankSpec spec;
+    spec.samples = { sineSample(200, 60, spec.pcm) };
+    // Loop over frames 200..800 while the audio spans 0..24999.
+    spec.samples[0].headers[0].loopWord = 200;
+    spec.samples[0].headers[0].endWord = 800;
+    spec.keymaps = { mapRange(200, 200, 60, 72) };
+    ProgramSpec program; program.id = 200; program.name = "Loop"; program.layers = { LayerSpec { 200, 0 } };
+    spec.programs = { program };
+    auto file = writeBank(dir.dir, "loop.krz", spec);
+
+    FileInstrument instrument; juce::String error;
+    REQUIRE(loadKrzInstrument(file, instrument, error));
+    REQUIRE_FALSE(instrument.zones.empty());
+    CHECK(instrument.zones[0].looping);
+    CHECK(instrument.zones[0].loopStart == 200);
+    CHECK(instrument.zones[0].loopEnd == 801);
+
+    ExternalKitSampler sampler;
+    REQUIRE(sampler.load(instrument, error));
+    sampler.prepare(44100);
+    juce::AudioBuffer<float> buffer(2, 8192);
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0);
+    sampler.render(buffer, 0, 8192, midi);
+    // The sample is 25000 frames at 25 kHz, so a one-shot would still be playing here; the second
+    // render is far past that and only a loop keeps a voice alive.
+    juce::AudioBuffer<float> later(2, 8192);
+    juce::MidiBuffer none;
+    for (int i = 0; i < 30; ++i) sampler.render(later, 0, 8192, none);
+    CHECK(sampler.activeVoices() == 1);
+    CHECK(later.getMagnitude(0, 8192) > 0.01f);
+}
+
+TEST_CASE("KRZ bank with undecodable samples does not blame the factory ROM", "[krz][sampler]")
+{
+    TestDirectory dir;
+    BankSpec spec;
+    SampleSpec broken; broken.id = 200; broken.name = "Broken";
+    HeaderSpec header; header.startWord = 0; header.endWord = 3; header.period = 0;
+    broken.headers = { header };
+    spec.samples = { broken };
+    spec.pcm = { 1, 2, 3, 4 };
+    auto file = writeBank(dir.dir, "broken.krz", spec);
+    FileInstrument instrument; juce::String error;
+    CHECK_FALSE(loadKrzInstrument(file, instrument, error));
+    CHECK(error.contains("cannot be decoded"));
+    CHECK_FALSE(error.startsWith("This bank uses the K2000 factory ROM"));
+}
+
+TEST_CASE("KRZ fallback program for a bare sample produces audio", "[krz][sampler]")
+{
+    TestDirectory dir;
+    BankSpec spec;
+    spec.samples = { sineSample(200, 60, spec.pcm) };
+    auto file = writeBank(dir.dir, "bare.krz", spec);
+    FileInstrument instrument; juce::String error;
+    REQUIRE(loadKrzInstrument(file, instrument, error));
+    REQUIRE_FALSE(instrument.zones.empty());
+    CHECK(instrument.zones[0].end == instrument.sources[0].frameCount);
+    ExternalKitSampler sampler;
+    REQUIRE(sampler.load(instrument, error));
+    sampler.prepare(44100);
+    juce::AudioBuffer<float> buffer(2, 2048);
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0);
+    sampler.render(buffer, 0, 2048, midi);
+    CHECK(buffer.getMagnitude(0, 2048) > 0.01f);
+}
+
+TEST_CASE("KRZ sample header volume is applied to its zones", "[krz][sampler]")
+{
+    TestDirectory dir;
+    BankSpec spec;
+    spec.samples = { sineSample(200, 60, spec.pcm) };
+    spec.samples[0].headers[0].volumeHalfDb = -6;
+    spec.keymaps = { mapRange(200, 200, 60, 72) };
+    ProgramSpec program; program.id = 200; program.name = "Quiet"; program.layers = { LayerSpec { 200, 0 } };
+    spec.programs = { program };
+    auto file = writeBank(dir.dir, "quiet.krz", spec);
+    FileInstrument instrument; juce::String error;
+    REQUIRE(loadKrzInstrument(file, instrument, error));
+    REQUIRE_FALSE(instrument.zones.empty());
+    CHECK(instrument.zones[0].attenuationDb == Catch::Approx(3.0));
+}

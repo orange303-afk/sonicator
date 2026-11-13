@@ -52,8 +52,13 @@ TEST_CASE("Every Kurzweil bank in the local corpus opens and decodes", "[.krz-co
         sonicator::FileInstrument instrument;
         juce::String loadError;
         if (sonicator::loadKrzInstrument(file, instrument, loadError)) ++playable;
-        else if (! loadError.startsWith("This bank uses the K2000 factory ROM samples")) unplayable.add(file.getFileName() + ": " + loadError);
-        else ++explained;
+        else if (loadError.startsWith("This bank uses the K2000 factory ROM samples"))
+        {
+            CHECK_FALSE(bank.hasPcm());   // the ROM message is only for banks without sample data
+            ++explained;
+        }
+        else if (loadError.startsWith("The bank's samples cannot be decoded")) ++defectiveRate;
+        else unplayable.add(file.getFileName() + ": " + loadError);
         for (const auto& sample : bank.samples)
         {
             for (int header = 0; header < (int) sample.headers.size(); ++header)

@@ -210,6 +210,7 @@ void ExtractService::runEmbedded()
         {
             result.state = ExtractFileState::failed;
             result.error = error.isNotEmpty() ? error : "Cannot read embedded samples";
+            result.problems.add(result.error);
             results.push_back(result);
             updateProgress([index, &results](ExtractProgress& p)
             {

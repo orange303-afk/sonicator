@@ -330,3 +330,79 @@ TEST_CASE("KRZ format probe accepts the extensions and the magic", "[krz]")
     CHECK(isKrzFile(writeBank(dir.dir, "c.k26", spec)));
     CHECK_FALSE(isKrzFile(writeBytes(dir.dir, "d.krz", std::vector<std::byte>(32, std::byte { 0 }))));
 }
+
+TEST_CASE("KRZ block with several objects is walked to the end", "[krz]")
+{
+    TestDirectory dir;
+    BankSpec spec;
+    KeymapSpec a = fullKeymap(200, 200);
+    KeymapSpec b = fullKeymap(201, 201);
+    KeymapSpec c = fullKeymap(202, 202);
+    spec.keymaps = { a, b, c };
+    spec.packObjects = true;
+    auto file = writeBank(dir.dir, "packed.krz", spec);
+    Bank bank; juce::String error;
+    REQUIRE(readBank(file, bank, error));
+    CHECK(bank.keymaps.size() == 3);
+    REQUIRE(bank.keymaps.size() == 3);
+    CHECK(bank.keymaps[2].levels[0][60].sampleId == 202);
+}
+
+TEST_CASE("KRZ object with a forged name offset stays inside the block", "[krz]")
+{
+    TestDirectory dir;
+    BankSpec spec;
+    spec.keymaps = { fullKeymap(200, 200) };
+    RawObject raw;
+    raw.type = 24;
+    raw.id = 7;
+    raw.name = "Effect";
+    raw.body.assign(8, std::byte { 0 });
+    raw.forcedNameOfs = 0x7ff0;
+    spec.raw = { raw };
+    auto file = writeBank(dir.dir, "forgedname.krz", spec);
+    Bank bank; juce::String error;
+    const bool read = readBank(file, bank, error);
+    INFO("error: " << error);
+    REQUIRE(read);
+    CHECK(bank.keymaps.size() == 1);
+}
+
+TEST_CASE("KRZ keymap whose entry size cannot hold its method is skipped", "[krz]")
+{
+    TestDirectory dir;
+    BankSpec spec;
+    KeymapSpec broken = fullKeymap(200, 200, 0x13, 1);
+    spec.keymaps = { broken, fullKeymap(201, 201) };
+    auto file = writeBank(dir.dir, "shortentry.krz", spec);
+    Bank bank; juce::String error;
+    REQUIRE(readBank(file, bank, error));
+    CHECK(bank.keymaps.size() == 1);
+    CHECK(bank.keymaps[0].id == 201);
+    CHECK(bank.warnings.joinIntoString("|").contains("200"));
+}
+
+TEST_CASE("KRZ short keymap repeats its last entry to the top of the keyboard", "[krz]")
+{
+    TestDirectory dir;
+    BankSpec spec;
+    KeymapSpec keymap; keymap.id = 200; keymap.slotCount = 97;
+    keymap.levels[0].assign(97, entry(200));
+    spec.keymaps = { keymap };
+    auto file = writeBank(dir.dir, "short.krz", spec);
+    Bank bank; juce::String error;
+    REQUIRE(readBank(file, bank, error));
+    REQUIRE(bank.keymaps.size() == 1);
+    CHECK(bank.keymaps[0].levels[0][120].sampleId == 200);
+    CHECK(bank.keymaps[0].levels[0][127].sampleId == 200);
+}
+
+TEST_CASE("KRZ file shorter than its header is refused", "[krz]")
+{
+    TestDirectory dir;
+    std::vector<std::byte> bytes { std::byte { 'P' }, std::byte { 'R' }, std::byte { 'A' } };
+    auto file = writeBytes(dir.dir, "tiny.krz", bytes);
+    Bank bank; juce::String error;
+    CHECK_FALSE(readBank(file, bank, error));
+    CHECK(error.isNotEmpty());
+}

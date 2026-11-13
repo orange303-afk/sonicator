@@ -4,6 +4,9 @@
 #include <map>
 namespace sonicator {
 namespace {
+// Decoded sources are float frames: 128M frames is 512 MB of audio, enough for any real bank and
+// a hard stop for a forged one.
+constexpr int64_t maxDecodedFrames = 128LL * 1024 * 1024;
 const char* const factoryRomMessage =
     "This bank uses the K2000 factory ROM samples; the file contains no samples of its own";
 
@@ -21,6 +24,7 @@ struct SourceInfo
     int rootKey = 60;
     int headerIndex = 0;
     int objectId = 0;
+    int volumeHalfDb = 0;
 };
 
 bool sameEntry(const krz::KeymapEntry& a, const krz::KeymapEntry& b)
@@ -66,7 +70,8 @@ void appendKeymapZones(std::vector<ExternalZone>& out, const krz::Keymap& keymap
                 zone.sampleIndex = found->second;
                 zone.rootKey = info.rootKey;
                 zone.tuningCents = (double) first.tuningCents;
-                zone.attenuationDb = -(double) first.volumeHalfDb / 2.0;
+                zone.attenuationDb = -((double) first.volumeHalfDb
+                                       + (double) info.volumeHalfDb) / 2.0;
                 zone.pan = pan;
                 zone.start = 0;
                 zone.end = descriptor.frameCount;
@@ -80,32 +85,24 @@ void appendKeymapZones(std::vector<ExternalZone>& out, const krz::Keymap& keymap
     }
 }
 
-void describeSources(FileInstrument& instrument, const std::vector<SourceInfo>& sources,
-                     const krz::Bank& bank)
-{
-    for (size_t index = 0; index < instrument.sources.size(); ++index)
-    {
-        const auto& info = sources[index];
-        auto& descriptor = instrument.sources[index];
-        // Header volume applies to the whole source; the zone adds the keymap's own adjustment.
-        descriptor.looping = false;
-        for (const auto& sample : bank.samples)
-        {
-            if (sample.id != info.objectId) continue;
-            if (info.headerIndex < (int) sample.headers.size())
-            {
-                const auto& header = sample.headers[(size_t) info.headerIndex];
-                descriptor.looping = header.looping;
-                descriptor.loopStart = 0;
-                descriptor.loopEnd = 0;
-            }
-        }
-        (void) info;
-    }
-}
 } // namespace
 
+static bool loadKrzInstrumentImpl(const juce::File&, FileInstrument&, juce::String&);
+
 bool loadKrzInstrument(const juce::File& file, FileInstrument& instrument, juce::String& error)
+{
+    try
+    {
+        return loadKrzInstrumentImpl(file, instrument, error);
+    }
+    catch (const std::bad_alloc&)
+    {
+        instrument = {};
+        error = "Not enough memory to read this bank";
+        return false;
+    }
+}
+static bool loadKrzInstrumentImpl(const juce::File& file, FileInstrument& instrument, juce::String& error)
 {
     error.clear();
     instrument = {};
@@ -121,8 +118,46 @@ bool loadKrzInstrument(const juce::File& file, FileInstrument& instrument, juce:
     instrument.warnings = bank.warnings;
     instrument.partial = bank.missingPart.isNotEmpty();
 
+    std::map<int, size_t> sampleById;
+    for (size_t index = 0; index < bank.samples.size(); ++index) sampleById[bank.samples[index].id] = index;
     std::map<ZoneSource, int> sourceOf;
     std::vector<SourceInfo> sourceInfo;
+    int64_t decodedFrames = 0;
+    auto overBudget = [&] { return decodedFrames > maxDecodedFrames; };
+    auto addMonoSource = [&] (const krz::SampleObject& sample, int headerIndex)
+    {
+        if (headerIndex < 0 || headerIndex >= (int) sample.headers.size()) return;
+        if (! sample.headers[(size_t) headerIndex].ramBased) return;
+        krz::DecodedSample decoded;
+        juce::String decodeError;
+        if (! krz::decodeHeader(bank, sample, headerIndex, decoded, decodeError))
+        {
+            instrument.warnings.add(sample.name.isEmpty() ? decodeError : sample.name + ": " + decodeError);
+            return;
+        }
+        if (overBudget())
+        {
+            instrument.warnings.add(sample.name + ": skipped, the bank is too large to decode");
+            return;
+        }
+        const int index = (int) instrument.sources.size();
+        SampleDescriptor descriptor;
+        descriptor.id = index;
+        descriptor.name = sample.headers.size() > 1
+            ? sample.name + " " + juce::String(headerIndex + 1) : sample.name;
+        descriptor.sampleRate = decoded.audio->sampleRate;
+        descriptor.channels = decoded.audio->channels;
+        descriptor.frameCount = decoded.audio->frames;
+        descriptor.looping = decoded.looping;
+        descriptor.loopStart = decoded.loopStart;
+        descriptor.loopEnd = decoded.loopEnd;
+        instrument.sources.push_back(std::move(descriptor));
+        instrument.audio.push_back(decoded.audio);
+        sourceInfo.push_back({ decoded.rootKey, headerIndex, sample.id,
+                               sample.headers[(size_t) headerIndex].volumeHalfDb });
+        sourceOf[ZoneSource { sample.id, headerIndex }] = index;
+        decodedFrames += decoded.audio->frames;
+    };
     for (const auto& sample : bank.samples)
     {
         if (sample.stereo && sample.headers.size() >= 2)
@@ -130,60 +165,46 @@ bool loadKrzInstrument(const juce::File& file, FileInstrument& instrument, juce:
             krz::DecodedSample decoded;
             juce::String decodeError;
             if (! krz::decodeStereo(bank, sample, decoded, decodeError))
+                instrument.warnings.add(sample.name.isEmpty() ? decodeError
+                                                             : sample.name + ": " + decodeError);
+            else if (overBudget())
+                instrument.warnings.add(sample.name + ": skipped, the bank is too large to decode");
+            else
             {
-                instrument.warnings.add(sample.name.isEmpty() ? decodeError : sample.name + ": " + decodeError);
-                continue;
+                const int index = (int) instrument.sources.size();
+                SampleDescriptor descriptor;
+                descriptor.id = index;
+                descriptor.name = sample.name;
+                descriptor.sampleRate = decoded.audio->sampleRate;
+                descriptor.channels = decoded.audio->channels;
+                descriptor.frameCount = decoded.audio->frames;
+                descriptor.looping = decoded.looping;
+                descriptor.loopStart = decoded.loopStart;
+                descriptor.loopEnd = decoded.loopEnd;
+                instrument.sources.push_back(std::move(descriptor));
+                instrument.audio.push_back(decoded.audio);
+                sourceInfo.push_back({ decoded.rootKey, 0, sample.id, sample.headers[0].volumeHalfDb });
+                sourceOf[ZoneSource { sample.id, 0 }] = index;
+                sourceOf[ZoneSource { sample.id, 1 }] = index;
+                decodedFrames += decoded.audio->frames;
             }
-            const int index = (int) instrument.sources.size();
-            SampleDescriptor descriptor;
-            descriptor.id = index;
-            descriptor.name = sample.name;
-            descriptor.sampleRate = decoded.audio->sampleRate;
-            descriptor.channels = decoded.audio->channels;
-            descriptor.frameCount = decoded.audio->frames;
-            descriptor.looping = decoded.looping;
-            descriptor.loopStart = decoded.loopStart;
-            descriptor.loopEnd = decoded.loopEnd;
-            instrument.sources.push_back(std::move(descriptor));
-            instrument.audio.push_back(decoded.audio);
-            sourceInfo.push_back({ decoded.rootKey, 0, sample.id });
-            sourceOf[ZoneSource { sample.id, 0 }] = index;
-            sourceOf[ZoneSource { sample.id, 1 }] = index;
+            // A stereo multisample can carry more headers; the extras are mono sub-samples.
+            for (int extra = 2; extra < (int) sample.headers.size(); ++extra)
+                addMonoSource(sample, extra);
             continue;
         }
         for (int headerIndex = 0; headerIndex < (int) sample.headers.size(); ++headerIndex)
-        {
-            if (! sample.headers[(size_t) headerIndex].ramBased) continue;
-            krz::DecodedSample decoded;
-            juce::String decodeError;
-            if (! krz::decodeHeader(bank, sample, headerIndex, decoded, decodeError))
-            {
-                instrument.warnings.add(sample.name.isEmpty() ? decodeError : sample.name + ": " + decodeError);
-                continue;
-            }
-            const int index = (int) instrument.sources.size();
-            SampleDescriptor descriptor;
-            descriptor.id = index;
-            descriptor.name = sample.headers.size() > 1
-                ? sample.name + " " + juce::String(headerIndex + 1) : sample.name;
-            descriptor.sampleRate = decoded.audio->sampleRate;
-            descriptor.channels = decoded.audio->channels;
-            descriptor.frameCount = decoded.audio->frames;
-            descriptor.looping = decoded.looping;
-            descriptor.loopStart = decoded.loopStart;
-            descriptor.loopEnd = decoded.loopEnd;
-            instrument.sources.push_back(std::move(descriptor));
-            instrument.audio.push_back(decoded.audio);
-            sourceInfo.push_back({ decoded.rootKey, headerIndex, sample.id });
-            sourceOf[ZoneSource { sample.id, headerIndex }] = index;
-        }
+            addMonoSource(sample, headerIndex);
     }
     if (instrument.sources.empty())
     {
-        error = factoryRomMessage;
+        error = bank.hasPcm()
+            ? "The bank's samples cannot be decoded: "
+                  + (instrument.warnings.isEmpty() ? juce::String("no usable sample data")
+                                                   : instrument.warnings[0])
+            : factoryRomMessage;
         return false;
     }
-    describeSources(instrument, sourceInfo, bank);
 
     auto keymapById = [&bank] (int id) -> const krz::Keymap*
     {
@@ -254,6 +275,12 @@ bool loadKrzInstrument(const juce::File& file, FileInstrument& instrument, juce:
             zone.velocityHigh = 127;
             zone.sampleIndex = (int) index;
             zone.rootKey = sourceInfo[index].rootKey;
+            zone.start = 0;
+            zone.end = instrument.sources[index].frameCount;
+            zone.looping = instrument.sources[index].looping;
+            zone.loopStart = instrument.sources[index].loopStart;
+            zone.loopEnd = instrument.sources[index].loopEnd;
+            zone.attenuationDb = -(double) sourceInfo[index].volumeHalfDb / 2.0;
             built.zones.push_back(zone);
             instrument.programs.push_back(std::move(built));
         }

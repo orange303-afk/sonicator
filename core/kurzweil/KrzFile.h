@@ -57,6 +57,9 @@ struct Bank
     std::vector<Program> programs;
     // Signed 16-bit words of every available part, in order, native-endian.
     std::vector<juce::int16> pcm;
+    // Every header's start word, sorted: decoding a looped sample needs the next span's start and
+    // a linear scan per header would be quadratic on a pathological bank.
+    std::vector<int64_t> spanStarts;
     juce::StringArray warnings;
     juce::String missingPart;   // file name of the next part that is not present, empty when complete
     bool hasPcm() const { return ! pcm.empty(); }

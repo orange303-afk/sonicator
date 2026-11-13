@@ -36,6 +36,7 @@ struct KeymapSpec
     int method = 0x03;
     int entrySize = 3;
     int defaultSampleId = 0;
+    int slotCount = 128;   // entries stored per level (the format allows fewer than 128)
     // Index 0 is MIDI note 12 (C0); notes below 12 cannot be mapped.
     std::array<std::vector<EntrySpec>, 8> levels;
 };
@@ -49,12 +50,24 @@ struct ProgramSpec
     juce::String name = "Program";
     std::vector<LayerSpec> layers { LayerSpec {} };
 };
+// An object the reader does not parse (effects, tables, setups). `forcedNameOfs` forges a name
+// offset so a bounds check can be exercised.
+struct RawObject
+{
+    int type = 24;
+    int id = 0;
+    juce::String name = "Raw";
+    std::vector<std::byte> body;
+    int forcedNameOfs = -1;
+};
 struct BankSpec
 {
     std::vector<SampleSpec> samples;
     std::vector<KeymapSpec> keymaps;
     std::vector<ProgramSpec> programs;
+    std::vector<RawObject> raw;
     std::vector<int16_t> pcm;
+    bool packObjects = false;   // put every object in one block, as older banks and factory files do
 };
 
 namespace detail {
@@ -77,14 +90,14 @@ inline void ascii(std::vector<std::byte>& b, const juce::String& s)
 // The object framing: hash, body size, name offset, name, pad. Body size is measured from the size
 // field, so the next object starts at objectStart + 6 + bodySize.
 inline void objectHeader(std::vector<std::byte>& out, int type, int id, const juce::String& name,
-                         const std::vector<std::byte>& body)
+                         const std::vector<std::byte>& body, int forcedNameOfs = -1)
 {
     const int nameLength = name.length();
     // Content starts right after the block length: hash, body size, name offset, name, pad, body.
     const int bodyOffset = nameLength % 2 == 0 ? 8 + nameLength : 7 + nameLength;
     u16(out, (type << 10) | (id & 0x3ff));
     u16(out, bodyOffset + (int) body.size());
-    u16(out, bodyOffset - 4);
+    u16(out, forcedNameOfs >= 0 ? forcedNameOfs : bodyOffset - 4);
     ascii(out, name);
     u8(out, 0);
     while ((int) out.size() < bodyOffset) u8(out, 0);
@@ -151,13 +164,14 @@ inline std::vector<std::byte> encodeEntry(int method, int entrySize, const Entry
 inline std::vector<std::byte> keymapBody(const KeymapSpec& k)
 {
     const int entrySize = k.entrySize > 0 ? k.entrySize : 3;
-    const int perLevel = 128 * entrySize;
+    const int slots = juce::jlimit(1, 128, k.slotCount);
+    const int perLevel = slots * entrySize;
     std::vector<std::byte> body;
     u16(body, k.defaultSampleId);
     u16(body, k.method);
     u16(body, 0);
     u16(body, 100);
-    u16(body, 127);
+    u16(body, slots - 1);
     u16(body, entrySize);
     for (int level = 0; level < 8; ++level)
     {
@@ -167,7 +181,7 @@ inline std::vector<std::byte> keymapBody(const KeymapSpec& k)
     for (int level = 0; level < 8; ++level)
     {
         const auto& entries = k.levels[(size_t) level];
-        for (int slot = 0; slot < 128; ++slot)
+        for (int slot = 0; slot < slots; ++slot)
         {
             EntrySpec e;
             if (slot < (int) entries.size()) e = entries[(size_t) slot];
@@ -218,24 +232,45 @@ inline void appendBlock(std::vector<std::byte>& file, const std::vector<std::byt
 inline std::vector<std::byte> makeBank(const BankSpec& spec)
 {
     using namespace detail;
-    std::vector<std::byte> objects;
+    std::vector<std::vector<std::byte>> contents;
     for (const auto& s : spec.samples)
     {
         std::vector<std::byte> body;
         objectHeader(body, 38, s.id, s.name, sampleBody(s));
-        appendBlock(objects, body);
+        contents.push_back(std::move(body));
     }
     for (const auto& k : spec.keymaps)
     {
         std::vector<std::byte> body;
         objectHeader(body, 37, k.id, k.name, keymapBody(k));
-        appendBlock(objects, body);
+        contents.push_back(std::move(body));
     }
     for (const auto& p : spec.programs)
     {
         std::vector<std::byte> body;
         objectHeader(body, 36, p.id, p.name, programBody(p));
-        appendBlock(objects, body);
+        contents.push_back(std::move(body));
+    }
+    for (const auto& r : spec.raw)
+    {
+        std::vector<std::byte> body;
+        objectHeader(body, r.type, r.id, r.name, r.body, r.forcedNameOfs);
+        contents.push_back(std::move(body));
+    }
+    std::vector<std::byte> objects;
+    if (spec.packObjects)
+    {
+        std::vector<std::byte> block;
+        for (const auto& content : contents)
+        {
+            block.insert(block.end(), content.begin(), content.end());
+            if (block.size() % 2 != 0) u8(block, 0);   // objects are word-aligned inside a block
+        }
+        appendBlock(objects, block);
+    }
+    else
+    {
+        for (const auto& content : contents) appendBlock(objects, content);
     }
     std::vector<std::byte> file;
     ascii(file, "PRAM");

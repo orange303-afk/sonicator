@@ -6,6 +6,9 @@
 namespace sonicator::krz {
 namespace {
 constexpr int64_t maxFileSize = 256LL * 1024 * 1024;
+// All parts together: 64M words = 128 MB of sample data. Beyond that a bank is refused instead of
+// being copied into memory and decoded again per source.
+constexpr int64_t maxPcmWords = 64LL * 1024 * 1024;
 constexpr int64_t objectSectionStart = 0x20;
 constexpr int64_t continuationPcmStart = 0x24;
 
@@ -54,7 +57,8 @@ bool rdSigned32(const Bytes& data, int64_t at, int32_t& value)
 juce::String readName(const Bytes& data, int64_t from, int64_t to)
 {
     juce::String name;
-    for (auto at = from; at < to; ++at)
+    to = std::min(to, (int64_t) data.size());
+    for (auto at = std::max<int64_t>(0, from); at < to; ++at)
     {
         const auto c = std::to_integer<int>(data[(size_t) at]);
         if (c == 0) break;
@@ -70,31 +74,32 @@ struct ObjectView
     int64_t body = 0, bodyEnd = 0;
 };
 
-// Walks one block from `start` to `end`, calling `visit` for every object. A malformed object ends
-// the walk with an error instead of reading outside the block.
+// Walks one block from `start` to `end`, calling `visit` for every object. The block opens with a
+// negative length; the first object follows it and later objects follow each other, word-aligned.
+// A malformed object ends the walk with an error instead of reading outside the block.
 bool walkBlock(const Bytes& data, int64_t start, int64_t end,
                const std::function<bool(const ObjectView&)>& visit, juce::String& error)
 {
-    int64_t at = start;
+    int64_t object = start + 4;
     int visited = 0;
-    while (at + 10 <= end)
+    while (object + 6 <= end)
     {
         int hash = 0, bodySize = 0, nameOfs = 0;
-        if (! rd16(data, at + 4, hash) || ! rd16(data, at + 6, bodySize) || ! rd16(data, at + 8, nameOfs))
+        if (! rd16(data, object, hash) || ! rd16(data, object + 2, bodySize)
+            || ! rd16(data, object + 4, nameOfs))
         {
             error = "Object header is truncated";
             return false;
         }
-        // The object starts at the hash (block start + 4); the body size is measured from there.
-        const int64_t body = at + 8 + nameOfs;
-        // The stored size runs from the hash to the end of the body; the block bounds it.
-        const int64_t bodyEnd = std::min(end, at + 4 + (int64_t) bodySize);
+        // The stored size runs from the object start to the end of its body.
+        const int64_t bodyEnd = std::min(end, object + (int64_t) bodySize);
         const int type = hash >> 10;
         const bool parsed = type == 36 || type == 37 || type == 38;
-        // Unknown object kinds (effects, tables) do not always follow the name-offset convention;
-        // they are skipped by their size, so only their extent has to be inside the block.
-        if (bodyEnd < at + 6 || at + 4 + (int64_t) bodySize > end + 8
-            || (parsed && (body < at + 10 || body > bodyEnd)))
+        // The name offset only means something for the objects this reader parses; for the rest it
+        // is clamped, so a forged value can never walk outside the block.
+        const int64_t body = std::min(bodyEnd, object + 4 + (int64_t) nameOfs);
+        if (object + (int64_t) bodySize > end + 2
+            || (parsed && (body < object + 6 || body > bodyEnd)))
         {
             // Trailing bytes after the objects this reader understands are common in effect banks.
             if (visited > 0) break;
@@ -104,19 +109,18 @@ bool walkBlock(const Bytes& data, int64_t start, int64_t end,
         ObjectView view;
         view.type = type;
         view.id = hash & 0x3ff;
-        view.name = readName(data, at + 10, body);
+        view.name = readName(data, object + 6, body);
         view.body = body;
         view.bodyEnd = bodyEnd;
         if (! visit(view)) return false;
         ++visited;
-        int64_t next = at + 6 + (int64_t) bodySize;
+        int64_t next = bodyEnd;
         if (next % 2 != 0) ++next;
-        if (next <= at) { error = "Object size does not advance"; return false; }
-        at = next;
+        if (next <= object) { error = "Object size does not advance"; return false; }
+        object = next;
     }
     return true;
 }
-
 int tuneWidth(int method)
 {
     if ((method & 0x10) != 0) return 2;
@@ -190,10 +194,16 @@ bool parseKeymap(const Bytes& data, const ObjectView& view, Bank& bank, juce::St
         error = "Keymap header is truncated";
         return false;
     }
-    if (entrySize < 1 || entrySize > 8)
+    const int requiredSize = tuneWidth(method) + (hasVolume(method) ? 1 : 0)
+                             + (hasSampleId(method) ? 2 : 0) + 1;
+    if (entrySize < requiredSize || entrySize > 8)
     {
-        error = "Keymap entry size " + juce::String(entrySize) + " is not supported";
-        return false;
+        // A stride too small for the method's fields would read the next entry's bytes; the keymap
+        // is dropped instead of guessing.
+        bank.warnings.add("Keymap " + juce::String(view.id) + " is skipped: entry size "
+                          + juce::String(entrySize) + " cannot hold method 0x"
+                          + juce::String::toHexString(method));
+        return true;
     }
     const int entries = std::clamp(entriesMinusOne + 1, 1, 128);
     Keymap keymap;
@@ -204,6 +214,7 @@ bool parseKeymap(const Bytes& data, const ObjectView& view, Bank& bank, juce::St
     const int tune = tuneWidth(method);
     for (int level = 0; level < 8; ++level)
     {
+        KeymapEntry lastEntry;
         int offset = 0;
         if (! rd16(data, view.body + 12 + 2 * level, offset))
         {
@@ -241,7 +252,12 @@ bool parseKeymap(const Bytes& data, const ObjectView& view, Bank& bank, juce::St
             else entry.subSample = 1;
             if (entry.sampleId == 0) entry.sampleId = defaultId;
             keymap.levels[(size_t) level][(size_t) note] = entry;
+            lastEntry = entry;
         }
+        // A keymap with fewer than 128 entries lets its last entry cover the rest of the keyboard.
+        if (entries < 128 && lastEntry.sampleId > 0)
+            for (int note = std::max(12, entries + 12); note < 128; ++note)
+                keymap.levels[(size_t) level][(size_t) note] = lastEntry;
     }
     bank.keymaps.push_back(std::move(keymap));
     return true;
@@ -389,8 +405,17 @@ bool readBank(const juce::File& file, Bank& bank, juce::String& error)
     if (! file.existsAsFile()) { error = "File is missing"; return false; }
     const auto first = firstPartOf(file);
     Bytes data;
-    if (! readWholeFile(first, data, error)) return false;
+    if (! readWholeFile(first, data, error))
+    {
+        if (first != file) error = first.getFileName() + " is missing";
+        return false;
+    }
     bank.magic = juce::String((const char*) data.data(), 4);
+    if (data.size() < 32)
+    {
+        error = "File is shorter than a Kurzweil bank header";
+        return false;
+    }
     if (bank.magic != "PRAM" && bank.magic != "SROM")
     {
         error = "Not a Kurzweil K2000/K2500/K2600 bank";
@@ -446,6 +471,11 @@ bool readBank(const juce::File& file, Bank& bank, juce::String& error)
     }
 
     // Every present part contributes its sample data; a continuation part starts at 0x24.
+    if ((int64_t) data.size() - (int64_t) pcmStart > maxPcmWords * 2)
+    {
+        error = "Bank sample data is larger than 128 MB";
+        return false;
+    }
     if (! readPcm(data, (int64_t) pcmStart, bank.pcm, error)) return false;
     int lastPart = 1;
     for (int number = 2; number < 100; ++number)
@@ -459,13 +489,31 @@ bool readBank(const juce::File& file, Bank& bank, juce::String& error)
             bank.warnings.add(next.getFileName() + ": " + tailError);
             break;
         }
+        const juce::String tailMagic = tail.size() >= 32
+            ? juce::String((const char*) tail.data(), 4) : juce::String();
+        if (tailMagic != "PRAM" && tailMagic != "SROM")
+        {
+            bank.warnings.add(next.getFileName() + ": not a Kurzweil part");
+            break;
+        }
+        if ((int64_t) bank.pcm.size() + ((int64_t) tail.size() - continuationPcmStart) / 2 > maxPcmWords)
+        {
+            bank.warnings.add("Sample data stops at 128 MB; later parts are ignored");
+            break;
+        }
         if (! readPcm(tail, continuationPcmStart, bank.pcm, error))
         {
             bank.warnings.add(next.getFileName() + ": " + error);
+            error.clear();
             break;
         }
         lastPart = number;
     }
+    bank.spanStarts.clear();
+    for (const auto& sample : bank.samples)
+        for (const auto& header : sample.headers)
+            if (header.ramBased) bank.spanStarts.push_back(header.startWord);
+    std::sort(bank.spanStarts.begin(), bank.spanStarts.end());
     // A span that reaches past the collected data means a part is missing.
     int64_t highestEnd = -1;
     for (const auto& sample : bank.samples)
@@ -505,10 +553,11 @@ bool decodeHeader(const Bank& bank, const SampleObject& sample, int headerIndex,
     // audio ends where the next span begins (or where the sample data ends).
     int64_t audioEnd = header.looping ? (int64_t) bank.pcm.size() - 1 : header.endWord;
     if (header.looping)
-        for (const auto& object : bank.samples)
-            for (const auto& other : object.headers)
-                if (other.startWord > header.startWord && other.startWord - 1 < audioEnd)
-                    audioEnd = std::min(audioEnd, other.startWord - 1);
+    {
+        const auto next = std::upper_bound(bank.spanStarts.begin(), bank.spanStarts.end(),
+                                           header.startWord);
+        if (next != bank.spanStarts.end()) audioEnd = std::min(audioEnd, *next - 1);
+    }
     if (header.startWord < 0 || header.endWord < header.startWord
         || header.startWord >= (int64_t) bank.pcm.size()
         || header.endWord >= (int64_t) bank.pcm.size()
