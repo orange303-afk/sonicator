@@ -30,7 +30,8 @@ TEST_CASE("Every Kurzweil bank in the local corpus opens and decodes", "[.krz-co
     const auto files = bankFiles(root);
     REQUIRE(files.size() > 100);
     int banks = 0, withoutPcm = 0, sets = 0, samples = 0, rejected = 0, explained = 0;
-    int defectiveRate = 0;
+    int defectiveRate = 0, playable = 0;
+    juce::StringArray unplayable;
     juce::StringArray problems;
     std::map<int, int> rates;
     for (const auto& file : files)
@@ -48,6 +49,11 @@ TEST_CASE("Every Kurzweil bank in the local corpus opens and decodes", "[.krz-co
         ++banks;
         if (! bank.missingPart.isEmpty()) ++explained;
         if (! bank.hasPcm()) { ++withoutPcm; continue; }
+        sonicator::FileInstrument instrument;
+        juce::String loadError;
+        if (sonicator::loadKrzInstrument(file, instrument, loadError)) ++playable;
+        else if (! loadError.startsWith("This bank uses the K2000 factory ROM samples")) unplayable.add(file.getFileName() + ": " + loadError);
+        else ++explained;
         for (const auto& sample : bank.samples)
         {
             for (int header = 0; header < (int) sample.headers.size(); ++header)
@@ -75,8 +81,11 @@ TEST_CASE("Every Kurzweil bank in the local corpus opens and decodes", "[.krz-co
                   << ", sets " << sets << ", samples " << samples << ", rejected " << rejected
                   << ", explained " << explained);
     INFO(problems.joinIntoString("\n"));
+    INFO("playable banks " << playable << "; unplayable: " << unplayable.joinIntoString("\n"));
     CHECK(rejected == 0);
     CHECK(problems.isEmpty());
+    CHECK(unplayable.isEmpty());
+    CHECK(playable > 150);
 }
 
 TEST_CASE("Official Kurzweil archives open or explain why not", "[.krz-factory]")
