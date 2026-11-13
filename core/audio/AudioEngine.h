@@ -98,6 +98,8 @@ public:
     // Legacy tracker modules: the whole song and its individual source samples are separate
     // capabilities of one document. Selecting a sample stops the song but keeps its position.
     bool isTrackerMode() const { return trackerMode; }
+    // A standalone XI instrument has a source but no whole-song renderer.
+    bool trackerHasSong() const;
     bool isTrackerSampleSelected() const { return trackerSampleChosen; }
     const TrackerDocumentInfo& trackerInfo() const;
     const std::vector<TrackerSampleSlot>& trackerSlots() const;

@@ -96,7 +96,8 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/ableton/AbletonPacks.cpp
     core/sampler/FileInstrument.cpp core/sampler/ExternalKitSampler.cpp
     core/tracker/TrackerFormats.cpp core/tracker/TrackerModReader.cpp core/tracker/TrackerXmReader.cpp
-    core/tracker/TrackerS3mReader.cpp core/tracker/TrackerDocument.cpp core/tracker/TrackerSongRenderer.cpp
+    core/tracker/TrackerS3mReader.cpp core/tracker/TrackerXiReader.cpp
+    core/tracker/TrackerDocument.cpp core/tracker/TrackerSongRenderer.cpp
     core/audio/SampleVoicePlayer.cpp
     core/audio/StereoPair.cpp
     core/legacy/LegacyFormatProbe.cpp

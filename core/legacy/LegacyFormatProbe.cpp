@@ -5,6 +5,24 @@ namespace sonicator {
 namespace {
 constexpr int probeBytes = 64 * 1024;
 
+bool probeXi(const std::vector<uint8_t>& head, int64_t fileSize, LegacyFormatProbe& out)
+{
+    if (head.size() < 338 || std::memcmp(head.data(), "Extended Instrument: ", 21) != 0
+        || head[43] != 0x1A)
+        return false;
+    const int64_t length = (int64_t) ((uint32_t) head[298] | ((uint32_t) head[299] << 8)
+                         | ((uint32_t) head[300] << 16) | ((uint32_t) head[301] << 24));
+    if (length <= 0 || 338 + length > fileSize) return false;
+    out.format = TrackerFormat::xi;
+    out.variant = "XI";
+    out.channels = 0;
+    out.sampleSlots = 1;
+    const int type = head[312];
+    out.detail = "XI · 1 instrument · "
+               + juce::String(type & 0x10 ? length / 2 : length) + " frames";
+    return true;
+}
+
 bool probeXm(const std::vector<uint8_t>& head, LegacyFormatProbe& out)
 {
     if (head.size() < 80 || std::memcmp(head.data(), "Extended Module: ", 17) != 0) return false;
@@ -48,7 +66,7 @@ bool probeS3m(const std::vector<uint8_t>& head, int64_t fileSize, LegacyFormatPr
 
 bool isLegacyTrackerExtension(const juce::File& file)
 {
-    return file.hasFileExtension("mod;xm;s3m");
+    return file.hasFileExtension("mod;xm;s3m;xi");
 }
 
 LegacyFormatProbe probeLegacyTracker(const juce::File& file)
@@ -64,6 +82,13 @@ LegacyFormatProbe probeLegacyTracker(const juce::File& file)
     if (read <= 0) { out.error = "Cannot read the file header"; return out; }
     head.resize((size_t) read);
 
+    if (probeXi(head, size, out))
+    {
+        out.recognised = true;
+        out.songPlayback = false; // a standalone instrument, played as a source
+        out.sampleExtraction = true;
+        return out;
+    }
     if (probeXm(head, out) || probeS3m(head, size, out))
     {
         out.recognised = true;

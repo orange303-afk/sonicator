@@ -110,7 +110,7 @@ EmbeddedSampleSet::EmbeddedSampleSet() = default;
 EmbeddedSampleSet::~EmbeddedSampleSet() = default;
 bool isEmbeddedSampleSource(const juce::File& file)
 {
-    return file.hasFileExtension("mod;xm;s3m;sf2;krz;k25;k26");
+    return file.hasFileExtension("mod;xm;s3m;xi;sf2;krz;k25;k26");
 }
 bool isTrackerModuleSource(const juce::File& file)
 {
@@ -139,7 +139,7 @@ bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
         error = "File is missing";
         return false;
     }
-    if (file.hasFileExtension("mod;xm;s3m"))
+    if (file.hasFileExtension("mod;xm;s3m;xi"))
     {
         auto document = TrackerDocument::open(file, error);
         if (document == nullptr) return false;
@@ -152,7 +152,9 @@ bool EmbeddedSampleSet::open(const juce::File& file, juce::String& error)
         }
         kind = Kind::tracker;
         tracker = std::move(document);
-        firstNotes = firstNotesPerSample(file, (int) tracker->slots().size());
+        // An XI instrument has no song; its root key is the extraction reference instead.
+        if (tracker->info().format != TrackerFormat::xi)
+            firstNotes = firstNotesPerSample(file, (int) tracker->slots().size());
         return true;
     }
     if (file.hasFileExtension("sf2"))
@@ -266,8 +268,17 @@ std::optional<SamplerChunk> EmbeddedSampleSet::samplerChunk(int index) const
 }
 double EmbeddedSampleSet::playbackRatio(int index) const
 {
-    if (kind != Kind::tracker || index < 0 || index >= (int) firstNotes.size()
-        || firstNotes[(size_t) index] == 0)
+    if (kind != Kind::tracker || tracker == nullptr) return 1.0;
+    if (tracker->info().format == TrackerFormat::xi)
+    {
+        const auto& slots = tracker->slots();
+        if (index < 0 || index >= (int) slots.size()) return 1.0;
+        // The document rate is the note-60 rate; the root key gives the note whose playback rate
+        // is the 8363 Hz tracker reference used by extracted WAV files.
+        const double ratio = std::pow(2.0, ((double) slots[(size_t) index].rootKey - 60.0) / 12.0);
+        return juce::jlimit(1.0 / 16.0, 16.0, ratio);
+    }
+    if (index < 0 || index >= (int) firstNotes.size() || firstNotes[(size_t) index] == 0)
         return 1.0;
     const double ratio = std::pow(2.0, ((double) firstNotes[(size_t) index] - libxmpC4) / 12.0);
     return juce::jlimit(1.0 / 16.0, 16.0, ratio);

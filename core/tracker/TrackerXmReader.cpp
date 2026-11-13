@@ -175,6 +175,7 @@ bool parseXm(const std::vector<uint8_t>& bytes, TrackerDocumentData& out, juce::
         slot.encoding = sixteenBit ? TrackerPcmEncoding::deltaInt16LE : TrackerPcmEncoding::deltaInt8;
         slot.frames = sixteenBit ? sample.lengthBytes / 2 : sample.lengthBytes;
         slot.sampleRate = xmRate(sample.relativeNote, sample.finetune);
+        slot.rootKey = juce::jlimit(0, 127, 60 - sample.relativeNote);
         if (sample.pcmOffset == 0 && version <= 0x0103)
         {
             sample.pcmOffset = dataCursor;

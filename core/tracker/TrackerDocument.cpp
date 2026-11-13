@@ -75,7 +75,9 @@ std::unique_ptr<TrackerDocument> TrackerDocument::open(const juce::File& file, j
     if (! readWholeFile(file, maxBytes, bytes, error)) return nullptr;
     TrackerDocumentData data;
     bool parsed = false;
-    if (bytes.size() >= 17 && std::memcmp(bytes.data(), "Extended Module: ", 17) == 0)
+    if (bytes.size() >= 21 && std::memcmp(bytes.data(), "Extended Instrument: ", 21) == 0)
+        parsed = parseXi(bytes, data, error);
+    else if (bytes.size() >= 17 && std::memcmp(bytes.data(), "Extended Module: ", 17) == 0)
         parsed = parseXm(bytes, data, error);
     else if (bytes.size() >= 48 && std::memcmp(bytes.data() + 44, "SCRM", 4) == 0)
         parsed = parseS3m(bytes, data, error);

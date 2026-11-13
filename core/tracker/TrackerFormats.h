@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 namespace sonicator {
-enum class TrackerFormat { mod, xm, s3m };
+enum class TrackerFormat { mod, xm, s3m, xi };
 juce::String trackerFormatName(TrackerFormat);
 
 // How one decoded source is stored inside the container. The encoding decides both the numeric
@@ -26,6 +26,7 @@ struct TrackerSampleSlot
     int channels = 1;
     int bitsPerSample = 8;
     int sampleRate = 0;                 // rate at MIDI note 60; the source has no other "true" rate
+    int rootKey = 60;                   // MIDI note that plays the 8363 Hz reference rate
     int64_t loopStart = 0;              // frames
     int64_t loopEnd = 0;                // frames, exclusive
     bool looping = false, pingPong = false;

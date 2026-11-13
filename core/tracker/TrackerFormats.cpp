@@ -8,6 +8,7 @@ juce::String trackerFormatName(TrackerFormat format)
         case TrackerFormat::mod: return "MOD";
         case TrackerFormat::xm: return "XM";
         case TrackerFormat::s3m: return "S3M";
+        case TrackerFormat::xi: return "XI";
     }
     return {};
 }

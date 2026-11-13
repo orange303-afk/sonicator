@@ -28,10 +28,14 @@ void PreviewPanel::paintListBoxItem(int row, juce::Graphics& g, int width, int h
         : (row == 0 ? juce::String("Head") : sampleBox.getItemText(row - 1));
     bool unavailable = ! tracker && row > 0 && row <= (int) instrumentSamples.size()
         && ! instrumentSamples[(size_t) row - 1].isPlayable();
-    if (tracker && row > 0 && row <= (int) engine.trackerSlots().size())
+    if (tracker)
     {
-        const auto& slot = engine.trackerSlots()[(size_t) row - 1];
-        unavailable = slot.fmInstrument || slot.error.isNotEmpty();
+        const int slotIndex = trackerBox.getItemId(row) - 2;
+        if (slotIndex >= 0 && slotIndex < (int) engine.trackerSlots().size())
+        {
+            const auto& slot = engine.trackerSlots()[(size_t) slotIndex];
+            unavailable = slot.fmInstrument || slot.error.isNotEmpty();
+        }
     }
     g.setColour(unavailable ? juce::Colour(0xffe05a5a) : theme::text);
     g.setFont(juce::FontOptions(tracker ? juce::Font::getDefaultMonospacedFontName() : juce::Font::getDefaultSansSerifFontName(),
@@ -44,8 +48,9 @@ void PreviewPanel::selectedRowsChanged(int row)
     if (engine.isReasonMode()) { applyReasonReference(row,true); return; }
     if (engine.isTrackerMode())
     {
-        if (row == 0) applyTrackerWholeSong(true);
-        else applyTrackerSample(trackerBox.getItemId(row) - 2, true);
+        const int itemId = trackerBox.getItemId(row);
+        if (itemId == 1) applyTrackerWholeSong(true);
+        else applyTrackerSample(itemId - 2, true);
     }
     else if (row == 0)
     {
@@ -288,15 +293,26 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
         rexInfo.setVisible(false);
         trackerBox.setVisible(true);
         fillTrackerChoices();
-        sampleDragButton.setVisible(false);
-        waveform.setFile(juce::File()); // no song overview yet; never show the first sample instead
-        waveform.setVisible(false);
-        songProgress.setLength(engine.length());
-        songProgress.setPosition(engine.position());
-        songProgress.setVisible(true);
-        filename.setText(file.getFileName() + "  —  " + engine.trackerSongTitle(),
-                         juce::dontSendNotification);
-        selectionStatus.setText(trackerSummary(), juce::dontSendNotification);
+        if (! engine.trackerHasSong() && engine.isTrackerSampleSelected())
+        {
+            // A standalone XI has no song overview: show its one source exactly like a selected
+            // tracker sample.
+            filename.setText(file.getFileName() + "  —  " + engine.trackerInfo().formatName,
+                             juce::dontSendNotification);
+            applyTrackerSample(engine.selectedTrackerSampleId(), false);
+        }
+        else
+        {
+            sampleDragButton.setVisible(false);
+            waveform.setFile(juce::File()); // no song overview yet; never show the first sample instead
+            waveform.setVisible(false);
+            songProgress.setLength(engine.length());
+            songProgress.setPosition(engine.position());
+            songProgress.setVisible(true);
+            filename.setText(file.getFileName() + "  —  " + engine.trackerSongTitle(),
+                             juce::dontSendNotification);
+            selectionStatus.setText(trackerSummary(), juce::dontSendNotification);
+        }
     }
     else if (instrument)
     {
@@ -530,7 +546,7 @@ juce::String PreviewPanel::instrumentSampleStem() const
 void PreviewPanel::fillTrackerChoices()
 {
     trackerBox.clear(juce::dontSendNotification);
-    trackerBox.addItem("Whole song", 1);
+    if (engine.trackerHasSong()) trackerBox.addItem("Whole song", 1);
     for (const auto& slot : engine.trackerSlots())
     {
         const auto label = slot.displayText.isNotEmpty() ? slot.displayText : juce::String(" ");

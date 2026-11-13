@@ -50,6 +50,8 @@ one stage, comparable to NKI. **Recommended next format.**
 
 ### 2. XI + the remaining tracker family — 2 700 files of PCM
 
+*Status 2026-11-13: XI implemented — see `docs/XI.md` (2 615/2 621 open).*
+
 FastTracker II `.xi` carries one instrument with keymap, loop and 8/16-bit PCM. The project has
 its own MOD/XM/S3M readers, so `.xi` needs a fourth reader but shares `TrackerDocument`,
 `TrackerSongRenderer` (libxmp renders modules only, XI is a standalone instrument and would play

@@ -467,6 +467,28 @@ bool AudioEngine::previewTracker(const juce::File& file)
         attachRender();
         return false;
     }
+    // XI is a single instrument, not a module: libxmp has no song to render, so it enters the
+    // same tracker document/sample path with its one source selected.
+    if (document->info().format == TrackerFormat::xi)
+    {
+        trackerDocument = std::move(document);
+        trackerMode = true;
+        trackerSampleChosen = false;
+        trackerSampleIdValue = invalidSampleId;
+        output.trackerSongMode = false;
+        output.trackerSampleMidi = false;
+        ++trackerGenerationValue;
+        loadedFile = file;
+        lastError.clear();
+        if (! selectTrackerSample(0))
+        {
+            if (lastError.isEmpty()) lastError = "The XI instrument has no playable sample";
+            attachRender();
+            return false;
+        }
+        attachRender();
+        return true;
+    }
     if (! trackerSong.load(file, deviceSampleRate(), error))
     {
         lastError = error.isNotEmpty() ? error : "Cannot start the tracker player";
@@ -491,6 +513,12 @@ const TrackerDocumentInfo& AudioEngine::trackerInfo() const
 {
     static const TrackerDocumentInfo empty;
     return trackerDocument != nullptr ? trackerDocument->info() : empty;
+}
+
+bool AudioEngine::trackerHasSong() const
+{
+    return trackerMode && trackerDocument != nullptr
+        && trackerDocument->info().format != TrackerFormat::xi;
 }
 
 const std::vector<TrackerSampleSlot>& AudioEngine::trackerSlots() const
@@ -538,7 +566,13 @@ bool AudioEngine::selectTrackerSample(SampleId id)
 }
 
 bool AudioEngine::selectTrackerWholeSong()
-{    if (! trackerMode) { lastError = "No tracker module is loaded"; return false; }
+{
+    if (! trackerMode) { lastError = "No tracker module is loaded"; return false; }
+    if (! trackerHasSong())
+    {
+        lastError = "An XI file contains one instrument, not a song";
+        return false;
+    }
     trackerSampleChosen = false;
     trackerSampleIdValue = invalidSampleId;
     trackerSample.reset();

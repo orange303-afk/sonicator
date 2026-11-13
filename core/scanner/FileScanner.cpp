@@ -8,7 +8,7 @@ bool FileScanner::isMetadataOnlyFormat(const juce::File& f)
 {
     // Tracker modules are indexed by identity and header metadata; their PCM is decoded only
     // when the module is opened, never during a library scan.
-    return f.hasFileExtension("rx2;sf2;exs;nki;sfz;mod;xm;s3m;iso;img;bin;cue;mdx;repatch;krz;k25;k26");
+    return f.hasFileExtension("rx2;sf2;exs;nki;sfz;mod;xm;s3m;xi;iso;img;bin;cue;mdx;repatch;krz;k25;k26");
 }
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {

@@ -69,6 +69,7 @@ must keep those notices next to the binary.
 | [SFZ format reference](https://sfzformat.com/opcodes/) | SFZ opcode names, value ranges and loop-mode semantics recorded in `docs/SFZ.md`; the reader in `core/sfz/` is an independent implementation, no code copied | Public format documentation |
 | Creative VOC.TXT (reproduced in the libsndfile documentation) | Creative Voice File header, block types, block 8/9 layouts and compression numbers recorded in `docs/VOC.md`; the decoder in `core/voc/` is an independent implementation, no code copied | Public format documentation |
 | [FFmpeg `libavcodec/adpcm.c`](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/adpcm.c) | Reference for the Sound Blaster Pro ADPCM predictor/step rule (`adpcm_sbpro_expand_nibble`); the decoder in `core/voc/` was written independently from that description and is tested with hand-computed vectors, no code copied | LGPL-2.1-or-later (reference only) |
+| FastTracker II XI instrument layout (XI.TXT / ModdingWiki) | Header offsets, 40-byte sample header and delta PCM encoding recorded in `docs/XI.md`; the reader in `core/tracker/` is an independent implementation, no code copied | Public format documentation |
 
 No other source code was copied into this repository. Format specifications and public documentation were
 used as references; they are not redistributed.
