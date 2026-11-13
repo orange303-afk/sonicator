@@ -118,6 +118,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/indexing/CatalogFileSync.cpp
     core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp
     core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
+    core/smart/TapTempo.cpp
     core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC

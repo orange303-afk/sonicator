@@ -114,3 +114,16 @@ std::optional<NoteName> parseNoteName(const juce::String& token)
     return note;
 }
 } // namespace sonicator
+
+namespace sonicator {
+int rootMidiFromKey(const juce::String& key)
+{
+    const auto name = key.upToFirstOccurrenceOf(" ", false, true).trim();
+    if (name.isEmpty()) return -1;
+    static const char* const names[] { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    static const char* const flats[] { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
+    for (int i = 0; i < 12; ++i)
+        if (name == names[i] || name == flats[i]) return 60 + i;
+    return -1;
+}
+}

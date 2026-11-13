@@ -31,4 +31,7 @@ struct NoteName
 };
 // Parses a complete note token with an octave, e.g. C4, F#3, Bb2. Returns nullopt for words.
 std::optional<NoteName> parseNoteName(const juce::String& token);
+// Root note for a displayed key name (C4 = 60). Accepts "C", "C#", "Bb", "A minor"; -1 when the
+// name does not start with a note.
+int rootMidiFromKey(const juce::String& key);
 } // namespace sonicator
