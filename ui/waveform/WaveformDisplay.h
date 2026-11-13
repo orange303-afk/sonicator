@@ -3,6 +3,7 @@
 #include <vector>
 #include "WaveformSelection.h"
 #include "WaveformView.h"
+#include "core/sampler/SamplerTypes.h"
 namespace sonicator {
 class WaveformDisplay final : public juce::Component, private juce::ChangeListener
 {
@@ -14,6 +15,9 @@ public:
     // reduced to min/max peaks here. The caller keeps ownership of the samples.
     void setPeaks(const std::vector<float>& samples, int sampleRate,
                   const std::vector<int64_t>& sliceStarts);
+    // Shows edited PCM instead of the file thumbnail; `sliceStarts` is in frames.
+    void setEditedAudio(SampleAudioPtr, const std::vector<int64_t>& sliceStarts = {});
+    void clearEditedAudio();
     void setActiveSlices(std::vector<int> indices);
     void setPosition(double p) { position = p; repaint(); }
     void setSelection(selection::Range);
@@ -34,7 +38,12 @@ public:
     void setSampleRateForZoom(int rate) { zoomSampleRate = rate; }
     int sampleRate() const { return zoomSampleRate; }
     void mouseMagnify(const juce::MouseEvent&, float scaleFactor) override;
-    double totalLength() const { return customLength > 0 ? customLength : thumbnail.getTotalLength(); }
+    double totalLength() const
+    {
+        if (editedAudio != nullptr && editedAudio->sampleRate > 0)
+            return (double) editedAudio->frames / (double) editedAudio->sampleRate;
+        return customLength > 0 ? customLength : thumbnail.getTotalLength();
+    }
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
@@ -46,12 +55,20 @@ public:
     std::function<void(selection::Range)> onSelectionChanged;
     std::function<void(selection::Range)> onSelectionChanging;
     std::function<void()> onExternalDragRequested;
+    // Screen position of a right-click; the owner builds and shows the menu.
+    std::function<void(juce::Point<int>)> onContextMenu;
 private:
     juce::File cacheFile;
     juce::AudioFormatManager formats;
     juce::AudioThumbnailCache cache { 64 };
     juce::AudioThumbnail thumbnail { 512, formats, cache };
     std::vector<float> peakMin, peakMax;
+    SampleAudioPtr editedAudio;
+    std::vector<int64_t> editedSlices;
+    struct PeakColumn { float minLeft = 0, maxLeft = 0, minRight = 0, maxRight = 0; };
+    std::vector<PeakColumn> columnCache;
+    waveview::View cachedView;
+    int cachedWidth = 0;
     std::vector<double> sliceTimes;
     std::vector<int> activeSlices;
     double customLength = 0;
@@ -78,6 +95,7 @@ private:
     bool isOverviewPoint(juce::Point<int>) const;
     double minimumSelectionLength() const;
     void updateCursorFor(double time);
+    void drawEditedPeaks(juce::Graphics&, juce::Rectangle<float> area, waveview::View);
     void changeListenerCallback(juce::ChangeBroadcaster*) override { repaint(); }
 };
 } // namespace sonicator

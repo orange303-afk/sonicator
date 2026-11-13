@@ -32,6 +32,7 @@ void WaveformDisplay::setFile(const juce::File& file)
 {
     position = 0;
     peakMin.clear(); peakMax.clear(); sliceTimes.clear(); activeSlices.clear(); customLength = 0;
+    editedAudio.reset(); editedSlices.clear(); columnCache.clear(); cachedWidth = 0;
     clearSelection();
     viewRange = {};
     if (file.existsAsFile()) thumbnail.setSource(new juce::FileInputSource(file,true));
@@ -46,6 +47,7 @@ void WaveformDisplay::setPeaks(const std::vector<float>& samples, int sampleRate
     viewRange = {};
     thumbnail.setSource(nullptr);
     peakMin.clear(); peakMax.clear(); sliceTimes.clear(); activeSlices.clear();
+    editedAudio.reset(); editedSlices.clear(); columnCache.clear(); cachedWidth = 0;
     customLength = sampleRate > 0 ? (double) samples.size() / sampleRate : 0;
     if (samples.empty() || customLength <= 0) { repaint(); return; }
     constexpr int bins = 2048;
@@ -68,6 +70,87 @@ void WaveformDisplay::setPeaks(const std::vector<float>& samples, int sampleRate
         sliceTimes.push_back((double) start / sampleRate);
     repaint();
 }
+void WaveformDisplay::setEditedAudio(SampleAudioPtr audio, const std::vector<int64_t>& sliceStarts)
+{
+    editedAudio = std::move(audio);
+    editedSlices = sliceStarts;
+    columnCache.clear(); cachedWidth = 0;
+    viewRange = {};
+    if (editedAudio != nullptr && editedAudio->sampleRate > 0)
+        setSampleRateForZoom(editedAudio->sampleRate);
+    repaint();
+}
+
+void WaveformDisplay::clearEditedAudio()
+{
+    editedAudio.reset();
+    editedSlices.clear();
+    columnCache.clear(); cachedWidth = 0;
+    repaint();
+}
+
+void WaveformDisplay::drawEditedPeaks(juce::Graphics& g, juce::Rectangle<float> area, waveview::View view)
+{
+    if (editedAudio == nullptr || ! view.valid() || editedAudio->frames <= 0) return;
+    const int width = juce::jmax(1, (int) area.getWidth());
+    if (cachedWidth != width || cachedView.start != view.start || cachedView.end != view.end)
+    {
+        columnCache.assign((size_t) width, {});
+        const auto frames = editedAudio->frames;
+        const auto rate = (double) editedAudio->sampleRate;
+        const bool stereo = editedAudio->channels > 1;
+        for (int x = 0; x < width; ++x)
+        {
+            const auto t0 = view.start + view.length() * (double) x / (double) width;
+            const auto t1 = view.start + view.length() * (double) (x + 1) / (double) width;
+            const auto first = juce::jlimit<int64_t>(0, frames - 1, (int64_t) std::floor(t0 * rate));
+            const auto last = juce::jlimit<int64_t>(first + 1, frames,
+                                                    (int64_t) std::ceil(t1 * rate));
+            auto& column = columnCache[(size_t) x];
+            column = {};
+            for (int64_t i = first; i < last; ++i)
+            {
+                const auto l = editedAudio->left[(size_t) i];
+                column.minLeft = juce::jmin(column.minLeft, l);
+                column.maxLeft = juce::jmax(column.maxLeft, l);
+                if (! stereo) continue;
+                const auto r = editedAudio->right[(size_t) i];
+                column.minRight = juce::jmin(column.minRight, r);
+                column.maxRight = juce::jmax(column.maxRight, r);
+            }
+        }
+        cachedView = view;
+        cachedWidth = width;
+    }
+    const bool stereo = editedAudio->channels > 1;
+    const auto laneHeight = area.getHeight() * (stereo ? 0.5f : 1.0f);
+    const auto laneTop = area.getY();
+    const auto leftCentre = stereo ? laneTop + laneHeight * 0.5f : area.getCentreY();
+    const auto rightCentre = laneTop + laneHeight * 1.5f;
+    const auto scale = laneHeight * 0.5f;
+    g.setColour(theme::accent);
+    for (int x = 0; x < (int) columnCache.size(); ++x)
+    {
+        const auto& column = columnCache[(size_t) x];
+        const auto px = area.getX() + (float) x;
+        g.drawVerticalLine((int) px, leftCentre - column.maxLeft * scale,
+                           leftCentre - column.minLeft * scale);
+        if (stereo)
+            g.drawVerticalLine((int) px, rightCentre - column.maxRight * scale,
+                               rightCentre - column.minRight * scale);
+    }
+    if (! editedSlices.empty() && editedAudio->sampleRate > 0)
+    {
+        g.setColour(theme::muted.withAlpha(0.55f));
+        for (const auto frame : editedSlices)
+        {
+            const auto x = waveview::xAtTime((double) frame / (double) editedAudio->sampleRate,
+                                             getWidth(), view);
+            g.drawVerticalLine((int) x, area.getY(), area.getBottom());
+        }
+    }
+}
+
 void WaveformDisplay::setActiveSlices(std::vector<int> indices)
 {
     if (indices == activeSlices) return;
@@ -198,7 +281,11 @@ void WaveformDisplay::paint(juce::Graphics& g)
     }
     const auto view = effectiveView();
     const auto area = getLocalBounds().reduced(6,10).toFloat();
-    if (! peakMin.empty())
+    if (editedAudio != nullptr)
+    {
+        drawEditedPeaks(g, area, view);
+    }
+    else if (! peakMin.empty())
     {
         const auto centre = area.getCentreY();
         const auto half = area.getHeight() * 0.5f;
@@ -267,6 +354,11 @@ void WaveformDisplay::paint(juce::Graphics& g)
 }
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu() || e.mods.isRightButtonDown())
+    {
+        if (onContextMenu) onContextMenu(e.getScreenPosition());
+        return;
+    }
     externalDragTriggered = false;
     selectionDragActive = false;
     pressInsideSelection = false;

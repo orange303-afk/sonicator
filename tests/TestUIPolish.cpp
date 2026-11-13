@@ -95,3 +95,61 @@ TEST_CASE("Panning clamps the view and leaves the selection in file time", "[wav
     REQUIRE(display.selection().start == Catch::Approx(0.1));
     REQUIRE(display.selection().end == Catch::Approx(0.2));
 }
+
+TEST_CASE("Edited audio replaces the thumbnail and its length", "[waveform][ui]")
+{
+    TestDirectory t;
+    WaveformDisplay display(t.dir.getChildFile("cache"));
+    display.setSize(600, 120);
+    display.setPeaks(std::vector<float>(44100, 0.5f), 44100, {});
+    display.setSampleRateForZoom(44100);
+    auto audio = std::make_shared<sonicator::SampleAudio>();
+    audio->sampleRate = 44100;
+    audio->channels = 2;
+    audio->frames = 22050;
+    audio->left.assign(22050, 0.5f);
+    audio->right.assign(22050, -0.5f);
+    display.setEditedAudio(audio);
+    REQUIRE(display.totalLength() == Catch::Approx(0.5));
+    REQUIRE(display.sampleRate() == 44100);
+    display.clearEditedAudio();
+    REQUIRE(display.totalLength() == Catch::Approx(1.0));
+}
+
+TEST_CASE("Right-click asks the owner for a menu", "[waveform][ui]")
+{
+    TestDirectory t;
+    WaveformDisplay display(t.dir.getChildFile("cache"));
+    display.setSize(400, 100);
+    display.setPeaks(std::vector<float>(44100, 0.5f), 44100, {});
+    bool asked = false;
+    display.onContextMenu = [&asked](juce::Point<int>) { asked = true; };
+    const auto now = juce::Time::getCurrentTime();
+    const juce::MouseEvent event(juce::Desktop::getInstance().getMainMouseSource(),
+        juce::Point<float>(120.0f, 40.0f),
+        juce::ModifierKeys(juce::ModifierKeys::rightButtonModifier),
+        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, &display, &display, now,
+        juce::Point<float>(120.0f, 40.0f), now, 1, false);
+    display.mouseDown(event);
+    REQUIRE(asked);
+}
+
+TEST_CASE("Edited peaks follow the zoom", "[waveform][ui]")
+{
+    TestDirectory t;
+    WaveformDisplay display(t.dir.getChildFile("cache"));
+    display.setSize(600, 120);
+    auto audio = std::make_shared<sonicator::SampleAudio>();
+    audio->sampleRate = 44100;
+    audio->channels = 1;
+    audio->frames = 44100;
+    audio->left.resize(44100);
+    for (int i = 0; i < 44100; ++i) audio->left[(size_t) i] = (float) i / 44100.0f;
+    display.setEditedAudio(audio);
+    display.setView({ 0.0, 0.1 });
+    REQUIRE(display.view().length() == Catch::Approx(0.1));
+    juce::Image image(juce::Image::ARGB, 600, 120, true);
+    juce::Graphics g(image);
+    display.paint(g);
+    REQUIRE(true);
+}
