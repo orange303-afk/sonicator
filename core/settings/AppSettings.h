@@ -38,6 +38,9 @@ struct AppSettings
     bool autoPreview = true;
     bool loopPreview = false;
     bool rexGate = true;
+    // Skips the Save / Normalize confirmation dialogs and replaces the original file directly.
+    // Formats without a writer still get a copy.
+    bool alwaysOverwriteOriginalFiles = false;
     bool contributeTrainingData = false;
     // Consent to the contribution text above. Sending needs both the toggle and this version:
     // an earlier build promised it sent nothing, so a stored `true` alone is not consent.

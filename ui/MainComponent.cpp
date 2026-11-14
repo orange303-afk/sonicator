@@ -25,6 +25,7 @@
 #include <iterator>
 #include <map>
 #include "core/indexing/CatalogFileSync.h"
+#include "core/edit/AudioEditWriter.h"
 #include "ui/library/TapTempoDialog.h"
 #include <thread>
 namespace sonicator {
@@ -488,6 +489,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         else if (smart && smart->progress().running) smart->cancel();
         else if (tagging && tagging->progress().running) tagging->cancel();
         else if (autoTag) autoTag->cancel();
+        else if (normalizer && normalizer->progress().running) normalizer->cancel();
     };
     settings.onClick = [this] { showSettings(); };
     tagFilter.onClick = [this] { showTagFilterMenu(); };
@@ -592,6 +594,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         autoTag = std::make_unique<AutoTagService>(*writeRepo);
         splitter = std::make_unique<SplitService>();
         extractor = std::make_unique<ExtractService>();
+        normalizer = std::make_unique<NormalizeService>();
         restoringSession = true;
         if (! appSettings.lastFolder.isEmpty()
             && juce::File(appSettings.lastFolder).isDirectory()
@@ -699,6 +702,7 @@ MainComponent::~MainComponent()
     }
     if (splitter) { splitter->cancel(); splitter->waitUntilFinished(-1); }
     if (extractor) { extractor->cancel(); extractor->waitUntilFinished(-1); }
+    if (normalizer) { normalizer->cancel(); normalizer->waitUntilFinished(-1); }
     if (contributionScheduler != nullptr)
     {
         contributionScheduler->stop();
@@ -711,6 +715,7 @@ MainComponent::~MainComponent()
     cancelFeatureV2 = true;
     if (featureV2Worker && featureV2Worker->joinable()) featureV2Worker->join();
     smart.reset(); indexer.reset(); tagging.reset(); autoTag.reset(); splitter.reset(); extractor.reset();
+    normalizer.reset();
     setLookAndFeel(nullptr);
 }
 bool MainComponent::contains(const std::vector<int64_t>& values, int64_t id)
@@ -1567,6 +1572,23 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
     // Enter opens the selected container wherever focus is; ordinary rows keep their normal
     // transport keys. This also drives the session-restored row without a mouse click.
     if (key.getKeyCode() == juce::KeyPress::returnKey && openSelectedDiscIfAny()) return true;
+    // ⇧⌘N belongs to the library context: it normalizes the selection, never the open waveform,
+    // and a text field keeps its own editing keys.
+    const auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    const bool previewFocused = focused != nullptr
+        && (focused == &preview || preview.isParentOf(focused));
+    const bool textInput = dynamic_cast<const juce::TextEditor*>(focused) != nullptr;
+    if (! previewFocused && ! textInput)
+        if (const auto* command = findEditCommand(EditAction::normalizeSelected);
+            command != nullptr && editCommandMatches(command->shortcut, key))
+        {
+            const auto selected = library.getSelectedSamples();
+            if (! selected.empty())
+            {
+                startNormalizeSelected(selected);
+                return true;
+            }
+        }
     return preview.keyPressed(key);
 }
 
@@ -2830,6 +2852,178 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
             }
         });
 }
+std::vector<SampleRecord> MainComponent::normalizeCandidates(
+    const std::vector<SampleRecord>& selection)
+{
+    std::vector<SampleRecord> records;
+    if (readRepo == nullptr) return records;
+    std::vector<IgnoredPath> ignoredPaths;
+    try { ignoredPaths = readRepo->ignoredPaths(); } catch (...) {}
+    for (const auto& record : selection)
+    {
+        const juce::File file(record.filePath);
+        if (! file.existsAsFile()) continue;
+        if (isPathIgnored(record.filePath, ignoredPaths)) continue;
+        if (normalizeSkipReason(file).isNotEmpty()) continue;
+        // The open editor owns a file with unsaved changes: rewriting it from the library would
+        // silently throw those edits away.
+        if (preview.hasUnsavedEditsFor(file)) continue;
+        records.push_back(record);
+    }
+    return records;
+}
+
+void MainComponent::startNormalizeSelected(const std::vector<SampleRecord>& selection)
+{
+    if (normalizer == nullptr) return;
+    if (isNormalizeRunning())
+    {
+        status.setText("Normalize is already running.", juce::dontSendNotification);
+        return;
+    }
+    const auto records = normalizeCandidates(selection);
+    if (records.empty())
+    {
+        status.setText("No selected file can be normalized.", juce::dontSendNotification);
+        return;
+    }
+    std::vector<juce::File> files;
+    std::map<juce::String, int64_t> sampleIds;
+    int overwritable = 0;
+    for (const auto& record : records)
+    {
+        const juce::File file(record.filePath);
+        files.push_back(file);
+        sampleIds[file.getFullPathName()] = record.id;
+        if (edit::canOverwriteInPlace(file)) ++overwritable;
+    }
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+    const auto begin = [safe, files, sampleIds](bool overwrite)
+    {
+        if (safe != nullptr) safe->beginNormalize(files, sampleIds, overwrite);
+    };
+    if (appSettings.alwaysOverwriteOriginalFiles)
+    {
+        // Settings -> Editing: no confirmation, the safe write path still replaces atomically and
+        // formats without a writer still get a copy.
+        begin(true);
+        return;
+    }
+    const auto count = juce::String((int) files.size());
+    juce::String message = count + (files.size() == 1 ? " file" : " files") + " to -0.1 dBFS.";
+    if (overwritable > 0)
+        message += " " + juce::String(overwritable)
+            + " can be replaced in place; the others are saved as \u201c edit\u201d copies.";
+    else
+        message += " None of these formats can be replaced in place; every result is a new copy.";
+    if (records.size() < selection.size())
+        message += " " + juce::String((int) (selection.size() - records.size()))
+            + " selected item(s) are skipped because they cannot be normalized here.";
+    const auto title = "Normalize " + count + (files.size() == 1 ? " file?" : " files?");
+    if (overwritable > 0)
+        dialogs::showAlert(*this, title, message,
+            { { "Overwrite originals", 1 }, { "Save copies", 2 }, { "Cancel", 0 } },
+            [begin](int id)
+            {
+                if (id == 1) begin(true);
+                else if (id == 2) begin(false);
+            });
+    else
+        dialogs::showAlert(*this, title, message,
+            { { "Save copies", 2 }, { "Cancel", 0 } },
+            [begin](int id) { if (id == 2) begin(false); });
+}
+
+void MainComponent::beginNormalize(const std::vector<juce::File>& files,
+                                   const std::map<juce::String, int64_t>& sampleIds,
+                                   bool overwriteOriginals)
+{
+    if (normalizer == nullptr || files.empty()) return;
+    NormalizeOptions options;
+    options.overwriteOriginals = overwriteOriginals;
+    if (! normalizer->start(files, options))
+    {
+        status.setText("Normalize could not start.", juce::dontSendNotification);
+        return;
+    }
+    normalizeSampleIds = sampleIds;
+    normalizeResults.clear();
+    normalizeWasRunning = true;
+    status.setText("Normalizing " + juce::String((int) files.size()) + " file(s) to -0.1 dBFS...",
+                   juce::dontSendNotification);
+}
+
+void MainComponent::finishNormalize()
+{
+    if (normalizer == nullptr) return;
+    const auto progress = normalizer->progress();
+    normalizeResults = normalizer->results();
+    juce::String text = (progress.cancelled ? "Normalize cancelled" : "Normalized")
+        + juce::String(" ") + juce::String(progress.normalized) + "/" + juce::String(progress.total)
+        + " file(s)";
+    if (progress.unchanged > 0) text += ", unchanged " + juce::String(progress.unchanged);
+    if (progress.skipped > 0) text += ", skipped " + juce::String(progress.skipped);
+    if (progress.failed > 0) text += ", failed " + juce::String(progress.failed);
+    juce::StringArray problems;
+    for (const auto& result : normalizeResults)
+        if (result.state == NormalizeFileState::failed || result.state == NormalizeFileState::skipped)
+            problems.add(result.source.getFileName() + ": " + result.error);
+    status.setText(text, juce::dontSendNotification);
+    status.setTooltip(problems.isEmpty() ? text : problems.joinIntoString("\n"));
+    // The open preview may be showing a file that was just rewritten; reload it so the waveform
+    // and the reader agree with the bytes on disk. Files with unsaved edits were skipped above.
+    for (const auto& result : normalizeResults)
+        if (result.replacedOriginal && preview.loadedFilePath() == result.destination)
+        {
+            preview.loadFile(result.destination, false);
+            break;
+        }
+    reloadLibrary();
+    syncNormalizedCatalog();
+}
+
+void MainComponent::syncNormalizedCatalog()
+{
+    auto* repo = writeRepo.get();
+    if (repo == nullptr || normalizeResults.empty()) return;
+    std::vector<NormalizeFileResult> written;
+    for (const auto& result : normalizeResults)
+        if (result.state == NormalizeFileState::normalized) written.push_back(result);
+    if (written.empty()) return;
+    if (catalogSyncWorker && catalogSyncWorker->joinable()) catalogSyncWorker->join();
+    const auto sampleIds = normalizeSampleIds;
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+    // Reanalysis reads the file again and can take seconds per row; it stays off the message
+    // thread. Tags, stars and manual values survive because the row is updated in place.
+    catalogSyncWorker = std::make_unique<std::thread>([repo, written, sampleIds, safe]()
+    {
+        int failures = 0;
+        for (const auto& result : written)
+        {
+            try
+            {
+                const auto found = sampleIds.find(result.source.getFullPathName());
+                const auto templateId = found != sampleIds.end() ? found->second : (int64_t) 0;
+                auto sync = result.replacedOriginal ? refreshCatalogFile(*repo, result.destination)
+                                                    : addCatalogCopy(*repo, result.destination, templateId);
+                if (! sync.ok) ++failures;
+            }
+            catch (const std::exception&)
+            {
+                ++failures;
+            }
+        }
+        juce::MessageManager::callAsync([safe, failures]()
+        {
+            if (safe == nullptr) return;
+            safe->reloadLibrary();
+            if (failures > 0)
+                safe->status.setText(safe->status.getText() + "  |  catalog errors "
+                    + juce::String(failures), juce::dontSendNotification);
+        });
+    });
+}
+
 void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selection,
                                           const SampleRecord& lead,
                                           juce::Point<int> screenPosition)
@@ -2866,6 +3060,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     // synthetic path, so they are collected from the records rather than from the file list.
     const auto extractCandidates = collectExtractCandidates(selection,
         [&ignoredPaths](const juce::String& path) { return isPathIgnored(path, ignoredPaths); });
+    const auto normalizeRecords = normalizeCandidates(selection);
     const auto assignments = readRepo->tagsForSamples(ids);
     std::map<int64_t, bool> allHave;
     for (const auto& tag : allTags)
@@ -2899,6 +3094,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     menu.addItem(9010, extractCandidates.sourceCount() > 1
         ? "Extract samples from " + juce::String(extractCandidates.sourceCount()) + " item(s)..."
         : juce::String("Extract samples..."), ! extractCandidates.empty());
+    menu.addItem(editCommandMenuItem(EditAction::normalizeSelected,
+                                     ! normalizeRecords.empty() && ! isNormalizeRunning()));
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
                          allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
@@ -3002,7 +3199,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
          ignoredPaths, allIgnored, anyInherited, splitCandidates, extractCandidates, customList,
-         standardTypes](int result)
+         standardTypes, normalizeRecords](int result)
         {
             if (safe == nullptr || result == 0) return;
             if ((safe->isSplitRunning() || safe->isExtractRunning())
@@ -3137,6 +3334,11 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     auto files = extractCandidates.embedded;
                     files.insert(files.end(), extractCandidates.images.begin(), extractCandidates.images.end());
                     safe->startExtract(files, extractCandidates.entries);
+                }
+                else if (const auto* command = findEditCommand(EditAction::normalizeSelected);
+                         command != nullptr && result == command->id)
+                {
+                    safe->startNormalizeSelected(normalizeRecords);
                 }
                 else if (result == 9009)
                 {
@@ -3389,13 +3591,15 @@ void MainComponent::timerCallback()
     const auto at = autoTag ? autoTag->progress() : AutoTagProgress {};
     const auto sp = splitter ? splitter->progress() : SplitProgress {};
     const auto ep = extractor ? extractor->progress() : ExtractProgress {};
+    const auto np = normalizer ? normalizer->progress() : NormalizeProgress {};
     const bool smartRunning = s.running;
     const bool taggingRunning = tg.running;
     const bool autoTagRunning = at.running;
     const bool splitRunning = sp.running;
     const bool extractRunning = ep.running;
+    const bool normalizeRunning = np.running;
     const bool busy = p.running || smartRunning || taggingRunning || autoTagRunning
-        || splitRunning || extractRunning;
+        || splitRunning || extractRunning || normalizeRunning;
     pause.setEnabled(! splitRunning && (p.running || smartRunning)); cancel.setEnabled(busy);
     addFolder.setEnabled(! busy); rescan.setEnabled(! busy);
     reanalyze.setEnabled(! busy); newFiles.setEnabled(! busy);
@@ -3419,6 +3623,14 @@ void MainComponent::timerCallback()
             + juce::String(ep.totalFiles) + " file(s)  |  "
             + juce::String(ep.written) + " sample(s)"
             + (ep.current.isNotEmpty() ? "  |  " + ep.current : juce::String()),
+            juce::dontSendNotification);
+        status.setTooltip(status.getText());
+    }
+    else if (normalizeRunning || normalizeWasRunning)
+    {
+        status.setText("Normalizing " + juce::String(np.processed) + "/" + juce::String(np.total)
+            + " file(s) to -0.1 dBFS"
+            + (np.current.isNotEmpty() ? "  |  " + np.current : juce::String()),
             juce::dontSendNotification);
         status.setTooltip(status.getText());
     }
@@ -3529,6 +3741,8 @@ void MainComponent::timerCallback()
     splitWasRunning = splitRunning;
     if (extractWasRunning && ! extractRunning) finishExtract();
     extractWasRunning = extractRunning;
+    if (normalizeWasRunning && ! normalizeRunning) finishNormalize();
+    normalizeWasRunning = normalizeRunning;
     if (! pendingSplitScan.isEmpty() && splitScanApproved && indexer && ! indexer->progress().running
         && ! (smart && smart->progress().running)
         && ! (tagging && tagging->progress().running)
@@ -3846,6 +4060,8 @@ void MainComponent::applySettings(const AppSettings& next)
     appSettings.theme = next.theme;
     appSettings.scalePercent = AppSettings::clampScale(next.scalePercent);
     appSettings.language = next.language;
+    appSettings.alwaysOverwriteOriginalFiles = next.alwaysOverwriteOriginalFiles;
+    preview.setAlwaysOverwriteOriginalFiles(appSettings.alwaysOverwriteOriginalFiles);
     refreshTheme();
     // The global scale factor belongs to the whole process: inside a DAW it would resize the
     // host's own windows. The plugin follows the host's scaling instead.
@@ -3859,6 +4075,7 @@ void MainComponent::applySettings(const AppSettings& next)
             saved.theme = appSettings.theme;
             saved.scalePercent = appSettings.scalePercent;
             saved.language = appSettings.language;
+            saved.alwaysOverwriteOriginalFiles = appSettings.alwaysOverwriteOriginalFiles;
         });
     }
     catch (const std::exception& e)

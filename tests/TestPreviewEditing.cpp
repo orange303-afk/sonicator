@@ -213,3 +213,42 @@ TEST_CASE("Delete clears the selection and a mono file cannot be converted", "[u
     preview.applyEditCommand(PreviewPanel::EditCommand::toMono);
     REQUIRE(preview.waveformLength() == Approx(0.9).margin(0.01));
 }
+
+TEST_CASE("Always overwrite saves the original without asking", "[ui][edit]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("a.wav"), false));
+    preview.selectRange(0.2, 0.6);
+    preview.applyEditCommand(PreviewPanel::EditCommand::crop);
+    REQUIRE(preview.hasUnsavedEdits());
+    int64_t reportedId = 0;
+    juce::File reportedFile;
+    preview.editingSampleId = 7;
+    preview.onFileSavedInPlace = [&](const juce::File& file, int64_t id)
+    { reportedFile = file; reportedId = id; };
+    preview.setAlwaysOverwriteOriginalFiles(true);
+    bool saved = false;
+    preview.saveEdits([&saved](bool ok) { saved = ok; });
+    REQUIRE(saved);
+    REQUIRE_FALSE(preview.hasUnsavedEdits());
+    REQUIRE(reportedFile.getFileName() == "a.wav");
+    REQUIRE(reportedId == 7);
+    REQUIRE(preview.waveformLength() == Approx(0.4).margin(0.01));
+}
+
+TEST_CASE("Unsaved edits belong to one file only", "[ui][edit]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    const auto a = t.wave("a.wav");
+    const auto b = t.wave("b.wav");
+    REQUIRE(preview.loadFile(a, false));
+    REQUIRE_FALSE(preview.hasUnsavedEditsFor(a));
+    preview.selectRange(0.1, 0.2);
+    preview.applyEditCommand(PreviewPanel::EditCommand::deleteRegion);
+    REQUIRE(preview.hasUnsavedEditsFor(a));
+    REQUIRE_FALSE(preview.hasUnsavedEditsFor(b));
+}

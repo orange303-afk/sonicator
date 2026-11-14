@@ -834,6 +834,14 @@ void PreviewPanel::applyPersistedSettings(const AppSettings& settings)
     if (! engine.setMidiPreview(settings.midiPreview))
         midi.setToggleState(engine.isMidiPreview(), juce::dontSendNotification);
     applyTransportLooping();
+    alwaysOverwrite = settings.alwaysOverwriteOriginalFiles;
+}
+
+bool PreviewPanel::hasUnsavedEditsFor(const juce::File& file) const
+{
+    if (! hasUnsavedEdits() || file == juce::File()) return false;
+    const auto target = editTarget != juce::File() ? editTarget : loadedFile;
+    return target.getFullPathName() == file.getFullPathName();
 }
 void PreviewPanel::selectRange(double start, double end)
 {
@@ -1074,26 +1082,18 @@ bool PreviewPanel::keyPressed(const juce::KeyPress& k)
 {
     const auto mods = k.getModifiers();
     const bool command = mods.isCommandDown() || mods.isCtrlDown();
-    if (command && (k.getKeyCode() == 'S' || k.getKeyCode() == 's'))
+    const auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    const bool focusHere = focused == this || (focused != nullptr && isParentOf(focused));
+    // The table owns both the hint and the working key. Modified commands keep working from
+    // anywhere, as before; an unmodified letter or Delete edits audio only while the focus is on
+    // the preview or the wave, so the library list and the search field never cut or normalize.
+    for (const auto& spec : editCommandTable())
     {
-        saveEdits();
-        return true;
-    }
-    if (command && (k.getKeyCode() == 'Z' || k.getKeyCode() == 'z'))
-    {
-        applyEditCommand(mods.isShiftDown() ? EditCommand::redo : EditCommand::undo);
-        return true;
-    }
-    if (command && k.getKeyCode() == '0')
-    {
-        applyEditCommand(EditCommand::zoomToFit);
-        return true;
-    }
-    if ((k.getKeyCode() == juce::KeyPress::deleteKey
-         || k.getKeyCode() == juce::KeyPress::backspaceKey)
-        && waveform.selection().valid() && (editBuffer.has_value() || sourceIsEditable()))
-    {
-        applyEditCommand(EditCommand::deleteRegion);
+        if (spec.context != CommandContext::waveform) continue;
+        if (! editCommandMatches(spec.shortcut, k)
+            && ! editCommandMatches(spec.alternateShortcut, k)) continue;
+        if (! command && ! focusHere) continue;
+        applyEditCommand(spec.action);
         return true;
     }
     if (k.getKeyCode() == juce::KeyPress::spaceKey) { togglePlayback(); return true; }
@@ -1456,33 +1456,38 @@ void PreviewPanel::showWaveformMenu(juce::Point<int> screenPosition)
     const bool undo = editing && editBuffer->canUndo();
     const bool redo = editing && editBuffer->canRedo();
     juce::PopupMenu menu;
-    menu.addItem(1, "Undo", undo);
-    menu.addItem(2, "Redo", redo);
-    menu.addSeparator();
-    menu.addItem(3, "Delete region", editable && selection);
-    menu.addItem(4, "Crop to selection", editable && selection);
-    menu.addItem(5, "Silence region", editable && selection);
-    menu.addSeparator();
-    menu.addItem(6, "Reverse", editable);
-    menu.addItem(7, "Fade in", editable);
-    menu.addItem(8, "Fade out", editable);
-    menu.addItem(9, "Normalize (-0.1 dBFS)", editable);
-    menu.addItem(10, "Gain...", editable);
-    menu.addItem(11, "Convert to mono", editable && waveform.totalLength() > 0 && ! sourceIsMono());
-    menu.addItem(12, "Remove DC offset", editable);
-    menu.addItem(13, "Trim silence", editable);
-    menu.addSeparator();
-    menu.addItem(14, "Zoom to selection", selection);
-    menu.addItem(15, "Zoom to fit", waveform.totalLength() > 0);
-    menu.addSeparator();
-    menu.addItem(16, "Save...", hasUnsavedEdits());
+    int lastGroup = -1;
+    for (const auto& spec : editCommandTable())
+    {
+        if (spec.context != CommandContext::waveform) continue;
+        if (lastGroup >= 0 && spec.group != lastGroup) menu.addSeparator();
+        lastGroup = spec.group;
+        bool enabled = editable;
+        switch (spec.action)
+        {
+            case EditAction::undo: enabled = undo; break;
+            case EditAction::redo: enabled = redo; break;
+            case EditAction::deleteRegion:
+            case EditAction::crop:
+            case EditAction::silence: enabled = editable && selection; break;
+            case EditAction::zoomToSelection: enabled = selection; break;
+            case EditAction::zoomToFit: enabled = waveform.totalLength() > 0; break;
+            case EditAction::toMono:
+                enabled = editable && waveform.totalLength() > 0 && ! sourceIsMono();
+                break;
+            case EditAction::save: enabled = hasUnsavedEdits(); break;
+            default: break;
+        }
+        menu.addItem(editCommandMenuItem(spec.action, enabled));
+    }
     auto safe = juce::Component::SafePointer<PreviewPanel>(this);
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
                            juce::Rectangle<int>(screenPosition.x, screenPosition.y, 1, 1)),
         [safe](int result)
         {
             if (safe == nullptr || result <= 0) return;
-            safe->applyEditCommand((EditCommand) (result - 1));
+            if (const auto* spec = findEditCommandById(result))
+                safe->applyEditCommand(spec->action);
         });
 }
 
@@ -1496,6 +1501,13 @@ void PreviewPanel::saveEdits(std::function<void(bool)> done)
     const auto name = editingName();
     auto safe = juce::Component::SafePointer<PreviewPanel>(this);
     const bool canOverwrite = editTarget != juce::File() && edit::canOverwriteInPlace(editTarget);
+    // The owner asked for one-click saves: with the setting on, a writable original is replaced
+    // without a second confirmation. Formats without a writer still go through the copy dialog.
+    if (canOverwrite && alwaysOverwrite)
+    {
+        overwriteEdits(done);
+        return;
+    }
     if (canOverwrite)
         dialogs::showAlert(*this, "Save changes to \u201c" + name + "\u201d?", {},
             { { "Overwrite", 1 }, { "Save copy", 2 }, { "Cancel", 0 } },

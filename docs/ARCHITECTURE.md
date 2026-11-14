@@ -120,10 +120,38 @@ the snapshot.
 
 Saving is explicit. Cmd/Ctrl+S asks Overwrite / Save copy / Cancel; only WAV, AIFF and FLAC can be
 overwritten, and everything else (decoded disc, instrument and tracker sources, MP3/OGG files) can
-only be copied. `core/edit/AudioEditWriter` writes a temporary file beside the target, validates
-WAV, copies POSIX permissions and macOS extended attributes, then renames over the original, so a
-failed write leaves the file byte-identical. Copies are named `<stem> edit<ext>` and numbered, and
-never overwrite. Sampler chunk fields (`smpl` root and loop, cue points) travel with the audio.
+only be copied. Settings -> Editing has `Always overwrite original files` (off by default): while it
+is on, a writable original is replaced without the Overwrite / Save copy / Cancel dialog, and a
+source without a writer still gets a copy. The prompt for unsaved edits when leaving a file stays
+regardless, because it protects edits rather than confirming a save. `core/edit/AudioEditWriter`
+writes a temporary file beside the target, validates WAV, copies POSIX permissions and macOS
+extended attributes, then renames over the original, so a failed write leaves the file
+byte-identical. Copies are named `<stem> edit<ext>` and numbered, and never overwrite. Sampler chunk
+fields (`smpl` root and loop, cue points) travel with the audio.
+
+The waveform context menu and its keys come from one table in `ui/preview/EditCommands`: label,
+stable command id, shortcut column text and the working key. The menu shows the key in JUCE's
+right-hand shortcut column, and `PreviewPanel::keyPressed` looks keys up in the same table, so a hint
+cannot outlive its key. Unmodified keys (N, R, C, S, I, O, G, M, D, T, Z, Backspace) edit audio only
+while the preview or the wave owns the keyboard focus; the library list and the search field never
+trigger them. Modified keys (Cmd+Z, Shift+Cmd+Z, Cmd+0, Cmd+S) keep working from anywhere. Clicking
+the wave focuses the preview. When Settings -> Keyboard Shortcuts is implemented, menus will read
+their hints from this table.
+
+Normalizing a library selection is the first slice of the batch processing design. `normalizeFile`
+in `core/edit/NormalizeService` reads the source twice in fixed 64k-frame chunks: the first pass
+measures the peak, the second writes the same audio with one gain for all channels toward
+-0.1 dBFS. The result goes to a temporary file beside the original, is reopened and verified
+(length, rate, channels, WAV format), file attributes are copied, and only then is the original
+renamed over; a source that changed during the job is left alone. WAV, AIFF and FLAC are replaced
+in place; other formats (MP3/OGG and decoded sources) are written as `... edit.wav` copies. A silent
+source or a file already on target reports `unchanged` and is not rewritten. Containers, disc
+entries, files with more than two channels and a file with unsaved editor changes are skipped with
+a reason. The batch runs on one background `NormalizeService` thread with progress in the status
+line and the common Cancel button; after it finishes, `CatalogFileSync` reanalyzes replaced rows
+(tags, star and manual values survive) or adds the copies with the source's tags and star. The
+context menu item and Shift+Cmd+N use the same command table entry, and the setting above removes
+the Overwrite originals / Save copies question.
 
 After a save, `core/indexing/CatalogFileSync` updates the catalog off the message thread. An
 overwrite reanalyzes the same row, which keeps its id, tags and star, and recomputes the audio-derived

@@ -11,6 +11,7 @@
 #include "core/tagging/TaggingService.h"
 #include "core/tagging/AutoTagService.h"
 #include "core/split/SplitService.h"
+#include "core/edit/NormalizeService.h"
 #include "core/extract/ExtractCandidates.h"
 #include "core/extract/ExtractService.h"
 #include "core/settings/AppSettings.h"
@@ -123,6 +124,7 @@ private:
     std::unique_ptr<AutoTagService> autoTag;
     std::unique_ptr<SplitService> splitter;
     std::unique_ptr<ExtractService> extractor;
+    std::unique_ptr<NormalizeService> normalizer;
     // Guards the contribution fields, which the scheduler reads off the message thread.
     juce::CriticalSection contributionLock;
     std::shared_ptr<contribute::Uploader> contributionUploader;
@@ -140,6 +142,11 @@ private:
     bool splitScanApproved = false;
     juce::uint32 extractStartMs = 0;
     bool extractWasRunning = false;
+    bool normalizeWasRunning = false;
+    // Source path -> catalog row, so a replaced original refreshes its row and a copy inherits the
+    // tags of the sample it came from.
+    std::map<juce::String, int64_t> normalizeSampleIds;
+    std::vector<NormalizeFileResult> normalizeResults;
     // A mixed selection runs the embedded banks first; the disc jobs start when that batch ends.
     std::vector<DiscExtractJob> pendingDiscExtract;
     ExtractOptions pendingDiscOptions;
@@ -226,6 +233,15 @@ private:
     void showAutoTagDialog(AutoTagResult result);
     void startSplit(const std::vector<juce::File>& files);
     void finishSplit();
+    // Normalize selected: the menu and ⇧⌘N both land here. Candidates are the ordinary files of
+    // the selection that this build can decode and write.
+    std::vector<SampleRecord> normalizeCandidates(const std::vector<SampleRecord>& selection);
+    void startNormalizeSelected(const std::vector<SampleRecord>& selection);
+    void beginNormalize(const std::vector<juce::File>& files,
+                        const std::map<juce::String, int64_t>& sampleIds, bool overwriteOriginals);
+    void finishNormalize();
+    void syncNormalizedCatalog();
+    bool isNormalizeRunning() const { return normalizer != nullptr && normalizer->progress().running; }
     void requestSplitScan(const juce::StringArray& folders);
     void closeSplitDialog();
     void requestCloseSplit();

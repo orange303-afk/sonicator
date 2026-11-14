@@ -80,6 +80,8 @@ AppSettings SettingsStore::load() const
     settings.autoPreview = readBool("autoPreview", settings.autoPreview);
     settings.loopPreview = readBool("loopPreview", settings.loopPreview);
     settings.rexGate = readBool("rexGate", settings.rexGate);
+    settings.alwaysOverwriteOriginalFiles = readBool("alwaysOverwriteOriginalFiles",
+                                                    settings.alwaysOverwriteOriginalFiles);
     settings.contributeTrainingData = readBool("contributeTrainingData", settings.contributeTrainingData);
     settings.contributionConsentVersion = (int) juce::jlimit(0.0, 100.0,
         readNumber("contributionConsentVersion", (double) settings.contributionConsentVersion));
@@ -147,6 +149,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("autoPreview", settings.autoPreview);
     object->setProperty("loopPreview", settings.loopPreview);
     object->setProperty("rexGate", settings.rexGate);
+    object->setProperty("alwaysOverwriteOriginalFiles", settings.alwaysOverwriteOriginalFiles);
     object->setProperty("contributeTrainingData", settings.contributeTrainingData);
     object->setProperty("contributionConsentVersion", settings.contributionConsentVersion);
     object->setProperty("contributionInstallId", settings.contributionInstallId);

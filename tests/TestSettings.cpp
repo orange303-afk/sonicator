@@ -260,3 +260,17 @@ TEST_CASE("AppSettings contributeTrainingData persistence", "[settings]")
     file.deleteFile();
 }
 
+
+TEST_CASE("Always overwrite original files defaults off and round-trips", "[settings][editing]")
+{
+    TestDirectory t;
+    SettingsStore store(t.dir.getChildFile("editing.json"));
+    REQUIRE_FALSE(store.load().alwaysOverwriteOriginalFiles);
+    store.update([](AppSettings& saved) { saved.alwaysOverwriteOriginalFiles = true; });
+    REQUIRE(store.load().alwaysOverwriteOriginalFiles);
+    store.update([](AppSettings& saved) { saved.alwaysOverwriteOriginalFiles = false; });
+    REQUIRE_FALSE(store.load().alwaysOverwriteOriginalFiles);
+    // A malformed value must not be read as "on": it would silently rewrite originals.
+    REQUIRE(store.file().replaceWithText("{\"alwaysOverwriteOriginalFiles\":\"yes\"}"));
+    REQUIRE_FALSE(store.load().alwaysOverwriteOriginalFiles);
+}

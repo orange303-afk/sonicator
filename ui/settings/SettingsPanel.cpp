@@ -23,8 +23,9 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
       kofi("ko-fi.com/ilyaorange", juce::URL("https://ko-fi.com/ilyaorange")),
       boosty("boosty.to/ilyaorange", juce::URL("https://boosty.to/ilyaorange"))
 {
-    for (auto* c : std::array<juce::Component*,26>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
+    for (auto* c : std::array<juce::Component*,29>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
          &languageLabel,&languageNote,&libraryHeading,&databaseKey,&databaseLabel,&libraryNote,&databaseStatus,
+         &editingHeading,&alwaysOverwriteToggle,&alwaysOverwriteNote,
          &audioHeading,&reportHeading,&reportNote,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&creditsLabel,&prototypesLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
         addAndMakeVisible(c);
     for (auto* c : std::array<juce::Component*,13>{&openDatabase,&backupDatabase,&audio,&reportBug,&reportFeature,
@@ -103,6 +104,21 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     libraryNote.setFont(noteFont()); libraryNote.setJustificationType(juce::Justification::centredLeft);
     databaseStatus.setFont(noteFont()); databaseStatus.setJustificationType(juce::Justification::centredLeft);
     audioHeading.setText("AUDIO",juce::dontSendNotification); audioHeading.setFont(sectionFont());
+    editingHeading.setText("EDITING",juce::dontSendNotification); editingHeading.setFont(sectionFont());
+    alwaysOverwriteToggle.setComponentID("settingsAlwaysOverwrite");
+    alwaysOverwriteToggle.setToggleState(initial.alwaysOverwriteOriginalFiles,
+                                         juce::dontSendNotification);
+    alwaysOverwriteToggle.onClick = [this]
+    {
+        current.alwaysOverwriteOriginalFiles = alwaysOverwriteToggle.getToggleState();
+        notifySettings();
+    };
+    alwaysOverwriteNote.setText("Save and Normalize selected replace the file without asking. "
+                                "WAV, AIFF and FLAC only; other formats still get an \u201c edit\u201d copy. "
+                                "The prompt for unsaved edits before leaving a file stays.",
+                                juce::dontSendNotification);
+    alwaysOverwriteNote.setFont(noteFont());
+    alwaysOverwriteNote.setJustificationType(juce::Justification::centredLeft);
     aboutHeading.setText("ABOUT",juce::dontSendNotification); aboutHeading.setFont(sectionFont());
     productLabel.setText("Sonicator",juce::dontSendNotification);
     productLabel.setFont(juce::FontOptions(18,juce::Font::bold));
@@ -181,20 +197,21 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         if (onClose) { onClose(); return; }
         if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
     };
-    setSize(560,1040);
+    setSize(560,1110);
 }
 void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
 {
     pluginMode = shouldUsePluginMode;
-    const std::array<juce::Component*,17> hidden {
+    const std::array<juce::Component*,20> hidden {
         &scaleLabel, &scaleBox, &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
         &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
+        &editingHeading, &alwaysOverwriteToggle, &alwaysOverwriteNote,
         &audioHeading, &audio, &contributeDataToggle, &contributionNote,
         &contributionPreview, &contributionDelete };
     for (auto* c : hidden)
         c->setVisible(! pluginMode);
     close.setVisible(pluginMode);
-    setSize(560, pluginMode ? 700 : 1040);
+    setSize(560, pluginMode ? 700 : 1110);
     resized();
 }
 void SettingsPanel::notifySettings()
@@ -411,6 +428,15 @@ void SettingsPanel::resized()
             right.removeFromLeft(8);
             contributionDelete.setBounds(right);
         });
+    }
+
+    if (editingHeading.isVisible())
+    {
+        section(editingHeading, 14);
+        add(26, 4, false, [this](juce::Rectangle<int> area)
+        { alwaysOverwriteToggle.setBounds(area.withTrimmedLeft(140)); });
+        add(34, 2, false, [this](juce::Rectangle<int> area)
+        { alwaysOverwriteNote.setBounds(area.withTrimmedLeft(140)); });
     }
 
     if (audioHeading.isVisible())

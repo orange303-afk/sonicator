@@ -4,6 +4,7 @@
 #include "core/export/SelectionExporter.h"
 #include "ui/waveform/WaveformDisplay.h"
 #include "core/edit/AudioEditBuffer.h"
+#include "EditCommands.h"
 #include "SongProgress.h"
 namespace sonicator {
 // Selector that also steps with Up/Down and the mouse wheel while closed. The popup keeps its
@@ -71,6 +72,8 @@ public:
     SampleAudioPtr discSampleAudio() const { return discAudioRef; }
     // Restores preview toggles and their engine state. Does not notify onSettingsChanged.
     void applyPersistedSettings(const AppSettings&);
+    // Settings -> Editing. Kept separate so a theme change does not reapply every preview toggle.
+    void setAlwaysOverwriteOriginalFiles(bool overwrite) { alwaysOverwrite = overwrite; }
     bool midiPreviewEnabled() const { return engine.isMidiPreview(); }
     bool skipSilenceEnabled() const { return engine.isSkipSilence(); }
     bool autoPreviewEnabled() const { return autoPreview.getToggleState(); }
@@ -94,10 +97,13 @@ public:
     bool isSelectionReady() const;
     // Waveform editing. The buffer lives in memory; the file changes only on an explicit save.
     bool hasUnsavedEdits() const { return editBuffer.has_value() && editBuffer->isModified(); }
+    // True when this panel holds unsaved edits of that file. The library's Normalize selected
+    // checks it so a batch never rewrites the file the editor still owns.
+    // The file the panel currently shows; used to refresh it after a library Normalize.
+    juce::File loadedFilePath() const { return loadedFile; }
+    bool hasUnsavedEditsFor(const juce::File&) const;
     bool sourceIsEditable() const;
-    enum class EditCommand { undo, redo, deleteRegion, crop, silence, reverse, fadeIn, fadeOut,
-                             normalize, gain, toMono, removeDc, trimSilence, zoomToSelection,
-                             zoomToFit, save };
+    using EditCommand = EditAction;
     void applyEditCommand(EditCommand);
     void saveEdits(std::function<void(bool)> done = {});
     // Calls `done(true)` now when nothing is unsaved; otherwise asks Save/Discard/Cancel and calls
@@ -159,6 +165,8 @@ private:
     bool discLooping = false;
     int64_t discLoopStart = 0, discLoopEnd = 0;
     bool clearSelectionAfterEdit = false, checkClipping = false;
+    // Settings -> Editing: skip the Save dialog and replace a writable original directly.
+    bool alwaysOverwrite = false;
     juce::ToggleButton rexGate { "Gate" };
     juce::Label rexInfo;
     juce::ToggleButton loop { "Loop" };

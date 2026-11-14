@@ -35,10 +35,12 @@ private:
     bool indexing = false, statusError = false, pluginMode = false;
     juce::Label title, appearance, themeLabel, scaleLabel, languageHeading, languageLabel,
                  languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
+                 editingHeading, alwaysOverwriteNote,
                  audioHeading, reportHeading, reportNote, aboutHeading, productLabel, authorLabel,
                  supportLabel, creditsLabel, prototypesLabel;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::ToggleButton contributeDataToggle;
+    juce::ToggleButton alwaysOverwriteToggle { "Always overwrite original files" };
     juce::Label contributionNote;
     juce::TextButton contributionPreview { "What will be sent..." },
                      contributionDelete { "Delete my contributed data..." };

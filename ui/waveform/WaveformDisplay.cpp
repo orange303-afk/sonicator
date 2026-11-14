@@ -16,6 +16,9 @@ WaveformDisplay::WaveformDisplay(const juce::File& folder) : cacheFile(folder.ge
     registerSonicatorFormats(formats); thumbnail.addChangeListener(this);
     folder.createDirectory();
     if (auto stream = cacheFile.createInputStream()) cache.readFromStream(*stream);
+    // Edit keys belong to the preview: clicking the wave puts the keyboard focus there instead of
+    // leaving it on the library list, where the same letters are ordinary typing/search input.
+    setWantsKeyboardFocus(true);
 }
 WaveformDisplay::~WaveformDisplay()
 {
@@ -411,6 +414,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
 }
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {
+    grabKeyboardFocus();
     if (e.mods.isPopupMenu() || e.mods.isRightButtonDown())
     {
         contextMenuClick = true;
