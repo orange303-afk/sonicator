@@ -80,6 +80,11 @@ TEST_CASE("Shortcut matcher follows the table and ignores letter case", "[comman
     REQUIRE(editCommandMatches(redo->shortcut, juce::KeyPress('z', commandShift, 0)));
     REQUIRE_FALSE(editCommandMatches(undo->shortcut, juce::KeyPress('z', commandShift, 0)));
     REQUIRE_FALSE(editCommandMatches(undo->shortcut, juce::KeyPress('z')));
+   #if JUCE_MAC
+    // Ctrl is not Command on macOS; a stray Ctrl+letter must not save or edit.
+    REQUIRE_FALSE(editCommandMatches(undo->shortcut,
+        juce::KeyPress('z', juce::ModifierKeys::ctrlModifier, 0)));
+   #endif
 
     const auto* remove = findEditCommand(EditAction::deleteRegion);
     REQUIRE(remove != nullptr);
