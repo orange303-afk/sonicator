@@ -66,9 +66,9 @@ CommandState CommandRegistry::state(const juce::String& id) const
     return entry->state();
 }
 
-bool CommandRegistry::invoke(const juce::String& id)
+bool CommandRegistry::invoke(const juce::String& id) const
 {
-    auto* entry = findEntry(id);
+    const auto* entry = findEntry(id);
     if (entry == nullptr || entry->invoke == nullptr) return false;
     // The state is re-read here, not at menu build time: a job may have started meanwhile.
     if (entry->state != nullptr && ! entry->state().canRun()) return false;

@@ -56,7 +56,7 @@ public:
     std::vector<CommandSpec> list() const;
     CommandState state(const juce::String& id) const;
     // Runs the command only when it is available and enabled; re-checks state at call time.
-    bool invoke(const juce::String& id);
+    bool invoke(const juce::String& id) const;
     bool contains(const juce::String& id) const;
     std::size_t size() const { return entries.size(); }
     void clear() { entries.clear(); }
