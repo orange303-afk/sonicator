@@ -108,6 +108,9 @@ public:
     // Transport entry points for the command registry. The buttons call the same code.
     void playPause() { togglePlayback(); }
     void stopPlayback() { engine.stop(); }
+    // Escape: clears the selection and stops the transport, except in instrument mode where the
+    // pin is lifted and the MIDI voices keep sounding.
+    void stopAndClearSelection();
     void seekBy(double seconds) { engine.seek(engine.position() + seconds); }
     // Set by MainComponent: the window router runs a bound key before the panel's own handling.
     std::function<bool(const juce::KeyPress&)> onCommandKey;

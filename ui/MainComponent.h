@@ -21,6 +21,7 @@
 #include "ui/commands/CommandRouter.h"
 #include "ui/shell/PanelLayout.h"
 #include "ui/shell/PanelSplitter.h"
+#include "ui/settings/SettingsSection.h"
 #include <mutex>
 namespace sonicator {
 class SplitDialog;
@@ -186,11 +187,13 @@ private:
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog, autoTagDialog;
     juce::Component::SafePointer<juce::Component> embeddedSettingsHost;
     juce::Component::SafePointer<SettingsPanel> embeddedSettingsPanel;
+    juce::Component::SafePointer<SettingsPanel> settingsPanel;
     std::unique_ptr<DiscBrowserPanel> discBrowser;
     // Every bindable action lives here. Menus, buttons and keys all resolve through it, and the
     // Hotkeys page edits the same catalogue.
     CommandRegistry commands;
-    ShortcutProfile shortcutProfile;
+    ShortcutProfile shortcutProfile;      // sanitised, what the router runs
+    ShortcutProfile storedShortcutProfile; // exactly what the settings file holds
     std::unique_ptr<CommandRouter> commandRouter;
     juce::StringArray shortcutDiagnostics;
     int pageOffset = 0, catalogCount = 0, pageSize = 10000;
@@ -216,6 +219,7 @@ private:
     bool saveShortcutProfile(const ShortcutProfile&);
     CommandFocus commandFocus() const;
     bool dispatchCommandKey(const juce::KeyPress&);
+    void showSettings(SettingsSection section);
     void showEmbeddedSettings();
     void closeEmbeddedSettings();
     void chooseFolder();

@@ -1,5 +1,7 @@
 #pragma once
+#include "core/settings/ShortcutPreferences.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <functional>
 #include <vector>
 
 namespace sonicator
@@ -37,6 +39,13 @@ struct EditCommandSpec
 const std::vector<EditCommandSpec>& editCommandTable();
 const EditCommandSpec* findEditCommand(EditAction);
 const EditCommandSpec* findEditCommandById(int id);
+
+// The stable registry id of a waveform command, e.g. "waveform.normalize".
+juce::String editCommandId(EditAction);
+
+// The live profile. Menus read it every time they open, so a rebinding or a removed key is shown
+// immediately. Without a provider the table's defaults are used (previews outside the window).
+void setEditCommandProfileProvider(std::function<ShortcutProfile()>);
 
 // "N", "⌘S", "⇧⌘N" on macOS; "Ctrl + S" elsewhere. Empty when the command has no shortcut.
 juce::String editCommandShortcutText(EditAction);

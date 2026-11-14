@@ -1079,9 +1079,22 @@ void PreviewPanel::updateSelectionPlayback()
     if (action == SelectionBoundary::restart) engine.seek(range.start);
     else if (action == SelectionBoundary::stop) engine.pause();
 }
+void PreviewPanel::stopAndClearSelection()
+{
+    if (engine.isSamplerInstrumentMode())
+    {
+        if (waveform.selection().valid()) clearSelection();
+        return;
+    }
+    if (waveform.selection().valid()) clearSelection();
+    engine.stop();
+}
+
 bool PreviewPanel::keyPressed(const juce::KeyPress& k)
 {
-    if (onCommandKey != nullptr && onCommandKey(k)) return true;
+    // In the window the router owns every binding: a key it did not consume must fall through,
+    // never be re-interpreted from this panel's old defaults.
+    if (onCommandKey != nullptr) return onCommandKey(k);
     const auto mods = k.getModifiers();
     const bool command = mods.isCommandDown() || mods.isCtrlDown();
     const auto* focused = juce::Component::getCurrentlyFocusedComponent();

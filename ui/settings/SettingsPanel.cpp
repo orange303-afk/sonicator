@@ -172,6 +172,10 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
                                 juce::dontSendNotification);
     alwaysOverwriteNote.setFont(noteFont());
     alwaysOverwriteNote.setJustificationType(juce::Justification::centredLeft);
+    privacyHeading.setText("PRIVACY & DATA", juce::dontSendNotification);
+    privacyHeading.setFont(sectionFont());
+    privacyHeading.setColour(juce::Label::textColourId, theme::muted);
+    generalContent.addAndMakeVisible(privacyHeading);
     workspaceHeading.setText("WORKSPACE", juce::dontSendNotification); workspaceHeading.setFont(sectionFont());
     workspaceNote.setText("Restores the folder and analysis panel widths and the preview height. "
                           "The window size, table columns and shortcuts are not changed.",
@@ -351,6 +355,11 @@ void SettingsPanel::setCommandRegistry(const CommandRegistry* commands)
     resized();
 }
 
+void SettingsPanel::setShortcutDiagnostics(const juce::StringArray& diagnostics)
+{
+    if (hotkeys != nullptr) hotkeys->setDiagnostics(diagnostics);
+}
+
 void SettingsPanel::setShortcutProfile(const ShortcutProfile& next)
 {
     profile = next;
@@ -364,6 +373,7 @@ void SettingsPanel::setAudioSettingsFactory(std::function<std::unique_ptr<juce::
     if (audioPage != nullptr) audioContent.removeChildComponent(audioPage);
     audioPage = nullptr;
     audioOwned.reset();
+    if (section == SettingsSection::audioMidi) ensureAudioPage();
 }
 
 void SettingsPanel::ensureAudioPage()
@@ -374,7 +384,9 @@ void SettingsPanel::ensureAudioPage()
     audioOwned = audioFactory();
     if (audioOwned == nullptr) return;
     audioPage = audioOwned.get();
+    audioOwned->setComponentID("settingsAudioPage");
     audioContent.addAndMakeVisible(*audioOwned);
+    audio.setVisible(false); // the page is the embedded selector; the legacy button is a fallback
     audioPage->setVisible(section == SettingsSection::audioMidi);
     audioNote.setVisible(false);
 }
@@ -389,6 +401,8 @@ bool SettingsPanel::sectionAvailable(SettingsSection candidate) const
 void SettingsPanel::selectSection(SettingsSection next)
 {
     if (!sectionAvailable(next)) next = SettingsSection::general;
+    if (next != SettingsSection::hotkeys && hotkeys != nullptr) hotkeys->cancelCapture();
+    const bool changed = section != next;
     section = next;
     for (size_t i = 0; i < nav.size(); ++i)
         nav[i].setToggleState((SettingsSection) i == section, juce::dontSendNotification);
@@ -396,6 +410,7 @@ void SettingsPanel::selectSection(SettingsSection next)
     updateSectionVisibility();
     resized();
     repaint();
+    if (changed && onSectionChanged != nullptr) onSectionChanged(section);
 }
 
 void SettingsPanel::updateSectionVisibility()
@@ -486,6 +501,7 @@ void SettingsPanel::lookAndFeelChanged()
     libraryHeading.setColour(juce::Label::textColourId, theme::muted);
     editingHeading.setColour(juce::Label::textColourId, theme::muted);
     workspaceHeading.setColour(juce::Label::textColourId, theme::muted);
+    privacyHeading.setColour(juce::Label::textColourId, theme::muted);
     aboutHeading.setColour(juce::Label::textColourId, theme::muted);
     themeLabel.setColour(juce::Label::textColourId, theme::text);
     scaleLabel.setColour(juce::Label::textColourId, theme::text);
@@ -557,21 +573,22 @@ void SettingsPanel::setContributionEnabled(bool enabled)
 
 void SettingsPanel::showContributionPreview()
 {
-    juce::AlertWindow window("What will be sent",
+    // The window deletes itself when dismissed, so it cannot live on the stack.
+    auto* window = new juce::AlertWindow("What will be sent",
         "This is the exact request the next contribution would make. Nothing has been sent.",
         juce::MessageBoxIconType::NoIcon);
-    window.setLookAndFeel(&getLookAndFeel());
-    window.addTextEditor("json", onContributionPreview ? onContributionPreview() : juce::String("{}"), {}, true);
-    if (auto* editor = window.getTextEditor("json"))
+    window->setLookAndFeel(&getLookAndFeel());
+    window->addTextEditor("json", onContributionPreview ? onContributionPreview() : juce::String("{}"), {}, true);
+    if (auto* editor = window->getTextEditor("json"))
     {
         editor->setMultiLine(true, true);
         editor->setReadOnly(true);
         editor->setScrollbarsShown(true);
     }
-    window.addButton("Close", 1, juce::KeyPress(juce::KeyPress::escapeKey));
-    window.setSize(600, 440);
-    window.centreAroundComponent(this, window.getWidth(), window.getHeight());
-    window.enterModalState(true, nullptr, true);
+    window->addButton("Close", 1, juce::KeyPress(juce::KeyPress::escapeKey));
+    window->setSize(600, 440);
+    window->centreAroundComponent(this, window->getWidth(), window->getHeight());
+    window->enterModalState(true, nullptr, true);
 }
 
 void SettingsPanel::confirmContributionDelete()
@@ -685,7 +702,8 @@ void SettingsPanel::layoutGeneralPage(juce::Rectangle<int> area)
 
     if (contributeDataToggle.isVisible())
     {
-        add(26, studio::spacingSection, [this](juce::Rectangle<int> area)
+        section(privacyHeading, studio::spacingSection);
+        add(26, studio::spacingTight, [this](juce::Rectangle<int> area)
         { contributeDataToggle.setBounds(area.withTrimmedLeft(labelColumn)); });
         note(contributionNote, 34, 4);
         add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)

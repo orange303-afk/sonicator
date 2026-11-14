@@ -89,6 +89,13 @@ void HotkeysPanel::reload()
     refreshFilter();
 }
 
+void HotkeysPanel::setDiagnostics(const juce::StringArray& messages)
+{
+    diagnostics = messages;
+    resized();
+    repaint();
+}
+
 void HotkeysPanel::setSearch(const juce::String& text)
 {
     if (search == text) return;
@@ -203,8 +210,9 @@ void HotkeysPanel::beginCapture()
     cancelKey.setEnabled(true);
     replaceKey.setEnabled(false);
     addKey.setEnabled(false);
-    // The list owns the keyboard so a letter is captured, not typed into the search field.
-    if (list.isShowing()) list.grabKeyboardFocus();
+    // The panel itself takes the keyboard: JUCE's ListBox swallows Delete, Return and the arrow
+    // keys, and those are exactly the keys a user may want to bind.
+    if (isShowing()) grabKeyboardFocus();
     resized();
     repaint();
 }
@@ -438,13 +446,17 @@ void HotkeysPanel::resized()
     resetEverything.setBounds(actions.removeFromLeft(96));
     hintLabel.setBounds(actions.withTrimmedLeft(8));
     footer.removeFromTop(4);
-    statusLabel.setBounds(footer.removeFromTop(18));
+    const bool hasDiagnostics = ! diagnostics.isEmpty();
+    const int diagnosticsHeight = hasDiagnostics ? (int) juce::jmin(44, 16 * diagnostics.size()) : 0;
+    if (hasDiagnostics) statusLabel.setBounds(footer.removeFromBottom(diagnosticsHeight));
+    else statusLabel.setBounds(footer.removeFromTop(18));
     hintLabel.setText(conflicts.isNotEmpty() ? conflicts
         : "Select a command, then add a shortcut. Escape cancels a capture.",
         juce::dontSendNotification);
     hintLabel.setColour(juce::Label::textColourId, conflicts.isNotEmpty() ? theme::accent : theme::muted);
-    statusLabel.setText(status, juce::dontSendNotification);
-    statusLabel.setColour(juce::Label::textColourId, theme::muted);
+    statusLabel.setText(hasDiagnostics ? diagnostics.joinIntoString("  ") : status,
+                        juce::dontSendNotification);
+    statusLabel.setColour(juce::Label::textColourId, hasDiagnostics ? theme::accent : theme::muted);
 }
 
 void HotkeysPanel::paint(juce::Graphics& g)

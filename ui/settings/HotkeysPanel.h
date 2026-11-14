@@ -22,6 +22,8 @@ public:
 
     // Replaces the profile being edited (for example after another window changed it).
     void setProfile(const ShortcutProfile&);
+    // Configuration problems (a conflicting override that was not applied).
+    void setDiagnostics(const juce::StringArray&);
     const ShortcutProfile& profile() const { return candidate; }
     // Sends the candidate to the owner. A rejected write leaves the candidate on screen so
     // nothing the user typed disappears; the previously published profile stays in effect.
@@ -51,6 +53,7 @@ public:
 
     juce::String conflictText() const { return conflicts; }
     juce::String statusText() const { return status; }
+    juce::String diagnosticsText() const { return diagnostics.joinIntoString("\n"); }
     // Resolves the pending conflict by replacing the other commands' keys.
     void replaceConflicting();
 
@@ -77,6 +80,7 @@ private:
     std::vector<CommandSpec> filtered;
     juce::String search;
     juce::String status, conflicts;
+    juce::StringArray diagnostics;
     bool capturing = false;
     std::vector<juce::KeyPress> pending;
     juce::String stagedCommand;

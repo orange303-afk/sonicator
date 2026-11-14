@@ -248,12 +248,15 @@ void MainComponent::persistLayout()
 {
     layoutPreferences.favoritesHeight = favoritePanelHeight;
     const auto layout = layoutPreferences;
+    const int favoritesHeight = favoritePanelHeight;
     try
     {
-        settingsStore.update([this, layout](AppSettings& saved)
+        settingsStore.update([this, layout, favoritesHeight](AppSettings& saved)
         {
             if (embeddedUi) saved.pluginLayout = layout;
             else saved.standaloneLayout = layout;
+            // The legacy field is what older builds read; keep both in step.
+            saved.favoritesPanelHeight = favoritesHeight;
         });
     }
     catch (const std::exception& e)
@@ -286,30 +289,6 @@ void MainComponent::resetLayout()
 
 namespace
 {
-juce::String commandIdFor(EditAction action)
-{
-    switch (action)
-    {
-        case EditAction::undo: return "waveform.undo";
-        case EditAction::redo: return "waveform.redo";
-        case EditAction::deleteRegion: return "waveform.deleteRegion";
-        case EditAction::crop: return "waveform.crop";
-        case EditAction::silence: return "waveform.silence";
-        case EditAction::reverse: return "waveform.reverse";
-        case EditAction::fadeIn: return "waveform.fadeIn";
-        case EditAction::fadeOut: return "waveform.fadeOut";
-        case EditAction::normalize: return "waveform.normalize";
-        case EditAction::gain: return "waveform.gain";
-        case EditAction::toMono: return "waveform.toMono";
-        case EditAction::removeDc: return "waveform.removeDc";
-        case EditAction::trimSilence: return "waveform.trimSilence";
-        case EditAction::zoomToSelection: return "waveform.zoomToSelection";
-        case EditAction::zoomToFit: return "waveform.zoomToFit";
-        case EditAction::save: return "waveform.save";
-        case EditAction::normalizeSelected: return "library.normalizeSelected";
-    }
-    return {};
-}
 juce::String commandCategoryFor(CommandScope scope)
 {
     switch (scope)
@@ -338,7 +317,7 @@ void MainComponent::registerCommands()
     for (const auto& legacy : editCommandTable())
     {
         CommandSpec spec;
-        spec.id = commandIdFor(legacy.action);
+        spec.id = editCommandId(legacy.action);
         spec.name = legacy.label;
         spec.description = "Waveform editor: " + juce::String(legacy.label);
         spec.scope = legacy.context == CommandContext::library ? CommandScope::library : CommandScope::waveform;
@@ -381,7 +360,9 @@ void MainComponent::registerCommands()
         spec.id = std::move(id);
         spec.name = name;
         spec.description = "Preview transport";
-        spec.scope = CommandScope::waveform;
+        // Transport keys worked from anywhere in the window before, so they stay application
+        // scoped; the router already keeps text fields and dialogs out.
+        spec.scope = CommandScope::app;
         spec.category = "Preview";
         spec.defaults = std::move(defaults);
         addCommand(std::move(spec), [] { return CommandState::ready(); }, std::move(run));
@@ -394,7 +375,7 @@ void MainComponent::registerCommands()
     addTransport("preview.seekForward", "Seek forward one second",
                  { juce::KeyPress(juce::KeyPress::rightKey) }, [this] { preview.seekBy(1.0); });
     addTransport("preview.clearSelection", "Clear selection / stop",
-                 { juce::KeyPress(juce::KeyPress::escapeKey) }, [this] { preview.clearSelection(); });
+                 { juce::KeyPress(juce::KeyPress::escapeKey) }, [this] { preview.stopAndClearSelection(); });
 
     {
         CommandSpec spec;
@@ -405,6 +386,16 @@ void MainComponent::registerCommands()
         spec.category = "Application";
         spec.defaults = { juce::KeyPress(',', juce::ModifierKeys::commandModifier, 0) };
         addCommand(std::move(spec), [] { return CommandState::ready(); }, [this] { showSettings(); });
+    }
+    {
+        CommandSpec spec;
+        spec.id = "app.settings.hotkeys";
+        spec.name = "Settings - Hotkeys";
+        spec.description = "Opens Settings on the Hotkeys page";
+        spec.scope = CommandScope::app;
+        spec.category = "Application";
+        addCommand(std::move(spec), [] { return CommandState::ready(); },
+                   [this] { showSettings(SettingsSection::hotkeys); });
     }
     {
         CommandSpec spec;
@@ -474,15 +465,19 @@ void MainComponent::registerCommands()
     }
 
     reapplyShortcutProfile();
+    setEditCommandProfileProvider([safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        return safe != nullptr ? safe->shortcutProfile : ShortcutProfile {};
+    });
     preview.onCommandKey = [this](const juce::KeyPress& key) { return dispatchCommandKey(key); };
 }
 
 void MainComponent::reapplyShortcutProfile()
 {
     shortcutDiagnostics.clear();
-    const auto& stored = juce::SystemStats::getOperatingSystemType() == juce::SystemStats::Windows
+    storedShortcutProfile = juce::SystemStats::getOperatingSystemType() == juce::SystemStats::Windows
         ? appSettings.shortcuts.windows : appSettings.shortcuts.mac;
-    shortcutProfile = sanitizedProfile(commands, stored, &shortcutDiagnostics);
+    shortcutProfile = sanitizedProfile(commands, storedShortcutProfile, &shortcutDiagnostics);
     commandRouter = std::make_unique<CommandRouter>(commands, [this] { return shortcutProfile; });
 }
 
@@ -508,13 +503,16 @@ bool MainComponent::saveShortcutProfile(const ShortcutProfile& candidate)
     else
         appSettings.shortcuts.mac = candidate;
     reapplyShortcutProfile();
+    if (settingsPanel != nullptr) settingsPanel->setShortcutDiagnostics(shortcutDiagnostics);
+    if (embeddedSettingsPanel != nullptr) embeddedSettingsPanel->setShortcutDiagnostics(shortcutDiagnostics);
     return true;
 }
 
 CommandFocus MainComponent::commandFocus() const
 {
     CommandFocus focus;
-    focus.modal = juce::Component::getCurrentlyModalComponent() != nullptr;
+    focus.modal = juce::Component::getCurrentlyModalComponent() != nullptr
+        || embeddedSettingsHost != nullptr;
     const auto* focused = juce::Component::getCurrentlyFocusedComponent();
     if (focused != nullptr && dynamic_cast<const juce::TextEditor*>(focused) != nullptr)
         focus.textInput = true;
@@ -1043,6 +1041,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
 }
 MainComponent::~MainComponent()
 {
+    // The menu provider outlives this object; never let a later menu read a dead window.
+    setEditCommandProfileProvider(nullptr);
     juce::PopupMenu::dismissAllActiveMenus();
     if (persistSessionState) saveSessionState();
     removeKeyListener(&enterKeyListener);
@@ -2007,23 +2007,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
     // Enter opens the selected container wherever focus is; ordinary rows keep their normal
     // transport keys. This also drives the session-restored row without a mouse click.
     if (key.getKeyCode() == juce::KeyPress::returnKey && openSelectedDiscIfAny()) return true;
-    // ⇧⌘N belongs to the library context: it normalizes the selection, never the open waveform,
-    // and a text field keeps its own editing keys.
-    const auto* focused = juce::Component::getCurrentlyFocusedComponent();
-    const bool previewFocused = focused != nullptr
-        && (focused == &preview || preview.isParentOf(focused));
-    const bool textInput = dynamic_cast<const juce::TextEditor*>(focused) != nullptr;
-    if (! previewFocused && ! textInput)
-        if (const auto* command = findEditCommand(EditAction::normalizeSelected);
-            command != nullptr && editCommandMatches(command->shortcut, key))
-        {
-            const auto selected = library.getSelectedSamples();
-            if (! selected.empty())
-            {
-                startNormalizeSelected(selected);
-                return true;
-            }
-        }
+    // Every bound key is resolved by the router above; the preview only sees keys the router did
+    // not consume, so a removed or rebound shortcut can never fall back to its old default.
     return preview.keyPressed(key);
 }
 
@@ -4089,6 +4074,12 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
 }
 void MainComponent::timerCallback()
 {
+    // The catalog's busy state changes while Settings is open; the page must follow it instead
+    // of keeping the snapshot taken when the window was created.
+    if (settingsPanel != nullptr) settingsPanel->setBusyState(indexer && indexer->progress().running);
+    if (embeddedSettingsPanel != nullptr)
+        embeddedSettingsPanel->setBusyState(indexer && indexer->progress().running);
+    if (settingsDialog == nullptr) settingsPanel = nullptr;
     if (! indexer) return;
     auto p = indexer->progress();
     const auto s = smart ? smart->progress() : SmartProgress {};
@@ -4633,7 +4624,20 @@ void MainComponent::closeEmbeddedSettings()
 void MainComponent::wireCommandSettings(SettingsPanel& panel)
 {
     panel.setCommandRegistry(&commands);
-    panel.setShortcutProfile(shortcutProfile);
+    panel.setShortcutProfile(storedShortcutProfile);
+    panel.setShortcutDiagnostics(shortcutDiagnostics);
+    panel.onSectionChanged = [this](SettingsSection section)
+    {
+        appSettings.lastSettingsSection = settingsSectionId(section);
+        try
+        {
+            settingsStore.update([section](AppSettings& saved)
+            {
+                saved.lastSettingsSection = settingsSectionId(section);
+            });
+        }
+        catch (...) {}
+    };
     panel.onShortcutProfileChanged = [this](const ShortcutProfile& candidate)
     {
         return saveShortcutProfile(candidate);
@@ -4645,6 +4649,19 @@ void MainComponent::wireCommandSettings(SettingsPanel& panel)
             return std::unique_ptr<juce::Component>(new juce::AudioDeviceSelectorComponent(
                 engine.deviceManager(), 0, 0, 0, 2, true, false, true, false));
         });
+}
+
+void MainComponent::showSettings(SettingsSection section)
+{
+    if (embeddedUi) { showEmbeddedSettings(); return; }
+    if (settingsDialog != nullptr)
+    {
+        if (settingsPanel != nullptr) settingsPanel->selectSection(section);
+        settingsDialog->toFront(true);
+        return;
+    }
+    showSettings();
+    if (settingsPanel != nullptr) settingsPanel->selectSection(section);
 }
 
 void MainComponent::showSettings()
@@ -4694,11 +4711,12 @@ void MainComponent::showSettings()
             else if (safePanel != nullptr) safePanel->setDatabaseStatus(error,true);
         };
     panel->setLookAndFeel(&look);
+    settingsPanel = panel;
     // The navigation column and each page's own viewport keep the window inside the display, so
     // there is no outer scroll area to nest.
     const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect(getScreenBounds());
     const auto area = display != nullptr ? display->userArea : juce::Rectangle<int>(0, 0, 1280, 800);
-    const int width = juce::jmin(940, juce::jmax(620, area.getWidth() - 80));
+    const int width = juce::jmin(940, juce::jmax(700, area.getWidth() - 80));
     const int height = juce::jmin(760, juce::jmax(460, area.getHeight() - 80));
     panel->setSize(width, height);
     auto* window = new SettingsDialogWindow();
@@ -4706,7 +4724,7 @@ void MainComponent::showSettings()
     window->setLookAndFeel(&look);
     window->setUsingNativeTitleBar(false);
     window->setResizable(true, false);
-    window->setResizeLimits(560, 420, area.getWidth(), area.getHeight());
+    window->setResizeLimits(700, 460, area.getWidth(), area.getHeight());
     window->centreAroundComponent(this, window->getWidth(), window->getHeight());
     settingsDialog = window;
     window->enterModalState(true, nullptr, true);

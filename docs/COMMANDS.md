@@ -68,6 +68,7 @@ disabled with the reason "No editable audio in the preview".
 | `library.normalizeSelected` | Normalize selected… | library | ⇧⌘N |
 | `library.addLastTag` | Add last tag | library | — |
 | `app.settings` | Settings | app | ⌘, |
+| `app.settings.hotkeys` | Settings - Hotkeys | app | — |
 | `app.focusSearch` | Focus search | app | ⌘F |
 | `layout.reset` | Reset panel layout | app | — |
 | `layout.reset.folders` | Reset folder panel width | app | — |

@@ -1,4 +1,5 @@
 #include "EditCommands.h"
+#include "ui/commands/ShortcutBindings.h"
 
 namespace sonicator
 {
@@ -10,6 +11,12 @@ constexpr int shiftFlag = juce::ModifierKeys::shiftModifier;
 juce::KeyPress key(int code, int modifiers = 0)
 {
     return juce::KeyPress(code, juce::ModifierKeys(modifiers), 0);
+}
+
+std::function<ShortcutProfile()>& profileProvider()
+{
+    static std::function<ShortcutProfile()> provider;
+    return provider;
 }
 }
 
@@ -59,11 +66,64 @@ const EditCommandSpec* findEditCommandById(int id)
     return nullptr;
 }
 
+juce::String editCommandId(EditAction action)
+{
+    switch (action)
+    {
+        case EditAction::undo: return "waveform.undo";
+        case EditAction::redo: return "waveform.redo";
+        case EditAction::deleteRegion: return "waveform.deleteRegion";
+        case EditAction::crop: return "waveform.crop";
+        case EditAction::silence: return "waveform.silence";
+        case EditAction::reverse: return "waveform.reverse";
+        case EditAction::fadeIn: return "waveform.fadeIn";
+        case EditAction::fadeOut: return "waveform.fadeOut";
+        case EditAction::normalize: return "waveform.normalize";
+        case EditAction::gain: return "waveform.gain";
+        case EditAction::toMono: return "waveform.toMono";
+        case EditAction::removeDc: return "waveform.removeDc";
+        case EditAction::trimSilence: return "waveform.trimSilence";
+        case EditAction::zoomToSelection: return "waveform.zoomToSelection";
+        case EditAction::zoomToFit: return "waveform.zoomToFit";
+        case EditAction::save: return "waveform.save";
+        case EditAction::normalizeSelected: return "library.normalizeSelected";
+    }
+    return {};
+}
+
+void setEditCommandProfileProvider(std::function<ShortcutProfile()> provider)
+{
+    profileProvider() = std::move(provider);
+}
+
 juce::String editCommandShortcutText(EditAction action)
 {
     const auto* spec = findEditCommand(action);
-    if (spec == nullptr || spec->shortcut.isValid() == false) return {};
+    if (spec == nullptr) return {};
+    // The live binding wins over the table's default, so the menu never advertises a key the
+    // router would not run (or hides one the user added).
+    if (auto& provider = profileProvider(); provider != nullptr)
+    {
+        const auto profile = provider();
+        std::vector<juce::KeyPress> keys;
+        if (profile.hasOverride(editCommandId(action)))
+        {
+            for (const auto& stored : profile.overrides.at(editCommandId(action)))
+                keys.push_back(keyPressFromShortcutKey(stored));
+        }
+        else
+        {
+            if (spec->shortcut.isValid()) keys.push_back(spec->shortcut);
+            if (spec->alternateShortcut.isValid()) keys.push_back(spec->alternateShortcut);
+        }
+        return formatShortcuts(keys);
+    }
+    if (! spec->shortcut.isValid()) return {};
+#if JUCE_MAC
     return spec->shortcut.getTextDescriptionWithIcons();
+#else
+    return spec->shortcut.getTextDescription();
+#endif
 }
 
 juce::PopupMenu::Item editCommandMenuItem(EditAction action, bool enabled)

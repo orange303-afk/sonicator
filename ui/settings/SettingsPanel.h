@@ -32,6 +32,7 @@ public:
     SettingsSection selectedSection() const { return section; }
     // The Hotkeys page reads this catalogue; the panel only edits and returns a candidate profile.
     void setCommandRegistry(const CommandRegistry*);
+    void setShortcutDiagnostics(const juce::StringArray&);
     void setShortcutProfile(const ShortcutProfile&);
     void setAudioSettingsFactory(std::function<std::unique_ptr<juce::Component>()>);
 
@@ -52,6 +53,7 @@ public:
     std::function<void(std::function<void(bool, juce::String)>)> onContributionDelete;
     // Returns false when the profile could not be saved; the Hotkeys page then keeps the entry.
     std::function<bool(const ShortcutProfile&)> onShortcutProfileChanged;
+    std::function<void(SettingsSection)> onSectionChanged;
     std::function<void()> onResetLayout;
     void setContributionEnabled(bool);
 
@@ -81,7 +83,7 @@ private:
                  editingHeading, alwaysOverwriteNote, workspaceHeading, workspaceNote,
                  audioHeading, audioNote, reportHeading, reportNote, aboutHeading, productLabel,
                  authorLabel, supportLabel, creditsLabel, prototypesLabel,
-                 pluginsHeading, pluginsNote;
+                 pluginsHeading, pluginsNote, privacyHeading;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::ToggleButton contributeDataToggle;
     juce::ToggleButton alwaysOverwriteToggle { "Always overwrite original files" };
