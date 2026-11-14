@@ -1,4 +1,7 @@
 #pragma once
+#include "ui/shell/ActionIcons.h"
+#include "ui/shell/DesignTokens.h"
+#include "ui/shell/Theme.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 namespace sonicator {
 class SearchField final : public juce::TextEditor
@@ -11,7 +14,17 @@ public:
         clearButton.setTooltip("Clear search");
         clearButton.setWantsKeyboardFocus(false);
         clearButton.onClick = [this] { clear(); if (onClear) onClear(); grabKeyboardFocus(); };
-        setBorder(juce::BorderSize<int>(0, 0, 0, 30));
+        // Room for the magnifier on the left and the clear control on the right.
+        setBorder(juce::BorderSize<int>(0, 26, 0, 30));
+    }
+    ActionIcon leadingIcon() const { return leading; }
+    void paintOverChildren(juce::Graphics& g) override
+    {
+        g.setColour(theme::muted);
+        drawActionIcon(g, leading,
+                       juce::Rectangle<float>(studio::spacingTight,
+                                              (float) getHeight() * 0.5f - 7.0f, 14.0f, 14.0f),
+                       1.4f);
     }
     void resized() override
     {
@@ -26,6 +39,7 @@ public:
         if (event.mods.isLeftButtonDown() && onHistoryRequest) onHistoryRequest();
     }
 private:
+    ActionIcon leading = ActionIcon::search;
     juce::TextButton clearButton { juce::String::charToString(0x00d7) };
 };
 } // namespace sonicator

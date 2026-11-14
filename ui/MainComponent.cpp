@@ -578,7 +578,6 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     tagsLabel.setFont(juce::FontOptions(11)); tagsLabel.setColour(juce::Label::textColourId,theme::muted);
     search.setTextToShowWhenEmpty("Search: *.rx2, ext:wav, type:pad, key:Am, C4",theme::muted);
     search.setJustification(juce::Justification::centredLeft);
-    search.setIndents(10, 0);
     search.onTextChange = [this]
     {
         pendingSearch = search.getText();
@@ -4993,22 +4992,28 @@ void MainComponent::paint(juce::Graphics& g)
     g.setColour(theme::panel);
     g.fillRoundedRectangle(sidebarBounds.toFloat(), 10.0f);
     g.fillRoundedRectangle(analysisBounds.toFloat(), 10.0f);
-    g.setColour(theme::line); g.drawHorizontalLine(85,0,(float) getWidth());
+    g.setColour(theme::line); g.drawHorizontalLine(headerBounds.getBottom(),0,(float) getWidth());
     if (logoWordmark.isValid() && theme::isDark)
-        g.drawImage(logoWordmark, juce::Rectangle<float>(16,8,310,70),
+        g.drawImage(logoWordmark,
+                    juce::Rectangle<float>((float) studio::spacingWide,
+                                           (float) headerBounds.getY() + 6.0f,
+                                           (float) studio::brandingWidth - 8.0f,
+                                           (float) studio::headerHeight - 12.0f),
                     juce::RectanglePlacement::onlyReduceInSize | juce::RectanglePlacement::centred);
 }
 void MainComponent::resized()
 {
     if (embeddedSettingsHost != nullptr)
         embeddedSettingsHost->setBounds(getLocalBounds());
-    auto r = getLocalBounds(); headerBounds = r.removeFromTop(86);
-    auto header = headerBounds.reduced(16,14);
-    auto branding = header.removeFromLeft(310); header.removeFromLeft(32);
+    auto r = getLocalBounds(); headerBounds = r.removeFromTop(studio::headerHeight);
+    auto header = headerBounds.reduced(studio::spacingWide, 14);
+    auto branding = header.removeFromLeft(studio::brandingWidth);
+    header.removeFromLeft(studio::spacing);
     heading.setBounds(branding.removeFromTop(30)); subtitle.setBounds(branding);
-    settings.setBounds(header.removeFromRight(115).withSizeKeepingCentre(115,32));
-    header.removeFromRight(16);
-    search.setBounds(header.withSizeKeepingCentre(header.getWidth(),34));
+    settings.setBounds(header.removeFromRight(studio::iconButtonSize)
+                             .withSizeKeepingCentre(studio::iconButtonSize, studio::iconButtonSize));
+    header.removeFromRight(studio::spacingWide);
+    search.setBounds(header.withSizeKeepingCentre(header.getWidth(), 32));
     selectionStatus.setBounds(r.removeFromBottom(24).reduced(12,1));
     // One model decides the split; the dividers only edit its preference. Effective sizes are
     // recomputed here, so shrinking the window never writes a smaller value back to settings.

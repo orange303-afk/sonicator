@@ -136,7 +136,8 @@ private:
     SearchField search;
     juce::TextButton libraryMenu { "LIBRARY" };
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" }, smartButton { "Smart metadata" };
-    juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" };
+    juce::TextButton pause { "Pause" }, cancel { "Cancel" };
+    studio::IconButton settings { ActionIcon::settings, "Settings" };
     juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" },
                      clearFilters { "Clear filters" }, editTags { "Edit tags..." };
     juce::ToggleButton hideEmpty { "Hide empty and unsupported" };
