@@ -1,6 +1,7 @@
 #pragma once
 #include "core/database/SampleRepository.h"
 #include "core/dsp/BasicAnalyzer.h"
+#include "core/scanner/FileScanner.h"
 #include <juce_events/juce_events.h>
 #include <atomic>
 #include <condition_variable>
@@ -12,6 +13,7 @@ struct IndexingProgress
     bool running = false, paused = false, cancelled = false, finalizing = false;
     int total = 0, processed = 0, analyzed = 0, skipped = 0, failed = 0, duplicates = 0;
     int discImages = 0, discSkipped = 0, discFailed = 0, discEntries = 0;
+    int workers = 0; // analysis threads used by the current (or last) scan
     juce::String current, message, discMessage;
 };
 // Rows under the scanned roots that are not in the discovery set and not on disk. The filesystem
@@ -55,8 +57,16 @@ private:
     std::mutex pauseMutex;
     std::condition_variable pauseCondition;
     bool paused = false;
+    // The analysis pipeline: workers hand finished rows to the writer through these, and cancel()
+    // wakes both sides. Only one scan runs at a time, so one set of conditions is enough.
+    std::mutex pipelineMutex;
+    std::condition_variable pipelineChanged;
+    std::condition_variable pipelineSpace;
     bool beginScan(const juce::StringArray& roots, bool force, ScanMode mode, bool registerRoots);
     bool checkpoint();
+    // Analyses the prechecked entries in a bounded worker pool; every database write stays on
+    // this (the service) thread.
+    void analyzePending(const std::vector<AudioFileInfo>& pending);
     void run() override;
 };
 }
