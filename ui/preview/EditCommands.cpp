@@ -83,8 +83,9 @@ bool editCommandMatches(const juce::KeyPress& shortcut, const juce::KeyPress& pr
     if (! shortcut.isValid() || ! pressed.isValid()) return false;
     const auto required = shortcut.getModifiers();
     const auto actual = pressed.getModifiers();
-    const bool actualCommand = actual.isCommandDown() || actual.isCtrlDown();
-    if (required.isCommandDown() != actualCommand) return false;
+    // JUCE maps Ctrl to commandModifier on Windows; on macOS Ctrl stays separate, so a stray
+    // Ctrl+letter cannot run a Command shortcut.
+    if (required.isCommandDown() != actual.isCommandDown()) return false;
     if (required.isShiftDown() != actual.isShiftDown()) return false;
     if (required.isAltDown() != actual.isAltDown()) return false;
     const auto requiredCode = shortcut.getKeyCode();

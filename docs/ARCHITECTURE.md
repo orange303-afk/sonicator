@@ -146,12 +146,15 @@ measures the peak, the second writes the same audio with one gain for all channe
 renamed over; a source that changed during the job is left alone. WAV, AIFF and FLAC are replaced
 in place; other formats (MP3/OGG and decoded sources) are written as `... edit.wav` copies. A silent
 source or a file already on target reports `unchanged` and is not rewritten. Containers, disc
-entries, files with more than two channels and a file with unsaved editor changes are skipped with
-a reason. The batch runs on one background `NormalizeService` thread with progress in the status
-line and the common Cancel button; after it finishes, `CatalogFileSync` reanalyzes replaced rows
-(tags, star and manual values survive) or adds the copies with the source's tags and star. The
-context menu item and Shift+Cmd+N use the same command table entry, and the setting above removes
-the Overwrite originals / Save copies question.
+entries, files with more than two channels and a file with unsaved editor changes are excluded from
+the batch (the confirmation says how many selected items are skipped). The batch runs on one
+background `NormalizeService` thread with progress in the status line and the common Cancel button;
+it starts only while no indexer, smart analysis, tagging, split or extract job is running, so Cancel
+is never ambiguous. After it finishes, `CatalogFileSync` reanalyzes replaced rows (tags, star and
+manual values survive) or adds the copies with the source's tags and star; its queue is drained by
+one worker, so a long reanalysis never blocks the message thread. The context menu item and
+Shift+Cmd+N use the same command table entry, and the setting above removes the Overwrite originals
+/ Save copies question.
 
 After a save, `core/indexing/CatalogFileSync` updates the catalog off the message thread. An
 overwrite reanalyzes the same row, which keeps its id, tags and star, and recomputes the audio-derived

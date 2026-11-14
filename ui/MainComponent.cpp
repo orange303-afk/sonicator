@@ -710,7 +710,12 @@ MainComponent::~MainComponent()
     }
     contributionUploader.reset();
     cancelFeedback = true;
+    {
+        std::lock_guard lock(catalogSyncMutex);
+        catalogSyncStop = true;
+    }
     if (catalogSyncWorker && catalogSyncWorker->joinable()) catalogSyncWorker->join();
+    catalogSyncRequests.clear();
     if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
     cancelFeatureV2 = true;
     if (featureV2Worker && featureV2Worker->joinable()) featureV2Worker->join();
@@ -1338,26 +1343,92 @@ void MainComponent::removeTagFromSamples(const std::vector<int64_t>& sampleIds, 
 }
 void MainComponent::startCatalogSync(const juce::File& file, int64_t sampleId, bool isCopy)
 {
-    auto* repo = writeRepo.get();
-    if (repo == nullptr) return;
-    if (catalogSyncWorker && catalogSyncWorker->joinable()) catalogSyncWorker->join();
+    if (writeRepo == nullptr) return;
     status.setText(isCopy ? "Adding the copy to the catalog..." : "Updating the catalog...",
                    juce::dontSendNotification);
-    auto safe = juce::Component::SafePointer<MainComponent>(this);
-    catalogSyncWorker = std::make_unique<std::thread>([safe, repo, file, sampleId, isCopy]()
+    enqueueCatalogSync(file, sampleId, isCopy);
+}
+
+void MainComponent::enqueueCatalogSync(const juce::File& file, int64_t sampleId, bool isCopy)
+{
+    auto* repo = writeRepo.get();
+    if (repo == nullptr) return;
     {
-        const auto result = isCopy ? addCatalogCopy(*repo, file, sampleId)
-                                   : refreshCatalogFile(*repo, file);
-        const auto name = file.getFileName();
-        juce::MessageManager::callAsync([safe, result, isCopy, name]()
+        std::lock_guard lock(catalogSyncMutex);
+        if (catalogSyncStop) return;
+        catalogSyncRequests.push_back({ file, sampleId, isCopy });
+        // A running drain loop takes the new request on its next round; nothing to start.
+        if (catalogSyncQueued) return;
+        catalogSyncQueued = true;
+    }
+    // The previous worker has already drained and is only posting its final message, so this join
+    // is short. Long reanalysis never happens while the message thread waits here.
+    if (catalogSyncWorker && catalogSyncWorker->joinable()) catalogSyncWorker->join();
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+    catalogSyncWorker = std::make_unique<std::thread>([this, repo, safe]()
+    {
+        runCatalogSyncQueue(*repo, safe);
+    });
+}
+
+void MainComponent::runCatalogSyncQueue(SampleRepository& repo,
+                                        juce::Component::SafePointer<MainComponent> safe)
+{
+    bool reload = false;
+    juce::StringArray messages;
+    for (;;)
+    {
+        std::vector<CatalogSyncRequest> batch;
         {
-            if (safe == nullptr) return;
-            safe->status.setText(result.ok
-                    ? (isCopy ? "Added to the catalog: " : "Catalog updated: ") + name
-                    : result.error,
-                juce::dontSendNotification);
-            if (result.ok && isCopy) safe->reloadLibrary();
-        });
+            std::lock_guard lock(catalogSyncMutex);
+            if (catalogSyncStop)
+            {
+                catalogSyncRequests.clear();
+                catalogSyncQueued = false;
+                break;
+            }
+            batch.swap(catalogSyncRequests);
+            if (batch.empty())
+            {
+                catalogSyncQueued = false;
+                break;
+            }
+        }
+        for (const auto& request : batch)
+        {
+            try
+            {
+                const auto result = request.isCopy
+                    ? addCatalogCopy(repo, request.file, request.sampleId)
+                    : refreshCatalogFile(repo, request.file);
+                if (result.ok)
+                {
+                    messages.add((request.isCopy ? "Added to the catalog: " : "Catalog updated: ")
+                                 + request.file.getFileName());
+                    reload = true;
+                }
+                else
+                    messages.add(result.error);
+            }
+            catch (const std::exception& error)
+            {
+                messages.add(juce::String::fromUTF8(error.what()));
+            }
+        }
+    }
+    juce::MessageManager::callAsync([safe, messages, reload]()
+    {
+        if (safe == nullptr) return;
+        if (! messages.isEmpty())
+        {
+            auto text = messages.joinIntoString("  |  ");
+            if (messages.size() > 3)
+                text = messages[0] + "  |  " + messages[1] + "  |  " + messages[2]
+                    + "  (+" + juce::String(messages.size() - 3) + " more)";
+            safe->status.setText(text, juce::dontSendNotification);
+            safe->status.setTooltip(messages.joinIntoString("\n"));
+        }
+        if (reload) safe->reloadLibrary();
     });
 }
 
@@ -2881,6 +2952,13 @@ void MainComponent::startNormalizeSelected(const std::vector<SampleRecord>& sele
         status.setText("Normalize is already running.", juce::dontSendNotification);
         return;
     }
+    // Cancel acts on whichever job is running; keeping one writer job at a time makes that
+    // unambiguous and keeps the catalog reanalysis from racing another writer.
+    if (! normalizeJobIdle())
+    {
+        status.setText("Wait for the running job to finish.", juce::dontSendNotification);
+        return;
+    }
     const auto records = normalizeCandidates(selection);
     if (records.empty())
     {
@@ -2913,7 +2991,7 @@ void MainComponent::startNormalizeSelected(const std::vector<SampleRecord>& sele
     juce::String message = count + (files.size() == 1 ? " file" : " files") + " to -0.1 dBFS.";
     if (overwritable > 0)
         message += " " + juce::String(overwritable)
-            + " can be replaced in place; the others are saved as \u201c edit\u201d copies.";
+            + " can be replaced in place; the others are saved as a new copy next to the original.";
     else
         message += " None of these formats can be replaced in place; every result is a new copy.";
     if (records.size() < selection.size())
@@ -2934,11 +3012,29 @@ void MainComponent::startNormalizeSelected(const std::vector<SampleRecord>& sele
             [begin](int id) { if (id == 2) begin(false); });
 }
 
+bool MainComponent::normalizeJobIdle() const
+{
+    return ! (indexer && indexer->progress().running)
+        && ! (smart && smart->progress().running)
+        && ! (tagging && tagging->progress().running)
+        && ! (autoTag && autoTag->progress().running)
+        && ! isSplitRunning() && ! isExtractRunning();
+}
+
 void MainComponent::beginNormalize(const std::vector<juce::File>& files,
                                    const std::map<juce::String, int64_t>& sampleIds,
                                    bool overwriteOriginals)
 {
     if (normalizer == nullptr || files.empty()) return;
+    // The timer may not have noticed that the previous batch ended; finish it now so its catalog
+    // rows and copies are not lost when this run replaces the service results.
+    if (normalizeWasRunning && ! normalizer->progress().running)
+    {
+        finishNormalize();
+        // The failed start below must not let the timer finish the same batch a second time.
+        normalizeWasRunning = false;
+        normalizeResults.clear();
+    }
     NormalizeOptions options;
     options.overwriteOriginals = overwriteOriginals;
     if (! normalizer->start(files, options))
@@ -2973,7 +3069,9 @@ void MainComponent::finishNormalize()
     // The open preview may be showing a file that was just rewritten; reload it so the waveform
     // and the reader agree with the bytes on disk. Files with unsaved edits were skipped above.
     for (const auto& result : normalizeResults)
-        if (result.replacedOriginal && preview.loadedFilePath() == result.destination)
+        if (result.replacedOriginal
+            && (preview.loadedFilePath() == result.source
+                || preview.loadedFilePath() == result.destination))
         {
             preview.loadFile(result.destination, false);
             break;
@@ -2984,44 +3082,14 @@ void MainComponent::finishNormalize()
 
 void MainComponent::syncNormalizedCatalog()
 {
-    auto* repo = writeRepo.get();
-    if (repo == nullptr || normalizeResults.empty()) return;
-    std::vector<NormalizeFileResult> written;
+    if (writeRepo == nullptr) return;
     for (const auto& result : normalizeResults)
-        if (result.state == NormalizeFileState::normalized) written.push_back(result);
-    if (written.empty()) return;
-    if (catalogSyncWorker && catalogSyncWorker->joinable()) catalogSyncWorker->join();
-    const auto sampleIds = normalizeSampleIds;
-    auto safe = juce::Component::SafePointer<MainComponent>(this);
-    // Reanalysis reads the file again and can take seconds per row; it stays off the message
-    // thread. Tags, stars and manual values survive because the row is updated in place.
-    catalogSyncWorker = std::make_unique<std::thread>([repo, written, sampleIds, safe]()
     {
-        int failures = 0;
-        for (const auto& result : written)
-        {
-            try
-            {
-                const auto found = sampleIds.find(result.source.getFullPathName());
-                const auto templateId = found != sampleIds.end() ? found->second : (int64_t) 0;
-                auto sync = result.replacedOriginal ? refreshCatalogFile(*repo, result.destination)
-                                                    : addCatalogCopy(*repo, result.destination, templateId);
-                if (! sync.ok) ++failures;
-            }
-            catch (const std::exception&)
-            {
-                ++failures;
-            }
-        }
-        juce::MessageManager::callAsync([safe, failures]()
-        {
-            if (safe == nullptr) return;
-            safe->reloadLibrary();
-            if (failures > 0)
-                safe->status.setText(safe->status.getText() + "  |  catalog errors "
-                    + juce::String(failures), juce::dontSendNotification);
-        });
-    });
+        if (result.state != NormalizeFileState::normalized) continue;
+        const auto found = normalizeSampleIds.find(result.source.getFullPathName());
+        const auto templateId = found != normalizeSampleIds.end() ? found->second : (int64_t) 0;
+        enqueueCatalogSync(result.destination, templateId, ! result.replacedOriginal);
+    }
 }
 
 void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selection,
@@ -3095,7 +3163,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         ? "Extract samples from " + juce::String(extractCandidates.sourceCount()) + " item(s)..."
         : juce::String("Extract samples..."), ! extractCandidates.empty());
     menu.addItem(editCommandMenuItem(EditAction::normalizeSelected,
-                                     ! normalizeRecords.empty() && ! isNormalizeRunning()));
+                                     ! normalizeRecords.empty() && ! isNormalizeRunning()
+                                         && normalizeJobIdle()));
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
                          allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
@@ -4253,7 +4322,12 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     }
     contributionUploader.reset();
     cancelFeedback = true;
+    {
+        std::lock_guard lock(catalogSyncMutex);
+        catalogSyncStop = true;
+    }
     if (catalogSyncWorker && catalogSyncWorker->joinable()) catalogSyncWorker->join();
+    catalogSyncRequests.clear();
     if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
     cancelFeedback = false;
     writeRepo.reset(); writeDb.reset(); readRepo.reset(); readDb.reset();
@@ -4261,6 +4335,11 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     readDb = std::move(newReadDb); readRepo = std::move(newReadRepo);
     AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
     loadShippedGlobalPrototypes();
+    {
+        // The queue may run again against the new catalog; requests for the old one were dropped.
+        std::lock_guard lock(catalogSyncMutex);
+        catalogSyncStop = false;
+    }
     indexer = std::make_unique<IndexingService>(*writeRepo);
     smart = std::make_unique<SmartAnalysisService>(*writeRepo);
     tagging = std::make_unique<TaggingService>(*writeRepo);

@@ -164,3 +164,55 @@ TEST_CASE("Normalize service reports every file of the batch", "[normalize]")
     REQUIRE(results[0].state == NormalizeFileState::normalized);
     REQUIRE(results[1].source == second);
 }
+
+TEST_CASE("Normalize refuses a non-finite sample instead of replacing the file", "[normalize]")
+{
+    TestDirectory directory;
+    const auto file = directory.dir.getChildFile("nan.wav");
+    file.deleteFile();
+    juce::WavAudioFormat wav;
+    auto stream = std::unique_ptr<juce::OutputStream>(file.createOutputStream());
+    auto options = juce::AudioFormatWriterOptions{}.withSampleRate(44100.0)
+        .withNumChannels(1).withBitsPerSample(32)
+        .withSampleFormat(juce::AudioFormatWriterOptions::SampleFormat::floatingPoint);
+    auto writer = wav.createWriterFor(stream, options);
+    REQUIRE(writer != nullptr);
+    std::vector<float> samples(2048, 0.1f);
+    samples[100] = std::numeric_limits<float>::quiet_NaN();
+    juce::AudioBuffer<float> buffer(1, (int) samples.size());
+    buffer.copyFrom(0, 0, samples.data(), (int) samples.size());
+    REQUIRE(writer->writeFromFloatArrays(buffer.getArrayOfReadPointers(), 1,
+                                         (int) samples.size()));
+    writer.reset();
+    stream.reset();
+    const auto before = readBytes(file);
+    const auto result = normalizeFile(file, NormalizeOptions{ true });
+    REQUIRE(result.state == NormalizeFileState::failed);
+    REQUIRE(readBytes(file) == before);
+}
+
+TEST_CASE("Normalize skips sources with more than two channels", "[normalize]")
+{
+    TestDirectory directory;
+    const auto file = writeWav(directory.dir.getChildFile("three.wav"),
+                               std::vector<float>(512, 0.2f),
+                               std::vector<float>(512, 0.2f));
+    // writeWav only makes mono or stereo; build a 3-channel file directly.
+    juce::WavAudioFormat wav;
+    file.deleteFile();
+    auto stream = std::unique_ptr<juce::OutputStream>(file.createOutputStream());
+    auto options = juce::AudioFormatWriterOptions{}.withSampleRate(44100.0)
+        .withNumChannels(3).withBitsPerSample(16)
+        .withSampleFormat(juce::AudioFormatWriterOptions::SampleFormat::integral);
+    auto writer = wav.createWriterFor(stream, options);
+    REQUIRE(writer != nullptr);
+    juce::AudioBuffer<float> buffer(3, 512);
+    buffer.clear();
+    buffer.applyGain(0.5f);
+    REQUIRE(writer->writeFromFloatArrays(buffer.getArrayOfReadPointers(), 3, 512));
+    writer.reset();
+    stream.reset();
+    const auto result = normalizeFile(file, NormalizeOptions{ true });
+    REQUIRE(result.state == NormalizeFileState::skipped);
+    REQUIRE(result.error == "More than two channels");
+}

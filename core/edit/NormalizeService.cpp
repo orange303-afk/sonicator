@@ -123,10 +123,10 @@ NormalizeFileResult normalizeFile(const juce::File& source, const NormalizeOptio
     const auto sourceMetadata = reader->metadataValues;
     const bool floatingPoint = reader->usesFloatingPointData;
     const int bitsPerSample = reader->bitsPerSample;
-
     juce::AudioBuffer<float> buffer(channels, chunkFrames);
     float peak = 0.0f;
-    for (int64_t position = 0; position < frames;)
+    bool invalidSample = false;
+    for (int64_t position = 0; position < frames && ! invalidSample;)
     {
         if (cancelled())
         {
@@ -141,29 +141,63 @@ NormalizeFileResult normalizeFile(const juce::File& source, const NormalizeOptio
             result.error = "Cannot read the source";
             return result;
         }
+        // getMagnitude treats NaN comparisons as "not larger", so a NaN would otherwise read as a
+        // silent file; only float sources can carry one, so integral files skip the scan.
+        if (floatingPoint)
+            for (int channel = 0; channel < channels && ! invalidSample; ++channel)
+            {
+                const auto* samples = buffer.getReadPointer(channel);
+                for (int i = 0; i < count; ++i)
+                    if (! std::isfinite(samples[i])) { invalidSample = true; break; }
+            }
         peak = juce::jmax(peak, buffer.getMagnitude(0, count));
         position += count;
     }
     reader.reset();
     result.peak = peak;
+    if (invalidSample)
+    {
+        result.state = NormalizeFileState::failed;
+        result.error = "The source contains an invalid sample";
+        return result;
+    }
+    if (! std::isfinite(peak))
+    {
+        // A NaN or infinite sample would make the gain non-finite and silently write broken audio
+        // over the original, while the length check would still pass.
+        result.state = NormalizeFileState::failed;
+        result.error = "The source contains an invalid sample";
+        return result;
+    }
     if (peak <= silentPeak) return unchanged(result, "Silent source", peak);
     const float gain = normalizePeakTarget / peak;
     result.gain = gain;
+    if (! std::isfinite(gain))
+    {
+        result.state = NormalizeFileState::failed;
+        result.error = "The source contains an invalid sample";
+        return result;
+    }
     if (std::abs(gain - 1.0f) <= unityGainTolerance)
         return unchanged(result, "Already at -0.1 dBFS", peak);
 
     const auto originalSize = source.getSize();
     const auto originalModified = source.getLastModificationTime().toMilliseconds();
     const auto writeTarget = source.isSymbolicLink() ? source.getLinkedTarget() : source;
-    const bool overwrite = options.overwriteOriginals && edit::canOverwriteInPlace(source);
-    const auto extension = overwrite ? extensionOf(writeTarget) : juce::String(".wav");
+    // The decision uses the resolved file: a .mp3 link to a .wav target can be overwritten.
+    const bool overwrite = options.overwriteOriginals && edit::canOverwriteInPlace(writeTarget);
+    const auto sourceExtension = extensionOf(writeTarget);
+    const auto extension = overwrite ? sourceExtension : juce::String(".wav");
+    // A decoded lossy source reports float data, but a sample library wants an integral WAV.
+    const bool sourceIsPcm = sourceExtension == ".wav" || sourceExtension == ".wave"
+        || sourceExtension == ".aif" || sourceExtension == ".aiff" || sourceExtension == ".flac";
 
     edit::AudioWriteSpec spec;
     spec.sampleRate = sampleRate;
     spec.channels = channels;
-    spec.bitsPerSample = bitsPerSample;
+    spec.bitsPerSample = overwrite || sourceIsPcm ? bitsPerSample : 24;
     spec.frames = frames;
-    spec.floatingPoint = floatingPoint;
+    spec.floatingPoint = overwrite || sourceIsPcm ? floatingPoint : false;
     spec.metadata = metadataFor(sourceMetadata, extension);
 
     const auto feed = [&](juce::AudioFormatWriter& writer)
@@ -174,6 +208,7 @@ NormalizeFileResult normalizeFile(const juce::File& source, const NormalizeOptio
         {
             if (cancelled()) return false;
             const auto count = (int) juce::jmin<int64_t>(chunkFrames, frames - position);
+            buffer.clear();
             if (! second->read(&buffer, 0, count, position, true, true)) return false;
             // One coefficient for every channel: the stereo image does not move.
             buffer.applyGain(0, count, gain);
@@ -237,8 +272,9 @@ NormalizeService::~NormalizeService()
 
 bool NormalizeService::start(const std::vector<juce::File>& sources, const NormalizeOptions& next)
 {
-    if (isThreadRunning()) return false;
-    waitForThreadToExit(-1);
+    // The previous run may still be unwinding after it published `running = false`; wait for it
+    // instead of rejecting a fresh batch in that tiny window.
+    if (isThreadRunning() && ! waitForThreadToExit(2000)) return false;
     {
         std::lock_guard lock(stateMutex);
         files = sources;

@@ -114,7 +114,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         notifySettings();
     };
     alwaysOverwriteNote.setText("Save and Normalize selected replace the file without asking. "
-                                "WAV, AIFF and FLAC only; other formats still get an \u201c edit\u201d copy. "
+                                "WAV, AIFF and FLAC only; other formats are saved as a new copy. "
                                 "The prompt for unsaved edits before leaving a file stays.",
                                 juce::dontSendNotification);
     alwaysOverwriteNote.setFont(noteFont());
@@ -202,16 +202,15 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
 void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
 {
     pluginMode = shouldUsePluginMode;
-    const std::array<juce::Component*,20> hidden {
+    const std::array<juce::Component*,17> hidden {
         &scaleLabel, &scaleBox, &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
         &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
-        &editingHeading, &alwaysOverwriteToggle, &alwaysOverwriteNote,
         &audioHeading, &audio, &contributeDataToggle, &contributionNote,
         &contributionPreview, &contributionDelete };
     for (auto* c : hidden)
         c->setVisible(! pluginMode);
     close.setVisible(pluginMode);
-    setSize(560, pluginMode ? 700 : 1110);
+    setSize(560, pluginMode ? 780 : 1110);
     resized();
 }
 void SettingsPanel::notifySettings()

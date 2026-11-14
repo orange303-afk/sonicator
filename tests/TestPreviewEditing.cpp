@@ -252,3 +252,19 @@ TEST_CASE("Unsaved edits belong to one file only", "[ui][edit]")
     REQUIRE(preview.hasUnsavedEditsFor(a));
     REQUIRE_FALSE(preview.hasUnsavedEditsFor(b));
 }
+
+TEST_CASE("Unmodified edit keys need the preview focus", "[ui][edit][keys]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave("a.wav"), false));
+    preview.selectRange(0.1, 0.5);
+    // The panel is not on a desktop and owns no focus here, like the library list owning it in the
+    // real window. A bare letter must not edit, but the modified Save key still reaches saveEdits.
+    REQUIRE_FALSE(preview.keyPressed(juce::KeyPress('n')));
+    REQUIRE_FALSE(preview.keyPressed(juce::KeyPress('r')));
+    REQUIRE_FALSE(preview.keyPressed(juce::KeyPress(juce::KeyPress::backspaceKey)));
+    REQUIRE_FALSE(preview.hasUnsavedEdits());
+    REQUIRE(preview.waveformLength() == Approx(1.0).margin(0.01));
+}

@@ -16,6 +16,7 @@
 #include "core/extract/ExtractService.h"
 #include "core/settings/AppSettings.h"
 #include "core/contribute/ContributionUploader.h"
+#include <mutex>
 namespace sonicator {
 class SplitDialog;
 class ExtractDialog;
@@ -242,6 +243,8 @@ private:
     void finishNormalize();
     void syncNormalizedCatalog();
     bool isNormalizeRunning() const { return normalizer != nullptr && normalizer->progress().running; }
+    // No other writer/analysis job is running, so Normalize may start and Cancel is unambiguous.
+    bool normalizeJobIdle() const;
     void requestSplitScan(const juce::StringArray& folders);
     void closeSplitDialog();
     void requestCloseSplit();
@@ -267,6 +270,19 @@ private:
     static bool contains(const std::vector<int64_t>& values, int64_t id);
     static void toggle(std::vector<int64_t>& values, int64_t id);
     std::unique_ptr<std::thread> catalogSyncWorker;
+    // Catalog work is queued and drained by one worker so a long reanalysis never blocks the
+    // message thread on a join; normalize batches and editor saves feed the same queue.
+    struct CatalogSyncRequest
+    {
+        juce::File file;
+        int64_t sampleId = 0;
+        bool isCopy = false;
+    };
+    std::mutex catalogSyncMutex;
+    std::vector<CatalogSyncRequest> catalogSyncRequests;
+    bool catalogSyncQueued = false, catalogSyncStop = false;
+    void enqueueCatalogSync(const juce::File&, int64_t sampleId, bool isCopy);
+    void runCatalogSyncQueue(SampleRepository&, juce::Component::SafePointer<MainComponent>);
     std::unique_ptr<std::thread> typeFeedbackWorker;
     std::atomic<bool> cancelFeedback{ false };
     std::unique_ptr<std::thread> featureV2Worker;

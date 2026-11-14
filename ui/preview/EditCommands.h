@@ -45,6 +45,7 @@ juce::String editCommandShortcutText(EditAction);
 juce::PopupMenu::Item editCommandMenuItem(EditAction, bool enabled);
 
 // True when the pressed key is exactly the command's shortcut. Letters compare
-// case-insensitively and Ctrl counts as Command on macOS, matching the old handlers.
+// case-insensitively; Ctrl on Windows arrives as Command, while macOS keeps Ctrl separate so it
+// cannot fire a Command shortcut by accident.
 bool editCommandMatches(const juce::KeyPress& shortcut, const juce::KeyPress& pressed);
 } // namespace sonicator

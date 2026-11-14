@@ -839,9 +839,10 @@ void PreviewPanel::applyPersistedSettings(const AppSettings& settings)
 
 bool PreviewPanel::hasUnsavedEditsFor(const juce::File& file) const
 {
-    if (! hasUnsavedEdits() || file == juce::File()) return false;
-    const auto target = editTarget != juce::File() ? editTarget : loadedFile;
-    return target.getFullPathName() == file.getFullPathName();
+    // Only an ordinary-file edit has a target. A decoded disc, instrument or tracker edit has no
+    // path and can never be a library Normalize target, so it must not match the loaded container.
+    if (! hasUnsavedEdits() || editTarget == juce::File() || file == juce::File()) return false;
+    return editTarget.getFullPathName() == file.getFullPathName();
 }
 void PreviewPanel::selectRange(double start, double end)
 {
