@@ -11,7 +11,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
-constexpr int schemaVersion = 17;
+constexpr int schemaVersion = 18;
 // Tag history started at schema 15 and must not follow later database bumps.
 constexpr int tagHistorySchemaVersion = 15;
 SampleRecord read(const detail::Statement& s)
@@ -168,32 +168,21 @@ juce::String orderBy(LibrarySort sort, bool ascending)
         case LibrarySort::Rate:     column = "samples.sampleRate"; break;
         case LibrarySort::Channels: column = "samples.numChannels"; break;
         case LibrarySort::Status:   column = "samples.error COLLATE NOCASE"; break;
+        // Schema 18 keeps the resolved values on the samples row, so the ORDER BY terms below
+        // match an index and the query no longer runs a correlated subquery per row.
         case LibrarySort::Type:
-        {
-            const auto expr = effectiveTypeSql();
-            return "(" + expr + " IS NULL) ASC, " + expr + " COLLATE NOCASE "
+            return juce::String("(samples.eff_type IS NULL) ASC, samples.eff_type COLLATE NOCASE ")
                  + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
-        }
         case LibrarySort::Genre:
-        {
-            const auto expr = effectiveGenreSql();
-            return "(" + expr + " IS NULL) ASC, " + expr + " COLLATE NOCASE "
+            return juce::String("(samples.eff_genre IS NULL) ASC, samples.eff_genre COLLATE NOCASE ")
                  + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
-        }
         case LibrarySort::Bpm:
-        {
-            const auto expr = effectiveBpmSql();
-            return "(" + expr + " IS NULL) ASC, " + expr + " "
+            return juce::String("(samples.eff_bpm IS NULL) ASC, samples.eff_bpm ")
                  + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
-        }
         case LibrarySort::Key:
-        {
-            const auto tonic = effectiveKeyTonicSql();
-            const auto mode = effectiveKeyModeSql();
-            return "(" + tonic + " IS NULL) ASC, " + tonic + " "
-                 + (ascending ? "ASC" : "DESC") + ", " + mode + " COLLATE NOCASE "
+            return juce::String("(samples.eff_key_tonic IS NULL) ASC, samples.eff_key_tonic ")
+                 + (ascending ? "ASC" : "DESC") + ", samples.eff_key_mode COLLATE NOCASE "
                  + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
-        }
         case LibrarySort::Name:
         default:                    column = "samples.name COLLATE NOCASE"; break;
     }
@@ -782,8 +771,40 @@ void SampleRepository::createTables()
         ensureColumn(db.handle, "smart_results", "genre_state", "TEXT NOT NULL DEFAULT 'unknown'");
         ensureColumn(db.handle, "smart_results", "genre_source", "TEXT NOT NULL DEFAULT ''");
         ensureColumn(db.handle, "smart_results", "genre_override", "TEXT NOT NULL DEFAULT 'none'");
+        // Schema 18: the resolved sort values live on the samples row and are indexed, so a
+        // whole-catalog sort by Type, Genre, BPM or Key is an index scan instead of five
+        // correlated subqueries per row. Unknown is NULL and sorts last, as before. Existing
+        // catalogs are backfilled once, below; afterwards writeResult() keeps them in step.
+        ensureColumn(db.handle, "samples", "eff_type", "TEXT");
+        ensureColumn(db.handle, "samples", "eff_bpm", "REAL");
+        ensureColumn(db.handle, "samples", "eff_key_tonic", "INTEGER");
+        ensureColumn(db.handle, "samples", "eff_key_mode", "TEXT");
+        ensureColumn(db.handle, "samples", "eff_genre", "TEXT");
+        if (current < 18)
+        {
+            detail::exec(db.handle, ("UPDATE samples SET eff_type=" + effectiveTypeSql()
+                + ", eff_bpm=" + effectiveBpmSql()
+                + ", eff_key_tonic=" + effectiveKeyTonicSql()
+                + ", eff_key_mode=" + effectiveKeyModeSql()
+                + ", eff_genre=" + effectiveGenreSql() + ";").toRawUTF8());
+        }
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS smart_results_pipeline"
                                 " ON smart_results(pipeline_state, sample_id);");
+        // Each effective index starts with the unknown flag, so "unknown last" holds for both
+        // directions without a temporary B-tree.
+        detail::exec(db.handle,
+            "CREATE INDEX IF NOT EXISTS samples_eff_type ON samples((eff_type IS NULL),"
+            " eff_type COLLATE NOCASE, id);"
+            "CREATE INDEX IF NOT EXISTS samples_eff_bpm ON samples((eff_bpm IS NULL), eff_bpm, id);"
+            "CREATE INDEX IF NOT EXISTS samples_eff_key ON samples((eff_key_tonic IS NULL),"
+            " eff_key_tonic, eff_key_mode COLLATE NOCASE, id);"
+            "CREATE INDEX IF NOT EXISTS samples_eff_genre ON samples((eff_genre IS NULL),"
+            " eff_genre COLLATE NOCASE, id);"
+            "CREATE INDEX IF NOT EXISTS samples_format ON samples(format COLLATE NOCASE, id);"
+            "CREATE INDEX IF NOT EXISTS samples_duration ON samples(duration, id);"
+            "CREATE INDEX IF NOT EXISTS samples_rate ON samples(rate, id);"
+            "CREATE INDEX IF NOT EXISTS samples_channels ON samples(channels, id);"
+            "CREATE INDEX IF NOT EXISTS samples_status ON samples(error COLLATE NOCASE, id);");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_pair_key ON samples(pair_key) WHERE pair_key != '';");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_ignored ON samples(ignored);");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_starred ON samples(starred) WHERE starred = 1;");
@@ -856,7 +877,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=17;");
+        detail::exec(db.handle, "PRAGMA user_version=18;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -2544,6 +2565,19 @@ void writeExtractions(sqlite3* h, int64_t sampleId, const std::vector<SmartExtra
         insert.step();
     }
 }
+// Keeps the indexed sort values in step with the resolved result and the overrides. Called from
+// writeResult(), the single point every result write passes through (publish, override, clear,
+// direct set), so a sort value cannot drift from the value the UI shows.
+void refreshEffectiveValues(sqlite3* h, int64_t sampleId)
+{
+    detail::Statement s(h, ("UPDATE samples SET eff_type=" + effectiveTypeSql()
+        + ", eff_bpm=" + effectiveBpmSql()
+        + ", eff_key_tonic=" + effectiveKeyTonicSql()
+        + ", eff_key_mode=" + effectiveKeyModeSql()
+        + ", eff_genre=" + effectiveGenreSql() + " WHERE id=?").toRawUTF8());
+    s.integer(1, sampleId);
+    s.step();
+}
 void writeResult(sqlite3* h, int64_t sampleId, const SmartResult& r)
 {
     detail::Statement s(h,
@@ -2579,6 +2613,7 @@ void writeResult(sqlite3* h, int64_t sampleId, const SmartResult& r)
     s.integer(40, r.analyzedAt); s.text(41, r.errorCode); s.text(42, r.errorDetail);
     s.integer(43, juce::Time::currentTimeMillis());
     s.step();
+    refreshEffectiveValues(h, sampleId);
 }
 int64_t nextGeneration(sqlite3* h)
 {
