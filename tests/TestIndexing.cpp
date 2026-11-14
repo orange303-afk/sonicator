@@ -1,7 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include <thread>
 #include <unordered_set>
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
+#include <sqlite3.h>
 using namespace sonicator;
 TEST_CASE("Indexer persists, skips unchanged files, detects duplicates and retries changes", "[indexing]")
 {
@@ -278,4 +281,92 @@ TEST_CASE("startFoldersNewOnly analyzes only unknown paths in the given folders"
     REQUIRE(repo.findByPath(known.filePath)->error == "bad");
     REQUIRE(repo.findByPath(t.dir.getChildFile("a/two.wav").getFullPathName())->error.isEmpty());
     REQUIRE(repo.roots().isEmpty());
+}
+
+TEST_CASE("A scan reports its analysis workers", "[indexing][parallel]")
+{
+    TestDirectory t;
+    for (int i = 0; i < 4; ++i) t.wave("parallel/a" + juce::String(i) + ".wav", 200 + i * 40);
+    Database db(t.dir.getChildFile("parallel.sqlite")); SampleRepository repo(db); repo.createTables();
+    IndexingService index(repo);
+    REQUIRE(index.start({ t.dir.getChildFile("parallel").getFullPathName() }));
+    REQUIRE(index.waitUntilFinished(30000));
+    const int expected = juce::jlimit(1, 4,
+        (int) juce::jmax(1u, std::thread::hardware_concurrency()));
+    REQUIRE(index.progress().analyzed == 4);
+    REQUIRE(index.progress().workers == expected);
+    if (std::thread::hardware_concurrency() >= 2) REQUIRE(index.progress().workers >= 2);
+}
+
+TEST_CASE("Parallel analysis stores the same rows as sequential analysis", "[indexing][parallel]")
+{
+    TestDirectory t;
+    const auto folder = t.dir.getChildFile("parallel-rows");
+    folder.createDirectory();
+    std::vector<juce::File> files;
+    for (int i = 0; i < 24; ++i)
+        files.push_back(t.wave("parallel-rows/sample" + juce::String::formatted("%02d", i) + ".wav",
+                               220 + i * 17, i % 3 == 0 ? 2 : 1));
+    files.push_back(t.wave("parallel-rows/dup1.wav", 330));
+    REQUIRE(files.back().copyFileTo(folder.getChildFile("dup2.wav")));
+    files.push_back(folder.getChildFile("dup2.wav"));
+
+    std::vector<SampleRecord> expected;
+    for (const auto& file : files) expected.push_back(BasicAnalyzer().analyzeAndHash(file));
+
+    Database db(t.dir.getChildFile("parallel-rows.sqlite")); SampleRepository repo(db); repo.createTables();
+    IndexingService index(repo);
+    REQUIRE(index.start({ folder.getFullPathName() }));
+    REQUIRE(index.waitUntilFinished(60000));
+    const auto progress = index.progress();
+    REQUIRE(progress.analyzed == (int) files.size());
+    REQUIRE(progress.failed == 0);
+    REQUIRE(progress.duplicates == 1);
+    REQUIRE(repo.count() == (int) files.size());
+    for (size_t i = 0; i < files.size(); ++i)
+    {
+        INFO(files[i].getFileName());
+        const auto stored = repo.findByPath(files[i].getFullPathName());
+        REQUIRE(stored.has_value());
+        REQUIRE(stored->fileHash == expected[i].fileHash);
+        REQUIRE(stored->format == expected[i].format);
+        REQUIRE(stored->duration == Catch::Approx(expected[i].duration));
+        REQUIRE(stored->sampleRate == Catch::Approx(expected[i].sampleRate));
+        REQUIRE(stored->numChannels == expected[i].numChannels);
+        REQUIRE(stored->bitsPerSample == expected[i].bitsPerSample);
+        REQUIRE(stored->error == expected[i].error);
+    }
+
+    // The additive mode still skips every known path after a parallel scan.
+    REQUIRE(index.startNewOnly({ folder.getFullPathName() }));
+    REQUIRE(index.waitUntilFinished(30000));
+    REQUIRE(index.progress().analyzed == 0);
+    REQUIRE(index.progress().skipped == (int) files.size());
+}
+
+TEST_CASE("A catalog write failure ends the scan instead of stranding its workers", "[indexing][parallel][abort]")
+{
+    TestDirectory t;
+    const auto folder = t.dir.getChildFile("abort");
+    folder.createDirectory();
+    for (int i = 0; i < 40; ++i)
+        t.wave("abort/take" + juce::String::formatted("%02d", i) + ".wav", 220 + i * 5);
+    const auto dbFile = t.dir.getChildFile("abort.sqlite");
+    Database db(dbFile); SampleRepository repo(db); repo.createTables();
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(dbFile.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        REQUIRE(sqlite3_exec(raw,
+            "CREATE TRIGGER fail_insert BEFORE INSERT ON samples"
+            " WHEN NEW.path LIKE '%/abort/%' BEGIN SELECT RAISE(ABORT,'boom'); END;",
+            nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(raw);
+    }
+    IndexingService index(repo);
+    REQUIRE(index.start({ folder.getFullPathName() }));
+    // Before the writer was exception-safe, this unwound while workers were still parked in the
+    // pipeline and the service thread never finished.
+    REQUIRE(index.waitUntilFinished(15000));
+    REQUIRE_FALSE(index.progress().running);
+    REQUIRE(index.progress().message.containsIgnoreCase("boom"));
 }

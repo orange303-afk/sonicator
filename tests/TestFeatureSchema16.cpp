@@ -90,7 +90,7 @@ TEST_CASE("a schema-15 catalog gains the v2 columns without losing rows", "[data
         REQUIRE(rows[0].featureSchema == 1);
         REQUIRE(rows[0].featuresV2.empty());
     }
-    REQUIRE(userVersion(file) == 17);
+    REQUIRE(userVersion(file) == 18);
 }
 
 TEST_CASE("the contribution record carries both feature schemas", "[database][feedback]")
