@@ -4,6 +4,7 @@
 #include "ui/library/FileListPanel.h"
 #include "ui/library/SearchField.h"
 #include "ui/preview/PreviewPanel.h"
+#include "ui/split/SplitDialog.h"
 #include "core/database/SampleRepository.h"
 #include "core/dsp/BasicAnalyzer.h"
 #include "ui/shell/Theme.h"
@@ -192,4 +193,37 @@ TEST_CASE("Preview shows the format line and fits the 156 px panel", "[ui][studi
     for (auto* child : panel.getChildren())
         if (child->isVisible())
             REQUIRE(child->getBottom() <= panel.getHeight());
+}
+
+TEST_CASE("The split dialog keeps its sliders and visible check boxes", "[ui][studio]")
+{
+    TestDirectory t;
+    SplitDialog dialog({ t.wave("a.wav") }, AppSettings{}, [](SplitOptions) { return true; });
+    dialog.setSize(520, 430);
+    dialog.resized();
+    juce::Label* title = nullptr;
+    int sliders = 0, checks = 0;
+    for (auto* child : dialog.getChildren())
+    {
+        if (auto* label = dynamic_cast<juce::Label*>(child))
+            if (label->getText().startsWith("Split ")) title = label;
+        if (auto* slider = dynamic_cast<juce::Slider*>(child))
+        {
+            ++sliders;
+            REQUIRE(slider->getWidth() > 150);
+            REQUIRE(slider->getTextBoxWidth() == 90);
+        }
+        if (auto* toggle = dynamic_cast<juce::ToggleButton*>(child))
+        {
+            ++checks;
+            REQUIRE(toggle->getHeight() == 24);
+        }
+        REQUIRE(child->getBounds().getRight() <= dialog.getWidth());
+        REQUIRE(child->getBottom() <= dialog.getHeight());
+    }
+    REQUIRE(sliders == 3);
+    REQUIRE(checks == 3);
+    REQUIRE(title != nullptr);
+    REQUIRE(title->getX() == 20);
+    REQUIRE(title->getY() == 20);
 }

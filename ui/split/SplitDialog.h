@@ -1,6 +1,7 @@
 #pragma once
 #include "core/settings/AppSettings.h"
 #include "core/split/SplitService.h"
+#include "ui/shell/DialogSurface.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 #include <memory>
@@ -24,6 +25,7 @@ public:
     bool isFinished() const { return finished; }
     std::function<void()> onCancel, onOk;
 private:
+    dialogs::Surface surface;
     std::vector<juce::File> sources;
     juce::Label title, thresholdLabel, minSilenceLabel, minPartLabel, error;
     juce::Slider threshold, minSilence, minPart;

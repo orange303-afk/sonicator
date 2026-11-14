@@ -139,7 +139,7 @@ public:
     void drawAlertBox(juce::Graphics& g, juce::AlertWindow& alert,
                       const juce::Rectangle<int>&, juce::TextLayout& textLayout) override
     {
-        const float cornerSize = 8.0f;
+        const float cornerSize = studio::dialogRadius;
         const auto bounds = alert.getLocalBounds().toFloat();
 
         g.setColour(theme::panel);

@@ -1,4 +1,5 @@
 #include "SplitDialog.h"
+#include "ui/shell/DialogSurface.h"
 #include "ui/shell/Theme.h"
 #include <cmath>
 namespace sonicator {
@@ -143,39 +144,37 @@ SplitDialog::SplitDialog(std::vector<juce::File> inputSources, const AppSettings
 }
 void SplitDialog::paint(juce::Graphics& g)
 {
-    g.fillAll(theme::panel);
+    surface.paint(g, getLocalBounds());
 }
+
 void SplitDialog::resized()
 {
-    auto area = getLocalBounds().reduced(18);
-    title.setBounds(area.removeFromTop(28));
-    area.removeFromTop(4);
-    const auto row = [&area](juce::Label& label, juce::Component& control)
-    {
-        auto line = area.removeFromTop(26);
-        label.setBounds(line.removeFromLeft(150));
-        control.setBounds(line);
-        area.removeFromTop(8);
-    };
-    row(thresholdLabel, threshold);
-    row(minSilenceLabel, minSilence);
-    row(minPartLabel, minPart);
-    sameFolder.setBounds(area.removeFromTop(24));
-    area.removeFromTop(4);
-    moveToTrash.setBounds(area.removeFromTop(24));
-    area.removeFromTop(4);
-    normalize.setBounds(area.removeFromTop(24));
-    area.removeFromTop(8);
-    auto folderRow = area.removeFromTop(26);
+    using dialogs::Surface;
+    auto area = Surface::contentArea(getLocalBounds());
+    title.setBounds(area.removeFromTop(24));
+    area.removeFromTop(studio::spacingUnit);
+    Surface::placeSliderRow(area, thresholdLabel, threshold);
+    Surface::placeSliderRow(area, minSilenceLabel, minSilence);
+    Surface::placeSliderRow(area, minPartLabel, minPart);
+    area.removeFromTop(studio::spacing);
+
+    Surface::placeCheck(area, sameFolder);
+    Surface::placeCheck(area, moveToTrash);
+    Surface::placeCheck(area, normalize);
+    area.removeFromTop(studio::spacing);
+
+    auto folderRow = area.removeFromTop(studio::controlHeight);
     browse.setBounds(folderRow.removeFromRight(96));
-    folderRow.removeFromRight(8);
+    folderRow.removeFromRight(studio::spacingTight);
     folder.setBounds(folderRow);
-    area.removeFromTop(8);
+    area.removeFromTop(studio::spacingTight);
+
     error.setBounds(area.removeFromTop(20));
     progressBar.setBounds(area.removeFromTop(18));
     progressLabel.setBounds(area.removeFromTop(20));
-    resultLabel.setBounds(area.removeFromTop(54));
-    auto buttons = area.removeFromBottom(32);
+    resultLabel.setBounds(area);
+
+    auto buttons = Surface::footerArea(getLocalBounds());
     const int buttonWidth = 110;
     if (ok.isVisible())
     {
@@ -184,10 +183,11 @@ void SplitDialog::resized()
     else
     {
         accept.setBounds(buttons.removeFromRight(buttonWidth));
-        buttons.removeFromRight(8);
+        buttons.removeFromRight(studio::spacingTight);
         cancel.setBounds(buttons.removeFromRight(90));
     }
 }
+
 SplitOptions SplitDialog::currentOptions() const
 {
     SplitOptions options;
