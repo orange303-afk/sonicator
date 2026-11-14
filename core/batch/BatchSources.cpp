@@ -332,6 +332,7 @@ PreflightResult prepareBatch(SampleRepository& repo, const Request& request, Can
                 continue;
             }
             OutputPlan plan;
+            plan.outputIndex = result.batch.outputs.size();
             plan.sourceIndex = index;
             plan.format = preset.format;
             plan.encoding = encoding;

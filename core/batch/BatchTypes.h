@@ -182,6 +182,7 @@ struct SourceSnapshot
 
 struct OutputPlan
 {
+    size_t outputIndex = 0;
     size_t sourceIndex = 0;
     Format format = Format::wav;
     Encoding encoding = Encoding::int24;
