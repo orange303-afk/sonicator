@@ -3,6 +3,7 @@
 #include "ui/analysis/AnalysisCard.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/library/SearchField.h"
+#include "ui/preview/PreviewPanel.h"
 #include "core/database/SampleRepository.h"
 #include "core/dsp/BasicAnalyzer.h"
 #include "ui/shell/Theme.h"
@@ -170,4 +171,25 @@ TEST_CASE("Selecting a sample fills the analysis card and keeps its notes", "[ui
     REQUIRE(card->content().title == "b_ok.wav");
     REQUIRE(card->content().stats.size() >= 8);
     REQUIRE(card->content().tooltip.endsWith("b_ok.wav"));
+}
+
+TEST_CASE("Preview shows the format line and fits the 156 px panel", "[ui][studio]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel panel(engine, t.dir);
+    REQUIRE(panel.loadFile(t.wave("fmt.wav", 440.0, 2), false));
+    panel.setSize(1100, 156);
+    panel.resized();
+    auto* format = dynamic_cast<juce::Label*>(panel.findChildWithID("previewFormat"));
+    REQUIRE(format != nullptr);
+    REQUIRE(format->getText().contains("WAV"));
+    REQUIRE(format->getText().contains("44.1"));
+    REQUIRE(format->getText().contains("Stereo"));
+    auto* play = buttonWithText(panel, "Play");
+    REQUIRE(play != nullptr);
+    REQUIRE(play->getWidth() == studio::circleButtonSize);
+    for (auto* child : panel.getChildren())
+        if (child->isVisible())
+            REQUIRE(child->getBottom() <= panel.getHeight());
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "core/audio/AudioEngine.h"
+#include "ui/shell/StudioControls.h"
 #include "core/settings/AppSettings.h"
 #include "core/export/SelectionExporter.h"
 #include "ui/waveform/WaveformDisplay.h"
@@ -153,10 +154,11 @@ private:
     int64_t loadedSize = 0, loadedModified = 0;
     WaveformDisplay waveform;
     SongProgress songProgress;
-    juce::Label filename, time;
+    juce::Label filename, time, formatLine;
     juce::Label reasonInfo, abletonInfo;
     bool applyReasonReference(int, bool autoPlay);
-    juce::TextButton play { "Play" }, stop { "Stop" };
+    juce::TextButton play { "Play" };
+    studio::IconButton stop { ActionIcon::stop, "Stop" };
     StepComboBox presetBox;
     StepComboBox sampleBox;
     StepComboBox trackerBox;
@@ -176,11 +178,11 @@ private:
     bool clearSelectionAfterEdit = false, checkClipping = false;
     // Settings -> Editing: skip the Save dialog and replace a writable original directly.
     bool alwaysOverwrite = false;
-    juce::ToggleButton rexGate { "Gate" };
+    studio::CheckChip rexGate { "Gate", true };
     juce::Label rexInfo;
-    juce::ToggleButton loop { "Loop" };
-    juce::ToggleButton midi { "MIDI Preview" }, skipSilence { "Skip Silence" };
-    juce::ToggleButton autoPreview { "Auto Preview" };
+    studio::CheckChip loop { "Loop", true };
+    studio::CheckChip midi { "MIDI Preview", true }, skipSilence { "Skip Silence", true };
+    studio::CheckChip autoPreview { "Auto Preview", true };
     juce::Slider volume;
     SelectionExporter exporter;
     std::optional<edit::AudioEditBuffer> editBuffer;
@@ -196,6 +198,10 @@ private:
     void discardEdits();
     void resetEditSession();
     juce::String editingName() const;
+    // Filled where the file is already open, never from the timer.
+    void refreshFormatLine();
+    juce::String sourceFormat;
+    int sourceRate = 0, sourceChannels = 0, sourceBits = 0;
     bool sourceIsMono() const;
     juce::TextButton clearSelectionButton { "Clear" };
     juce::Label selectionStatus;

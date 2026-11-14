@@ -96,10 +96,17 @@ void PreviewPanel::refreshSourceList()
 PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,const juce::File& exportFolder)
     : engine(audio),waveform(cacheFolder),exporter(exportFolder)
 {
-    for (auto* c : std::array<juce::Component*,19>{&waveform, &songProgress, &filename, &time, &play, &stop, &loop, &volume,
+    for (auto* c : std::array<juce::Component*,20>{&waveform, &songProgress, &filename, &time, &formatLine, &play, &stop, &loop, &volume,
                                                    &midi, &skipSilence, &autoPreview, &clearSelectionButton, &selectionStatus,
                                                    &presetBox, &sampleBox, &rexGate, &rexInfo, &trackerBox, &sampleDragButton})
         addAndMakeVisible(c);
+    formatLine.setComponentID("previewFormat");
+    formatLine.setFont(studio::captionFont());
+    formatLine.setColour(juce::Label::textColourId, theme::muted);
+    formatLine.setJustificationType(juce::Justification::centredLeft);
+    studio::setCircle(play, true);
+    studio::setIcon(play, ActionIcon::play);
+    time.setFont(juce::Font(juce::FontOptions(15.0f)));
     presetBox.setVisible(false); sampleBox.setVisible(false); rexGate.setVisible(false); rexInfo.setVisible(false);
     trackerBox.setVisible(false); sampleDragButton.setVisible(false); songProgress.setVisible(false);
     addChildComponent(sourceList);
@@ -449,6 +456,24 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     }
     else if (! instrument && ! tracker)
         waveform.setFile(success ? file : juce::File());
+    // The format line is filled here, where the file is already being read, never from the timer.
+    sourceFormat = file.getFileExtension().substring(1).toUpperCase();
+    sourceRate = sourceChannels = sourceBits = 0;
+    if (success && ! instrument && ! tracker && ! rex && ! reason)
+    {
+        juce::AudioFormatManager formats;
+        registerSonicatorFormats(formats);
+        std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
+        if (reader != nullptr)
+        {
+            sourceRate = (int) reader->sampleRate;
+            sourceChannels = (int) reader->numChannels;
+            sourceBits = (int) reader->bitsPerSample;
+        }
+    }
+    refreshFormatLine();
+    time.setText(juce::String(engine.position(),2) + " / " + juce::String(engine.length(),2) + " s",
+                 juce::dontSendNotification);
     midi.setToggleState(engine.isMidiPreview(),juce::dontSendNotification);
     resized(); // the tracker/sample selectors appear or disappear with the loaded asset
     instrumentHead = true;
@@ -740,6 +765,11 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
     sampleDragButton.setVisible(true);
     sampleDragButton.setButtonText("Drag sample");
     filename.setText(stem + "  —  " + container.getFileName(), juce::dontSendNotification);
+    sourceFormat = container.getFileExtension().substring(1).toUpperCase();
+    sourceRate = discAudioRef != nullptr ? (int) discAudioRef->sampleRate : 0;
+    sourceChannels = discAudioRef != nullptr ? discAudioRef->channels : 0;
+    sourceBits = 0;
+    refreshFormatLine();
     resized();
     selectionStatus.setText(discSampleSummary(), juce::dontSendNotification);
     if (allowAutoPlay && autoPreview.getToggleState())
@@ -760,6 +790,8 @@ void PreviewPanel::clearSource()
     discStem.clear();
     exporter.cancel();
     loadedFile = juce::File(); loadedSize = 0; loadedModified = 0;
+    sourceFormat.clear(); sourceRate = sourceChannels = sourceBits = 0;
+    formatLine.setText({}, juce::dontSendNotification);
     instrumentSamples.clear();
     currentSampleId = invalidSampleId;
     waveform.setFile(juce::File());
@@ -1190,6 +1222,7 @@ void PreviewPanel::timerCallback()
         if (rexInfo.getText() != text) rexInfo.setText(text,juce::dontSendNotification);
     }
     play.setButtonText(engine.isPlaying() ? "Pause" : "Play");
+    studio::setIcon(play, engine.isPlaying() ? ActionIcon::pause : ActionIcon::play);
     if (sampleDragButton.isVisible())
     {
         const auto state = exporter.state();
@@ -1216,42 +1249,106 @@ void PreviewPanel::paint(juce::Graphics& g)
     g.setColour(theme::panel);
     g.fillPath(background);
 }
+void PreviewPanel::refreshFormatLine()
+{
+    juce::String kind = sourceFormat;
+    if (engine.isTrackerMode()) kind = "Tracker";
+    else if (engine.isSamplerInstrumentMode()) kind = "Instrument";
+    int rate = sourceRate, channels = sourceChannels;
+    if ((rate <= 0 || channels <= 0) && currentEditableAudio() != nullptr)
+    {
+        const auto audio = currentEditableAudio();
+        rate = (int) audio->sampleRate;
+        channels = audio->channels;
+    }
+    juce::StringArray parts;
+    if (kind.isNotEmpty()) parts.add(kind);
+    if (rate > 0) parts.add(juce::String(rate / 1000.0, 1) + " kHz");
+    if (channels == 1) parts.add("Mono");
+    else if (channels == 2) parts.add("Stereo");
+    else if (channels > 2) parts.add(juce::String(channels) + " ch");
+    formatLine.setText(parts.joinIntoString(" \xc2\xb7 "), juce::dontSendNotification);
+}
+
 void PreviewPanel::resized()
 {
-    auto r = getLocalBounds().reduced(16,12);
-    auto top = r.removeFromTop(24); filename.setBounds(top.removeFromLeft(juce::jmax(200,top.getWidth()-160)));
-    time.setBounds(top);
-    r.removeFromTop(8);
-    if (abletonInfo.isVisible()) abletonInfo.setBounds(r.removeFromTop(18));
-    auto controls = r.removeFromRight(330); r.removeFromRight(16); waveform.setBounds(r); songProgress.setBounds(r);
-    if (reasonInfo.isVisible())
+    auto r = getLocalBounds().reduced(studio::spacingWide, studio::spacing);
+    const int gap = getHeight() >= 160 ? studio::spacingTight : studio::spacingUnit;
+
+    auto controls = r.removeFromRight(juce::jmin(300, juce::jmax(240, r.getWidth() / 3)));
+    r.removeFromRight(studio::spacingWide);
+
+    // Title row. A bank program or a tracker overview takes the right half of it, so the fixed
+    // rows below never have to make room for a combo.
+    auto title = r.removeFromTop(20);
+    juce::Component* selector = presetBox.isVisible() ? static_cast<juce::Component*>(&presetBox)
+        : trackerBox.isVisible() ? static_cast<juce::Component*>(&trackerBox) : nullptr;
+    if (selector != nullptr)
     {
-        reasonInfo.setBounds(r.removeFromTop(waveform.isVisible() ? 48 : r.getHeight()));
-        waveform.setBounds(r);
-    }
-    auto extra = presetBox.isVisible() || rexGate.isVisible() ? controls.removeFromTop(26) : juce::Rectangle<int>();
-    if (presetBox.isVisible())
-    {
-        presetBox.setBounds(extra);
+        selector->setBounds(title.removeFromRight(juce::jmin(220, title.getWidth() / 2)).reduced(0, 1));
+        title.removeFromRight(gap);
     }
     else
     {
-        trackerBox.setBounds(extra);
-        sampleBox.setBounds(extra);
+        presetBox.setBounds({});
+        trackerBox.setBounds({});
     }
-    rexGate.setBounds(extra.removeFromLeft(90));
-    rexInfo.setBounds(extra);
-    auto modes = controls.removeFromTop(28);
-    midi.setBounds(modes.removeFromLeft(145)); skipSilence.setBounds(modes);
-    auto options = controls.removeFromTop(26);
-    autoPreview.setBounds(options.removeFromLeft(145)); loop.setBounds(options);
-    auto buttons = controls.removeFromTop(30);
-    play.setBounds(buttons.removeFromLeft(78)); buttons.removeFromLeft(6);
-    stop.setBounds(buttons.removeFromLeft(60)); buttons.removeFromLeft(12); volume.setBounds(buttons);
-    auto selection = controls.removeFromTop(26);
-    if (sampleDragButton.isVisible()) { sampleDragButton.setBounds(selection.removeFromRight(96)); selection.removeFromRight(6); }
-    clearSelectionButton.setBounds(selection.removeFromRight(58)); selection.removeFromRight(8);
+    sampleBox.setBounds({});
+    filename.setBounds(title);
+    r.removeFromTop(gap);
+
+    if (abletonInfo.isVisible()) { abletonInfo.setBounds(r.removeFromTop(16)); r.removeFromTop(gap); }
+    else abletonInfo.setBounds({});
+    if (rexInfo.isVisible()) { rexInfo.setBounds(r.removeFromTop(16)); r.removeFromTop(gap); }
+    else rexInfo.setBounds({});
+
+    // The selection status belongs under the wave, with the two actions that act on the selection.
+    auto selection = r.removeFromBottom(studio::chipSmallHeight);
+    r.removeFromBottom(gap);
+    if (sampleDragButton.isVisible())
+    {
+        sampleDragButton.setBounds(selection.removeFromRight(96));
+        selection.removeFromRight(studio::spacingTight);
+    }
+    clearSelectionButton.setBounds(selection.removeFromRight(58));
+    selection.removeFromRight(studio::spacingTight);
     selectionStatus.setBounds(selection);
+    waveform.setBounds(r);
+    songProgress.setBounds(r);
+
+    // Right column: time and format, the transport, then two rows of toggles. At the default
+    // 156 px panel this is 30 + 4 + 36 + 4 + 26 + 4 + 26 = 130 of the 132 px available.
+    auto block = controls.removeFromTop(30);
+    time.setBounds(block.removeFromTop(17));
+    formatLine.setBounds(block);
+    controls.removeFromTop(gap);
+
+    auto transport = controls.removeFromTop(studio::circleButtonSize);
+    play.setBounds(transport.removeFromLeft(studio::circleButtonSize));
+    transport.removeFromLeft(studio::spacingTight);
+    stop.setBounds(transport.removeFromLeft(studio::iconButtonSize)
+                       .withSizeKeepingCentre(studio::iconButtonSize, studio::iconButtonSize));
+    transport.removeFromLeft(studio::spacingTight);
+    volume.setBounds(transport);
+    controls.removeFromTop(gap);
+
+    // Row A carries Loop, Auto Preview and, in REx mode, the gate; row B the two preview toggles.
+    {
+        auto row = controls.removeFromTop(studio::chipSmallHeight);
+        const int count = rexGate.isVisible() ? 3 : 2;
+        const int width = (row.getWidth() - gap * (count - 1)) / count;
+        loop.setBounds(row.removeFromLeft(width)); row.removeFromLeft(gap);
+        autoPreview.setBounds(row.removeFromLeft(width)); row.removeFromLeft(gap);
+        if (rexGate.isVisible()) rexGate.setBounds(row);
+        else rexGate.setBounds({});
+    }
+    controls.removeFromTop(gap);
+    {
+        auto row = controls.removeFromTop(studio::chipSmallHeight);
+        const int width = (row.getWidth() - gap) / 2;
+        midi.setBounds(row.removeFromLeft(width)); row.removeFromLeft(gap);
+        skipSilence.setBounds(row);
+    }
 }
 
 bool PreviewPanel::sourceIsEditable() const
