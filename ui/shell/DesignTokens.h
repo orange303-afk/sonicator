@@ -20,6 +20,16 @@ inline constexpr int controlHeight = 30;
 inline constexpr int navigationWidth = 172;
 inline constexpr int dividerThickness = 8;
 
+// The workspace scale: the same 4 px step as Settings, with the sizes this window needs.
+inline constexpr int iconButtonSize = 32;
+inline constexpr int circleButtonSize = 36;
+inline constexpr int chipHeight = 30;
+inline constexpr int chipSmallHeight = 26;
+inline constexpr int chipRadius = 15;
+inline constexpr int headerHeight = 72;
+inline constexpr int brandingWidth = 298;
+inline constexpr int tableRowHeight = 36;
+
 inline juce::Font bodyFont()
 {
     return juce::Font(juce::FontOptions(14.0f));
@@ -44,5 +54,14 @@ inline juce::Font pageTitleFont()
 inline juce::Font pageSubtitleFont()
 {
     return juce::Font(juce::FontOptions(13.0f));
+}
+// The larger line of a value + caption pair (the Analysis card).
+inline juce::Font statValueFont()
+{
+    return juce::Font(juce::FontOptions(17.0f, juce::Font::bold));
+}
+inline juce::Font statCaptionFont()
+{
+    return captionFont();
 }
 } // namespace sonicator::studio

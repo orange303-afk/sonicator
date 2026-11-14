@@ -1,4 +1,5 @@
 #pragma once
+#include "StudioControls.h"
 #include "core/settings/AppSettings.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 namespace sonicator::theme {
@@ -245,6 +246,39 @@ public:
     void drawButtonBackground(juce::Graphics& g, juce::Button& button, const juce::Colour&,
                               bool highlighted, bool down) override
     {
+        // Two Studio surfaces come before the ordinary button: the accent disc of the preview
+        // transport and the filter pill. Both are chosen by a property, so the control keeps its
+        // JUCE type, its text and its callbacks.
+        if ((bool) button.getProperties().getWithDefault(studio::properties::circle, false))
+        {
+            const auto area = button.getLocalBounds().toFloat().reduced(1.0f);
+            const float diameter = juce::jmin(area.getWidth(), area.getHeight());
+            const auto disc = juce::Rectangle<float>(diameter, diameter).withCentre(area.getCentre());
+            auto colour = button.isEnabled() ? theme::accent : theme::disabled(theme::accent);
+            if (button.isEnabled() && down) colour = colour.darker(0.10f);
+            else if (button.isEnabled() && highlighted) colour = colour.brighter(0.06f);
+            g.setColour(colour);
+            g.fillEllipse(disc);
+            if (button.hasKeyboardFocus(true) && button.isEnabled())
+            {
+                g.setColour(theme::text.withAlpha(0.65f));
+                g.drawEllipse(disc.reduced(1.5f), 1.0f);
+            }
+            return;
+        }
+        if (studio::chipStyle(button) > 0)
+        {
+            paintChip(g, button.getLocalBounds().toFloat(), button.getToggleState(),
+                      button.isEnabled(), highlighted, down);
+            if (button.hasKeyboardFocus(true) && button.isEnabled())
+            {
+                g.setColour(theme::muted.withAlpha(0.55f));
+                g.drawRoundedRectangle(button.getLocalBounds().toFloat().reduced(1.5f),
+                                       (float) studio::chipRadius - 1.0f, 1.0f);
+            }
+            return;
+        }
+
         // Colour ids let a surface (the Settings navigation) use the same control with a quieter
         // resting state than a toolbar button, without a second LookAndFeel.
         auto base = button.findColour(button.getToggleState() ? juce::TextButton::buttonOnColourId
@@ -265,8 +299,58 @@ public:
         }
     }
 
+    // The pill every chip shares: a surface, its border, and the tick box a CheckChip adds.
+    static void paintChip(juce::Graphics& g, juce::Rectangle<float> area, bool on, bool enabled,
+                          bool highlighted, bool down)
+    {
+        auto fill = on ? theme::selection : theme::panel;
+        if (! enabled) fill = theme::disabled(fill);
+        else if (down) fill = on ? theme::selection.darker(0.08f) : theme::hover;
+        else if (highlighted) fill = on ? theme::selection.brighter(0.06f) : theme::hover;
+        const float radius = juce::jmin((float) studio::chipRadius, area.getHeight() / 2.0f);
+        g.setColour(fill);
+        g.fillRoundedRectangle(area.reduced(0.5f), radius);
+        g.setColour(enabled ? theme::line : theme::line.withAlpha(0.5f));
+        g.drawRoundedRectangle(area.reduced(0.5f), radius, 1.0f);
+    }
+
     void drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool) override
     {
+        // An icon button draws its icon and never its text; the text stays as the accessible name.
+        const int iconIndex = studio::iconProperty(button);
+        if (iconIndex >= 0)
+        {
+            const auto bounds = button.getLocalBounds().toFloat();
+            const float side = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.42f;
+            const auto glyph = juce::Rectangle<float>(side, side).withCentre(bounds.getCentre());
+            g.setColour(button.isEnabled() ? theme::text : theme::muted);
+            drawActionIcon(g, (ActionIcon) iconIndex, glyph, 1.5f);
+            return;
+        }
+
+        if (studio::chipStyle(button) > 0)
+        {
+            const auto on = button.getToggleState();
+            auto area = button.getLocalBounds().reduced(studio::spacing, 0);
+            const int trailing = (int) button.getProperties().getWithDefault(studio::properties::trailingIcon, -1);
+            if (trailing >= 0)
+            {
+                const auto glyph = juce::Rectangle<float>(12.0f, 12.0f)
+                    .withCentre({ (float) button.getLocalBounds().getRight() - 14.0f,
+                                  (float) button.getLocalBounds().getCentreY() });
+                g.setColour(button.isEnabled() ? (on ? theme::text : theme::muted) : theme::muted);
+                drawActionIcon(g, (ActionIcon) trailing, glyph, 1.4f);
+                area.removeFromRight(14);
+            }
+            g.setFont(studio::controlFont());
+            g.setColour(! button.isEnabled() ? theme::muted
+                                             : (on ? theme::text : theme::muted));
+            g.drawFittedText(button.getButtonText(), area,
+                             trailing >= 0 ? juce::Justification::centredLeft
+                                           : juce::Justification::centred, 1);
+            return;
+        }
+
         g.setFont(getTextButtonFont(button, button.getHeight()));
         g.setColour(button.isEnabled() ? theme::text : theme::muted);
         // A list-style surface (the Settings navigation) opts into left aligned labels.
@@ -278,6 +362,40 @@ public:
 
     void drawToggleButton(juce::Graphics& g, juce::ToggleButton& button, bool highlighted, bool down) override
     {
+        if (studio::isCheckChip(button))
+        {
+            const auto area = button.getLocalBounds().toFloat();
+            paintChip(g, area, button.getToggleState(), button.isEnabled(), highlighted, down);
+            const bool on = button.getToggleState();
+            const float box = area.getHeight() >= 28.0f ? 10.0f : 9.0f;
+            const auto boxArea = juce::Rectangle<float>(box, box)
+                .withCentre({ area.getX() + 14.0f, area.getCentreY() });
+            if (on)
+            {
+                g.setColour(button.isEnabled() ? theme::text : theme::disabled(theme::text));
+                g.fillRoundedRectangle(boxArea, 2.0f);
+                auto tick = getTickShape(0.62f);
+                g.setColour(theme::selection);
+                g.fillPath(tick, tick.getTransformToScaleToFit(boxArea.reduced(2.0f, 2.5f), false));
+            }
+            else
+            {
+                g.setColour(theme::muted);
+                g.drawRoundedRectangle(boxArea.reduced(0.5f), 2.0f, 1.0f);
+            }
+            g.setFont(studio::controlFont());
+            g.setColour(! button.isEnabled() ? theme::muted : (on ? theme::text : theme::muted));
+            g.drawFittedText(button.getButtonText(),
+                             button.getLocalBounds().withTrimmedLeft(24).withTrimmedRight(10),
+                             juce::Justification::centredLeft, 1);
+            if (button.hasKeyboardFocus(true) && button.isEnabled())
+            {
+                g.setColour(theme::muted.withAlpha(0.55f));
+                g.drawRoundedRectangle(area.reduced(1.5f), (float) studio::chipRadius - 1.0f, 1.0f);
+            }
+            return;
+        }
+
         juce::ignoreUnused(down);
         const float box = 14.0f;
         const auto area = button.getLocalBounds().toFloat();

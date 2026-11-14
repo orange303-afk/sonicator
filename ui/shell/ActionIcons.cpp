@@ -98,9 +98,16 @@ IconShape makeIcon(ActionIcon icon)
         case ActionIcon::chevronRight:
             p.startNewSubPath(0.40f, 0.28f); p.lineTo(0.62f, 0.5f); p.lineTo(0.40f, 0.72f);
             return { p, false };
+        case ActionIcon::chevronLeft:
+            p.startNewSubPath(0.60f, 0.28f); p.lineTo(0.38f, 0.5f); p.lineTo(0.60f, 0.72f);
+            return { p, false };
         case ActionIcon::chevronDown:
             p.startNewSubPath(0.28f, 0.42f); p.lineTo(0.5f, 0.62f); p.lineTo(0.72f, 0.42f);
             return { p, false };
+        case ActionIcon::more:
+            for (const float cy : { 0.28f, 0.5f, 0.72f })
+                p.addEllipse(0.41f, cy - 0.09f, 0.18f, 0.18f);
+            return { p, true };
     }
     return { p, false };
 }

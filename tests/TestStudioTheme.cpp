@@ -33,11 +33,11 @@ TEST_CASE("Studio typography is a readable hierarchy", "[ui][studio]")
 
 TEST_CASE("Every action icon is drawable inside its box", "[ui][studio]")
 {
-    const std::array<ActionIcon, 13> icons {
+    const std::array<ActionIcon, 15> icons {
         ActionIcon::settings, ActionIcon::search, ActionIcon::play, ActionIcon::pause,
         ActionIcon::stop, ActionIcon::folder, ActionIcon::favorite, ActionIcon::reset,
         ActionIcon::close, ActionIcon::add, ActionIcon::remove, ActionIcon::chevronRight,
-        ActionIcon::chevronDown };
+        ActionIcon::chevronLeft, ActionIcon::chevronDown, ActionIcon::more };
     for (const auto icon : icons)
     {
         const auto path = actionIconPath(icon);
