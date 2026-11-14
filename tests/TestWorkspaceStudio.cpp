@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include "ui/MainComponent.h"
+#include "ui/library/FileListPanel.h"
 #include "ui/library/SearchField.h"
+#include "core/database/SampleRepository.h"
+#include "core/dsp/BasicAnalyzer.h"
 #include "ui/shell/Theme.h"
 #include "TestHelpers.h"
 
@@ -60,4 +63,35 @@ TEST_CASE("Filter chips keep their state and the shorter hide-empty label", "[ui
     REQUIRE(clear != nullptr);
     REQUIRE(clear->isVisible());
     REQUIRE(clear->getRight() <= app.getWidth() - 8);
+}
+
+TEST_CASE("A selected library row carries the accent stripe", "[ui][studio]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("rows.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto name = "s" + juce::String(i) + ".wav";
+        auto record = BasicAnalyzer().analyze(t.wave(name, 200.0 + 40.0 * i));
+        record.fileName = name;
+        repo.upsert(record);
+    }
+    FileListPanel panel;
+    panel.setSamples(repo.page());
+    panel.setSize(700, 400);
+    panel.resized();
+    juce::TableListBox* table = nullptr;
+    for (auto* child : panel.getChildren())
+        if (auto* found = dynamic_cast<juce::TableListBox*>(child)) table = found;
+    REQUIRE(table != nullptr);
+    REQUIRE(table->getRowHeight() == studio::tableRowHeight);
+    table->selectRow(0, false);
+    const auto image = panel.createComponentSnapshot(panel.getLocalBounds());
+    const int y = table->getY() + table->getHeaderHeight() + table->getRowHeight() / 2;
+    // The stripe is a filled 2 px rectangle on the row's left edge, so both its pixels are exact.
+    REQUIRE(image.getPixelAt(table->getX(), y) == theme::accent);
+    REQUIRE(image.getPixelAt(table->getX() + 1, y) == theme::accent);
+    REQUIRE(image.getPixelAt(table->getX() + 20, y) != theme::accent);
 }

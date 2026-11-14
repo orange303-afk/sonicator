@@ -1,4 +1,5 @@
 #include "FileListPanel.h"
+#include "ui/shell/DesignTokens.h"
 #include "core/export/DragMetadata.h"
 #include "ui/shell/Theme.h"
 #include <algorithm>
@@ -111,7 +112,7 @@ juce::String smartCellText(const SmartDisplay& d, int column)
 } // namespace
 FileListPanel::FileListPanel()
 {
-    addAndMakeVisible(table); table.setRowHeight(34);
+    addAndMakeVisible(table); table.setRowHeight(studio::tableRowHeight);
     refreshTheme();
     table.setMultipleSelectionEnabled(true);
     table.addMouseListener(&rowDragListener, true);
@@ -479,6 +480,13 @@ void FileListPanel::paintRowBackground(juce::Graphics& g,int row,int width,int h
         g.fillAll();
     }
     g.setColour(theme::line.withAlpha(0.25f)); g.drawHorizontalLine(height-1,0,(float) width);
+    if (selected)
+    {
+        // The selection is the accent's job: a 2 px stripe on the left edge, so a selected row is
+        // readable even where the row fill is covered by tags or a star.
+        g.setColour(theme::accent);
+        g.fillRect(juce::Rectangle<int>(0, 0, 2, height));
+    }
 }
 std::vector<FileListPanel::TagHit> FileListPanel::tagHits(const std::vector<Tag>& tags, int width) const
 {

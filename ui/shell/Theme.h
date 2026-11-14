@@ -516,7 +516,7 @@ public:
         }
 
         g.setColour(header.findColour(juce::TableHeaderComponent::textColourId));
-        g.setFont(juce::Font(juce::FontOptions(10.5f, juce::Font::bold)));
+        g.setFont(studio::sectionFont());
         g.drawFittedText(columnName, area, juce::Justification::centredLeft, 1);
     }
 
