@@ -94,11 +94,12 @@ TEST_CASE("Row gesture reaches the listener with the whole multi-selection", "[d
     });
     const auto now = juce::Time::getCurrentTime();
     const auto source = juce::Desktop::getInstance().getMainMouseSource();
-    juce::MouseEvent down(source, { 5.0f, 5.0f }, juce::ModifierKeys(), 1.0f, 0, 0, 0, 0,
-                          row, row, now, { 5.0f, 5.0f }, now, 1, false);
+    // A press on the character area drags the row; the star column is a control now.
+    juce::MouseEvent down(source, { 60.0f, 5.0f }, juce::ModifierKeys(), 1.0f, 0, 0, 0, 0,
+                          row, row, now, { 60.0f, 5.0f }, now, 1, false);
     FileListPanelTestAccess::press(list, down);
-    juce::MouseEvent dragged(source, { 5.0f, 12.0f }, juce::ModifierKeys(), 1.0f, 0, 0, 0, 0,
-                             row, row, now, { 5.0f, 5.0f }, now, 1, true);
+    juce::MouseEvent dragged(source, { 60.0f, 12.0f }, juce::ModifierKeys(), 1.0f, 0, 0, 0, 0,
+                             row, row, now, { 60.0f, 5.0f }, now, 1, true);
     FileListPanelTestAccess::drag(list, dragged);
     REQUIRE(called); REQUIRE_FALSE(canMove);
     REQUIRE(seen.size() == 2);

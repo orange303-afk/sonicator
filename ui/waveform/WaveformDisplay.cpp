@@ -438,15 +438,19 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     }
     dragAnchor = waveview::timeAtX(e.position.x, getWidth(), view);
     pressInsideSelection = selection::contains(currentSelection, dragAnchor);
-    if (! pressWasPrimary || ! loopArmed || ! currentSelection.valid()) return;
+    if (! pressWasPrimary) return;
     // Cmd/Ctrl-drag still starts the external file drag that plain dragging inside used to do.
     if (pressInsideSelection && e.mods.isCommandDown()) return;
-    // Edges win over the body: a few pixels around either boundary resize, the rest moves the
-    // whole window. Both are live, so a playing loop follows the mouse.
+    // Edges win over the body: a few pixels around either boundary resize the region, and that
+    // never depends on the Loop chip. Only moving the whole window stays tied to the armed loop,
+    // because a plain drag inside the selection is the DAW file drag.
     const auto tolerance = 5.0 * secondsPerPixel();
-    if (std::abs(dragAnchor - currentSelection.start) <= tolerance) dragMode = DragMode::resizeStart;
-    else if (std::abs(dragAnchor - currentSelection.end) <= tolerance) dragMode = DragMode::resizeEnd;
-    else if (pressInsideSelection) dragMode = DragMode::move;
+    if (currentSelection.valid())
+    {
+        if (std::abs(dragAnchor - currentSelection.start) <= tolerance) dragMode = DragMode::resizeStart;
+        else if (std::abs(dragAnchor - currentSelection.end) <= tolerance) dragMode = DragMode::resizeEnd;
+    }
+    if (dragMode == DragMode::none && pressInsideSelection && loopArmed) dragMode = DragMode::move;
     if (dragMode != DragMode::none) { dragStartRange = currentSelection; dragStartTime = dragAnchor; }
 }
 void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
@@ -546,16 +550,17 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 }
 void WaveformDisplay::updateCursorFor(double time)
 {
-    if (! loopArmed || ! currentSelection.valid())
+    if (! currentSelection.valid())
     {
         setMouseCursor(juce::MouseCursor::NormalCursor);
         return;
     }
+    // The edges are grabbable whether or not the loop is armed, so the cursor says so.
     const auto tolerance = 5.0 * secondsPerPixel();
     if (std::abs(time - currentSelection.start) <= tolerance
         || std::abs(time - currentSelection.end) <= tolerance)
         setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
-    else if (selection::contains(currentSelection, time))
+    else if (loopArmed && selection::contains(currentSelection, time))
         setMouseCursor(juce::MouseCursor::DraggingHandCursor);
     else
         setMouseCursor(juce::MouseCursor::NormalCursor);

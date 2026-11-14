@@ -38,6 +38,10 @@ public:
     void setStereoPairs(std::map<int64_t, juce::String> partnerPaths);
     void setIgnoredPaths(std::vector<IgnoredPath>);
     void setStarredInPlace(const std::vector<int64_t>& ids, bool starred);
+    // A left click on the star column asks the owner to toggle this row's favorite state.
+    std::function<void(const SampleRecord&)> onStarClicked;
+    // The click path itself, exposed so a test can drive it without synthesising a mouse.
+    void notifyStarClick(int row);
     void setSearchText(const juce::String&);
     void selectRow(int row) { table.selectRow(row); }
     void selectRows(const std::vector<int>& rows);

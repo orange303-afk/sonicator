@@ -202,9 +202,26 @@ int FileListPanel::prepareRowDrag(int row, bool addToSelection)
     if (! table.isRowSelected(row)) table.selectRow(row, true, ! addToSelection);
     return row;
 }
+void FileListPanel::notifyStarClick(int row)
+{
+    if (const auto* record = recordAt(row))
+        if (onStarClicked) onStarClicked(*record);
+}
+
 void FileListPanel::handlePress(const juce::MouseEvent& e)
 {
     const auto pos = e.getEventRelativeTo(&table).getPosition();
+    // The star column is a control, not a drag handle: a left click toggles the favorite.
+    if (! e.mods.isPopupMenu() && ! e.mods.isAltDown() && ! e.mods.isCommandDown())
+    {
+        const int starRow = table.getRowContainingPosition(pos.x, pos.y);
+        if (starRow >= 0 && table.getHeader().getColumnIdAtX(pos.x) == 8)
+        {
+            dragArmed = false;
+            notifyStarClick(starRow);
+            return;
+        }
+    }
     if (e.mods.isAltDown() && onTagAltClicked != nullptr)
     {
         const int row = table.getRowContainingPosition(pos.x, pos.y);

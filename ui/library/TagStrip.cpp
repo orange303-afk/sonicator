@@ -2,8 +2,10 @@
 #include "ui/shell/Theme.h"
 namespace sonicator {
 namespace {
-constexpr int chipHeight = 22, gap = 5, padding = 9, dotSize = 6;
-juce::Font chipFont() { return juce::FontOptions(11); }
+// Tags sit in the Analysis panel next to the large Key/BPM numbers, so they are readable at a
+// glance rather than only hovering them.
+constexpr int chipHeight = 26, gap = 6, padding = 11, dotSize = 9;
+juce::Font chipFont() { return juce::FontOptions(12.5f); }
 int chipWidth(const Tag& tag)
 {
     return padding + dotSize + 6 + juce::GlyphArrangement::getStringWidthInt(chipFont(), tag.name) + padding;
@@ -17,7 +19,7 @@ void TagStrip::setTags(std::vector<Tag> values)
 }
 int TagStrip::getPreferredHeight(int width, int maxRows) const
 {
-    if (tags.empty()) return 24;
+    if (tags.empty()) return 28;
     int rows = 1, x = 0;
     for (const auto& tag : tags)
     {
@@ -59,8 +61,8 @@ void TagStrip::paint(juce::Graphics& g)
 {
     if (tags.empty())
     {
-        g.setColour(theme::muted); g.setFont(juce::FontOptions(11));
-        g.drawText("No tags", 0, 0, getWidth(), 22, juce::Justification::centredLeft, true);
+        g.setColour(theme::muted); g.setFont(chipFont());
+        g.drawText("No tags", 0, 0, getWidth(), chipHeight, juce::Justification::centredLeft, true);
         return;
     }
     g.setFont(chipFont());

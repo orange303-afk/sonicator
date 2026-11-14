@@ -491,6 +491,26 @@ TEST_CASE("An armed loop edge resizes while the body moves", "[selection][wavefo
     REQUIRE(waveform.selection().end == Catch::Approx(5.0).margin(0.03));
     waveform.mouseUp(waveformDrag(waveform, press, drag));
 }
+TEST_CASE("An unarmed loop edge still resizes the selection", "[selection][waveform][live]")
+{
+    TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(1000, 0.2f), 100, {});
+    waveform.setSelection({ 2.0, 4.0 });
+    // No setLoopArmed(true): resizing a region must not depend on the Loop chip.
+    int live = 0, external = 0;
+    waveform.onSelectionChanging = [&](selection::Range) { ++live; };
+    waveform.onExternalDragRequested = [&] { ++external; };
+    const juce::Point<float> press(161.2f, 30.0f), drag(200.0f, 30.0f);
+    waveform.mouseDown(waveformPress(waveform, press));
+    waveform.mouseDrag(waveformDrag(waveform, press, drag));
+    REQUIRE(live > 0);
+    REQUIRE(external == 0);
+    REQUIRE(waveform.selection().start == Catch::Approx(2.0).margin(0.01));
+    REQUIRE(waveform.selection().end == Catch::Approx(5.0).margin(0.03));
+    waveform.mouseUp(waveformDrag(waveform, press, drag));
+}
+
 TEST_CASE("A wheel edit defers the WAV export until it settles", "[selection][preview][live]")
 {
     TestDirectory t; AudioEngine engine(false);

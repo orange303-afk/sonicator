@@ -66,6 +66,11 @@ inline juce::Font statCaptionFont()
 {
     return captionFont();
 }
+// The large number of the Analysis hero block (Key, BPM).
+inline juce::Font heroValueFont()
+{
+    return juce::Font(juce::FontOptions(26.0f, juce::Font::bold));
+}
 // Table column headers: the section size, but without the tracking that makes "FORMAT" wider
 // than its minimum column.
 inline juce::Font tableHeaderFont()

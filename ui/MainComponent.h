@@ -1,6 +1,7 @@
 #pragma once
 #include "ui/shell/Theme.h"
 #include "ui/analysis/AnalysisCard.h"
+#include "ui/analysis/KeyBpmBlock.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/library/SearchField.h"
 #include "ui/library/FolderTree.h"
@@ -137,8 +138,7 @@ private:
     SearchField search;
     studio::Chip libraryMenu { "LIBRARY" };
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" }, smartButton { "Smart metadata" };
-    juce::TextButton pause { "Pause" }, cancel { "Cancel" };
-    studio::IconButton settings { ActionIcon::settings, "Settings" };
+    juce::TextButton pause { "Pause" }, cancel { "Cancel" }, settings { "Settings" };
     studio::Chip tagFilter { "Tags" }, starredButton { "Starred" },
                  clearFilters { "Clear filters" };
     juce::TextButton editTags { "Edit tags..." };
@@ -148,6 +148,7 @@ private:
     juce::ComboBox pageSizeBox;
     juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, tagsLabel, selectionStatus;
     AnalysisCard analysisCard;
+    KeyBpmBlock keyBpm;
     ActivityDot activityDot;
     TagStrip selectedTags;
     juce::Viewport analysisViewport;

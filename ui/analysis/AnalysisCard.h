@@ -11,6 +11,7 @@ namespace sonicator
 struct AnalysisContent
 {
     juce::String title, meta, tooltip;
+    juce::String key, bpm;   // the large hero values shown outside the card
     std::vector<studio::Stat> stats;
     std::vector<juce::String> notes;
 };

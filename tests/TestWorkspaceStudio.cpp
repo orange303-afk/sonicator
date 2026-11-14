@@ -2,6 +2,7 @@
 #include <cmath>
 #include "ui/MainComponent.h"
 #include "ui/analysis/AnalysisCard.h"
+#include "ui/analysis/KeyBpmBlock.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/library/SearchField.h"
 #include "ui/preview/PreviewPanel.h"
@@ -42,8 +43,9 @@ TEST_CASE("The header keeps search and settings on the grid", "[ui][studio]")
     REQUIRE(search->leadingIcon() == ActionIcon::search);
     auto* settings = buttonWithText(app, "Settings");
     REQUIRE(settings != nullptr);
-    REQUIRE(settings->getWidth() == 32);
-    REQUIRE(settings->getHeight() == 32);
+    REQUIRE(settings->getButtonText() == "Settings");
+    REQUIRE(settings->getWidth() >= 80);
+    REQUIRE(settings->getHeight() == studio::controlHeight);
     REQUIRE(settings->getRight() <= app.getWidth() - 8);
     REQUIRE(search->getRight() < settings->getX());
     REQUIRE(search->getWidth() >= 300);
@@ -511,4 +513,67 @@ TEST_CASE("The analysis card keeps its path tooltip reachable", "[ui][studio]")
     // One point inside the first tile, one on the gap, one inside the note.
     for (const auto point : { juce::Point<int>(40, 50), juce::Point<int>(120, 40), juce::Point<int>(40, 130) })
         REQUIRE(card.getComponentAt(point) == &card);
+}
+
+TEST_CASE("Clicking the star asks the owner to toggle the favorite", "[ui][studio]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("star.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+    auto record = BasicAnalyzer().analyze(t.wave("star.wav", 440.0, 1));
+    record.fileName = "star.wav";
+    repo.upsert(record);
+    const auto stored = repo.page().front();
+    FileListPanel panel;
+    panel.setSamples(repo.page());
+    panel.setSize(700, 300);
+    panel.resized();
+    REQUIRE(panel.getNumRows() == 1);
+    int calls = 0;
+    int64_t clicked = 0;
+    panel.onStarClicked = [&](const SampleRecord& r) { ++calls; clicked = r.id; };
+    panel.notifyStarClick(0);
+    REQUIRE(calls == 1);
+    REQUIRE(clicked == stored.id);
+    // The click path ignores rows that do not exist.
+    panel.notifyStarClick(5);
+    REQUIRE(calls == 1);
+}
+
+TEST_CASE("The analysis panel shows key and tempo in its free space", "[ui][studio]")
+{
+    TestDirectory t;
+    const auto dbPath = t.dir.getChildFile("hero.sqlite");
+    const auto audio = t.wave("hero.wav", 440.0, 2);
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        repo.createTables();
+        auto record = BasicAnalyzer().analyze(audio);
+        record.fileName = "hero.wav";
+        const auto id = repo.upsert(record);
+        SmartResult smart;
+        smart.bpm = 124.0; smart.hasBpm = true; smart.bpmState = SmartState::Resolved;
+        smart.keyTonic = 9; smart.keyMode = "minor"; smart.keyState = SmartState::Resolved;
+        smart.pipelineState = SmartPipelineState::Complete;
+        smart.revision = 1;
+        smart.extractorVersion = smartExtractorsVersion;
+        smart.resolverVersion = smartResolverVersion;
+        smart.dspVersion = smartDspVersion;
+        repo.setSmartResult(id, smart);
+        repo.addRoot(t.dir.getFullPathName());
+    }
+    MainComponent app(dbPath, false, {}, t.dir.getChildFile("hero-settings.json"));
+    app.setSize(1200, 800);
+    app.resized();
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr);
+    library->selectRows({ 0 });
+    auto* block = dynamic_cast<KeyBpmBlock*>(findDescendantWithID(app, "analysisKeyBpm"));
+    REQUIRE(block != nullptr);
+    REQUIRE(block->isVisible());
+    REQUIRE(block->key() == "A minor");
+    REQUIRE(block->bpm() == "124");
+    REQUIRE(block->getHeight() == KeyBpmBlock::preferredHeight());
 }

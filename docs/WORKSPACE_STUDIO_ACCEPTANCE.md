@@ -13,7 +13,8 @@ Spec: `docs/superpowers/specs/2026-11-14-workspace-studio-design.md`; mockup:
   `chevronLeft` and `more`.
 - **Header**: 72 px on the 4/8/12 grid; the wordmark column is measured from a token; search has
   the magnifier inside the field and the clear control only while there is text; Settings is a
-  32×32 gear icon that still answers to the name "Settings".
+  30 px text button on the right (the gear icon of the first pass was replaced at the owner's
+  request — the word is easier to find than the symbol).
 - **Toolbar and filters**: `LIBRARY` is a chip with a chevron; page controls are 32×32 icon
   buttons; `Tags`, `Starred`, `Clear filters` are chips and `Hide empty` is a check chip with a
   visible tick. Chip widths are measured from their text (minimum 64 px), so the row fits an
@@ -80,3 +81,15 @@ Files: `library-{dark,light}-{1400x900,1120x720}.png`, `analysis-{...}.png`, `pr
 - Deferred polish from the branch review: `LIBRARY` is still a 40 px pill rather than a 30 px
   chip, the gear has no tooltip, dialog fields rely on the LookAndFeel's own editor colours, the
   bank/tracker selector is 18 px high, and `SectionCaption`/`ActionIcon::more` are unused.
+
+## Follow-up after the first review (same branch)
+
+- **Analysis hero**: Key and BPM are shown large (26 px values, 11 px captions) in the free space
+  above SMART METADATA, and hide themselves while the smart metadata is still unknown (`?`, `??`,
+  `n/a`, `--`) instead of showing markers at 26 px.
+- **Tags**: analysis chips grew to 26 px with a 12.5 px label and a 9 px dot.
+- **Star click**: a left click on the star column toggles the favorite in place (`onStarClicked`),
+  and the row drag no longer starts from that column.
+- **Region edges**: dragging a selection edge resizes the region whether or not the Loop chip is
+  armed (moving the whole region still needs the armed loop, because a plain drag inside is the DAW
+  file drag). The resize cursor appears on the edges in both cases.

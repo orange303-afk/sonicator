@@ -545,9 +545,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     persistSessionState = juce::JUCEApplicationBase::getInstance() != nullptr;
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,33>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
+    for (auto* c : std::array<juce::Component*,34>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
          &pause,&cancel,&settings,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
-         &libraryHeading,&rootsLabel,&status,&activityDot,&countLabel,&analysisHeading,&analysisCard,&tagsLabel,
+         &libraryHeading,&rootsLabel,&status,&activityDot,&countLabel,&analysisHeading,&analysisCard,&keyBpm,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel,&selectionStatus})
         if (c != nullptr) addAndMakeVisible(c);
     heading.setText("SONICATOR",juce::dontSendNotification);
@@ -623,6 +623,24 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         for (const auto& sample : library.getSelectedSamples()) ids.push_back(sample.id);
         if (ids.empty() && selectedSampleId > 0) ids.push_back(selectedSampleId);
         removeTagFromSamples(ids, tag.id);
+    };
+    library.onStarClicked = [this](const SampleRecord& r)
+    {
+        if (writeRepo == nullptr) return;
+        const bool next = ! r.starred;
+        writeRepo->setStarred({ r.id }, next);
+        status.setText(next ? "Starred " + r.fileName
+                            : "Removed " + r.fileName + " from favorites",
+                        juce::dontSendNotification);
+        if (filter.starredOnly)
+        {
+            reloadLibrary();
+            return;
+        }
+        library.setStarredInPlace({ r.id }, next);
+        if (selectedSampleId == r.id && readRepo != nullptr)
+            if (auto selected = readRepo->findById(selectedSampleId))
+                updateSelectionStatus(*selected);
     };
     library.onOpen = [this](const SampleRecord& r) { openDiscImage(r); };
     library.onDragMessage = [this](const juce::String& message) { status.setText(message,juce::dontSendNotification); };
@@ -1877,12 +1895,14 @@ void MainComponent::selectSample(const SampleRecord& r)
 }
 void MainComponent::refreshAnalysis(AnalysisContent content)
 {
+    keyBpm.setValues(content.key, content.bpm);
     analysisCard.setContent(std::move(content));
     resized();   // the card's height inside the viewport follows its content
 }
 
 void MainComponent::showAnalysisPlaceholder()
 {
+    keyBpm.setValues({}, {});
     analysisCard.showPlaceholder("Select a sample to inspect its measured audio features.");
     resized();
 }
@@ -1915,6 +1935,18 @@ AnalysisContent MainComponent::analysisFor(const SampleRecord& r) const
         // the source next to the value.
         const auto displays = readRepo->smartDisplays({ r.id });
         const auto found = displays.find(r.id);
+        // Key and BPM are the two values a person looks for first: they go big above the tiles.
+        if (found != displays.end())
+        {
+            const auto& d = found->second;
+            card.key = d.key.isNotEmpty() ? d.key : juce::String("--");
+            card.bpm = d.hasBpm ? juce::String(d.bpm, d.bpm >= 100.0 ? 0 : 1) : juce::String("--");
+        }
+        else
+        {
+            card.key = "--";
+            card.bpm = "--";
+        }
         if (found != displays.end() && found->second.genre.isNotEmpty())
         {
             const auto& d = found->second;
@@ -5046,8 +5078,8 @@ void MainComponent::resized()
     auto branding = header.removeFromLeft(studio::brandingWidth);
     header.removeFromLeft(studio::spacing);
     heading.setBounds(branding.removeFromTop(30)); subtitle.setBounds(branding);
-    settings.setBounds(header.removeFromRight(studio::iconButtonSize)
-                             .withSizeKeepingCentre(studio::iconButtonSize, studio::iconButtonSize));
+    settings.setBounds(header.removeFromRight(92)
+                             .withSizeKeepingCentre(92, studio::controlHeight));
     header.removeFromRight(studio::spacingWide);
     search.setBounds(header.withSizeKeepingCentre(header.getWidth(), 32));
     selectionStatus.setBounds(r.removeFromBottom(24).reduced(12,1));
@@ -5104,6 +5136,12 @@ void MainComponent::resized()
         analysis.removeFromBottom(10);
     }
     stageLabel.setBounds(analysis.removeFromBottom(metadataHeight));
+    // The hero block uses the free space between the tags and SMART METADATA.
+    if (keyBpm.isVisible())
+    {
+        analysis.removeFromBottom(studio::spacingTight);
+        keyBpm.setBounds(analysis.removeFromBottom(KeyBpmBlock::preferredHeight()));
+    }
     analysisViewport.setBounds(analysis);
     const int cardWidth = juce::jmax(1, analysis.getWidth() - 14);
     analysisCard.setBounds(0, 0, cardWidth, analysisCard.preferredHeight(cardWidth));

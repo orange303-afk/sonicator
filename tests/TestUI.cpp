@@ -191,17 +191,17 @@ TEST_CASE("Header sorting requests a whole-catalog order without looping on page
 TEST_CASE("Tag strip lays out coloured chips and reports its height", "[ui][tags]")
 {
     TagStrip strip;
-    REQUIRE(strip.getPreferredHeight(200) == 24);
+    REQUIRE(strip.getPreferredHeight(200) == 28);
     Tag kick; kick.id = 1; kick.name = "Kick"; kick.colour = 0xffe05a5a;
     Tag loop; loop.id = 2; loop.name = "Loop"; loop.colour = 0xff9ad06a;
     strip.setTags({kick,loop});
     REQUIRE(strip.getTags().size() == 2);
     const int height = strip.getPreferredHeight(200);
-    REQUIRE(height >= 22);
+    REQUIRE(height >= 26);
     strip.setSize(200,height);
     REQUIRE(strip.createComponentSnapshot(strip.getLocalBounds()).isValid());
     strip.setTags({});
-    REQUIRE(strip.getPreferredHeight(200) == 24);
+    REQUIRE(strip.getPreferredHeight(200) == 28);
 }
 TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][settings]")
 {
