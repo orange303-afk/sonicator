@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include "ui/MainComponent.h"
 #include "ui/analysis/AnalysisCard.h"
 #include "ui/library/FileListPanel.h"
@@ -346,4 +347,168 @@ TEST_CASE("A restored session shows its sample in the analysis card", "[ui][stud
     REQUIRE(card != nullptr);
     REQUIRE(card->content().title == "restored.wav");
     REQUIRE(card->content().stats.size() >= 8);
+}
+
+TEST_CASE("Analysis notes are drawn in the muted colour", "[ui][studio]")
+{
+    theme::apply(ThemeMode::Dark);
+    AnalysisCard card;
+    AnalysisContent content;
+    content.notes = { "File is missing" };
+    card.setContent(content);
+    card.setSize(240, 60);
+    card.resized();
+    const auto image = card.createComponentSnapshot(card.getLocalBounds());
+    auto distance = [](juce::Colour a, juce::Colour b)
+    {
+        return std::abs((int) a.getRed() - (int) b.getRed())
+             + std::abs((int) a.getGreen() - (int) b.getGreen())
+             + std::abs((int) a.getBlue() - (int) b.getBlue());
+    };
+    int glyphs = 0;
+    long long toMuted = 0, toBlack = 0;
+    for (int y = 0; y < image.getHeight(); ++y)
+        for (int x = 0; x < image.getWidth(); ++x)
+        {
+            const auto pixel = image.getPixelAt(x, y);
+            if (pixel.getAlpha() < 100) continue;       // the card paints no background
+            ++glyphs;
+            toMuted += distance(pixel, theme::muted);
+            toBlack += distance(pixel, juce::Colours::black);
+        }
+    REQUIRE(glyphs > 0);
+    // Every glyph must be recognisably the muted token, not the default black of an unset colour.
+    REQUIRE(toMuted / glyphs < toBlack / glyphs);
+    REQUIRE(toMuted / glyphs < 80);
+}
+
+TEST_CASE("The analysis meta line wraps in a narrow panel", "[ui][studio]")
+{
+    AnalysisCard card;
+    AnalysisContent content;
+    content.title = "x.wav";
+    content.meta = "WAV \xc2\xb7 2 ch \xc2\xb7 44.1 kHz \xc2\xb7 16 bit";
+    card.setContent(content);
+    card.setSize(154, 200);
+    card.resized();
+    REQUIRE(card.getNumChildComponents() == 2);
+    REQUIRE(card.getChildComponent(1)->getHeight()
+            >= 2 * juce::roundToInt(studio::captionFont().getHeight()));
+}
+
+TEST_CASE("Switching theme repaints the analysis card and the preview format line", "[ui][studio]")
+{
+    theme::apply(ThemeMode::Dark);
+    SonicatorLookAndFeel look;
+    AnalysisCard card;
+    card.setLookAndFeel(&look);
+    AnalysisContent content;
+    content.title = "x.wav";
+    card.setContent(content);
+    juce::Label* title = nullptr;
+    for (auto* child : card.getChildren())
+        if (auto* label = dynamic_cast<juce::Label*>(child)) title = label;
+    REQUIRE(title != nullptr);
+    REQUIRE(title->findColour(juce::Label::textColourId) == theme::text);
+
+    theme::apply(ThemeMode::Light);
+    card.sendLookAndFeelChange();
+    REQUIRE(title->findColour(juce::Label::textColourId) == theme::text);
+    REQUIRE(theme::text.getPerceivedBrightness() < 0.5f);
+
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel panel(engine, t.dir);
+    panel.setLookAndFeel(&look);
+    REQUIRE(panel.loadFile(t.wave("theme.wav", 440.0, 2), false));
+    auto* format = dynamic_cast<juce::Label*>(panel.findChildWithID("previewFormat"));
+    REQUIRE(format != nullptr);
+    panel.lookAndFeelChanged();
+    REQUIRE(format->findColour(juce::Label::textColourId) == theme::muted);
+    theme::apply(ThemeMode::System);
+}
+
+TEST_CASE("A batch selection sizes the analysis card to its content", "[ui][studio]")
+{
+    TestDirectory t;
+    const auto dbPath = t.dir.getChildFile("batch.sqlite");
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        repo.createTables();
+        for (int i = 0; i < 3; ++i)
+        {
+            const auto name = "b" + juce::String(i) + ".wav";
+            auto record = BasicAnalyzer().analyze(t.wave(name, 200.0 + 40.0 * i));
+            record.fileName = name;
+            repo.upsert(record);
+        }
+        repo.addRoot(t.dir.getFullPathName());
+    }
+    MainComponent app(dbPath, false, {}, t.dir.getChildFile("batch-settings.json"));
+    app.setSize(1200, 800);
+    app.resized();
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr);
+    REQUIRE(library->getNumRows() == 3);
+    library->selectRows({ 0, 1, 2 });
+    auto* card = dynamic_cast<AnalysisCard*>(findDescendantWithID(app, "analysisDetails"));
+    REQUIRE(card != nullptr);
+    REQUIRE(card->content().stats.empty());
+    REQUIRE(card->getHeight() == card->preferredHeight(card->getWidth()));
+}
+
+TEST_CASE("The search field keeps its placeholder hint", "[ui][studio]")
+{
+    TestDirectory t;
+    MainComponent app(t.dir.getChildFile("hint.sqlite"), false);
+    auto* search = dynamic_cast<SearchField*>(app.findChildWithID("search"));
+    REQUIRE(search != nullptr);
+    REQUIRE(search->getTextToShowWhenEmpty().contains("Search:"));
+}
+
+TEST_CASE("An empty search field shows its placeholder", "[ui][studio]")
+{
+    theme::apply(ThemeMode::Dark);
+    SonicatorLookAndFeel look;
+    SearchField search;
+    search.setLookAndFeel(&look);
+    search.setTextToShowWhenEmpty("Search: type:pad, key:Am", theme::muted);
+    search.setSize(320, 32);
+    const auto image = search.createComponentSnapshot(search.getLocalBounds());
+    auto distance = [](juce::Colour a, juce::Colour b)
+    {
+        return std::abs((int) a.getRed() - (int) b.getRed())
+             + std::abs((int) a.getGreen() - (int) b.getGreen())
+             + std::abs((int) a.getBlue() - (int) b.getBlue());
+    };
+    int hintPixels = 0;
+    for (int y = 0; y < image.getHeight(); ++y)
+        for (int x = 34; x < image.getWidth(); ++x)   // right of the magnifier
+            if (image.getPixelAt(x, y).getAlpha() > 100
+                && distance(image.getPixelAt(x, y), theme::muted) < 90)
+                ++hintPixels;
+    REQUIRE(hintPixels > 20);
+    theme::apply(ThemeMode::System);
+}
+
+TEST_CASE("The analysis card keeps its path tooltip reachable", "[ui][studio]")
+{
+    AnalysisCard card;
+    AnalysisContent content;
+    content.title = "x.wav";
+    content.meta = "WAV";
+    content.stats = { { "1.0 s", "Length" } };
+    content.notes = { "/long/path/to/the/sample.wav" };
+    content.tooltip = "/long/path/to/the/sample.wav";
+    juce::Component host;
+    host.setSize(240, 220);
+    host.addAndMakeVisible(card);
+    card.setBounds(0, 0, 240, 200);
+    card.setContent(content);
+    card.resized();
+    // Tiles and notes must not swallow the mouse: the card owns the tooltip with the full path.
+    // One point inside the first tile, one on the gap, one inside the note.
+    for (const auto point : { juce::Point<int>(40, 50), juce::Point<int>(120, 40), juce::Point<int>(40, 130) })
+        REQUIRE(card.getComponentAt(point) == &card);
 }

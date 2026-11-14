@@ -27,6 +27,7 @@ public:
     ~AnalysisCard() override;
     void setContent(const AnalysisContent&);
     void showPlaceholder(const juce::String&);
+    void lookAndFeelChanged() override;
     const AnalysisContent& content() const noexcept { return data; }
     // The height the content needs at that width, so the viewport scrolls instead of clipping.
     int preferredHeight(int width) const;
@@ -37,7 +38,8 @@ public:
 
 private:
     AnalysisContent data;
-    juce::Label title, meta;
+    juce::Label title;
+    std::unique_ptr<WrappedNote> meta;
     std::vector<std::unique_ptr<studio::StatTile>> tiles;
     std::vector<std::unique_ptr<WrappedNote>> notes;
     static int wrappedHeight(const juce::String&, const juce::Font&, int width);

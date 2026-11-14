@@ -21,9 +21,15 @@ void styleLabel(juce::Label& label, juce::Font font, juce::Colour colour)
 class WrappedNote final : public juce::Component
 {
 public:
+    WrappedNote()
+    {
+        // The card's tooltip is the file path, so the note must not swallow the mouse.
+        setInterceptsMouseClicks(false, false);
+    }
     void setText(const juce::String& text)
     {
         body = text;
+        setTitle(body);   // what assistive tools read for this custom-painted text
         repaint();
     }
     const juce::String& getText() const noexcept { return body; }
@@ -32,8 +38,7 @@ public:
         if (body.isEmpty()) return;
         juce::AttributedString attributed;
         attributed.setJustification(juce::Justification::topLeft);
-        attributed.setColour(theme::muted);
-        attributed.append(body, studio::captionFont());
+        attributed.append(body, studio::captionFont(), theme::muted);
         juce::TextLayout layout;
         layout.createLayout(attributed, (float) getWidth());
         layout.draw(g, getLocalBounds().toFloat());
@@ -44,23 +49,27 @@ private:
 
 AnalysisCard::~AnalysisCard() = default;
 
-AnalysisCard::AnalysisCard()
+AnalysisCard::AnalysisCard() : meta(std::make_unique<WrappedNote>())
 {
     addChildComponent(title);
-    addChildComponent(meta);
     styleLabel(title, juce::Font(juce::FontOptions(studio::bodyFont().getHeight(), juce::Font::bold)),
                theme::text);
-    styleLabel(meta, studio::captionFont(), theme::muted);
+}
+
+void AnalysisCard::lookAndFeelChanged()
+{
+    title.setColour(juce::Label::textColourId, theme::text);
+    repaint();
 }
 
 void AnalysisCard::setContent(const AnalysisContent& next)
 {
     data = next;
     title.setText(data.title, juce::dontSendNotification);
-    meta.setText(data.meta, juce::dontSendNotification);
+    meta->setText(data.meta);
     // Empty pieces are not children at all, so the card holds exactly what it shows.
     if (data.title.isNotEmpty()) addAndMakeVisible(title); else removeChildComponent(&title);
-    if (data.meta.isNotEmpty()) addAndMakeVisible(meta); else removeChildComponent(&meta);
+    if (data.meta.isNotEmpty()) addAndMakeVisible(*meta); else removeChildComponent(meta.get());
 
     tiles.clear();
     for (const auto& stat : data.stats)
@@ -81,7 +90,6 @@ void AnalysisCard::setContent(const AnalysisContent& next)
     setTooltip(data.tooltip);
     resized();
 }
-
 void AnalysisCard::showPlaceholder(const juce::String& text)
 {
     AnalysisContent placeholder;
@@ -115,8 +123,8 @@ int AnalysisCard::preferredHeight(int width) const
 {
     if (width <= 0) return 0;
     int height = 0;
-    if (data.title.isNotEmpty()) height += 20 + (data.meta.isNotEmpty() ? 2 : 0);
-    if (data.meta.isNotEmpty()) height += 16;
+    if (data.title.isNotEmpty()) height += 20;
+    if (data.meta.isNotEmpty()) height += wrappedHeight(data.meta, studio::captionFont(), width) + 2;
     if (! data.stats.empty())
     {
         const int columns = columnsFor(width);
@@ -132,12 +140,13 @@ int AnalysisCard::preferredHeight(int width) const
 void AnalysisCard::resized()
 {
     auto area = getLocalBounds();
-    if (data.title.isNotEmpty())
+    if (data.title.isNotEmpty()) title.setBounds(area.removeFromTop(20));
+    if (data.meta.isNotEmpty())
     {
-        title.setBounds(area.removeFromTop(20));
-        if (data.meta.isNotEmpty()) area.removeFromTop(2);
+        const int height = wrappedHeight(data.meta, studio::captionFont(), area.getWidth());
+        meta->setBounds(area.removeFromTop(height));
+        area.removeFromTop(2);
     }
-    if (data.meta.isNotEmpty()) meta.setBounds(area.removeFromTop(16));
 
     if (! tiles.empty())
     {

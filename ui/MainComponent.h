@@ -235,6 +235,9 @@ private:
     void selectSample(const SampleRecord&);
     // The Analysis card content for one record; the only place its values are formatted.
     AnalysisContent analysisFor(const SampleRecord&) const;
+    // Sets the card content and relayouts, so its height always matches the content.
+    void refreshAnalysis(AnalysisContent content);
+    void showAnalysisPlaceholder();
     void loadSelectedSample(const SampleRecord&);
     void clearSampleSelectionNow();
     std::optional<SampleRecord> pendingSample;

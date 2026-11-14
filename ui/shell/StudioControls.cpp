@@ -41,6 +41,9 @@ CheckChip::CheckChip(const juce::String& text, bool small) : juce::ToggleButton(
 void StatTile::setStat(const Stat& next)
 {
     data = next;
+    // The card owns the tooltip (the whole path), so a tile never takes the mouse.
+    setInterceptsMouseClicks(false, false);
+    setTitle(data.value + ", " + data.caption);   // what assistive tools read for this paint-only text
     repaint();
 }
 

@@ -563,7 +563,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     rootsLabel.setColour(juce::Label::textColourId,theme::muted); rootsLabel.setFont(juce::FontOptions(12));
     analysisHeading.setText("Sample Analysis",juce::dontSendNotification);
     analysisHeading.setFont(juce::FontOptions(17,juce::Font::bold));
-    analysisCard.showPlaceholder("Select a sample to inspect its measured audio features.");
+    showAnalysisPlaceholder();
     analysisViewport.setViewedComponent(&analysisCard,false);
     analysisViewport.setScrollBarsShown(true,false);
     addChildComponent(preview.containerSourceList());
@@ -976,7 +976,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
                     updateSelectionStatus(*record);
                     updateSelectedTags();
                     // The restored sample is shown by the preview below; the card must match it.
-                    analysisCard.setContent(analysisFor(*record));
+                    refreshAnalysis(analysisFor(*record));
                     if (record->isDiscEntry())
                     {
                         preview.clearDiscSource();
@@ -1875,6 +1875,18 @@ void MainComponent::selectSample(const SampleRecord& r)
     }
     loadSelectedSample(r);
 }
+void MainComponent::refreshAnalysis(AnalysisContent content)
+{
+    analysisCard.setContent(std::move(content));
+    resized();   // the card's height inside the viewport follows its content
+}
+
+void MainComponent::showAnalysisPlaceholder()
+{
+    analysisCard.showPlaceholder("Select a sample to inspect its measured audio features.");
+    resized();
+}
+
 AnalysisContent MainComponent::analysisFor(const SampleRecord& r) const
 {
     auto dbfs = [](double v) { return v > 0 ? juce::String(juce::Decibels::gainToDecibels(v),1) + " dBFS" : "-inf dBFS"; };
@@ -1961,14 +1973,13 @@ void MainComponent::loadSelectedSample(const SampleRecord& r)
                   [](const Tag& a, const Tag& b) { return a.name.compareIgnoreCase(b.name) < 0; });
         selectedTags.setTags(unionTags);
         editTags.setEnabled(false); // editing a batch would need its own menu; display only
-        resized();
         AnalysisContent card;
         card.title = juce::String(ids.size()) + " samples selected";
         card.meta = juce::String(unionTags.size()) + " unique tags on the selection";
         card.notes = { unionTags.empty()
                            ? juce::String("Tags apply to the whole selection.")
                            : juce::String("Alt+click a tag to remove it from every selected file.") };
-        analysisCard.setContent(card);
+        refreshAnalysis(std::move(card));
         selectionStatus.setText(juce::String(selectedRows) + " samples selected",
                                 juce::dontSendNotification);
         selectionStatus.setTooltip({});
@@ -1978,7 +1989,7 @@ void MainComponent::loadSelectedSample(const SampleRecord& r)
     preview.editingSampleId = r.id;
     sessionSamplePath = r.filePath;
     markSessionStateDirty();
-    analysisCard.setContent(analysisFor(r));
+    refreshAnalysis(analysisFor(r));
     updateSelectionStatus(r);
     updateSelectedTags();
     if (r.isDiscEntry())
@@ -2019,7 +2030,7 @@ void MainComponent::clearSampleSelectionNow()
     markSessionStateDirty();
     preview.clearSource();
     updateSelectedTags();
-    analysisCard.showPlaceholder("Select a sample to inspect its measured audio features.");
+    showAnalysisPlaceholder();
     analysisCard.setTooltip({});
     selectionStatus.setText("No sample selected", juce::dontSendNotification);
     selectionStatus.setTooltip({});
@@ -4970,7 +4981,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     filter.matchAnyTag = false; filter.starredOnly = false;
     filter.hideDuplicates = false; filter.hideEmpty = appSettings.hideEmpty; filter.duplicateHash.clear();
     search.clear(); pendingSearch.clear();
-    analysisCard.showPlaceholder("Select a sample to inspect its measured audio features.");
+    showAnalysisPlaceholder();
     selectedTags.setTags({});
     writeRepo->refreshDuplicates();
     folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored);

@@ -40,6 +40,8 @@ public:
     std::function<void()> onTextChanged;
     void paintOverChildren(juce::Graphics& g) override
     {
+        // The placeholder hint and the field outline live in the base implementation.
+        juce::TextEditor::paintOverChildren(g);
         g.setColour(theme::muted);
         drawActionIcon(g, leading,
                        juce::Rectangle<float>(studio::spacingTight,

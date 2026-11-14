@@ -164,6 +164,9 @@ TEST_CASE("Reason metadata cards have no audio and reset when loading a disc sou
     REQUIRE(panel.loadFile(f)); REQUIRE(engine.length()==0); REQUIRE_FALSE(engine.isPlaying());
     auto* card=dynamic_cast<juce::Label*>(panel.findChildWithID("reasonInfo")); REQUIRE(card!=nullptr);
     REQUIRE(card->isVisible()); REQUIRE(card->getText().contains(juce::String::fromUTF8("закрытый формат")));
+    // The card explains a whole unsupported format, so the layout must actually show it.
+    panel.setSize(1100, 156); panel.resized();
+    REQUIRE(card->getWidth() > 100); REQUIRE(card->getHeight() > 0);
     auto audio=std::make_shared<SampleAudio>(); audio->frames=441; audio->sampleRate=44100;
     audio->left.resize(441,0.1f); audio->right=audio->left;
     REQUIRE(panel.loadDiscSample(t.dir.getChildFile("d.iso"),"Disc sample",audio,false,0,0,false,false));

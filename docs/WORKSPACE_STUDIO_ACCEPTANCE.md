@@ -22,7 +22,9 @@ Spec: `docs/superpowers/specs/2026-11-14-workspace-studio-design.md`; mockup:
 - **Table**: 36 px rows, header font without letter tracking (so `FORMAT` fits its column), and a
   2 px accent stripe on the selected row. Columns, widths, sorting and cells are unchanged.
 - **Analysis**: the padded-spaces `Label` is now `AnalysisCard`, a grid of value + caption tiles
-  (two columns from 210 px), a meta line, and notes that wrap with their own `TextLayout`. Genre
+  (two columns from 210 px), a meta line and notes that both wrap with their own `TextLayout` and
+  are drawn in the muted token; the card owns the path tooltip, and tiles and notes never take the
+  mouse. Content and height are set together, so a batch selection from launch no longer clips. Genre
   keeps its source next to the value; duplicates, missing files, errors, disc-image lines and the
   batch-selection note are all still shown. A restored session now fills the card as well.
 - **Preview**: 36 px accent Play disc whose glyph follows the transport state, icon Stop, a time
@@ -39,8 +41,8 @@ Spec: `docs/superpowers/specs/2026-11-14-workspace-studio-design.md`; mockup:
 
 | Check | Result |
 |---|---|
-| `ctest --preset debug` | 1/1 passed, 33.7 s |
-| Full suite (`SonicatorTests`) | 1062 cases / 14 623 assertions passed |
+| `ctest --preset debug` | 1/1 passed, 33.3 s |
+| Full suite (`SonicatorTests`) | 1069 cases / 14 648 assertions passed |
 | `cmake --build --preset release --target Sonicator` | `SONICATOR.app` linked and ad-hoc signed |
 | Screenshots from real components | 14 PNGs, both themes, `1400x900` and `1120x720`, plus the Split dialog |
 | Real application at 100% | Launched the Release build: header, chips, table, analysis, preview render as the components do |
@@ -75,3 +77,6 @@ Files: `library-{dark,light}-{1400x900,1120x720}.png`, `analysis-{...}.png`, `pr
   literals in `MainComponent.cpp`/`PreviewPanel.cpp`.
 - The Analysis card's place inside the panel is a fixed 14 px scrollbar allowance; at very large
   interface scales the viewport scrolls rather than shrinking the tiles.
+- Deferred polish from the branch review: `LIBRARY` is still a 40 px pill rather than a 30 px
+  chip, the gear has no tooltip, dialog fields rely on the LookAndFeel's own editor colours, the
+  bank/tracker selector is 18 px high, and `SectionCaption`/`ActionIcon::more` are unused.

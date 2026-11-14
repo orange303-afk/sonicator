@@ -1238,6 +1238,7 @@ void PreviewPanel::lookAndFeelChanged()
     reasonInfo.setColour(juce::Label::textColourId,theme::text);
     abletonInfo.setColour(juce::Label::textColourId,theme::muted);
     selectionStatus.setColour(juce::Label::textColourId,theme::muted);
+    formatLine.setColour(juce::Label::textColourId, theme::muted);
     repaint();
 }
 void PreviewPanel::paint(juce::Graphics& g)
@@ -1301,6 +1302,13 @@ void PreviewPanel::resized()
     else abletonInfo.setBounds({});
     if (rexInfo.isVisible()) { rexInfo.setBounds(r.removeFromTop(16)); r.removeFromTop(gap); }
     else rexInfo.setBounds({});
+    // The Reason card is the only explanation for a whole unsupported format, so it keeps a row.
+    if (reasonInfo.isVisible())
+    {
+        reasonInfo.setBounds(r.removeFromTop(juce::jmin(80, juce::jmax(24, r.getHeight() / 2))));
+        r.removeFromTop(gap);
+    }
+    else reasonInfo.setBounds({});
 
     // The selection status belongs under the wave, with the two actions that act on the selection.
     auto selection = r.removeFromBottom(studio::chipSmallHeight);
