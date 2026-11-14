@@ -2130,8 +2130,21 @@ std::vector<Tag> SampleRepository::recentTags(int limit) const
     while (s.step()) out.push_back(readTag(s, 0));
     return out;
 }
-std::vector<int64_t> SampleRepository::idsInFolder(const juce::String& folder, bool includeDiscContents) const
+std::vector<PathEntry> SampleRepository::physicalPathsInFolder(const juce::String& folder, int limit) const
 {
+    std::vector<PathEntry> out;
+    if (folder.isEmpty()) return out;
+    std::lock_guard lock(db.mutex);
+    auto [lower, upper] = folderRange(folder);
+    detail::Statement s(db.handle,
+        "SELECT id,path,missing,container_path FROM samples"
+        " WHERE path>=? AND path<? AND container_path='' ORDER BY path,id LIMIT ?");
+    s.text(1, lower); s.text(2, upper); s.integer(3, juce::jlimit(1, 200000, limit));
+    while (s.step())
+        out.push_back({ s.integer(0), s.text(1), s.integer(2) != 0, s.text(3) });
+    return out;
+}
+std::vector<int64_t> SampleRepository::idsInFolder(const juce::String& folder, bool includeDiscContents) const{
     std::vector<int64_t> out;
     if (folder.isEmpty()) return out;
     std::lock_guard lock(db.mutex);

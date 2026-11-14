@@ -175,6 +175,11 @@ public:
     // Every catalogued sample inside a folder and its descendants. Separator-aware, independent
     // of search, tags, stars, duplicate filters and pagination. Empty folder means no scope.
     std::vector<int64_t> idsInFolder(const juce::String& folder, bool includeDiscContents = true) const;
+    // Physical files below a folder and every subfolder, independent of table filters, pagination
+    // and stereo-pair visibility. Container rows are excluded. At most `limit` entries are read,
+    // so a caller can detect an oversized folder without loading it. Ignored paths stay in this
+    // raw listing; the caller decides how to report them.
+    std::vector<PathEntry> physicalPathsInFolder(const juce::String& folder, int limit = 100001) const;
     int countWithTagInFolder(const juce::String& folder, int64_t tagId) const;
     void setStarred(const std::vector<int64_t>& sampleIds, bool starred);
     // Rebuilds the byte-identical duplicate groups (same full SHA-256 and size).
