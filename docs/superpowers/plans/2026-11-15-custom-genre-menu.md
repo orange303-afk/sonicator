@@ -39,7 +39,7 @@ genres without folded-name duplicates. Existing manual assignment APIs persist n
 - [x] Implement schema 19, transactional registration, combined names and migrate version tests.
 - [x] Add failing row/folder menu reuse tests, including a long list and a stale popup mapping.
 - [x] Implement shared list lookup, captured menu snapshots and separate genre ID ranges.
-- [ ] Run focused tests and full debug ctest, build release, graphify update and review.
+- [x] Run focused tests and full debug ctest, build release, graphify update and review.
 
 ## Ledger
 
@@ -61,3 +61,11 @@ genres without folded-name duplicates. Existing manual assignment APIs persist n
 - Release Sonicator built successfully; `codesign --verify --deep --strict` passed.
 - `graphify update .` completed: 13,685 nodes / 41,518 edges; existing zero-node data-file and
   community-label warnings are unrelated to this feature. No paid semantic extraction.
+- Independent read-only review of `86c9f21..416fb59`: approved, no Critical/Important/Minor findings.
+- Final: Ruling: reuse the project's existing supported Unicode folding rather than add a new
+  dependency for full Unicode case folding — consistent with existing catalog search; exotic
+  case-equivalent spellings outside these mappings may remain separate. No cross-platform or
+  interactive visual acceptance claim is made; native menus reuse their current styling.
+- Committed as `416fb59`, fast-forwarded into `main`; merged-result ctest passed 1/1 (55.87 s).
+- Task 1: complete. The only initial full-suite failures were the schema-version write, fixed
+  before review; final focused, complete-suite, release and signature checks all passed.
