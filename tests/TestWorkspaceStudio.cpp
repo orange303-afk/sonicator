@@ -116,10 +116,24 @@ TEST_CASE("The analysis card shows one tile per statistic", "[ui][studio]")
     card.resized();
     REQUIRE(card.content().stats.size() == 3);
     REQUIRE(card.getNumChildComponents() == 6);   // title, meta, three tiles, one note
-    REQUIRE(AnalysisCard::columnsFor(270) == 2);
-    REQUIRE(AnalysisCard::columnsFor(220) == 1);
+    REQUIRE(AnalysisCard::columnsFor(240) == 2);
+    REQUIRE(AnalysisCard::columnsFor(200) == 1);
     // Two columns are shorter than one, which is the whole point of the grid.
-    REQUIRE(card.preferredHeight(270) < card.preferredHeight(220));
+    REQUIRE(card.preferredHeight(240) < card.preferredHeight(200));
+}
+
+TEST_CASE("A wrapped note grows to the lines it needs", "[ui][studio]")
+{
+    AnalysisCard card;
+    AnalysisContent content;
+    content.notes = { "Select a sample to inspect its measured audio features." };
+    card.setContent(content);
+    card.setSize(224, 300);
+    card.resized();
+    REQUIRE(card.getNumChildComponents() == 1);
+    // One line would truncate this sentence at 224 px; it wraps to two.
+    REQUIRE(card.getChildComponent(0)->getHeight()
+            >= 2 * juce::roundToInt(studio::captionFont().getHeight()));
 }
 
 TEST_CASE("The analysis card keeps every note the old label printed", "[ui][studio]")
@@ -230,6 +244,15 @@ TEST_CASE("The split dialog keeps its sliders and visible check boxes", "[ui][st
     REQUIRE(title != nullptr);
     REQUIRE(title->getX() == 20);
     REQUIRE(title->getY() == 20);
+    // The folder field sits on the window background so its edge shows on the panel.
+    bool sawField = false;
+    for (auto* child : dialog.getChildren())
+        if (auto* editor = dynamic_cast<juce::TextEditor*>(child))
+        {
+            sawField = true;
+            REQUIRE(editor->findColour(juce::TextEditor::backgroundColourId) == theme::background);
+        }
+    REQUIRE(sawField);
 }
 
 TEST_CASE("Every dialog lays its content out from the shared surface", "[ui][studio]")
@@ -274,4 +297,53 @@ TEST_CASE("Every dialog lays its content out from the shared surface", "[ui][stu
             REQUIRE(child->getBottom() <= one.dialog->getHeight() - 20);
         }
     }
+}
+
+TEST_CASE("The header hides its clear control while the search is empty", "[ui][studio]")
+{
+    TestDirectory t;
+    MainComponent app(t.dir.getChildFile("clear.sqlite"), false);
+    app.setSize(880, 580);
+    app.resized();
+    auto* search = dynamic_cast<SearchField*>(app.findChildWithID("search"));
+    REQUIRE(search != nullptr);
+    juce::Button* clear = nullptr;
+    for (auto* child : search->getChildren())
+        if (auto* button = dynamic_cast<juce::Button*>(child)) clear = button;
+    REQUIRE(clear != nullptr);
+    REQUIRE_FALSE(clear->isVisible());
+    // TextEditor dispatches its change callback through the message queue.
+    const auto pump = [] { juce::MessageManager::getInstance()->runDispatchLoopUntil(50); };
+    search->setText("pad", true);
+    pump();
+    REQUIRE(clear->isVisible());
+    search->clear();
+    pump();
+    REQUIRE_FALSE(clear->isVisible());
+}
+
+TEST_CASE("A restored session shows its sample in the analysis card", "[ui][studio]")
+{
+    TestDirectory t;
+    const auto dbPath = t.dir.getChildFile("restore.sqlite");
+    const auto file = t.wave("restored.wav", 440.0, 1);
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        repo.createTables();
+        auto record = BasicAnalyzer().analyze(file);
+        record.fileName = "restored.wav";
+        repo.upsert(record);
+        repo.addRoot(t.dir.getFullPathName());
+    }
+    AppSettings settings;
+    settings.lastFolder = t.dir.getFullPathName();
+    settings.lastSamplePath = file.getFullPathName();
+    MainComponent app(dbPath, false, settings, t.dir.getChildFile("restore-settings.json"));
+    app.setSize(1200, 800);
+    app.resized();
+    auto* card = dynamic_cast<AnalysisCard*>(findDescendantWithID(app, "analysisDetails"));
+    REQUIRE(card != nullptr);
+    REQUIRE(card->content().title == "restored.wav");
+    REQUIRE(card->content().stats.size() >= 8);
 }

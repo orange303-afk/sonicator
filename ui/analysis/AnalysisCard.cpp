@@ -1,5 +1,6 @@
 #include "AnalysisCard.h"
 #include "ui/shell/Theme.h"
+#include <cmath>
 
 namespace sonicator
 {
@@ -16,6 +17,32 @@ void styleLabel(juce::Label& label, juce::Font font, juce::Colour colour)
     label.setInterceptsMouseClicks(false, false);
 }
 } // namespace
+
+class WrappedNote final : public juce::Component
+{
+public:
+    void setText(const juce::String& text)
+    {
+        body = text;
+        repaint();
+    }
+    const juce::String& getText() const noexcept { return body; }
+    void paint(juce::Graphics& g) override
+    {
+        if (body.isEmpty()) return;
+        juce::AttributedString attributed;
+        attributed.setJustification(juce::Justification::topLeft);
+        attributed.setColour(theme::muted);
+        attributed.append(body, studio::captionFont());
+        juce::TextLayout layout;
+        layout.createLayout(attributed, (float) getWidth());
+        layout.draw(g, getLocalBounds().toFloat());
+    }
+private:
+    juce::String body;
+};
+
+AnalysisCard::~AnalysisCard() = default;
 
 AnalysisCard::AnalysisCard()
 {
@@ -46,11 +73,10 @@ void AnalysisCard::setContent(const AnalysisContent& next)
     notes.clear();
     for (const auto& text : data.notes)
     {
-        auto label = std::make_unique<juce::Label>();
-        styleLabel(*label, studio::captionFont(), theme::muted);
-        label->setText(text, juce::dontSendNotification);
-        addAndMakeVisible(*label);
-        notes.push_back(std::move(label));
+        auto note = std::make_unique<WrappedNote>();
+        note->setText(text);
+        addAndMakeVisible(*note);
+        notes.push_back(std::move(note));
     }
     setTooltip(data.tooltip);
     resized();
@@ -65,7 +91,9 @@ void AnalysisCard::showPlaceholder(const juce::String& text)
 
 int AnalysisCard::columnsFor(int width)
 {
-    return width >= 240 ? 2 : 1;
+    // The default analysis panel gives the card about 224 px, which is two columns; the 200 px
+    // minimum panel gives it 154 px, which is one.
+    return width >= 210 ? 2 : 1;
 }
 
 int AnalysisCard::wrappedHeight(const juce::String& text, const juce::Font& font, int width)
@@ -76,7 +104,11 @@ int AnalysisCard::wrappedHeight(const juce::String& text, const juce::Font& font
     attributed.append(text, font);
     juce::TextLayout layout;
     layout.createLayout(attributed, (float) width);
-    return juce::jmax(juce::roundToInt(font.getHeight()), juce::roundToInt(layout.getHeight()));
+    // A label draws as many lines as fit: height / font height. Returning exactly lines * height
+    // can truncate to one line through float rounding, so each line gets a pixel of slack.
+    const float lineHeight = font.getHeight();
+    const int lines = juce::jmax(1, (int) std::ceil(layout.getHeight() / lineHeight));
+    return juce::roundToInt(lines * lineHeight) + 1;
 }
 
 int AnalysisCard::preferredHeight(int width) const

@@ -56,6 +56,7 @@ SplitDialog::SplitDialog(std::vector<juce::File> inputSources, const AppSettings
     folder.setText(sources.empty() ? juce::String()
                                    : sources.front().getParentDirectory().getFullPathName());
     folder.setMultiLine(false);
+    dialogs::Surface::styleField(folder);
     error.setColour(juce::Label::textColourId, juce::Colour(0xffff8b8b));
     resultLabel.setColour(juce::Label::textColourId, theme::text);
     resultLabel.setJustificationType(juce::Justification::topLeft);

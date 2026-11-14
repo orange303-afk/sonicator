@@ -23,5 +23,7 @@ public:
     static void placeSliderRow(juce::Rectangle<int>& area, juce::Component& label, juce::Slider& slider);
     // A 24 px check row with the LookAndFeel's tick. Advances `area`.
     static void placeCheck(juce::Rectangle<int>& area, juce::Component& toggle);
+    // Text fields sit on the window background, so their edge is visible on the panel.
+    static void styleField(juce::TextEditor&);
 };
 } // namespace sonicator::dialogs

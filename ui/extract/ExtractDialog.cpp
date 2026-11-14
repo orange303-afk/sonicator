@@ -34,6 +34,7 @@ ExtractDialog::ExtractDialog(std::vector<juce::File> inputSources, const AppSett
                           "in the song. SoundFont samples are never changed.");
     folder.setComponentID("extractFolder");
     folder.setMultiLine(false);
+    dialogs::Surface::styleField(folder);
     folder.setText(settings.extractOutputFolder.isNotEmpty()
         ? settings.extractOutputFolder
         : (sources.empty() ? juce::String() : sources.front().getParentDirectory().getFullPathName()));

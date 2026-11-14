@@ -62,3 +62,9 @@ TEST_CASE("Theme switch repaints custom painted controls", "[ui][studio]")
     REQUIRE(theme::background != theme::panel);
     theme::apply(previous ? ThemeMode::Dark : ThemeMode::Light);
 }
+
+TEST_CASE("The table header fits its column without letter tracking", "[ui][studio]")
+{
+    REQUIRE(studio::tableHeaderFont().getExtraKerningFactor() == 0.0f);
+    REQUIRE(studio::tableHeaderFont().getHeight() < studio::bodyFont().getHeight());
+}

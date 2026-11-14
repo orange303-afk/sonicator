@@ -16,10 +16,15 @@ struct AnalysisContent
 };
 
 // The value + caption grid that replaced the single padded-spaces label.
+// A note wraps with its own TextLayout: a Label squeezes or truncates instead of wrapping, and
+// the notes carry paths and error text that must stay readable.
+class WrappedNote;
+
 class AnalysisCard final : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     AnalysisCard();
+    ~AnalysisCard() override;
     void setContent(const AnalysisContent&);
     void showPlaceholder(const juce::String&);
     const AnalysisContent& content() const noexcept { return data; }
@@ -34,7 +39,7 @@ private:
     AnalysisContent data;
     juce::Label title, meta;
     std::vector<std::unique_ptr<studio::StatTile>> tiles;
-    std::vector<std::unique_ptr<juce::Label>> notes;
+    std::vector<std::unique_ptr<WrappedNote>> notes;
     static int wrappedHeight(const juce::String&, const juce::Font&, int width);
 };
 } // namespace sonicator

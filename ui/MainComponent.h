@@ -233,6 +233,8 @@ private:
     void reloadLibrary();
     void updateTagControls();
     void selectSample(const SampleRecord&);
+    // The Analysis card content for one record; the only place its values are formatted.
+    AnalysisContent analysisFor(const SampleRecord&) const;
     void loadSelectedSample(const SampleRecord&);
     void clearSampleSelectionNow();
     std::optional<SampleRecord> pendingSample;

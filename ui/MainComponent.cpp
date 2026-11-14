@@ -577,7 +577,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     tagsLabel.setFont(juce::FontOptions(11)); tagsLabel.setColour(juce::Label::textColourId,theme::muted);
     search.setTextToShowWhenEmpty("Search: *.rx2, ext:wav, type:pad, key:Am, C4",theme::muted);
     search.setJustification(juce::Justification::centredLeft);
-    search.onTextChange = [this]
+    search.onTextChanged = [this]
     {
         pendingSearch = search.getText();
         lastSearchChange = juce::Time::getMillisecondCounter();
@@ -975,6 +975,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
                     sessionSamplePath = record->filePath;
                     updateSelectionStatus(*record);
                     updateSelectedTags();
+                    // The restored sample is shown by the preview below; the card must match it.
+                    analysisCard.setContent(analysisFor(*record));
                     if (record->isDiscEntry())
                     {
                         preview.clearDiscSource();
@@ -1873,48 +1875,8 @@ void MainComponent::selectSample(const SampleRecord& r)
     }
     loadSelectedSample(r);
 }
-void MainComponent::loadSelectedSample(const SampleRecord& r)
+AnalysisContent MainComponent::analysisFor(const SampleRecord& r) const
 {
-    const int selectedRows = library.getSelectedRowCount();
-    if (selectedRows > 1)
-    {
-        // A batch is a library operation, not an audition: no single waveform or sound should
-        // look as if it belonged to the whole selection.
-        selectedSampleId = 0;
-        preview.editingSampleId = 0;
-        sessionSamplePath.clear();
-        markSessionStateDirty();
-        preview.clearSource();
-        // The selection still has a useful answer: every tag on any selected file, once.
-        std::vector<int64_t> ids;
-        for (const auto& sample : library.getSelectedSamples()) ids.push_back(sample.id);
-        std::map<int64_t, Tag> unique;
-        if (readRepo != nullptr)
-            for (const auto& [sampleId, tags] : readRepo->tagsForSamples(ids))
-                for (const auto& tag : tags) unique[tag.id] = tag;
-        std::vector<Tag> unionTags;
-        for (const auto& [id, tag] : unique) { juce::ignoreUnused(id); unionTags.push_back(tag); }
-        std::sort(unionTags.begin(), unionTags.end(),
-                  [](const Tag& a, const Tag& b) { return a.name.compareIgnoreCase(b.name) < 0; });
-        selectedTags.setTags(unionTags);
-        editTags.setEnabled(false); // editing a batch would need its own menu; display only
-        resized();
-        AnalysisContent card;
-        card.title = juce::String(ids.size()) + " samples selected";
-        card.meta = juce::String(unionTags.size()) + " unique tags on the selection";
-        card.notes = { unionTags.empty()
-                           ? juce::String("Tags apply to the whole selection.")
-                           : juce::String("Alt+click a tag to remove it from every selected file.") };
-        analysisCard.setContent(card);
-        selectionStatus.setText(juce::String(selectedRows) + " samples selected",
-                                juce::dontSendNotification);
-        selectionStatus.setTooltip({});
-        return;
-    }
-    selectedSampleId = r.id;
-    preview.editingSampleId = r.id;
-    sessionSamplePath = r.filePath;
-    markSessionStateDirty();
     auto dbfs = [](double v) { return v > 0 ? juce::String(juce::Decibels::gainToDecibels(v),1) + " dBFS" : "-inf dBFS"; };
     AnalysisContent card;
     card.title = r.fileName;
@@ -1971,7 +1933,52 @@ void MainComponent::loadSelectedSample(const SampleRecord& r)
         }
     }
     card.tooltip = r.filePath;
-    analysisCard.setContent(card);
+    return card;
+}
+
+void MainComponent::loadSelectedSample(const SampleRecord& r)
+{
+    const int selectedRows = library.getSelectedRowCount();
+    if (selectedRows > 1)
+    {
+        // A batch is a library operation, not an audition: no single waveform or sound should
+        // look as if it belonged to the whole selection.
+        selectedSampleId = 0;
+        preview.editingSampleId = 0;
+        sessionSamplePath.clear();
+        markSessionStateDirty();
+        preview.clearSource();
+        // The selection still has a useful answer: every tag on any selected file, once.
+        std::vector<int64_t> ids;
+        for (const auto& sample : library.getSelectedSamples()) ids.push_back(sample.id);
+        std::map<int64_t, Tag> unique;
+        if (readRepo != nullptr)
+            for (const auto& [sampleId, tags] : readRepo->tagsForSamples(ids))
+                for (const auto& tag : tags) unique[tag.id] = tag;
+        std::vector<Tag> unionTags;
+        for (const auto& [id, tag] : unique) { juce::ignoreUnused(id); unionTags.push_back(tag); }
+        std::sort(unionTags.begin(), unionTags.end(),
+                  [](const Tag& a, const Tag& b) { return a.name.compareIgnoreCase(b.name) < 0; });
+        selectedTags.setTags(unionTags);
+        editTags.setEnabled(false); // editing a batch would need its own menu; display only
+        resized();
+        AnalysisContent card;
+        card.title = juce::String(ids.size()) + " samples selected";
+        card.meta = juce::String(unionTags.size()) + " unique tags on the selection";
+        card.notes = { unionTags.empty()
+                           ? juce::String("Tags apply to the whole selection.")
+                           : juce::String("Alt+click a tag to remove it from every selected file.") };
+        analysisCard.setContent(card);
+        selectionStatus.setText(juce::String(selectedRows) + " samples selected",
+                                juce::dontSendNotification);
+        selectionStatus.setTooltip({});
+        return;
+    }
+    selectedSampleId = r.id;
+    preview.editingSampleId = r.id;
+    sessionSamplePath = r.filePath;
+    markSessionStateDirty();
+    analysisCard.setContent(analysisFor(r));
     updateSelectionStatus(r);
     updateSelectedTags();
     if (r.isDiscEntry())

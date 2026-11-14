@@ -2,6 +2,10 @@
 #include "ui/MainComponent.h"
 #include "ui/settings/SettingsPanel.h"
 #include "ui/commands/CommandRegistry.h"
+#include "ui/library/FileListPanel.h"
+#include "ui/split/SplitDialog.h"
+#include "core/database/SampleRepository.h"
+#include "core/dsp/BasicAnalyzer.h"
 #include "ui/shell/Theme.h"
 #include "TestHelpers.h"
 
@@ -83,4 +87,90 @@ TEST_CASE("Settings pages render their content", "[ui][studio]")
     writeIfRequested(hotkeys, "SONICATOR_SETTINGS_HOTKEYS_SCREENSHOT");
     panel.setLookAndFeel(nullptr);
     theme::apply(ThemeMode::System);
+}
+
+namespace
+{
+// The acceptance set: the workspace parts the Studio stage touched, in both themes and in the two
+// logical sizes that matter (100%, and the logical size an 1120 px-wide window gets at 125%).
+void writeAcceptanceShots()
+{
+    const auto directory = juce::SystemStats::getEnvironmentVariable("SONICATOR_SCREENSHOT_DIR", {});
+    if (directory.isEmpty()) return;
+    const juce::File folder(directory);
+    folder.createDirectory();
+
+    auto write = [&folder](const juce::Image& image, const juce::String& name)
+    {
+        REQUIRE(image.isValid());
+        auto stream = folder.getChildFile(name).createOutputStream();
+        REQUIRE(stream != nullptr);
+        juce::PNGImageFormat png;
+        REQUIRE(png.writeImageToStream(image, *stream));
+    };
+
+    struct Size { int width, height; const char* label; };
+    for (const auto mode : { ThemeMode::Dark, ThemeMode::Light })
+    {
+        theme::apply(mode);
+        const auto themeName = mode == ThemeMode::Dark ? juce::String("dark") : juce::String("light");
+        for (const auto size : { Size { 1400, 900, "1400x900" }, Size { 1120, 720, "1120x720" } })
+        {
+            TestDirectory t;
+            const auto dbPath = t.dir.getChildFile("shots.sqlite");
+            const auto audio = t.wave("PAD_WARM_A#m.wav", 220.0, 2);
+            {
+                Database db(dbPath);
+                SampleRepository repo(db);
+                repo.createTables();
+                auto record = BasicAnalyzer().analyze(audio);
+                record.fileName = "PAD_WARM_A#m.wav";
+                repo.upsert(record);
+                repo.addRoot(t.dir.getFullPathName());
+            }
+            AppSettings settings;
+            settings.theme = mode;
+            MainComponent app(dbPath, false, settings, t.dir.getChildFile("shots-settings.json"));
+            app.setSize(size.width, size.height);
+            app.resized();
+            const auto suffix = themeName + "-" + size.label + ".png";
+            write(app.createComponentSnapshot(app.getLocalBounds()), "library-" + suffix);
+            if (auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library")))
+                library->selectRows({ 0 });
+            app.resized();
+
+            // The analysis card as it sits in its panel, and the preview band under it.
+            if (auto* card = dynamic_cast<AnalysisCard*>(findDescendantWithID(app, "analysisDetails")))
+            {
+                const int width = card->getWidth() + 2 * studio::spacingWide;
+                const int height = card->getHeight() + 2 * studio::spacingWide;
+                juce::Image image(juce::Image::ARGB, width, height, true);
+                juce::Graphics g(image);
+                g.fillAll(theme::panel);
+                g.drawImageAt(card->createComponentSnapshot(card->getLocalBounds()),
+                              studio::spacingWide, studio::spacingWide);
+                write(image, "analysis-" + suffix);
+            }
+            if (auto* preview = app.findChildWithID("preview"))
+                write(preview->createComponentSnapshot(preview->getLocalBounds()), "preview-" + suffix);
+        }
+
+        // The look-and-feel must outlive the dialog it is set on.
+        SonicatorLookAndFeel look;
+        SplitDialog split({ juce::File("/tmp/bank.wav") }, AppSettings{},
+                          [](SplitOptions) { return true; });
+        split.setLookAndFeel(&look);
+        split.setSize(520, 430);
+        split.resized();
+        write(split.createComponentSnapshot(split.getLocalBounds()),
+              "dialog-" + themeName + "-520x430.png");
+        split.setLookAndFeel(nullptr);
+    }
+    theme::apply(ThemeMode::System);
+}
+} // namespace
+
+TEST_CASE("The workspace renders its Studio parts for acceptance", "[ui][studio]")
+{
+    writeAcceptanceShots();
 }

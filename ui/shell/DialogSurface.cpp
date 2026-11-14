@@ -45,4 +45,14 @@ void Surface::placeCheck(juce::Rectangle<int>& area, juce::Component& toggle)
     toggle.setBounds(area.removeFromTop(24));
     area.removeFromTop(studio::spacingUnit);
 }
+
+void Surface::styleField(juce::TextEditor& editor)
+{
+    editor.setColour(juce::TextEditor::backgroundColourId, theme::background);
+    editor.setColour(juce::TextEditor::outlineColourId, theme::line);
+    editor.setColour(juce::TextEditor::textColourId, theme::text);
+    editor.setColour(juce::TextEditor::focusedOutlineColourId, theme::accent);
+    // Text already in the editor carries the colour it was inserted with, so it is repainted here.
+    editor.applyColourToAllText(theme::text, true);
+}
 } // namespace sonicator::dialogs

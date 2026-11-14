@@ -66,4 +66,10 @@ inline juce::Font statCaptionFont()
 {
     return captionFont();
 }
+// Table column headers: the section size, but without the tracking that makes "FORMAT" wider
+// than its minimum column.
+inline juce::Font tableHeaderFont()
+{
+    return juce::Font(juce::FontOptions(10.5f, juce::Font::bold));
+}
 } // namespace sonicator::studio
