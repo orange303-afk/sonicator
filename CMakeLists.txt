@@ -73,6 +73,20 @@ FetchContent_Declare(libxmp
     GIT_REPOSITORY https://github.com/libxmp/libxmp.git
     GIT_TAG libxmp-4.6.2 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(libxmp)
+# libsamplerate provides the band-limited conversion used by Batch Processing. The archive is
+# pinned by SHA256 and built statically; its examples, tests and install rules stay off.
+set(SONICATOR_BUILD_TESTING_SAVED ${BUILD_TESTING})
+set(BUILD_TESTING OFF)
+set(LIBSAMPLERATE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LIBSAMPLERATE_INSTALL OFF CACHE BOOL "" FORCE)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+FetchContent_Declare(libsamplerate
+    URL "https://github.com/libsndfile/libsamplerate/archive/refs/tags/0.2.2.tar.gz"
+    URL_HASH SHA256=16e881487f184250deb4fcb60432d7556ab12cb58caea71ef23960aec6c0405a
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(libsamplerate)
+unset(CMAKE_POLICY_VERSION_MINIMUM)
+set(BUILD_TESTING ${SONICATOR_BUILD_TESTING_SAVED})
 # libxmp enables verbose stderr tracing through -DDEBUG in Debug builds. Keep the library silent:
 # its diagnostics are development noise for an application and would otherwise dominate tests.
 if(NOT MSVC)
@@ -119,7 +133,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/edit/AudioEditWriter.cpp
     core/edit/AudioFileWriter.cpp
     core/edit/NormalizeService.cpp
-    core/batch/BatchTypes.cpp core/batch/BatchSources.cpp core/batch/BatchPaths.cpp core/batch/BatchPipeline.cpp
+    core/batch/BatchTypes.cpp core/batch/BatchSources.cpp core/batch/BatchPaths.cpp core/batch/BatchPipeline.cpp core/batch/BatchResampler.cpp core/batch/BatchQuantizer.cpp
     core/indexing/CatalogFileSync.cpp
     core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp
     core/updates/UpdateCheck.cpp
@@ -131,7 +145,8 @@ target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
 target_link_libraries(SonicatorCore PUBLIC
-    juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib)
+    juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib
+    SampleRate::samplerate)
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png
     resources/fonts/Manrope-Regular.ttf

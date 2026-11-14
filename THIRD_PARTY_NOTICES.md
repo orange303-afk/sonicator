@@ -17,6 +17,7 @@ component is present and what the project does not ship.
 | ONNX Runtime | 1.20.1 | Prebuilt release binary (macOS universal2, Windows x64, Linux x64) | MIT | <https://github.com/microsoft/onnxruntime/blob/v1.20.1/LICENSE.txt> |
 | Manrope | 4 static faces (Regular, Medium, SemiBold, Bold) | Embedded in the binary as `resources/fonts/*.ttf` | SIL Open Font License 1.1 | [`resources/fonts/OFL.txt`](resources/fonts/OFL.txt) |
 | zlib | system copy on macOS (1.2.12 in the SDK), fetched 1.3.1 on Windows | Linked by JUCE and by `core/sampler/FileInstrument.cpp` | Zlib | <https://zlib.net/zlib_license.html> |
+| libsamplerate | 0.2.2 | FetchContent archive pinned by SHA256, linked statically | BSD-2-Clause | <https://github.com/libsndfile/libsamplerate/blob/0.2.2/COPYING> |
 
 ### Manrope and the OFL
 
