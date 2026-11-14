@@ -245,9 +245,14 @@ public:
     void drawButtonBackground(juce::Graphics& g, juce::Button& button, const juce::Colour&,
                               bool highlighted, bool down) override
     {
-        auto base = button.getToggleState() ? theme::selection : theme::raised;
-        if (down) base = theme::selection;
-        else if (highlighted) base = button.getToggleState() ? theme::selection.brighter(0.08f) : theme::hover;
+        // Colour ids let a surface (the Settings navigation) use the same control with a quieter
+        // resting state than a toolbar button, without a second LookAndFeel.
+        auto base = button.findColour(button.getToggleState() ? juce::TextButton::buttonOnColourId
+                                                              : juce::TextButton::buttonColourId);
+        if (down) base = button.findColour(juce::TextButton::buttonOnColourId);
+        else if (highlighted) base = button.getToggleState()
+            ? button.findColour(juce::TextButton::buttonOnColourId).brighter(0.08f)
+            : button.findColour(juce::TextButton::buttonColourId).brighter(0.10f);
         if (! button.isEnabled()) base = theme::disabled(base);
 
         g.setColour(base);
@@ -264,8 +269,11 @@ public:
     {
         g.setFont(getTextButtonFont(button, button.getHeight()));
         g.setColour(button.isEnabled() ? theme::text : theme::muted);
-        g.drawFittedText(button.getButtonText(), button.getLocalBounds().reduced(8, 0),
-                         juce::Justification::centred, 1);
+        // A list-style surface (the Settings navigation) opts into left aligned labels.
+        const bool leftAligned = (bool) button.getProperties().getWithDefault("leftAligned", false);
+        g.drawFittedText(button.getButtonText(),
+                         button.getLocalBounds().reduced(leftAligned ? 14 : 8, 0),
+                         leftAligned ? juce::Justification::centredLeft : juce::Justification::centred, 1);
     }
 
     void drawToggleButton(juce::Graphics& g, juce::ToggleButton& button, bool highlighted, bool down) override

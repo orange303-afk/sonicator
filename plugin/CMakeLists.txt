@@ -73,22 +73,33 @@ endforeach()
 # needs the embedded runtime in place, and the manifest must be covered by the final signature.
 juce_enable_vst3_manifest_step(${spike_target})
 
+# Signing the built bundle is part of the build. Copying it into the user's plug-in folders is
+# opt-in: a verification build must not replace an installed plug-in behind the user's back.
+option(SONICATOR_INSTALL_PLUGIN_SPIKE "Copy built plug-ins into the user's plug-in folders" OFF)
 foreach(plugin_target IN LISTS spike_plugin_targets)
     if(plugin_target MATCHES "VST3")
         set(spike_install_dir "$ENV{HOME}/Library/Audio/Plug-Ins/VST3")
     else()
         set(spike_install_dir "$ENV{HOME}/Library/Audio/Plug-Ins/Components")
     endif()
-    add_custom_command(TARGET ${plugin_target} POST_BUILD
-        # The bundle binary changed after linking, so it must be signed last.
-        COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignMacPluginBundle.sh"
-            "$<TARGET_BUNDLE_DIR:${plugin_target}>"
-            "$<TARGET_BUNDLE_CONTENT_DIR:${plugin_target}>/Frameworks/libonnxruntime.dylib"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${spike_install_dir}"
-        COMMAND "${CMAKE_COMMAND}" -E rm -rf
-            "${spike_install_dir}/$<TARGET_BUNDLE_DIR_NAME:${plugin_target}>"
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "$<TARGET_BUNDLE_DIR:${plugin_target}>"
-            "${spike_install_dir}/$<TARGET_BUNDLE_DIR_NAME:${plugin_target}>"
-        VERBATIM)
+    if(SONICATOR_INSTALL_PLUGIN_SPIKE)
+        add_custom_command(TARGET ${plugin_target} POST_BUILD
+            # The bundle binary changed after linking, so it must be signed last.
+            COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignMacPluginBundle.sh"
+                "$<TARGET_BUNDLE_DIR:${plugin_target}>"
+                "$<TARGET_BUNDLE_CONTENT_DIR:${plugin_target}>/Frameworks/libonnxruntime.dylib"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${spike_install_dir}"
+            COMMAND "${CMAKE_COMMAND}" -E rm -rf
+                "${spike_install_dir}/$<TARGET_BUNDLE_DIR_NAME:${plugin_target}>"
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "$<TARGET_BUNDLE_DIR:${plugin_target}>"
+                "${spike_install_dir}/$<TARGET_BUNDLE_DIR_NAME:${plugin_target}>"
+            VERBATIM)
+    else()
+        add_custom_command(TARGET ${plugin_target} POST_BUILD
+            COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignMacPluginBundle.sh"
+                "$<TARGET_BUNDLE_DIR:${plugin_target}>"
+                "$<TARGET_BUNDLE_CONTENT_DIR:${plugin_target}>/Frameworks/libonnxruntime.dylib"
+            VERBATIM)
+    endif()
 endforeach()

@@ -1,92 +1,43 @@
 # Command inventory
 
-Every action Sonicator can run from a button, a menu item or a key is listed here with the stable
-id it keeps for the rest of its life. `ui/commands/CommandRegistry` is the single catalogue: a
-button, a menu item and a key all resolve to the same id, so a renamed label never breaks a
-user's binding and a menu hint can never describe a key that no longer works.
+Sonicator runs actions from buttons, menu items and keys. Every action that is registered here has
+a stable id and can be rebound in **Settings → Hotkeys**. `ui/commands/CommandRegistry` is the
+single catalogue: a menu item, a button and a key all resolve to the same id, so a renamed label
+never breaks a binding and a menu hint can never describe a key that no longer works.
 
-Ids are `scope.action` in lower camel case, never translated. `scope` is one of `app`, `library`,
-`folders`, `waveform`, `discBrowser`, `settings`.
+Ids are `scope.action` in lower camel case and are never translated. `scope` is one of `app`,
+`library`, `folders`, `waveform`, `discBrowser`, `settings`.
+
+## Status in this stage
+
+The registry currently holds every action with a single, parameter-free entry point:
+
+- all waveform editor commands, the library `Normalize selected`, and the transport keys;
+- `Settings`, focus search, add last tag and the layout resets.
+
+Commands that live only inside a parameterised context-menu branch – choosing a tag, a type or a
+BPM value, splitting, extracting, folder management, starring and page navigation – are listed in
+the second half of this document and are **not yet rebindable**. They keep working exactly as
+before; moving them into the registry is a separate change because each one needs its menu logic
+extracted first. An action is never shown in Hotkeys until its handler is shared.
 
 ## How a command runs
 
-1. A component registers the command with `CommandSpec` (name, description, category, scope,
+1. A component registers the command with a `CommandSpec` (name, description, category, scope,
    platform defaults) plus two callbacks: `state()` and `invoke()`.
 2. `state()` is evaluated when the menu is built **and again inside `invoke()`**. A command that
    became unavailable while a menu was open does not run.
-3. Menus render their item from the spec; the shortcut column is read from the effective binding,
-   not from a hard-coded string.
-4. The keyboard router resolves a key by (a) the focused scope, (b) the effective binding. Text
-   editors, open dialogs and the shortcut recorder keep the key to themselves.
+3. Menus render their item from the spec; the shortcut column reads the effective binding.
+4. The keyboard router resolves a key by focused scope and effective binding. Text fields, open
+   dialogs and the shortcut recorder keep the key to themselves.
+5. A newer shortcut schema is preserved but not executed, and a conflicting user binding is
+   dropped with a diagnostic instead of running two handlers.
 
-## Library and catalog
+## Registered commands
 
-| Id | Name | Scope | Default | Notes |
-|---|---|---|---|---|
-| `library.selectAll` | Select all | library | ⌘A | Selects rows, never text while a text field has focus |
-| `library.clearSelection` | Clear selection | library | — | |
-| `library.star` | Star / Unstar | library | — | Toggles the selected rows |
-| `library.copyPath` | Copy path | library | — | |
-| `library.showInFinder` | Show in Finder / Explorer | library | — | Platform label |
-| `library.normalizeSelected` | Normalize selected… | library | ⇧⌘N | Library context only, see EditCommands |
-| `library.analyzeSelected` | Analyze selected | library | — | Smart analysis |
-| `library.autoTagSelected` | AutoTag selected… | library | — | |
-| `library.resetTags` | Reset tags… | library | — | Destructive: confirmation stays |
-| `library.splitBySilence` | Split by silence… | library | — | |
-| `library.extractSamples` | Extract samples… | library | — | |
-| `library.ignore` | Ignore / Un-ignore | library | — | |
-| `library.showAllCopies` | Show all copies | library | — | Only for a duplicate group |
-| `library.addLastTag` | Add last tag | library | — | Uses the last tag the user applied in this catalog |
-| `library.focusSearch` | Focus search | library | ⌘F | |
-| `app.newFiles` | New files | app | — | Rescans for paths not in the catalog |
-| `app.rescan` | Rescan | app | — | Destructive: confirmation stays |
-| `app.reanalyzeAll` | Reanalyze all | app | — | Destructive: confirmation stays |
-| `app.addFolder` | Add folder… | app | — | |
-| `app.settings` | Settings | app | ⌘, | Opens the last section |
-| `app.settings.general` | Settings → General | app | — | |
-| `app.settings.audioMidi` | Settings → Audio & MIDI | app | — | Hidden in the DAW plugin |
-| `app.settings.hotkeys` | Settings → Hotkeys | app | — | |
-| `app.settings.about` | Settings → About | app | — | |
-| `app.previousPage` / `app.nextPage` | Previous / next page | app | — | |
-| `layout.reset` | Reset panel layout | app | — | Panels only, not the window |
-| `layout.reset.folders` | Reset folder panel width | app | — | |
-| `layout.reset.analysis` | Reset analysis panel width | app | — | |
-| `layout.reset.preview` | Reset preview height | app | — | |
+### Waveform editor
 
-## Folder tree
-
-| Id | Name | Scope | Notes |
-|---|---|---|---|
-| `folders.open` | Open in Finder / Explorer | folders | |
-| `folders.favorite` | Add / remove favorite | folders | |
-| `folders.ignore` | Ignore folder | folders | |
-| `folders.rename` | Rename folder… | folders | Roots only |
-| `folders.scan` | Scan folder | folders | |
-| `folders.smartMetadata` | Analyze smart metadata | folders | |
-| `folders.autoTag` | AutoTag folder… | folders | |
-| `folders.tag` | Tag folder ▸ | folders | One id per tag is generated by the menu |
-| `folders.resetTags` | Reset tags… | folders | |
-| `folders.remove` | Remove from library… | folders | |
-
-## Preview and transport
-
-| Id | Name | Scope | Default | Notes |
-|---|---|---|---|---|
-| `preview.playPause` | Play / pause | waveform | Space | |
-| `preview.stop` | Stop | waveform | — | |
-| `preview.seekBack` | Seek back | waveform | ← | One second |
-| `preview.seekForward` | Seek forward | waveform | → | One second |
-| `preview.clearSelection` | Clear selection / stop | waveform | Escape | Instrument mode keeps its pin |
-| `preview.loop` | Loop | waveform | — | |
-| `preview.midiPreview` | MIDI preview | waveform | — | |
-| `preview.autoPreview` | Auto preview | waveform | — | |
-| `preview.skipSilence` | Skip silence | waveform | — | |
-| `preview.sourceMode` | Instrument / whole song | waveform | — | Trackers only |
-
-## Waveform editor
-
-All entries below keep the popup ids 1–17 they had in `ui/preview/EditCommands`; the ids are part
-of the contract with `PreviewPanel`'s menu.
+Popup ids 1–17 are the contract with the preview's context menu and are unchanged.
 
 | Id | Popup id | Name | Default |
 |---|---|---|---|
@@ -106,22 +57,64 @@ of the contract with `PreviewPanel`'s menu.
 | `waveform.zoomToSelection` | 14 | Zoom to selection | Z |
 | `waveform.zoomToFit` | 15 | Zoom to fit | ⌘0 |
 | `waveform.save` | 16 | Save… | ⌘S |
-| `waveform.saveCopy` | — | Save copy… | — |
-| `waveform.saveOverwrite` | — | Save and overwrite | — |
 
-`waveform.save` may still offer Overwrite / Save copy / Cancel; `saveCopy` always writes a copy and
-`saveOverwrite` never bypasses the format, busy-job or unsaved-edit checks.
+Waveform commands are available only while the preview holds editable audio; otherwise they are
+disabled with the reason "No editable audio in the preview".
+
+### Library and application
+
+| Id | Name | Scope | Default |
+|---|---|---|---|
+| `library.normalizeSelected` | Normalize selected… | library | ⇧⌘N |
+| `library.addLastTag` | Add last tag | library | — |
+| `app.settings` | Settings | app | ⌘, |
+| `app.focusSearch` | Focus search | app | ⌘F |
+| `layout.reset` | Reset panel layout | app | — |
+| `layout.reset.folders` | Reset folder panel width | app | — |
+| `layout.reset.analysis` | Reset analysis panel width | app | — |
+| `layout.reset.preview` | Reset preview height | app | — |
+
+`library.addLastTag` applies the last tag the user assigned in this catalog, never a prediction.
+It is unavailable when the selection is empty or no tag has been applied yet.
+
+`app.settings` opens the last used section. The section ids `general`, `audioMidi`, `hotkeys`,
+`plugins` and `about` are stored in the settings file; a page that is unavailable (in the DAW
+plugin) falls back to General.
+
+### Preview transport
+
+| Id | Name | Default | Notes |
+|---|---|---|---|
+| `preview.playPause` | Play / pause | Space | |
+| `preview.stop` | Stop | — | |
+| `preview.seekBack` | Seek back one second | ← | |
+| `preview.seekForward` | Seek forward one second | → | |
+| `preview.clearSelection` | Clear selection / stop | Escape | Instrument mode keeps its pin |
+
+## Menu-only commands (not yet rebindable)
+
+These keep their current behaviour and are not listed in Hotkeys. Moving one into the registry
+means extracting its menu branch into a single handler first.
+
+| Area | Actions |
+|---|---|
+| Library row | Star/unstar, Copy path, Show in Finder, Analyze selected, AutoTag selected, Reset tags, Split by silence, Extract samples, Ignore, Show all copies |
+| Tags | Tag ▸, New tag, Manage tags (colour/rename/delete), Remove tag |
+| Metadata | Type ▸ (standard, custom, reset), BPM ▸ (set, tap, clear) |
+| Library toolbar | New files, Rescan, Reanalyze all, Smart metadata, Add folder, Tags filter, Starred, Hide empty, Clear filters, page size, previous/next page |
+| Folder tree | Open in Finder, Favorite, Ignore, Rename, Scan, Smart metadata, AutoTag, Tag ▸, Reset tags, Remove from library |
+| Settings | Move/Open/Relocate/Backup catalog, contribution preview/delete, report links |
 
 ## Deliberate exclusions
 
-These are not commands and are not rebindable. Each is owned by the focused control, not the app:
+Not commands, not rebindable; each is owned by the focused control:
 
 - Typing in any text field: Copy, Paste, Select all, Undo, Delete, Space, letters.
-- Combo boxes, page-size selector, tag filter menus and any other value picker.
+- Combo boxes, page-size selector, tag filter menus and other value pickers.
 - Mouse gestures: waveform selection, drag to DAW, scroll/zoom, context menus, panel dividers.
 - Local dialog buttons: OK / Cancel / Close, and Enter / Escape inside them.
 - Tap BPM's Space (tap), Return (apply) and Escape (cancel) inside its own dialog.
-- Trackers' note input through MIDI and the MIDI keyboard.
+- Tracker note input through MIDI.
 - The operating system's file chooser and any native menu.
 
 ## Adding a command

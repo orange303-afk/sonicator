@@ -266,6 +266,9 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         button.setClickingTogglesState(true);
         button.setRadioGroupId(0x5e771e);
         button.setWantsKeyboardFocus(true);
+        button.getProperties().set("leftAligned", true);
+        button.setColour(juce::TextButton::buttonColourId, theme::panel);
+        button.setColour(juce::TextButton::buttonOnColourId, theme::raised);
         button.setComponentID("settingsNav" + settingsSectionId((SettingsSection) i));
         button.onClick = [this, i]
         {
@@ -508,7 +511,13 @@ void SettingsPanel::lookAndFeelChanged()
     pluginsNote.setColour(juce::Label::textColourId, theme::muted);
     for (auto* link : std::array<juce::HyperlinkButton*, 5> { &gumroad, &bandcamp, &naukograd, &kofi, &boosty })
         link->setColour(juce::HyperlinkButton::textColourId, theme::accent);
-    for (auto& button : nav) button.setColour(juce::TextButton::textColourOffId, theme::muted);
+    for (auto& button : nav)
+    {
+        button.setColour(juce::TextButton::textColourOffId, theme::muted);
+        button.getProperties().set("leftAligned", true);
+        button.setColour(juce::TextButton::buttonColourId, theme::panel);
+        button.setColour(juce::TextButton::buttonOnColourId, theme::raised);
+    }
     repaint();
 }
 
@@ -520,17 +529,25 @@ void SettingsPanel::paint(juce::Graphics& g)
     g.fillRect(navArea);
     g.setColour(theme::line);
     g.drawVerticalLine(navArea.getRight() - 1, 0.0f, (float) getHeight());
-    if (!databaseFieldBounds.isEmpty())
+    // Decorations are laid out inside the scrolling page, so translate them into panel space.
+    auto toPanel = [this](const juce::Component& page, juce::Rectangle<float> area)
     {
-        const auto field = databaseFieldBounds.toFloat().reduced(0.5f);
+        const auto topLeft = getLocalPoint(&page, area.getTopLeft().roundToInt());
+        return area.translated((float) topLeft.x - area.getX(), (float) topLeft.y - area.getY());
+    };
+    if (!databaseFieldBounds.isEmpty() && generalViewport.isVisible())
+    {
+        const auto field = toPanel(generalContent, databaseFieldBounds.toFloat()).reduced(0.5f);
         g.setColour(theme::background);
         g.fillRoundedRectangle(field, studio::controlRadius);
         g.setColour(theme::line);
         g.drawRoundedRectangle(field, studio::controlRadius, 1.0f);
     }
     g.setColour(theme::line);
-    for (const auto& rule : sectionRules) g.fillRect(rule);
-    for (const auto& rule : aboutRules) g.fillRect(rule);
+    if (generalViewport.isVisible())
+        for (const auto& rule : sectionRules) g.fillRect(toPanel(generalContent, rule));
+    if (aboutViewport.isVisible())
+        for (const auto& rule : aboutRules) g.fillRect(toPanel(aboutContent, rule));
 }
 
 void SettingsPanel::setContributionEnabled(bool enabled)
@@ -754,8 +771,8 @@ void SettingsPanel::resized()
     for (auto& button : nav)
     {
         if (!button.isVisible()) continue;
-        button.setBounds(navArea.removeFromTop(34));
-        navArea.removeFromTop(2);
+        button.setBounds(navArea.removeFromTop(32));
+        navArea.removeFromTop(4);
     }
     if (close.isVisible())
     {

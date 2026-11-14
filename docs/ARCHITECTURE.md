@@ -52,6 +52,37 @@ After analysis, missing files are reconciled in one pass ordered by primary key.
 
 Future machine predictions and user overrides must be stored independently of these measured file records. Model upgrades must not overwrite user annotations.
 
+## Commands, shortcuts and window layout
+
+`ui/commands/CommandRegistry` is the single catalogue of actions that buttons, menus and keys
+share. A `CommandSpec` carries a stable id, name, category, scope, platform defaults and the
+legacy popup id where one exists; its `state()` callback is evaluated when a menu is built and
+again inside `invoke()`, so a command that became unavailable while a menu was open never runs.
+`ShortcutBindings` turns stored `ShortcutKey` values into `juce::KeyPress`, compares them with
+Command and Control kept distinct on macOS, and reports conflicts only inside overlapping scopes
+(an application command overlaps every panel; panels do not overlap each other).
+`sanitizedProfile` drops a conflicting user binding with a diagnostic instead of installing two
+handlers, and leaves an unknown-command binding in place so a component can return later.
+`CommandRouter` resolves a key against the focused scope and refuses to act while a dialog, a text
+field or the shortcut recorder owns the keyboard.
+
+Bindings persist as `shortcuts.mac` and `shortcuts.windows` in `settings.json`, keyed by command
+id. A missing id means the built-in defaults, an empty list means "no key", and a profile whose
+schema is newer than the build is preserved but not executed. `Settings → Hotkeys` edits a
+candidate profile and only publishes it after the settings write succeeds.
+
+The Settings window is a navigation column plus one page per section; each page owns a viewport,
+so switching sections keeps scroll position and never rebuilds the audio device selector.
+`SettingsSection` ids are stored in the settings file. In the DAW plugin the Audio & MIDI and
+Plugins pages are hidden because the host owns devices and loaded code.
+
+`ui/shell/PanelLayout.h` computes the workspace split from `PanelLayoutPreferences`
+(`layoutStandalone` / `layoutPlugin`): preferred folder width, analysis width and preview height,
+clamped so panels never overlap and dividers stay visible. Effective sizes are never written back,
+so shrinking a window keeps the user's choice; a workspace smaller than the minimums falls back to
+a compact layout. The three `PanelSplitter` handles edit the preference and commit it on mouse up.
+`Reset layout` restores these sizes and the Favorites height only.
+
 ## Settings, theme and catalogue switching
 
 Settings are stored as JSON at `Sonicator/settings.json` (atomic temp-file replace). The theme is a
