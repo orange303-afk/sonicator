@@ -55,7 +55,8 @@ public:
     void replaceConflicting();
 
     std::function<bool(const ShortcutProfile&)> onProfileChanged; // false rejects the write
-    std::function<bool()> onConfirmResetAll;
+    // Asks the owner to confirm; the callback receives the answer and only then resets.
+    std::function<void(std::function<void(bool)>)> onConfirmResetAll;
 
     enum ColourIds { panelBackgroundColourId = 0x2000100 };
 
@@ -66,6 +67,7 @@ private:
     void paintListBoxItem(int row, juce::Graphics&, int width, int height, bool selected) override;
     void listBoxItemClicked(int row, const juce::MouseEvent&) override;
     void updateFromSelection();
+    void applyResetAll();
     const CommandSpec* selectedCommand() const;
     void showConflictFor(const std::vector<juce::KeyPress>&);
     void clearStatus();

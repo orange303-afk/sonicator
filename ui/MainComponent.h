@@ -16,6 +16,11 @@
 #include "core/extract/ExtractService.h"
 #include "core/settings/AppSettings.h"
 #include "core/contribute/ContributionUploader.h"
+#include "ui/commands/CommandRegistry.h"
+#include "ui/commands/ShortcutBindings.h"
+#include "ui/commands/CommandRouter.h"
+#include "ui/shell/PanelLayout.h"
+#include "ui/shell/PanelSplitter.h"
 #include <mutex>
 namespace sonicator {
 class SplitDialog;
@@ -61,6 +66,8 @@ public:
     // The settings file this window reads and writes. Exposed so tests can prove they never
     // touch the owner's live preferences.
     juce::File settingsFile() const;
+    // The effective split of the panel row and the preview band in this window.
+    const PanelLayoutBounds& currentLayout() const { return layoutBounds; }
     // hostEngine and embeddedUi are used by the DAW plugin: the processor owns the audio engine
     // (no device is opened) and dialogs render inside the editor instead of separate windows.
     explicit MainComponent(const juce::File& databaseFile = defaultDatabaseFile(),
@@ -99,6 +106,10 @@ public:
     // Writes the pending last folder/file immediately. Used by shutdown and session tests.
     void flushSessionState();
     void setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny = false);
+    // Restores the three panel sizes and the Favorites height to their defaults.
+    void resetLayout();
+    // Restores one panel to its default and keeps the other sizes.
+    void resetPanelSize(const juce::String& panelId);
 private:
     SonicatorLookAndFeel look;
     juce::Image logoWordmark;
@@ -176,6 +187,12 @@ private:
     juce::Component::SafePointer<juce::Component> embeddedSettingsHost;
     juce::Component::SafePointer<SettingsPanel> embeddedSettingsPanel;
     std::unique_ptr<DiscBrowserPanel> discBrowser;
+    // Every bindable action lives here. Menus, buttons and keys all resolve through it, and the
+    // Hotkeys page edits the same catalogue.
+    CommandRegistry commands;
+    ShortcutProfile shortcutProfile;
+    std::unique_ptr<CommandRouter> commandRouter;
+    juce::StringArray shortcutDiagnostics;
     int pageOffset = 0, catalogCount = 0, pageSize = 10000;
     bool wasRunning = false, smartWasRunning = false, taggingWasRunning = false;
     bool autoTagPreparing = false, autoTagWasRunning = false;
@@ -184,8 +201,21 @@ private:
     bool sessionDirty = false, restoringSession = false, persistSessionState = false;
     juce::String pendingSearch;
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
+    // Effective split of the panel row and the preview band, rebuilt on every resize.
+    PanelLayoutPreferences layoutPreferences;
+    PanelLayoutBounds layoutBounds;
+    PanelSplitter foldersDivider { PanelSplitter::Axis::columns, "folders" };
+    PanelSplitter analysisDivider { PanelSplitter::Axis::columns, "analysis" };
+    PanelSplitter previewDivider { PanelSplitter::Axis::rows, "preview" };
+    int dragBaseFolders = 0, dragBaseAnalysis = 0, dragBasePreview = 0;
     void timerCallback() override;
     void darkModeSettingChanged() override;
+    void registerCommands();
+    void persistLayout();
+    void reapplyShortcutProfile();
+    bool saveShortcutProfile(const ShortcutProfile&);
+    CommandFocus commandFocus() const;
+    bool dispatchCommandKey(const juce::KeyPress&);
     void showEmbeddedSettings();
     void closeEmbeddedSettings();
     void chooseFolder();
@@ -227,6 +257,7 @@ private:
     void setContributionEnabledFromPanel(bool wanted, juce::Component::SafePointer<SettingsPanel> panel);
     void deleteContributionData(std::function<void(bool, juce::String)> done);
     void wireContributionPanel(SettingsPanel&);
+    void wireCommandSettings(SettingsPanel&);
     void refreshTheme();
     void showTagFilterMenu();
     void showTagColourMenu(int64_t tagId);

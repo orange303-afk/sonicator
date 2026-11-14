@@ -1081,6 +1081,7 @@ void PreviewPanel::updateSelectionPlayback()
 }
 bool PreviewPanel::keyPressed(const juce::KeyPress& k)
 {
+    if (onCommandKey != nullptr && onCommandKey(k)) return true;
     const auto mods = k.getModifiers();
     const bool command = mods.isCommandDown() || mods.isCtrlDown();
     const auto* focused = juce::Component::getCurrentlyFocusedComponent();

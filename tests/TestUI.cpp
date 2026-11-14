@@ -206,8 +206,8 @@ TEST_CASE("Tag strip lays out coloured chips and reports its height", "[ui][tags
 TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][settings]")
 {
     SettingsPanel panel(AppSettings{}, juce::File("/tmp/catalog.sqlite"), false);
-    auto* themeBox = dynamic_cast<juce::ComboBox*>(panel.findChildWithID("settingsTheme"));
-    auto* scaleBox = dynamic_cast<juce::ComboBox*>(panel.findChildWithID("settingsScale"));
+    auto* themeBox = dynamic_cast<juce::ComboBox*>(findDescendantWithID(panel, "settingsTheme"));
+    auto* scaleBox = dynamic_cast<juce::ComboBox*>(findDescendantWithID(panel, "settingsScale"));
     REQUIRE(themeBox != nullptr); REQUIRE(scaleBox != nullptr);
     AppSettings changed; int calls = 0;
     panel.onSettingsChanged = [&](const AppSettings& value) { changed = value; ++calls; };
@@ -217,7 +217,18 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
     REQUIRE(calls == 2); REQUIRE(changed.scalePercent == 125);
 
     std::set<juce::String> urls;
-    for (auto* child : panel.getChildren())
+    std::vector<juce::Component*> descendants;
+    std::function<void(juce::Component&)> walk = [&descendants, &walk](juce::Component& node)
+    {
+        for (int i = 0; i < node.getNumChildComponents(); ++i)
+        {
+            auto* child = node.getChildComponent(i);
+            descendants.push_back(child);
+            walk(*child);
+        }
+    };
+    walk(panel);
+    for (auto* child : descendants)
         if (auto* link = dynamic_cast<juce::HyperlinkButton*>(child)) urls.insert(link->getURL().toString(true));
     REQUIRE(urls.count("https://ilyaorange.gumroad.com") == 1);
     REQUIRE(urls.count("https://ilyaorange.bandcamp.com") == 1);
@@ -225,18 +236,18 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
     REQUIRE(urls.count("https://ko-fi.com/ilyaorange") == 1);
     REQUIRE(urls.count("https://boosty.to/ilyaorange") == 1);
     bool credits = false;
-    for (auto* child : panel.getChildren())
+    for (auto* child : descendants)
         if (auto* label = dynamic_cast<juce::Label*>(child))
             credits = credits || (label->getText().contains("JUCE")
                                   && label->getText().contains("No telemetry"));
     REQUIRE(credits);
     bool licence = false;
-    for (auto* child : panel.getChildren())
+    for (auto* child : descendants)
         if (auto* label = dynamic_cast<juce::Label*>(child))
             licence = licence || label->getText().contains("AGPL-3.0-or-later");
     REQUIRE(licence);
     std::set<juce::String> buttonText;
-    for (auto* child : panel.getChildren())
+    for (auto* child : descendants)
         if (auto* button = dynamic_cast<juce::TextButton*>(child)) buttonText.insert(button->getButtonText());
     REQUIRE(buttonText.count("Report a bug...") == 1);
     REQUIRE(buttonText.count("Request a feature...") == 1);
@@ -247,7 +258,7 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
     panel.setBounds(0,0,560,panel.getHeight());
     // The credits block must still hold all four lines after the licence line was added.
     bool fits = false;
-    for (auto* child : panel.getChildren())
+    for (auto* child : descendants)
         if (auto* label = dynamic_cast<juce::Label*>(child))
             if (label->getText().contains("AGPL-3.0-or-later"))
                 fits = label->getHeight() >= juce::roundToInt(label->getFont().getHeight() * 4.0f);
@@ -748,7 +759,7 @@ TEST_CASE("Embedded settings stay inside the editor and survive a theme change",
     REQUIRE(panel != nullptr);
     REQUIRE(panel->getTopLevelComponent() == &app);
 
-    auto* theme = dynamic_cast<juce::ComboBox*>(panel->findChildWithID("settingsTheme"));
+    auto* theme = dynamic_cast<juce::ComboBox*>(findDescendantWithID(*panel, "settingsTheme"));
     REQUIRE(theme != nullptr);
     theme->setSelectedId(2, juce::sendNotificationSync);
     REQUIRE(theme->getSelectedId() == 2);
@@ -756,10 +767,19 @@ TEST_CASE("Embedded settings stay inside the editor and survive a theme change",
     REQUIRE(dynamic_cast<SettingsPanel*>(overlay->findChildWithID("settingsPanel")) != nullptr);
     REQUIRE(panel->getTopLevelComponent() == &app);
 
-    // The host owns audio and the catalog, so those controls are not offered in the plugin.
-    for (int i = 0; i < panel->getNumChildComponents(); ++i)
-        if (auto* button = dynamic_cast<juce::TextButton*>(panel->getChildComponent(i)))
-            CHECK_FALSE((button->getButtonText() == "Audio/MIDI Settings" && button->isVisible()));
+    // The host owns audio and the catalog, so those pages are not offered in the plugin.
+    const auto* audioNav = dynamic_cast<juce::TextButton*>(
+        findDescendantWithID(*panel, "settingsNavaudioMidi"));
+    const auto* pluginsNav = dynamic_cast<juce::TextButton*>(
+        findDescendantWithID(*panel, "settingsNavplugins"));
+    REQUIRE(audioNav != nullptr);
+    REQUIRE(pluginsNav != nullptr);
+    CHECK_FALSE(audioNav->isVisible());
+    CHECK_FALSE(pluginsNav->isVisible());
+    const auto* libraryControls = findDescendantWithID(*panel, "settingsAlwaysOverwrite");
+    REQUIRE(libraryControls != nullptr); // the Editing group still applies in the plugin
+    panel->selectSection(SettingsSection::about);
+    REQUIRE(panel->selectedSection() == SettingsSection::about);
 }
 
 TEST_CASE("AutoTag proposal sorting follows the clicked header", "[ui][autotag]")

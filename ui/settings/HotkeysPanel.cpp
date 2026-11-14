@@ -366,7 +366,19 @@ void HotkeysPanel::resetSelected()
 
 void HotkeysPanel::resetAll()
 {
-    if (onConfirmResetAll != nullptr && ! onConfirmResetAll()) return;
+    if (onConfirmResetAll != nullptr)
+    {
+        onConfirmResetAll([safe = juce::Component::SafePointer<HotkeysPanel>(this)](bool confirmed)
+        {
+            if (safe != nullptr && confirmed) safe->applyResetAll();
+        });
+        return;
+    }
+    applyResetAll();
+}
+
+void HotkeysPanel::applyResetAll()
+{
     candidate.overrides.clear();
     capturing = false;
     pending.clear();

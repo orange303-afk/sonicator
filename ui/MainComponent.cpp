@@ -243,6 +243,296 @@ juce::File MainComponent::settingsFile() const
 {
     return settingsStore.file();
 }
+
+void MainComponent::persistLayout()
+{
+    layoutPreferences.favoritesHeight = favoritePanelHeight;
+    const auto layout = layoutPreferences;
+    try
+    {
+        settingsStore.update([this, layout](AppSettings& saved)
+        {
+            if (embeddedUi) saved.pluginLayout = layout;
+            else saved.standaloneLayout = layout;
+        });
+    }
+    catch (const std::exception& e)
+    {
+        status.setText("Panel size not saved: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+        return;
+    }
+    if (embeddedUi) appSettings.pluginLayout = layout;
+    else appSettings.standaloneLayout = layout;
+}
+
+void MainComponent::resetPanelSize(const juce::String& panelId)
+{
+    const auto defaults = defaultPanelLayout(getWidth());
+    if (panelId == "folders") layoutPreferences.foldersWidth = defaults.foldersWidth;
+    else if (panelId == "analysis") layoutPreferences.analysisWidth = defaults.analysisWidth;
+    else if (panelId == "preview") layoutPreferences.previewHeight = defaults.previewHeight;
+    resized();
+    persistLayout();
+}
+
+void MainComponent::resetLayout()
+{
+    const auto defaults = defaultPanelLayout(getWidth());
+    layoutPreferences = defaults;
+    favoritePanelHeight = defaults.favoritesHeight;
+    resized();
+    persistLayout();
+}
+
+namespace
+{
+juce::String commandIdFor(EditAction action)
+{
+    switch (action)
+    {
+        case EditAction::undo: return "waveform.undo";
+        case EditAction::redo: return "waveform.redo";
+        case EditAction::deleteRegion: return "waveform.deleteRegion";
+        case EditAction::crop: return "waveform.crop";
+        case EditAction::silence: return "waveform.silence";
+        case EditAction::reverse: return "waveform.reverse";
+        case EditAction::fadeIn: return "waveform.fadeIn";
+        case EditAction::fadeOut: return "waveform.fadeOut";
+        case EditAction::normalize: return "waveform.normalize";
+        case EditAction::gain: return "waveform.gain";
+        case EditAction::toMono: return "waveform.toMono";
+        case EditAction::removeDc: return "waveform.removeDc";
+        case EditAction::trimSilence: return "waveform.trimSilence";
+        case EditAction::zoomToSelection: return "waveform.zoomToSelection";
+        case EditAction::zoomToFit: return "waveform.zoomToFit";
+        case EditAction::save: return "waveform.save";
+        case EditAction::normalizeSelected: return "library.normalizeSelected";
+    }
+    return {};
+}
+juce::String commandCategoryFor(CommandScope scope)
+{
+    switch (scope)
+    {
+        case CommandScope::waveform: return "Waveform edit";
+        case CommandScope::library: return "Library";
+        case CommandScope::folders: return "Folders";
+        case CommandScope::discBrowser: return "Container";
+        case CommandScope::settings: return "Settings";
+        case CommandScope::app:
+        default: return "Application";
+    }
+}
+}
+
+void MainComponent::registerCommands()
+{
+    commands.clear();
+    auto addCommand = [this](CommandSpec spec, std::function<CommandState()> state,
+                             std::function<void()> run)
+    {
+        commands.add(std::move(spec), std::move(state), std::move(run));
+    };
+
+    // Waveform commands keep the ids and defaults from the single EditCommands table.
+    for (const auto& legacy : editCommandTable())
+    {
+        CommandSpec spec;
+        spec.id = commandIdFor(legacy.action);
+        spec.name = legacy.label;
+        spec.description = "Waveform editor: " + juce::String(legacy.label);
+        spec.scope = legacy.context == CommandContext::library ? CommandScope::library : CommandScope::waveform;
+        spec.category = commandCategoryFor(spec.scope);
+        spec.legacyMenuId = legacy.id;
+        if (legacy.shortcut.isValid()) spec.defaults.push_back(legacy.shortcut);
+        if (legacy.alternateShortcut.isValid()) spec.defaults.push_back(legacy.alternateShortcut);
+        spec.destructive = legacy.action == EditAction::normalize || legacy.action == EditAction::trimSilence
+            || legacy.action == EditAction::deleteRegion || legacy.action == EditAction::save
+            || legacy.action == EditAction::normalizeSelected;
+        const auto action = legacy.action;
+        auto state = [this, action]() -> CommandState
+        {
+            if (action == EditAction::normalizeSelected)
+                return (! library.getSelectedSamples().empty() && ! isNormalizeRunning())
+                    ? CommandState::ready()
+                    : CommandState::unavailable("Select one or more ordinary files");
+            return preview.sourceIsEditable() ? CommandState::ready()
+                                              : CommandState::unavailable("No editable audio in the preview");
+        };
+        auto run = [this, action]()
+        {
+            if (action == EditAction::normalizeSelected)
+            {
+                const auto selected = library.getSelectedSamples();
+                if (! selected.empty()) startNormalizeSelected(selected);
+                return;
+            }
+            preview.applyEditCommand(action);
+        };
+        addCommand(std::move(spec), std::move(state), std::move(run));
+    }
+
+    // Transport. These were handled in PreviewPanel::keyPressed before; now the same ids drive
+    // the buttons, the keys and the Hotkeys page.
+    auto addTransport = [this, &addCommand](juce::String id, juce::String name, std::vector<juce::KeyPress> defaults,
+                                            std::function<void()> run)
+    {
+        CommandSpec spec;
+        spec.id = std::move(id);
+        spec.name = name;
+        spec.description = "Preview transport";
+        spec.scope = CommandScope::waveform;
+        spec.category = "Preview";
+        spec.defaults = std::move(defaults);
+        addCommand(std::move(spec), [] { return CommandState::ready(); }, std::move(run));
+    };
+    addTransport("preview.playPause", "Play / pause",
+                 { juce::KeyPress(juce::KeyPress::spaceKey) }, [this] { preview.playPause(); });
+    addTransport("preview.stop", "Stop", {}, [this] { preview.stopPlayback(); });
+    addTransport("preview.seekBack", "Seek back one second",
+                 { juce::KeyPress(juce::KeyPress::leftKey) }, [this] { preview.seekBy(-1.0); });
+    addTransport("preview.seekForward", "Seek forward one second",
+                 { juce::KeyPress(juce::KeyPress::rightKey) }, [this] { preview.seekBy(1.0); });
+    addTransport("preview.clearSelection", "Clear selection / stop",
+                 { juce::KeyPress(juce::KeyPress::escapeKey) }, [this] { preview.clearSelection(); });
+
+    {
+        CommandSpec spec;
+        spec.id = "app.settings";
+        spec.name = "Settings";
+        spec.description = "Open Settings on the last used page";
+        spec.scope = CommandScope::app;
+        spec.category = "Application";
+        spec.defaults = { juce::KeyPress(',', juce::ModifierKeys::commandModifier, 0) };
+        addCommand(std::move(spec), [] { return CommandState::ready(); }, [this] { showSettings(); });
+    }
+    {
+        CommandSpec spec;
+        spec.id = "app.focusSearch";
+        spec.name = "Focus search";
+        spec.description = "Move the keyboard focus to the library search field";
+        spec.scope = CommandScope::app;
+        spec.category = "Application";
+        spec.defaults = { juce::KeyPress('f', juce::ModifierKeys::commandModifier, 0) };
+        addCommand(std::move(spec), [] { return CommandState::ready(); },
+                   [this] { search.grabKeyboardFocus(); });
+    }
+    {
+        CommandSpec spec;
+        spec.id = "library.addLastTag";
+        spec.name = "Add last tag";
+        spec.description = "Applies the last tag you assigned in this catalog to the selection";
+        spec.scope = CommandScope::library;
+        spec.category = "Tags";
+        auto state = [this]() -> CommandState
+        {
+            if (library.getSelectedSamples().empty())
+                return CommandState::unavailable("Select one or more files");
+            if (readRepo == nullptr || readRepo->recentTags().empty())
+                return CommandState::unavailable("No tag has been applied yet");
+            return CommandState::ready();
+        };
+        auto run = [this]()
+        {
+            if (readRepo == nullptr) return;
+            const auto recent = readRepo->recentTags();
+            if (recent.empty()) return;
+            std::vector<int64_t> ids;
+            for (const auto& sample : library.getSelectedSamples()) ids.push_back(sample.id);
+            if (ids.empty()) return;
+            const auto added = assignTagAndRemember(ids, recent.front().id);
+            status.setText("Tag " + recent.front().name + (added > 0 ? " added to " + juce::String(added)
+                                                                  : juce::String(" already present")),
+                           juce::dontSendNotification);
+        };
+        addCommand(std::move(spec), std::move(state), std::move(run));
+    }
+
+    {
+        CommandSpec spec;
+        spec.id = "layout.reset";
+        spec.name = "Reset panel layout";
+        spec.description = "Restores the folder width, analysis width, preview height and favorites height";
+        spec.scope = CommandScope::app;
+        spec.category = "Workspace";
+        addCommand(std::move(spec), [] { return CommandState::ready(); }, [this] { resetLayout(); });
+    }
+    const std::array<std::pair<juce::String, juce::String>, 3> panelResets { {
+        { "folders", "Reset folder panel width" }, { "analysis", "Reset analysis panel width" },
+        { "preview", "Reset preview height" } } };
+    for (const auto& reset : panelResets)
+    {
+        CommandSpec spec;
+        spec.id = "layout.reset." + reset.first;
+        spec.name = reset.second;
+        spec.description = "Restores one panel size to its default";
+        spec.scope = CommandScope::app;
+        spec.category = "Workspace";
+        const auto panelId = reset.first;
+        addCommand(std::move(spec), [] { return CommandState::ready(); },
+                   [this, panelId] { resetPanelSize(panelId); });
+    }
+
+    reapplyShortcutProfile();
+    preview.onCommandKey = [this](const juce::KeyPress& key) { return dispatchCommandKey(key); };
+}
+
+void MainComponent::reapplyShortcutProfile()
+{
+    shortcutDiagnostics.clear();
+    const auto& stored = juce::SystemStats::getOperatingSystemType() == juce::SystemStats::Windows
+        ? appSettings.shortcuts.windows : appSettings.shortcuts.mac;
+    shortcutProfile = sanitizedProfile(commands, stored, &shortcutDiagnostics);
+    commandRouter = std::make_unique<CommandRouter>(commands, [this] { return shortcutProfile; });
+}
+
+bool MainComponent::saveShortcutProfile(const ShortcutProfile& candidate)
+{
+    try
+    {
+        settingsStore.update([&candidate](AppSettings& saved)
+        {
+            if (juce::SystemStats::getOperatingSystemType() == juce::SystemStats::Windows)
+                saved.shortcuts.windows = candidate;
+            else
+                saved.shortcuts.mac = candidate;
+        });
+    }
+    catch (const std::exception& e)
+    {
+        status.setText("Shortcut not saved: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+        return false;
+    }
+    if (juce::SystemStats::getOperatingSystemType() == juce::SystemStats::Windows)
+        appSettings.shortcuts.windows = candidate;
+    else
+        appSettings.shortcuts.mac = candidate;
+    reapplyShortcutProfile();
+    return true;
+}
+
+CommandFocus MainComponent::commandFocus() const
+{
+    CommandFocus focus;
+    focus.modal = juce::Component::getCurrentlyModalComponent() != nullptr;
+    const auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    if (focused != nullptr && dynamic_cast<const juce::TextEditor*>(focused) != nullptr)
+        focus.textInput = true;
+    if (focused != nullptr && (focused == &preview || preview.isParentOf(focused)))
+        focus.panel = CommandScope::waveform;
+    else if (focused != nullptr && (focused == &folders || folders.isParentOf(focused)
+                                    || focused == &favorites || favorites.isParentOf(focused)))
+        focus.panel = CommandScope::folders;
+    else
+        focus.panel = CommandScope::library;
+    return focus;
+}
+
+bool MainComponent::dispatchCommandKey(const juce::KeyPress& key)
+{
+    if (commandRouter == nullptr) return false;
+    return commandRouter->dispatch(key, commandFocus());
+}
 MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppSettings initialSettings,
                              juce::File settingsFile,AudioEngine* hostEngine,bool embeddedUiMode)
     : dbPath(databaseFile), appSettings(std::move(initialSettings)),
@@ -376,6 +666,44 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         favoritePanelHeight = juce::jlimit(60, 2000, height);
         resized();
     };
+    layoutPreferences = embeddedUi ? appSettings.pluginLayout : appSettings.standaloneLayout;
+    layoutPreferences.previewHeight = layoutPreferences.previewHeight > 0 ? layoutPreferences.previewHeight
+                                                                          : minPreviewHeight;
+    layoutPreferences.favoritesHeight = favoritePanelHeight;
+    for (auto* divider : { &foldersDivider, &analysisDivider, &previewDivider })
+        addAndMakeVisible(divider);
+    foldersDivider.setComponentID("foldersDivider");
+    analysisDivider.setComponentID("analysisDivider");
+    previewDivider.setComponentID("previewDivider");
+    foldersDivider.getPreferred = [this] { return layoutBounds.folders.getWidth(); };
+    foldersDivider.onDragBegin = [this](int base) { dragBaseFolders = base; };
+    foldersDivider.onDrag = [this](int delta)
+    {
+        layoutPreferences.foldersWidth = juce::jmax(minFoldersWidth, dragBaseFolders + delta);
+        resized();
+    };
+    foldersDivider.onCommit = [this] { persistLayout(); };
+    foldersDivider.onReset = [this] { resetPanelSize("folders"); };
+    analysisDivider.getPreferred = [this] { return layoutBounds.analysis.getWidth(); };
+    analysisDivider.onDragBegin = [this](int base) { dragBaseAnalysis = base; };
+    analysisDivider.onDrag = [this](int delta)
+    {
+        // Dragging the right handle left makes the analysis panel wider.
+        layoutPreferences.analysisWidth = juce::jmax(minAnalysisWidth, dragBaseAnalysis - delta);
+        resized();
+    };
+    analysisDivider.onCommit = [this] { persistLayout(); };
+    analysisDivider.onReset = [this] { resetPanelSize("analysis"); };
+    previewDivider.getPreferred = [this] { return layoutBounds.preview.getHeight(); };
+    previewDivider.onDragBegin = [this](int base) { dragBasePreview = base; };
+    previewDivider.onDrag = [this](int delta)
+    {
+        // Dragging the top edge up makes the preview taller.
+        layoutPreferences.previewHeight = juce::jmax(minPreviewHeight, dragBasePreview - delta);
+        resized();
+    };
+    previewDivider.onCommit = [this] { persistLayout(); };
+    previewDivider.onReset = [this] { resetPanelSize("preview"); };
     favoritesSplitter.onRelease = [this]
     {
         try { settingsStore.update([this](AppSettings& saved) { saved.favoritesPanelHeight = favoritePanelHeight; }); }
@@ -699,6 +1027,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
                 AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*repo);
         });
     juce::Desktop::getInstance().addDarkModeSettingListener(this);
+    registerCommands();
     if (persistSessionState && ! embeddedUi)
     {
         startContribution();
@@ -1672,6 +2001,9 @@ bool MainComponent::openSelectedDiscIfAny()
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
+    // Every bound command resolves through one router, so a menu hint and the working key can
+    // never disagree. Text fields, dialogs and the shortcut recorder are excluded inside it.
+    if (dispatchCommandKey(key)) return true;
     // Enter opens the selected container wherever focus is; ordinary rows keep their normal
     // transport keys. This also drives the session-restored row without a mouse click.
     if (key.getKeyCode() == juce::KeyPress::returnKey && openSelectedDiscIfAny()) return true;
@@ -4264,6 +4596,7 @@ void MainComponent::showEmbeddedSettings()
     panel->setComponentID("settingsPanel");
     panel->onSettingsChanged = [this](AppSettings next) { applySettings(next); };
     wireContributionPanel(*panel);
+    wireCommandSettings(*panel);
     panel->setLookAndFeel(&look);
     panel->setPluginMode(true);
     panel->onClose = [safe = juce::Component::SafePointer<MainComponent>(this)]
@@ -4297,15 +4630,34 @@ void MainComponent::closeEmbeddedSettings()
         if (safeHost != nullptr) delete safeHost.getComponent();
     });
 }
+void MainComponent::wireCommandSettings(SettingsPanel& panel)
+{
+    panel.setCommandRegistry(&commands);
+    panel.setShortcutProfile(shortcutProfile);
+    panel.onShortcutProfileChanged = [this](const ShortcutProfile& candidate)
+    {
+        return saveShortcutProfile(candidate);
+    };
+    panel.onResetLayout = [this] { resetLayout(); };
+    if (!embeddedUi)
+        panel.setAudioSettingsFactory([this]()
+        {
+            return std::unique_ptr<juce::Component>(new juce::AudioDeviceSelectorComponent(
+                engine.deviceManager(), 0, 0, 0, 2, true, false, true, false));
+        });
+}
+
 void MainComponent::showSettings()
 {
     if (embeddedUi) { showEmbeddedSettings(); return; }
     if (settingsDialog != nullptr) { settingsDialog->toFront(true); return; }
     const bool indexing = indexer && indexer->progress().running;
     auto* panel = new SettingsPanel(appSettings,dbPath,indexing);
+    panel->setComponentID("settingsPanel");
     panel->onSettingsChanged = [this](AppSettings next) { applySettings(next); };
     panel->onShowAudio = [this] { showAudioSettings(); };
     wireContributionPanel(*panel);
+    wireCommandSettings(*panel);
     panel->onBackupRequested = [this](juce::String& error) -> juce::File
     {
         try { return backupCatalog(); }
@@ -4342,20 +4694,19 @@ void MainComponent::showSettings()
             else if (safePanel != nullptr) safePanel->setDatabaseStatus(error,true);
         };
     panel->setLookAndFeel(&look);
-    // The settings panel has a fixed height. On a smaller display a taller panel would be clipped
-    // at the bottom, so it scrolls inside a viewport that fits the screen.
+    // The navigation column and each page's own viewport keep the window inside the display, so
+    // there is no outer scroll area to nest.
     const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect(getScreenBounds());
-    const int available = (display != nullptr ? display->userArea.getHeight() : 900) - 60;
-    auto* viewport = new juce::Viewport();
-    viewport->setViewedComponent(panel, true);
-    viewport->setScrollBarsShown(true, false);
-    viewport->setSize(panel->getWidth() + (panel->getHeight() > available ? 12 : 0),
-                      juce::jmin(panel->getHeight(), available));
+    const auto area = display != nullptr ? display->userArea : juce::Rectangle<int>(0, 0, 1280, 800);
+    const int width = juce::jmin(940, juce::jmax(620, area.getWidth() - 80));
+    const int height = juce::jmin(760, juce::jmax(460, area.getHeight() - 80));
+    panel->setSize(width, height);
     auto* window = new SettingsDialogWindow();
-    window->setContentOwned(viewport, true);
+    window->setContentOwned(panel, true);
     window->setLookAndFeel(&look);
     window->setUsingNativeTitleBar(false);
-    window->setResizable(false, false);
+    window->setResizable(true, false);
+    window->setResizeLimits(560, 420, area.getWidth(), area.getHeight());
     window->centreAroundComponent(this, window->getWidth(), window->getHeight());
     settingsDialog = window;
     window->enterModalState(true, nullptr, true);
@@ -4542,14 +4893,30 @@ void MainComponent::resized()
     header.removeFromRight(16);
     search.setBounds(header.withSizeKeepingCentre(header.getWidth(),34));
     selectionStatus.setBounds(r.removeFromBottom(24).reduced(12,1));
-    preview.setBounds(r.removeFromBottom(156));
+    // One model decides the split; the dividers only edit its preference. Effective sizes are
+    // recomputed here, so shrinking the window never writes a smaller value back to settings.
+    layoutBounds = computePanelLayout(r, layoutPreferences);
+    const int previewHeight = juce::jlimit(0, juce::jmax(0, r.getHeight() - 40), layoutBounds.preview.getHeight());
+    preview.setBounds(r.removeFromBottom(previewHeight));
+    previewDivider.setVisible(previewHeight > 0 && r.getHeight() > panelDividerThickness);
+    previewDivider.setBounds(r.removeFromBottom(previewDivider.isVisible() ? panelDividerThickness : 0));
     auto footer = r.removeFromBottom(42).reduced(12,5);
     cancel.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
     pause.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
     activityDot.setBounds(footer.removeFromLeft(12).withSizeKeepingCentre(8, 8));
     footer.removeFromLeft(6);
     status.setBounds(footer);
-    sidebarBounds = r.removeFromLeft(getWidth() < 1100 ? 190 : 240); analysisBounds = r.removeFromRight(getWidth() < 1100 ? 230 : 270);
+    sidebarBounds = r.removeFromLeft(layoutBounds.folders.getWidth());
+    layoutBounds.folders = sidebarBounds;
+    foldersDivider.setVisible(r.getWidth() > panelDividerThickness * 4);
+    foldersDivider.setBounds(r.removeFromLeft(foldersDivider.isVisible() ? panelDividerThickness : 0));
+    foldersDivider.setColour(juce::ResizableWindow::backgroundColourId, theme::background);
+    analysisBounds = r.removeFromRight(layoutBounds.analysis.getWidth());
+    layoutBounds.analysis = analysisBounds;
+    analysisDivider.setVisible(r.getWidth() > panelDividerThickness * 4);
+    analysisDivider.setBounds(r.removeFromRight(analysisDivider.isVisible() ? panelDividerThickness : 0));
+    layoutBounds.library = r;
+    layoutBounds.preview = preview.getBounds();
     auto sidebar = sidebarBounds.reduced(14,16);
     libraryMenu.setBounds(sidebar.removeFromTop(40)); sidebar.removeFromTop(16);
     if (favorites.isVisible() && ! appSettings.favoriteFolders.isEmpty())

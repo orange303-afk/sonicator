@@ -1,20 +1,45 @@
 #include "SettingsPanel.h"
+#include "HotkeysPanel.h"
+#include "ui/commands/CommandRegistry.h"
 #include "ui/shell/Theme.h"
+#include "ui/shell/DesignTokens.h"
 #include "core/Version.h"
 #include "core/diagnostics/Diagnostics.h"
 #include "core/smart/AcousticClassifierService.h"
 #include "ui/shell/ThemedDialogs.h"
+#include <algorithm>
+
 namespace sonicator {
 namespace {
-juce::Font sectionFont()
+constexpr int labelColumn = 150;
+
+juce::Font sectionFont() { return studio::sectionFont(); }
+juce::Font noteFont() { return studio::captionFont(); }
+
+struct Row
 {
-    return juce::Font(juce::FontOptions(10.5f, juce::Font::bold)).withExtraKerningFactor(0.12f);
-}
-juce::Font noteFont()
+    int height = 0, gap = 0;
+    std::function<void(juce::Rectangle<int>)> place;
+};
+using Rows = std::vector<Row>;
+
+void placeRows(juce::Component& content, int width, const Rows& rows, int minimumHeight,
+               std::vector<juce::Rectangle<float>>* rules)
 {
-    return juce::Font(juce::FontOptions(12.0f));
+    int height = 0;
+    for (const auto& row : rows) height += row.height + row.gap;
+    content.setSize(width, juce::jmax(minimumHeight, height));
+    int y = 0;
+    for (const auto& row : rows)
+    {
+        y += row.gap;
+        row.place({ 0, y, width, row.height });
+        y += row.height;
+    }
+    juce::ignoreUnused(rules);
 }
 }
+
 SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool busy)
     : current(initial), database(std::move(file)), indexing(busy),
       gumroad("ilyaorange.gumroad.com", juce::URL("https://ilyaorange.gumroad.com")),
@@ -23,16 +48,49 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
       kofi("ko-fi.com/ilyaorange", juce::URL("https://ko-fi.com/ilyaorange")),
       boosty("boosty.to/ilyaorange", juce::URL("https://boosty.to/ilyaorange"))
 {
-    for (auto* c : std::array<juce::Component*,29>{&title,&appearance,&themeLabel,&scaleLabel,&languageHeading,
-         &languageLabel,&languageNote,&libraryHeading,&databaseKey,&databaseLabel,&libraryNote,&databaseStatus,
-         &editingHeading,&alwaysOverwriteToggle,&alwaysOverwriteNote,
-         &audioHeading,&reportHeading,&reportNote,&aboutHeading,&productLabel,&authorLabel,&supportLabel,&creditsLabel,&prototypesLabel,&themeBox,&scaleBox,&languageBox,&moveDatabase,&relocateDatabase})
-        addAndMakeVisible(c);
-    for (auto* c : std::array<juce::Component*,13>{&openDatabase,&backupDatabase,&audio,&reportBug,&reportFeature,
-         &reportFormat,&reportDiscuss,&close,&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
-        addAndMakeVisible(c);
+    setWantsKeyboardFocus(true);
+    setSize(760, 640);
 
-    const auto pendingCrash = diagnostics::pendingCrash (diagnostics::defaultCrashMarker(), database);
+    // --- general page controls -------------------------------------------------------------
+    for (auto* c : std::array<juce::Component*, 20> {
+             &appearance, &themeLabel, &scaleLabel, &languageHeading, &languageLabel, &languageNote,
+             &libraryHeading, &databaseKey, &databaseLabel, &libraryNote, &databaseStatus,
+             &editingHeading, &alwaysOverwriteToggle, &alwaysOverwriteNote,
+             &workspaceHeading, &workspaceNote, &themeBox, &scaleBox, &languageBox, &moveDatabase })
+        generalContent.addAndMakeVisible(c);
+    for (auto* c : std::array<juce::Component*, 6> {
+             &openDatabase, &backupDatabase, &relocateDatabase, &contributeDataToggle,
+             &contributionNote, &resetLayout })
+        generalContent.addAndMakeVisible(c);
+    generalContent.addAndMakeVisible(contributionPreview);
+    generalContent.addAndMakeVisible(contributionDelete);
+    audioContent.addAndMakeVisible(audio);
+    audioHeading.setText("AUDIO & MIDI", juce::dontSendNotification);
+    audioHeading.setFont(sectionFont());
+    audioHeading.setColour(juce::Label::textColourId, theme::muted);
+    audioContent.addAndMakeVisible(audioHeading);
+    audioContent.addAndMakeVisible(audioNote);
+    audioNote.setFont(noteFont());
+    audioNote.setJustificationType(juce::Justification::topLeft);
+    audioNote.setColour(juce::Label::textColourId, theme::muted);
+    audioNote.setText("Choose the audio device and MIDI input here. In the DAW plugin the host owns "
+                      "the devices, so this page is hidden.", juce::dontSendNotification);
+
+    // --- about page controls ---------------------------------------------------------------
+    for (auto* c : std::array<juce::Component*, 14> {
+             &reportHeading, &reportNote, &aboutHeading, &productLabel, &authorLabel, &supportLabel,
+             &creditsLabel, &prototypesLabel, &reportBug, &reportFeature, &reportFormat,
+             &reportDiscuss, &gumroad, &bandcamp })
+        aboutContent.addAndMakeVisible(c);
+    aboutContent.addAndMakeVisible(naukograd);
+    aboutContent.addAndMakeVisible(kofi);
+    aboutContent.addAndMakeVisible(boosty);
+
+    addAndMakeVisible(title);
+    title.setText("Settings", juce::dontSendNotification);
+    title.setFont(studio::pageTitleFont());
+
+    const auto pendingCrash = diagnostics::pendingCrash(diagnostics::defaultCrashMarker(), database);
     reportHeading.setText("REPORT", juce::dontSendNotification); reportHeading.setFont(sectionFont());
     reportNote.setText(juce::String("Opens a new issue in your browser with the app version, the OS and the "
                                     "tail of the log. Your home folder and catalog path are shortened; nothing "
@@ -47,25 +105,22 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         diagnostics::ReportContext context;
         context.appVersion = version();
         context.catalogFile = database;
-        if (juce::URL (diagnostics::issueUrl (kind, context)).launchInDefaultBrowser())
-            diagnostics::clearPendingCrash (diagnostics::defaultCrashMarker());
+        if (juce::URL(diagnostics::issueUrl(kind, context)).launchInDefaultBrowser())
+            diagnostics::clearPendingCrash(diagnostics::defaultCrashMarker());
     };
-    reportBug.onClick = [openReport] { openReport (diagnostics::ReportKind::bug); };
-    reportFeature.onClick = [openReport] { openReport (diagnostics::ReportKind::feature); };
-    reportFormat.onClick = [openReport] { openReport (diagnostics::ReportKind::formatSupport); };
+    reportBug.onClick = [openReport] { openReport(diagnostics::ReportKind::bug); };
+    reportFeature.onClick = [openReport] { openReport(diagnostics::ReportKind::feature); };
+    reportFormat.onClick = [openReport] { openReport(diagnostics::ReportKind::formatSupport); };
     reportDiscuss.onClick = []
     {
         juce::URL("https://github.com/orange303-afk/sonicator/discussions/new").launchInDefaultBrowser();
     };
-    addAndMakeVisible(contributeDataToggle);
+
     contributeDataToggle.setButtonText("Contribute anonymous feedback to improve classification models");
     contributeDataToggle.setToggleState(initial.contributeTrainingData, juce::dontSendNotification);
-    addAndMakeVisible(contributionNote);
-    addAndMakeVisible(contributionPreview);
-    addAndMakeVisible(contributionDelete);
     contributionNote.setText("Sends confirmed types, tags, tempo and key plus acoustic numbers (14 values, "
                              "or 84 on rows with the richer vector). No audio, "
-                           "file names or paths. Off by default.", juce::dontSendNotification);
+                             "file names or paths. Off by default.", juce::dontSendNotification);
     contributionNote.setFont(noteFont());
     contributionNote.setJustificationType(juce::Justification::centredLeft);
     contributeDataToggle.onClick = [this]
@@ -75,39 +130,37 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     contributionPreview.onClick = [this] { showContributionPreview(); };
     contributionDelete.onClick = [this] { confirmContributionDelete(); };
 
-    title.setText("Settings",juce::dontSendNotification);
-    title.setFont(juce::FontOptions(20,juce::Font::bold));
-    appearance.setText("APPEARANCE",juce::dontSendNotification); appearance.setFont(sectionFont());
-    themeLabel.setText("Theme",juce::dontSendNotification); themeLabel.setFont(juce::FontOptions(13));
-    scaleLabel.setText("Interface scale",juce::dontSendNotification); scaleLabel.setFont(juce::FontOptions(13));
+    appearance.setText("APPEARANCE", juce::dontSendNotification); appearance.setFont(sectionFont());
+    themeLabel.setText("Theme", juce::dontSendNotification); themeLabel.setFont(studio::controlFont());
+    scaleLabel.setText("Interface scale", juce::dontSendNotification); scaleLabel.setFont(studio::controlFont());
     themeBox.setComponentID("settingsTheme");
     scaleBox.setComponentID("settingsScale");
     languageBox.setComponentID("settingsLanguage");
-    themeBox.addItem("System",1); themeBox.addItem("Dark",2); themeBox.addItem("Light",3);
-    themeBox.setSelectedId(initial.theme == ThemeMode::Dark ? 2 : (initial.theme == ThemeMode::Light ? 3 : 1),juce::dontSendNotification);
-    scaleBox.addItem("100%",100); scaleBox.addItem("110%",110); scaleBox.addItem("125%",125); scaleBox.addItem("150%",150);
-    scaleBox.setSelectedId(AppSettings::clampScale(initial.scalePercent),juce::dontSendNotification);
-    languageHeading.setText("LANGUAGE",juce::dontSendNotification); languageHeading.setFont(sectionFont());
-    languageLabel.setText("Interface language",juce::dontSendNotification); languageLabel.setFont(juce::FontOptions(13));
-    languageNote.setText("English is the only language in this stage. The choice is stored so later translations can use it.",juce::dontSendNotification);
+    themeBox.addItem("System", 1); themeBox.addItem("Dark", 2); themeBox.addItem("Light", 3);
+    themeBox.setSelectedId(initial.theme == ThemeMode::Dark ? 2 : (initial.theme == ThemeMode::Light ? 3 : 1),
+                           juce::dontSendNotification);
+    scaleBox.addItem("100%", 100); scaleBox.addItem("110%", 110); scaleBox.addItem("125%", 125);
+    scaleBox.addItem("150%", 150);
+    scaleBox.setSelectedId(AppSettings::clampScale(initial.scalePercent), juce::dontSendNotification);
+    languageHeading.setText("LANGUAGE", juce::dontSendNotification); languageHeading.setFont(sectionFont());
+    languageLabel.setText("Interface language", juce::dontSendNotification);
+    languageLabel.setFont(studio::controlFont());
+    languageNote.setText("English is the only language in this stage. The choice is stored so later "
+                         "translations can use it.", juce::dontSendNotification);
     languageNote.setFont(noteFont()); languageNote.setJustificationType(juce::Justification::centredLeft);
-    languageBox.addItem("English",1); languageBox.setSelectedId(1,juce::dontSendNotification);
+    languageBox.addItem("English", 1); languageBox.setSelectedId(1, juce::dontSendNotification);
     languageBox.setEnabled(false);
-    libraryHeading.setText("LIBRARY",juce::dontSendNotification); libraryHeading.setFont(sectionFont());
-    databaseKey.setText("Database",juce::dontSendNotification); databaseKey.setFont(juce::FontOptions(13));
-    databaseLabel.setFont(juce::FontOptions(12)); databaseLabel.setJustificationType(juce::Justification::centredLeft);
-    databaseLabel.setBorderSize(juce::BorderSize<int>(0,10,0,10));
+    libraryHeading.setText("LIBRARY", juce::dontSendNotification); libraryHeading.setFont(sectionFont());
+    databaseKey.setText("Database", juce::dontSendNotification); databaseKey.setFont(studio::controlFont());
+    databaseLabel.setFont(studio::captionFont());
+    databaseLabel.setJustificationType(juce::Justification::centredLeft);
+    databaseLabel.setBorderSize(juce::BorderSize<int>(0, 10, 0, 10));
     databaseLabel.setMinimumHorizontalScale(0.8f);
-    libraryNote.setText(indexing
-        ? "Indexing is running. Stop it before moving or opening another catalog."
-        : "Move copies a consistent snapshot to a new location and switches to it; the old file is kept. Open uses an existing catalog.",juce::dontSendNotification);
     libraryNote.setFont(noteFont()); libraryNote.setJustificationType(juce::Justification::centredLeft);
     databaseStatus.setFont(noteFont()); databaseStatus.setJustificationType(juce::Justification::centredLeft);
-    audioHeading.setText("AUDIO",juce::dontSendNotification); audioHeading.setFont(sectionFont());
-    editingHeading.setText("EDITING",juce::dontSendNotification); editingHeading.setFont(sectionFont());
+    editingHeading.setText("EDITING", juce::dontSendNotification); editingHeading.setFont(sectionFont());
     alwaysOverwriteToggle.setComponentID("settingsAlwaysOverwrite");
-    alwaysOverwriteToggle.setToggleState(initial.alwaysOverwriteOriginalFiles,
-                                         juce::dontSendNotification);
+    alwaysOverwriteToggle.setToggleState(initial.alwaysOverwriteOriginalFiles, juce::dontSendNotification);
     alwaysOverwriteToggle.onClick = [this]
     {
         current.alwaysOverwriteOriginalFiles = alwaysOverwriteToggle.getToggleState();
@@ -119,11 +172,20 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
                                 juce::dontSendNotification);
     alwaysOverwriteNote.setFont(noteFont());
     alwaysOverwriteNote.setJustificationType(juce::Justification::centredLeft);
-    aboutHeading.setText("ABOUT",juce::dontSendNotification); aboutHeading.setFont(sectionFont());
-    productLabel.setText("Sonicator",juce::dontSendNotification);
-    productLabel.setFont(juce::FontOptions(18,juce::Font::bold));
-    authorLabel.setText("by Ilya Orange",juce::dontSendNotification); authorLabel.setFont(juce::FontOptions(13));
-    supportLabel.setText("Sonicator is free, but you can support further development:",juce::dontSendNotification);
+    workspaceHeading.setText("WORKSPACE", juce::dontSendNotification); workspaceHeading.setFont(sectionFont());
+    workspaceNote.setText("Restores the folder and analysis panel widths and the preview height. "
+                          "The window size, table columns and shortcuts are not changed.",
+                          juce::dontSendNotification);
+    workspaceNote.setFont(noteFont()); workspaceNote.setJustificationType(juce::Justification::centredLeft);
+    resetLayout.onClick = [this] { if (onResetLayout) onResetLayout(); };
+
+    aboutHeading.setText("ABOUT", juce::dontSendNotification); aboutHeading.setFont(sectionFont());
+    productLabel.setText("Sonicator", juce::dontSendNotification);
+    productLabel.setFont(juce::Font(juce::FontOptions(18, juce::Font::bold)));
+    authorLabel.setText("by Ilya Orange", juce::dontSendNotification);
+    authorLabel.setFont(studio::controlFont());
+    supportLabel.setText("Sonicator is free, but you can support further development:",
+                         juce::dontSendNotification);
     supportLabel.setFont(noteFont()); supportLabel.setJustificationType(juce::Justification::centredLeft);
     creditsLabel.setText(juce::String::fromUTF8(
         "JUCE 9.0.5  ·  SQLite 3.47.2  ·  libxmp 4.6.2  ·  ONNX Runtime 1.20.1  ·  Catch2 (tests)\n"
@@ -134,7 +196,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         "see docs/DATA_CREDITS.md.\n"
         "Licensed under AGPL-3.0-or-later."),
         juce::dontSendNotification);
-    creditsLabel.setFont(juce::FontOptions(10.5f));
+    creditsLabel.setFont(juce::Font(juce::FontOptions(10.5f)));
     creditsLabel.setJustificationType(juce::Justification::topLeft);
     creditsLabel.setMinimumHorizontalScale(0.7f);
     {
@@ -142,35 +204,32 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         const auto generatedAt = classifier.globalGeneratedAt();
         const auto kind = classifier.hasGlobalModel() ? "Global model" : "Global prototypes";
         prototypesLabel.setText(generatedAt.isNotEmpty()
-                ? juce::String(kind) + ": " + generatedAt.substring(0, 10) + ", "
-                      + juce::String(classifier.globalLabelCount()) + " labels"
-                : juce::String(kind) + ": none in this build",
-            juce::dontSendNotification);
+                                    ? juce::String(kind) + ": " + generatedAt.substring(0, 10) + ", "
+                                          + juce::String(classifier.globalLabelCount()) + " labels"
+                                    : juce::String(kind) + ": none in this build",
+                                juce::dontSendNotification);
         prototypesLabel.setFont(noteFont());
         prototypesLabel.setJustificationType(juce::Justification::centredLeft);
     }
-    for (auto* link : std::array<juce::HyperlinkButton*,5>{&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
+    for (auto* link : std::array<juce::HyperlinkButton*, 5> { &gumroad, &bandcamp, &naukograd, &kofi, &boosty })
     {
-        link->setFont(juce::FontOptions(12),false);
+        link->setFont(juce::Font(juce::FontOptions(12)), false);
         link->setJustificationType(juce::Justification::centredLeft);
     }
-    for (auto* button : std::array<juce::Button*,12>{&moveDatabase,&openDatabase,&relocateDatabase,&backupDatabase,
-                                                    &audio,&reportBug,&reportFeature,&reportFormat,&reportDiscuss,
-                                                    &close,&contributionPreview,&contributionDelete})
-    {
-        button->setWantsKeyboardFocus(false);
-        button->setMouseClickGrabsKeyboardFocus(false);
-    }
-    moveDatabase.setEnabled(! indexing); openDatabase.setEnabled(! indexing);
-    relocateDatabase.setEnabled(! indexing);
+    for (auto* button : std::array<juce::Button*, 12> { &moveDatabase, &openDatabase, &relocateDatabase,
+                                                       &backupDatabase, &audio, &reportBug, &reportFeature,
+                                                       &reportFormat, &reportDiscuss, &close,
+                                                       &contributionPreview, &contributionDelete })
+        button->setWantsKeyboardFocus(true);
     moveDatabase.setTooltip("Copy the current catalog through SQLite and switch to the copy");
     openDatabase.setTooltip("Open an existing SONICATOR catalog without moving the current one");
     relocateDatabase.setTooltip("Rewrite catalog paths for folders that moved to this computer");
     backupDatabase.setTooltip("Save a consistent copy of the catalog database; original audio files are not included");
-    close.setVisible(false); // The title bar is the single close control.
+    resetLayout.setTooltip("Restore the default folder width, analysis width and preview height");
+    close.setVisible(false);
     close.setTooltip("Close");
     setDatabaseFile(database);
-    setDatabaseStatus(indexing ? "Unavailable while indexing." : "Original audio files are not included in the database.",false);
+    setDatabaseStatus(indexing ? "Unavailable while indexing." : "Original audio files are not included in the database.", false);
 
     themeBox.onChange = [this]
     {
@@ -185,7 +244,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     relocateDatabase.onClick = [this] { if (onRelocateRequested) onRelocateRequested(); };
     backupDatabase.onClick = [this]
     {
-        if (! onBackupRequested) return;
+        if (!onBackupRequested) return;
         juce::String error;
         const auto file = onBackupRequested(error);
         if (file.existsAsFile()) setDatabaseStatus("Backup saved: " + file.getFullPathName(), false);
@@ -197,33 +256,198 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         if (onClose) { onClose(); return; }
         if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
     };
-    setSize(560,1134);
+
+    // --- navigation and pages ---------------------------------------------------------------
+    const std::array<juce::String, 5> labels { "General", "Audio & MIDI", "Hotkeys", "Plugins", "About" };
+    for (size_t i = 0; i < nav.size(); ++i)
+    {
+        auto& button = nav[i];
+        button.setButtonText(labels[i]);
+        button.setClickingTogglesState(true);
+        button.setRadioGroupId(0x5e771e);
+        button.setWantsKeyboardFocus(true);
+        button.setComponentID("settingsNav" + settingsSectionId((SettingsSection) i));
+        button.onClick = [this, i]
+        {
+            const auto target = (SettingsSection) i;
+            if (sectionAvailable(target)) selectSection(target);
+            else nav[(size_t) section].setToggleState(true, juce::dontSendNotification);
+        };
+        addAndMakeVisible(button);
+    }
+
+    generalViewport.setViewedComponent(&generalContent, false);
+    generalViewport.setScrollBarsShown(true, false);
+    aboutViewport.setViewedComponent(&aboutContent, false);
+    aboutViewport.setScrollBarsShown(true, false);
+    addChildComponent(generalViewport);
+    addChildComponent(aboutViewport);
+
+    pluginsHeading.setText("PLUGINS", juce::dontSendNotification);
+    pluginsHeading.setFont(sectionFont());
+    pluginsHeading.setColour(juce::Label::textColourId, theme::muted);
+    pluginsNote.setText("User components arrive in a later stage. This page will install, enable, update "
+                        "and remove them. Nothing is installed today and no third-party code runs.",
+                        juce::dontSendNotification);
+    pluginsNote.setFont(noteFont());
+    pluginsNote.setJustificationType(juce::Justification::topLeft);
+    pluginsNote.setColour(juce::Label::textColourId, theme::muted);
+    pluginsContent.addAndMakeVisible(pluginsHeading);
+    pluginsContent.addAndMakeVisible(pluginsNote);
+    addChildComponent(pluginsContent);
+    addChildComponent(audioContent);
+
+    addAndMakeVisible(title);
+    close.setVisible(false);
+
+    section = settingsSectionFromId(initial.lastSettingsSection);
+    if (!sectionAvailable(section)) section = SettingsSection::general;
+    nav[(size_t) section].setToggleState(true, juce::dontSendNotification);
+    updateSectionVisibility();
+    setBusyState(busy);
 }
+
+SettingsPanel::~SettingsPanel() = default;
+
+void SettingsPanel::setBusyState(bool busy)
+{
+    indexing = busy;
+    catalogBusy = busy;
+    moveDatabase.setEnabled(!busy);
+    openDatabase.setEnabled(!busy);
+    relocateDatabase.setEnabled(!busy);
+    libraryNote.setText(busy
+        ? "Indexing is running. Stop it before moving or opening another catalog."
+        : "Move copies a consistent snapshot to a new location and switches to it; the old file is kept. "
+          "Open uses an existing catalog.", juce::dontSendNotification);
+    if (!busy && databaseStatus.getText().containsIgnoreCase("Unavailable"))
+        setDatabaseStatus("Original audio files are not included in the database.", false);
+}
+
+void SettingsPanel::setCommandRegistry(const CommandRegistry* commands)
+{
+    registry = commands;
+    if (commands == nullptr) return;
+    hotkeys = std::make_unique<HotkeysPanel>(*commands);
+    hotkeys->setComponentID("hotkeysPanel");
+    hotkeys->setProfile(profile);
+    hotkeys->onProfileChanged = [this](const ShortcutProfile& candidate)
+    {
+        const bool saved = onShortcutProfileChanged == nullptr || onShortcutProfileChanged(candidate);
+        if (saved) profile = candidate;
+        return saved;
+    };
+    hotkeys->onConfirmResetAll = [this](std::function<void(bool)> done)
+    {
+        dialogs::showAlert(*this, "Reset all shortcuts?",
+            "Every command returns to its default shortcut. Your own bindings are lost.",
+            { { "Cancel", 0 }, { "Reset all", 1 } }, [done](int result) { done(result == 1); });
+    };
+    addChildComponent(*hotkeys);
+    updateSectionVisibility();
+    resized();
+}
+
+void SettingsPanel::setShortcutProfile(const ShortcutProfile& next)
+{
+    profile = next;
+    if (hotkeys != nullptr) hotkeys->setProfile(profile);
+}
+
+void SettingsPanel::setAudioSettingsFactory(std::function<std::unique_ptr<juce::Component>()> factory)
+{
+    audioFactory = std::move(factory);
+    audioPageBuilt = false;
+    if (audioPage != nullptr) audioContent.removeChildComponent(audioPage);
+    audioPage = nullptr;
+    audioOwned.reset();
+}
+
+void SettingsPanel::ensureAudioPage()
+{
+    if (audioPageBuilt) return;
+    audioPageBuilt = true;
+    if (audioFactory == nullptr) return;
+    audioOwned = audioFactory();
+    if (audioOwned == nullptr) return;
+    audioPage = audioOwned.get();
+    audioContent.addAndMakeVisible(*audioOwned);
+    audioPage->setVisible(section == SettingsSection::audioMidi);
+    audioNote.setVisible(false);
+}
+
+bool SettingsPanel::sectionAvailable(SettingsSection candidate) const
+{
+    if (!pluginMode) return true;
+    // The host owns audio, devices and any loaded code, so those pages do not appear.
+    return candidate != SettingsSection::audioMidi && candidate != SettingsSection::plugins;
+}
+
+void SettingsPanel::selectSection(SettingsSection next)
+{
+    if (!sectionAvailable(next)) next = SettingsSection::general;
+    section = next;
+    for (size_t i = 0; i < nav.size(); ++i)
+        nav[i].setToggleState((SettingsSection) i == section, juce::dontSendNotification);
+    if (section == SettingsSection::audioMidi) ensureAudioPage();
+    updateSectionVisibility();
+    resized();
+    repaint();
+}
+
+void SettingsPanel::updateSectionVisibility()
+{
+    generalViewport.setVisible(section == SettingsSection::general);
+    aboutViewport.setVisible(section == SettingsSection::about);
+    audioContent.setVisible(section == SettingsSection::audioMidi);
+    pluginsContent.setVisible(section == SettingsSection::plugins);
+    if (hotkeys != nullptr) hotkeys->setVisible(section == SettingsSection::hotkeys);
+    if (audioPage != nullptr) audioPage->setVisible(section == SettingsSection::audioMidi);
+    audioNote.setVisible(section == SettingsSection::audioMidi && audioPage == nullptr);
+
+    // Plugin mode hides the controls the host owns, not the whole General page.
+    const bool showLibrary = !pluginMode;
+    for (auto* c : std::array<juce::Component*, 15> {
+             &scaleLabel, &scaleBox, &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
+             &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
+             &contributeDataToggle, &contributionNote, &contributionPreview, &contributionDelete })
+        if (!showLibrary) c->setVisible(false);
+    if (showLibrary)
+    {
+        // Restore the ordinary state; the values are already owned by the controls.
+        for (auto* c : std::array<juce::Component*, 15> {
+                 &scaleLabel, &scaleBox, &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
+                 &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
+                 &contributeDataToggle, &contributionNote, &contributionPreview, &contributionDelete })
+            c->setVisible(true);
+    }
+    close.setVisible(pluginMode);
+    nav[(size_t) SettingsSection::audioMidi].setVisible(!pluginMode);
+    nav[(size_t) SettingsSection::plugins].setVisible(!pluginMode);
+}
+
 void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
 {
     pluginMode = shouldUsePluginMode;
-    const std::array<juce::Component*,17> hidden {
-        &scaleLabel, &scaleBox, &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
-        &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
-        &audioHeading, &audio, &contributeDataToggle, &contributionNote,
-        &contributionPreview, &contributionDelete };
-    for (auto* c : hidden)
-        c->setVisible(! pluginMode);
-    close.setVisible(pluginMode);
-    setSize(560, pluginMode ? 794 : 1134);
+    if (!sectionAvailable(section)) section = SettingsSection::general;
+    nav[(size_t) section].setToggleState(true, juce::dontSendNotification);
+    updateSectionVisibility();
     resized();
+    repaint();
 }
+
 void SettingsPanel::notifySettings()
 {
     if (onSettingsChanged) onSettingsChanged(current);
     sendLookAndFeelChange();
     repaint();
 }
+
 void SettingsPanel::chooseDatabase(bool moveCurrent)
 {
-    if (indexing) { setDatabaseStatus("Stop indexing before switching catalogs.",true); return; }
+    if (indexing) { setDatabaseStatus("Stop indexing before switching catalogs.", true); return; }
     chooser = std::make_unique<juce::FileChooser>(moveCurrent ? "Copy catalog to..." : "Open catalog",
-        database.getParentDirectory(), "*.sqlite");
+                                                 database.getParentDirectory(), "*.sqlite");
     const auto flags = moveCurrent
         ? juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
             | juce::FileBrowserComponent::warnAboutOverwriting
@@ -236,64 +460,79 @@ void SettingsPanel::chooseDatabase(bool moveCurrent)
         if (safe->onDatabaseChosen) safe->onDatabaseChosen(file, moveCurrent);
     });
 }
+
 void SettingsPanel::setDatabaseFile(juce::File file)
 {
     database = std::move(file);
-    databaseLabel.setText(database.getFullPathName(),juce::dontSendNotification);
+    databaseLabel.setText(database.getFullPathName(), juce::dontSendNotification);
     databaseLabel.setTooltip(database.getFullPathName());
 }
+
 void SettingsPanel::setDatabaseStatus(const juce::String& text, bool error)
 {
     statusError = error;
-    databaseStatus.setColour(juce::Label::textColourId,error
+    databaseStatus.setColour(juce::Label::textColourId, error
         ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e)) : theme::muted);
-    databaseStatus.setText(text,juce::dontSendNotification);
+    databaseStatus.setText(text, juce::dontSendNotification);
 }
+
 void SettingsPanel::lookAndFeelChanged()
 {
-    appearance.setColour(juce::Label::textColourId,theme::muted);
-    languageHeading.setColour(juce::Label::textColourId,theme::muted);
-    libraryHeading.setColour(juce::Label::textColourId,theme::muted);
-    audioHeading.setColour(juce::Label::textColourId,theme::muted);
-    aboutHeading.setColour(juce::Label::textColourId,theme::muted);
-    themeLabel.setColour(juce::Label::textColourId,theme::text);
-    scaleLabel.setColour(juce::Label::textColourId,theme::text);
-    languageLabel.setColour(juce::Label::textColourId,theme::text);
-    databaseKey.setColour(juce::Label::textColourId,theme::text);
-    languageNote.setColour(juce::Label::textColourId,theme::muted);
-    libraryNote.setColour(juce::Label::textColourId,theme::muted);
-    databaseStatus.setColour(juce::Label::textColourId,statusError
+    appearance.setColour(juce::Label::textColourId, theme::muted);
+    languageHeading.setColour(juce::Label::textColourId, theme::muted);
+    libraryHeading.setColour(juce::Label::textColourId, theme::muted);
+    editingHeading.setColour(juce::Label::textColourId, theme::muted);
+    workspaceHeading.setColour(juce::Label::textColourId, theme::muted);
+    aboutHeading.setColour(juce::Label::textColourId, theme::muted);
+    themeLabel.setColour(juce::Label::textColourId, theme::text);
+    scaleLabel.setColour(juce::Label::textColourId, theme::text);
+    languageLabel.setColour(juce::Label::textColourId, theme::text);
+    databaseKey.setColour(juce::Label::textColourId, theme::text);
+    languageNote.setColour(juce::Label::textColourId, theme::muted);
+    libraryNote.setColour(juce::Label::textColourId, theme::muted);
+    workspaceNote.setColour(juce::Label::textColourId, theme::muted);
+    databaseStatus.setColour(juce::Label::textColourId, statusError
         ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e)) : theme::muted);
     contributeDataToggle.setColour(juce::ToggleButton::textColourId, theme::text);
     contributionNote.setColour(juce::Label::textColourId, theme::muted);
     contributeDataToggle.setColour(juce::ToggleButton::tickColourId, theme::accent);
-    authorLabel.setColour(juce::Label::textColourId,theme::muted);
-    productLabel.setColour(juce::Label::textColourId,theme::text);
-    title.setColour(juce::Label::textColourId,theme::text);
-    reportHeading.setColour(juce::Label::textColourId,theme::muted);
-    reportNote.setColour(juce::Label::textColourId,theme::muted);
-    supportLabel.setColour(juce::Label::textColourId,theme::muted);
-    creditsLabel.setColour(juce::Label::textColourId,theme::muted);
-    prototypesLabel.setColour(juce::Label::textColourId,theme::muted);
-    for (auto* link : std::array<juce::HyperlinkButton*,5>{&gumroad,&bandcamp,&naukograd,&kofi,&boosty})
-        link->setColour(juce::HyperlinkButton::textColourId,theme::accent);
+    authorLabel.setColour(juce::Label::textColourId, theme::muted);
+    productLabel.setColour(juce::Label::textColourId, theme::text);
+    title.setColour(juce::Label::textColourId, theme::text);
+    reportHeading.setColour(juce::Label::textColourId, theme::muted);
+    reportNote.setColour(juce::Label::textColourId, theme::muted);
+    supportLabel.setColour(juce::Label::textColourId, theme::muted);
+    creditsLabel.setColour(juce::Label::textColourId, theme::muted);
+    prototypesLabel.setColour(juce::Label::textColourId, theme::muted);
+    pluginsHeading.setColour(juce::Label::textColourId, theme::muted);
+    pluginsNote.setColour(juce::Label::textColourId, theme::muted);
+    for (auto* link : std::array<juce::HyperlinkButton*, 5> { &gumroad, &bandcamp, &naukograd, &kofi, &boosty })
+        link->setColour(juce::HyperlinkButton::textColourId, theme::accent);
+    for (auto& button : nav) button.setColour(juce::TextButton::textColourOffId, theme::muted);
     repaint();
 }
+
 void SettingsPanel::paint(juce::Graphics& g)
 {
-    g.fillAll(theme::panel);
-    if (! databaseFieldBounds.isEmpty())
+    g.fillAll(theme::background);
+    auto navArea = getLocalBounds().removeFromLeft(studio::navigationWidth);
+    g.setColour(theme::panel);
+    g.fillRect(navArea);
+    g.setColour(theme::line);
+    g.drawVerticalLine(navArea.getRight() - 1, 0.0f, (float) getHeight());
+    if (!databaseFieldBounds.isEmpty())
     {
         const auto field = databaseFieldBounds.toFloat().reduced(0.5f);
         g.setColour(theme::background);
-        g.fillRoundedRectangle(field, 7.0f);
+        g.fillRoundedRectangle(field, studio::controlRadius);
         g.setColour(theme::line);
-        g.drawRoundedRectangle(field, 7.0f, 1.0f);
+        g.drawRoundedRectangle(field, studio::controlRadius, 1.0f);
     }
     g.setColour(theme::line);
-    for (const auto& rule : sectionRules)
-        g.fillRect(rule);
+    for (const auto& rule : sectionRules) g.fillRect(rule);
+    for (const auto& rule : aboutRules) g.fillRect(rule);
 }
+
 void SettingsPanel::setContributionEnabled(bool enabled)
 {
     contributeDataToggle.setToggleState(enabled, juce::dontSendNotification);
@@ -324,7 +563,7 @@ void SettingsPanel::confirmContributionDelete()
     dialogs::showAlert(*this, "Delete contributed data?",
         "Removes every batch this installation sent and issues a new anonymous id. Data already "
         "included in a released dataset or model cannot be recalled. Contribution is turned off.",
-        {{ "Cancel", 0 }, { "Delete", 1 }},
+        { { "Cancel", 0 }, { "Delete", 1 } },
         [safe](int result)
         {
             if (safe == nullptr || result != 1) return;
@@ -338,72 +577,70 @@ void SettingsPanel::confirmContributionDelete()
                 dialogs::showAlert(*safe, ok ? "Data deleted" : "Could not delete",
                     ok ? "The batches are gone and a new id was issued. Contribution is off."
                        : "Nothing was changed: " + (error.isNotEmpty() ? error : juce::String("no response")),
-                    {{ "OK", 1 }}, {});
+                    { { "OK", 1 } }, {});
             };
             if (safe->onContributionDelete) safe->onContributionDelete(finish);
         });
 }
 
-void SettingsPanel::resized()
+void SettingsPanel::layoutGeneralPage(juce::Rectangle<int> area)
 {
     sectionRules.clear();
-    auto bounds = getLocalBounds().reduced(24,16);
-
-    struct LayoutRow
+    const int width = juce::jmax(320, area.getWidth() - 6);
+    Rows rows;
+    auto add = [&rows](int height, int gap, std::function<void(juce::Rectangle<int>)> place)
     {
-        int height = 0, gap = 0;
-        bool stretch = false;
-        std::function<void(juce::Rectangle<int>)> place;
+        rows.push_back({ height, gap, std::move(place) });
     };
-    std::vector<LayoutRow> rows;
-    constexpr int labelColumn = 140;
-
-    auto add = [&rows](int height, int gap, bool stretch, std::function<void(juce::Rectangle<int>)> place)
+    auto section = [this, &add, &rows](juce::Label& label, int gapBefore)
     {
-        rows.push_back({ height, gap, stretch, std::move(place) });
-    };
-    auto section = [this, &add](juce::Label& label, int gapBefore)
-    {
-        add(14, gapBefore, true, [this, &label](juce::Rectangle<int> area)
+        const int index = (int) rows.size();
+        add(16, gapBefore, [this, &label, index](juce::Rectangle<int> row)
         {
-            label.setBounds(area);
+            label.setBounds(row);
             const auto textWidth = juce::GlyphArrangement::getStringWidthInt(label.getFont(), label.getText());
-            const auto lineX = area.getX() + textWidth + 12;
-            if (lineX < area.getRight())
-                sectionRules.emplace_back((float) lineX, (float) area.getCentreY(),
-                                          (float) (area.getRight() - lineX), 1.0f);
+            const auto lineX = row.getX() + textWidth + 12;
+            if (lineX < row.getRight())
+                sectionRules.emplace_back((float) lineX, (float) row.getCentreY(),
+                                          (float) (row.getRight() - lineX), 1.0f);
+            juce::ignoreUnused(index);
         });
     };
-    auto row = [&add, labelColumn](juce::Label& label, juce::Component& control, int gapBefore)
+    auto row = [&add](juce::Label& label, juce::Component& control, int gapBefore)
     {
-        add(28, gapBefore, false, [&label, &control, labelColumn](juce::Rectangle<int> area)
+        add(studio::controlHeight, gapBefore, [&label, &control](juce::Rectangle<int> area)
         {
             label.setBounds(area.removeFromLeft(labelColumn));
-            control.setBounds(area);
+            control.setBounds(area.removeFromLeft(juce::jmin(220, area.getWidth())));
+        });
+    };
+    auto note = [&add](juce::Label& label, int height, int gapBefore)
+    {
+        add(height, gapBefore, [&label](juce::Rectangle<int> area)
+        {
+            label.setBounds(area.withTrimmedLeft(labelColumn));
         });
     };
 
-    add(24, 0, false, [this](juce::Rectangle<int> area) { title.setBounds(area); });
-    section(appearance, 12);
-    row(themeLabel, themeBox, 4);
-    if (scaleLabel.isVisible())
-        row(scaleLabel, scaleBox, 4);
-    section(languageHeading, 14);
-    row(languageLabel, languageBox, 4);
-    add(30, 6, false, [this](juce::Rectangle<int> area) { languageNote.setBounds(area); });
+    section(appearance, 0);
+    row(themeLabel, themeBox, studio::spacingTight);
+    if (scaleLabel.isVisible()) row(scaleLabel, scaleBox, studio::spacingTight);
+    section(languageHeading, studio::spacingSection);
+    row(languageLabel, languageBox, studio::spacingTight);
+    note(languageNote, 34, 6);
 
     if (libraryHeading.isVisible())
     {
-        section(libraryHeading, 14);
-        add(30, 4, false, [this](juce::Rectangle<int> area)
+        section(libraryHeading, studio::spacingSection);
+        add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)
         {
-            databaseKey.setBounds(area.removeFromLeft(140));
+            databaseKey.setBounds(area.removeFromLeft(labelColumn));
             databaseFieldBounds = area;
-            databaseLabel.setBounds(area.reduced(0, 4));
+            databaseLabel.setBounds(area.reduced(0, 3));
         });
-        add(30, 6, false, [this](juce::Rectangle<int> area)
+        add(studio::controlHeight, 6, [this](juce::Rectangle<int> area)
         {
-            auto right = area.withTrimmedLeft(140);
+            auto right = area.withTrimmedLeft(labelColumn);
             const auto width = (right.getWidth() - 16) / 3;
             moveDatabase.setBounds(right.removeFromLeft(width));
             right.removeFromLeft(8);
@@ -411,43 +648,69 @@ void SettingsPanel::resized()
             right.removeFromLeft(8);
             relocateDatabase.setBounds(right);
         });
-        add(30, 4, false, [this](juce::Rectangle<int> area)
+        add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)
         {
-            backupDatabase.setBounds(area.withTrimmedLeft(140).removeFromLeft(180));
+            backupDatabase.setBounds(area.withTrimmedLeft(labelColumn).removeFromLeft(180));
         });
-        add(32, 6, false, [this](juce::Rectangle<int> area) { libraryNote.setBounds(area.withTrimmedLeft(140)); });
-        add(24, 4, false, [this](juce::Rectangle<int> area) { databaseStatus.setBounds(area.withTrimmedLeft(140)); });
-        add(26, 4, false, [this](juce::Rectangle<int> area) { contributeDataToggle.setBounds(area.withTrimmedLeft(140)); });
-        add(34, 2, false, [this](juce::Rectangle<int> area) { contributionNote.setBounds(area.withTrimmedLeft(140)); });
-        add(28, 6, false, [this](juce::Rectangle<int> area)
+        note(libraryNote, 36, 6);
+        note(databaseStatus, 22, 2);
+    }
+
+    section(editingHeading, studio::spacingSection);
+    add(26, studio::spacingTight, [this](juce::Rectangle<int> area)
+    { alwaysOverwriteToggle.setBounds(area.withTrimmedLeft(labelColumn)); });
+    note(alwaysOverwriteNote, 38, 2);
+
+    section(workspaceHeading, studio::spacingSection);
+    add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)
+    { resetLayout.setBounds(area.withTrimmedLeft(labelColumn).removeFromLeft(200)); });
+    note(workspaceNote, 36, 2);
+
+    if (contributeDataToggle.isVisible())
+    {
+        add(26, studio::spacingSection, [this](juce::Rectangle<int> area)
+        { contributeDataToggle.setBounds(area.withTrimmedLeft(labelColumn)); });
+        note(contributionNote, 34, 4);
+        add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)
         {
-            auto right = area.withTrimmedLeft(140);
+            auto right = area.withTrimmedLeft(labelColumn);
             const auto width = (right.getWidth() - 8) / 2;
             contributionPreview.setBounds(right.removeFromLeft(width));
             right.removeFromLeft(8);
             contributionDelete.setBounds(right);
         });
     }
+    add(studio::spacingWide, 0, [](juce::Rectangle<int>) {});
 
-    if (editingHeading.isVisible())
-    {
-        section(editingHeading, 14);
-        add(26, 4, false, [this](juce::Rectangle<int> area)
-        { alwaysOverwriteToggle.setBounds(area.withTrimmedLeft(140)); });
-        add(34, 2, false, [this](juce::Rectangle<int> area)
-        { alwaysOverwriteNote.setBounds(area.withTrimmedLeft(140)); });
-    }
+    placeRows(generalContent, width, rows, area.getHeight(), &sectionRules);
+}
 
-    if (audioHeading.isVisible())
+void SettingsPanel::layoutAboutPage(juce::Rectangle<int> area)
+{
+    aboutRules.clear();
+    const int width = juce::jmax(320, area.getWidth() - 6);
+    Rows rows;
+    auto add = [&rows](int height, int gap, std::function<void(juce::Rectangle<int>)> place)
     {
-        section(audioHeading, 14);
-        add(30, 4, false, [this](juce::Rectangle<int> area) { audio.setBounds(area.withTrimmedLeft(140)); });
-    }
+        rows.push_back({ height, gap, std::move(place) });
+    };
+    auto section = [this, &add, &rows](juce::Label& label, int gapBefore)
+    {
+        add(16, gapBefore, [this, &label](juce::Rectangle<int> row)
+        {
+            label.setBounds(row);
+            const auto textWidth = juce::GlyphArrangement::getStringWidthInt(label.getFont(), label.getText());
+            const auto lineX = row.getX() + textWidth + 12;
+            if (lineX < row.getRight())
+                aboutRules.emplace_back((float) lineX, (float) row.getCentreY(),
+                                        (float) (row.getRight() - lineX), 1.0f);
+        });
+    };
 
-    section(reportHeading, 14);
-    add(28, 4, false, [this](juce::Rectangle<int> area)
+    section(reportHeading, 0);
+    add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)
     {
-        auto right = area.withTrimmedLeft(140);
+        auto right = area.withTrimmedLeft(labelColumn);
         const auto width = (right.getWidth() - 24) / 4;
         reportBug.setBounds(right.removeFromLeft(width));
         right.removeFromLeft(8);
@@ -457,44 +720,91 @@ void SettingsPanel::resized()
         right.removeFromLeft(8);
         reportDiscuss.setBounds(right);
     });
-    add(40, 6, false, [this](juce::Rectangle<int> area) { reportNote.setBounds(area.withTrimmedLeft(140)); });
+    add(42, 6, [this](juce::Rectangle<int> area) { reportNote.setBounds(area.withTrimmedLeft(labelColumn)); });
 
-    section(aboutHeading, 14);
-    add(24, 2, false, [this](juce::Rectangle<int> area) { productLabel.setBounds(area); });
-    add(18, 0, false, [this](juce::Rectangle<int> area) { authorLabel.setBounds(area); });
-    add(60, 2, false, [this](juce::Rectangle<int> area)
+    section(aboutHeading, studio::spacingSection);
+    add(26, 2, [this](juce::Rectangle<int> area) { productLabel.setBounds(area); });
+    add(18, 0, [this](juce::Rectangle<int> area) { authorLabel.setBounds(area); });
+    add(64, 4, [this](juce::Rectangle<int> area)
     {
         auto r = area;
         for (auto* link : { &gumroad, &bandcamp, &naukograd })
             link->setBounds(r.removeFromTop(20));
     });
-    add(24, 6, false, [this](juce::Rectangle<int> area) { supportLabel.setBounds(area); });
-    add(20, 2, false, [this](juce::Rectangle<int> area)
+    add(24, 6, [this](juce::Rectangle<int> area) { supportLabel.setBounds(area); });
+    add(22, 2, [this](juce::Rectangle<int> area)
     {
         auto left = area.removeFromLeft(area.getWidth() / 2);
         kofi.setBounds(left);
         boosty.setBounds(area);
     });
-    add(86, 10, false, [this](juce::Rectangle<int> area) { creditsLabel.setBounds(area); });
-    add(18, 2, false, [this](juce::Rectangle<int> area) { prototypesLabel.setBounds(area); });
+    add(96, 10, [this](juce::Rectangle<int> area) { creditsLabel.setBounds(area); });
+    add(20, 2, [this](juce::Rectangle<int> area) { prototypesLabel.setBounds(area); });
+    add(studio::spacingSection, 0, [](juce::Rectangle<int>) {});
+
+    placeRows(aboutContent, width, rows, area.getHeight(), &aboutRules);
+}
+
+void SettingsPanel::resized()
+{
+    auto bounds = getLocalBounds();
+    auto navArea = bounds.removeFromLeft(studio::navigationWidth).reduced(studio::spacing, studio::spacingWide);
+    title.setBounds(navArea.removeFromTop(34));
+    navArea.removeFromTop(studio::spacingWide);
+    for (auto& button : nav)
+    {
+        if (!button.isVisible()) continue;
+        button.setBounds(navArea.removeFromTop(34));
+        navArea.removeFromTop(2);
+    }
     if (close.isVisible())
-        add(30, 12, false, [this](juce::Rectangle<int> area) { close.setBounds(area.removeFromRight(110)); });
-
-    int fixedHeight = 0, stretchCount = 0;
-    for (const auto& r : rows)
     {
-        fixedHeight += r.height + r.gap;
-        if (r.stretch) ++stretchCount;
-    }
-    const int extra = stretchCount > 0 ? juce::jmax(0, (bounds.getHeight() - fixedHeight) / stretchCount) : 0;
-
-    int y = bounds.getY();
-    for (const auto& r : rows)
-    {
-        y += r.gap + (r.stretch ? extra : 0);
-        r.place({ bounds.getX(), y, bounds.getWidth(), r.height });
-        y += r.height;
+        close.setBounds(navArea.removeFromBottom(studio::controlHeight));
+        navArea.removeFromBottom(studio::spacingTight);
     }
 
+    auto content = bounds.reduced(studio::spacingSection, studio::spacingWide);
+    const int contentWidth = content.getWidth();
+    generalViewport.setBounds(content);
+    aboutViewport.setBounds(content);
+    audioContent.setBounds(content);
+    pluginsContent.setBounds(content);
+    if (hotkeys != nullptr) hotkeys->setBounds(content);
+
+    layoutGeneralPage({ 0, 0, contentWidth - (generalContent.getHeight() > content.getHeight() ? 12 : 0),
+                        content.getHeight() });
+    layoutAboutPage({ 0, 0, contentWidth - (aboutContent.getHeight() > content.getHeight() ? 12 : 0),
+                      content.getHeight() });
+
+    // The Audio page hosts the stock selector (or the fallback button) inside the page body.
+    auto audioBody = audioContent.getLocalBounds();
+    audioHeading.setBounds(audioBody.removeFromTop(16));
+    audioBody.removeFromTop(studio::spacingWide);
+    if (audioPage != nullptr)
+    {
+        audioPage->setBounds(audioBody);
+        audioNote.setVisible(false);
+    }
+    else
+    {
+        audioNote.setBounds(audioBody.removeFromTop(40));
+        audioBody.removeFromTop(studio::spacing);
+        audio.setBounds(audioBody.removeFromTop(studio::controlHeight).removeFromLeft(200));
+    }
+
+    auto pluginsBody = pluginsContent.getLocalBounds();
+    pluginsHeading.setBounds(pluginsBody.removeFromTop(16));
+    pluginsBody.removeFromTop(studio::spacingWide);
+    pluginsNote.setBounds(pluginsBody.removeFromTop(80));
+}
+
+bool SettingsPanel::keyPressed(const juce::KeyPress& key)
+{
+    if (key.getKeyCode() == juce::KeyPress::escapeKey && onClose != nullptr)
+    {
+        onClose();
+        return true;
+    }
+    return false;
 }
 } // namespace sonicator

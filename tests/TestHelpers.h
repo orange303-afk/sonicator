@@ -1,7 +1,17 @@
 #pragma once
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_gui_basics/juce_gui_basics.h>
 #include <cmath>
 #include <vector>
+// Recursive component-ID lookup: JUCE's own findChildWithID only searches direct children.
+inline juce::Component* findDescendantWithID(juce::Component& root, const juce::String& id)
+{
+    if (root.getComponentID() == id) return &root;
+    for (int i = 0; i < root.getNumChildComponents(); ++i)
+        if (auto* found = findDescendantWithID(*root.getChildComponent(i), id)) return found;
+    return nullptr;
+}
+
 struct TestDirectory
 {
     juce::File dir = juce::File::getSpecialLocation(juce::File::tempDirectory)

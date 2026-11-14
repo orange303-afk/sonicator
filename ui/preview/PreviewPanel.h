@@ -105,6 +105,12 @@ public:
     bool sourceIsEditable() const;
     using EditCommand = EditAction;
     void applyEditCommand(EditCommand);
+    // Transport entry points for the command registry. The buttons call the same code.
+    void playPause() { togglePlayback(); }
+    void stopPlayback() { engine.stop(); }
+    void seekBy(double seconds) { engine.seek(engine.position() + seconds); }
+    // Set by MainComponent: the window router runs a bound key before the panel's own handling.
+    std::function<bool(const juce::KeyPress&)> onCommandKey;
     void saveEdits(std::function<void(bool)> done = {});
     // Calls `done(true)` now when nothing is unsaved; otherwise asks Save/Discard/Cancel and calls
     // `done(true)` only after a successful save or an explicit discard, `done(false)` on Cancel.

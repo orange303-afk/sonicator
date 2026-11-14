@@ -48,7 +48,7 @@ struct Fixture
             published = profile;
             return true;
         };
-        panel.onConfirmResetAll = [] { return true; };
+        panel.onConfirmResetAll = [](std::function<void(bool)> done) { done(true); };
         panel.setSize(520, 460);
     }
 };
@@ -183,11 +183,11 @@ TEST_CASE("Reset all returns every command to its default after confirmation", "
     f.panel.captureKey(key('k', juce::ModifierKeys::altModifier));
     f.panel.applyCapture();
     bool asked = false;
-    f.panel.onConfirmResetAll = [&asked] { asked = true; return false; };
+    f.panel.onConfirmResetAll = [&asked](std::function<void(bool)> done) { asked = true; done(false); };
     f.panel.resetAll();
     REQUIRE(asked);
     REQUIRE(f.published.hasOverride("waveform.normalize"));
-    f.panel.onConfirmResetAll = [] { return true; };
+    f.panel.onConfirmResetAll = [](std::function<void(bool)> done) { done(true); };
     f.panel.resetAll();
     REQUIRE(f.published.overrides.empty());
 }
