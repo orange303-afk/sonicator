@@ -1,5 +1,6 @@
 #pragma once
 #include "ui/shell/Theme.h"
+#include "ui/analysis/AnalysisCard.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/library/SearchField.h"
 #include "ui/library/FolderTree.h"
@@ -145,7 +146,8 @@ private:
     studio::IconButton previousPage { ActionIcon::chevronLeft, "<" };
     studio::IconButton nextPage { ActionIcon::chevronRight, ">" };
     juce::ComboBox pageSizeBox;
-    juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel, selectionStatus;
+    juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, tagsLabel, selectionStatus;
+    AnalysisCard analysisCard;
     ActivityDot activityDot;
     TagStrip selectedTags;
     juce::Viewport analysisViewport;

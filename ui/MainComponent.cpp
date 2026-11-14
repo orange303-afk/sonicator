@@ -547,7 +547,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
     for (auto* c : std::array<juce::Component*,33>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
          &pause,&cancel,&settings,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
-         &libraryHeading,&rootsLabel,&status,&activityDot,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
+         &libraryHeading,&rootsLabel,&status,&activityDot,&countLabel,&analysisHeading,&analysisCard,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel,&selectionStatus})
         if (c != nullptr) addAndMakeVisible(c);
     heading.setText("SONICATOR",juce::dontSendNotification);
@@ -563,9 +563,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     rootsLabel.setColour(juce::Label::textColourId,theme::muted); rootsLabel.setFont(juce::FontOptions(12));
     analysisHeading.setText("Sample Analysis",juce::dontSendNotification);
     analysisHeading.setFont(juce::FontOptions(17,juce::Font::bold));
-    analysisDetails.setText("Select a sample to inspect its measured audio features.",juce::dontSendNotification);
-    analysisDetails.setJustificationType(juce::Justification::topLeft); analysisDetails.setFont(juce::FontOptions(13));
-    analysisViewport.setViewedComponent(&analysisDetails,false);
+    analysisCard.showPlaceholder("Select a sample to inspect its measured audio features.");
+    analysisViewport.setViewedComponent(&analysisCard,false);
     analysisViewport.setScrollBarsShown(true,false);
     addChildComponent(preview.containerSourceList());
     preview.onSourcesChanged = [this] { resized(); };
@@ -600,7 +599,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     search.setComponentID("search");
     selectedTags.setComponentID("selectedTags");
     preview.setComponentID("preview");
-    library.setComponentID("library"); status.setComponentID("importStatus"); analysisDetails.setComponentID("analysisDetails");
+    library.setComponentID("library"); status.setComponentID("importStatus"); analysisCard.setComponentID("analysisDetails");
     selectionStatus.setComponentID("selectionStatus");
     selectionStatus.setFont(juce::FontOptions(11));
     selectionStatus.setColour(juce::Label::textColourId,theme::muted);
@@ -1900,10 +1899,13 @@ void MainComponent::loadSelectedSample(const SampleRecord& r)
         selectedTags.setTags(unionTags);
         editTags.setEnabled(false); // editing a batch would need its own menu; display only
         resized();
-        analysisDetails.setText("Multiple samples selected (" + juce::String(ids.size())
-            + "). Tags on the selection: " + juce::String(unionTags.size()) + " unique."
-            + (unionTags.empty() ? "" : " Alt+click a tag to remove it from every selected file."),
-            juce::dontSendNotification);
+        AnalysisContent card;
+        card.title = juce::String(ids.size()) + " samples selected";
+        card.meta = juce::String(unionTags.size()) + " unique tags on the selection";
+        card.notes = { unionTags.empty()
+                           ? juce::String("Tags apply to the whole selection.")
+                           : juce::String("Alt+click a tag to remove it from every selected file.") };
+        analysisCard.setContent(card);
         selectionStatus.setText(juce::String(selectedRows) + " samples selected",
                                 juce::dontSendNotification);
         selectionStatus.setTooltip({});
@@ -1914,18 +1916,25 @@ void MainComponent::loadSelectedSample(const SampleRecord& r)
     sessionSamplePath = r.filePath;
     markSessionStateDirty();
     auto dbfs = [](double v) { return v > 0 ? juce::String(juce::Decibels::gainToDecibels(v),1) + " dBFS" : "-inf dBFS"; };
-    juce::String details = r.fileName + "\n\n" + r.format + "  /  " + juce::String(r.numChannels) + " channels\n\n"
-        + "Length      " + juce::String(r.duration,3) + " s\n\n"
-        + "Rate          " + juce::String(r.sampleRate/1000,1) + " kHz\n\n"
-        + "Bit depth   " + (r.bitsPerSample > 0 ? juce::String(r.bitsPerSample) : juce::String("N/A")) + "\n\n"
-        + "Peak         " + dbfs(r.peakLevel) + "\n\nRMS         " + dbfs(r.rmsLevel) + "\n\n"
-        + "Centroid   " + juce::String(r.spectralCentroid,0) + " Hz\n\n"
-        + "Rolloff      " + juce::String(r.spectralRolloff,0) + " Hz\n\n"
-        + "Flatness   " + juce::String(r.spectralFlatness,4);
+    AnalysisContent card;
+    card.title = r.fileName;
+    card.meta = r.format + " · " + juce::String(r.numChannels) + " ch · "
+        + (r.sampleRate > 0 ? juce::String(r.sampleRate / 1000, 1) + " kHz" : juce::String("unknown rate"))
+        + " · " + (r.bitsPerSample > 0 ? juce::String(r.bitsPerSample) + " bit" : juce::String("unknown depth"));
+    card.stats.push_back({ juce::String(r.duration,3) + " s", "Length" });
+    card.stats.push_back({ r.sampleRate > 0 ? juce::String(r.sampleRate/1000,1) + " kHz" : juce::String("N/A"), "Rate" });
+    card.stats.push_back({ r.bitsPerSample > 0 ? juce::String(r.bitsPerSample) : juce::String("N/A"), "Bit depth" });
+    card.stats.push_back({ dbfs(r.peakLevel), "Peak" });
+    card.stats.push_back({ dbfs(r.rmsLevel), "RMS" });
+    card.stats.push_back({ juce::String(r.spectralCentroid,0) + " Hz", "Centroid" });
+    card.stats.push_back({ juce::String(r.spectralRolloff,0) + " Hz", "Rolloff" });
+    card.stats.push_back({ juce::String(r.spectralFlatness,4), "Flatness" });
     if (r.isDiscEntry())
-        details += "\n\nInside image  " + juce::File(r.containerPath).getFileName()
-            + "\nEntry         " + r.discPath
-            + "\n\nDecoded on demand; the image is never extracted.";
+    {
+        card.notes.push_back("Inside image " + juce::File(r.containerPath).getFileName());
+        card.notes.push_back("Entry " + r.discPath);
+        card.notes.push_back("Decoded on demand; the image is never extracted.");
+    }
     if (readRepo != nullptr)
     {
         // Where a genre came from decides how much a person should trust it, so the card names
@@ -1938,26 +1947,31 @@ void MainComponent::loadSelectedSample(const SampleRecord& r)
             const auto source = d.genreOverride == OverrideState::Value ? juce::String("manual")
                 : d.genreState == SmartState::Ambiguous ? juce::String("ambiguous")
                 : juce::String("automatic");
-            details += "\n\nGenre        " + d.genre + "  (" + source + ")";
+            card.stats.push_back({ d.genre, "Genre · " + source });
         }
         else if (found != displays.end() && found->second.genreOverride == OverrideState::Unknown)
-            details += "\n\nGenre        edited unknown";
+            card.stats.push_back({ "unknown", "Genre · manual" });
     }
-    if (r.missing) details += "\n\nFile is missing";
-    if (r.error.isNotEmpty()) details += "\n\n" + r.error;
+    if (r.missing) card.notes.push_back("File is missing");
+    if (r.error.isNotEmpty()) card.notes.push_back(r.error);
     if (readRepo != nullptr)
     {
         if (const auto duplicate = readRepo->duplicateInfo(r.id))
         {
-            details += "\n\nDuplicates   " + juce::String(duplicate->groupSize) + " copies";
+            card.stats.push_back({ juce::String::charToString(0x00d7) + juce::String(duplicate->groupSize),
+                                   "Duplicates" });
             if (duplicate->representativeId != r.id)
-                details += "\nShown copy is not the catalog representative.\nRepresentative: " + duplicate->representativePath;
+            {
+                card.notes.push_back("Shown copy is not the catalog representative.");
+                card.notes.push_back("Representative: " + duplicate->representativePath);
+            }
             for (const auto& copy : readRepo->duplicateMembers(r.id))
-                if (copy.id != r.id) details += "\n\n" + copy.filePath + (copy.missing ? "  (missing)" : "");
+                if (copy.id != r.id)
+                    card.notes.push_back(copy.filePath + (copy.missing ? juce::String("  (missing)") : juce::String()));
         }
     }
-    analysisDetails.setText(details,juce::dontSendNotification);
-    analysisDetails.setTooltip(r.filePath);
+    card.tooltip = r.filePath;
+    analysisCard.setContent(card);
     updateSelectionStatus(r);
     updateSelectedTags();
     if (r.isDiscEntry())
@@ -1998,9 +2012,8 @@ void MainComponent::clearSampleSelectionNow()
     markSessionStateDirty();
     preview.clearSource();
     updateSelectedTags();
-    analysisDetails.setText("Select a sample to inspect its measured audio features.",
-                            juce::dontSendNotification);
-    analysisDetails.setTooltip({});
+    analysisCard.showPlaceholder("Select a sample to inspect its measured audio features.");
+    analysisCard.setTooltip({});
     selectionStatus.setText("No sample selected", juce::dontSendNotification);
     selectionStatus.setTooltip({});
 }
@@ -4950,7 +4963,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     filter.matchAnyTag = false; filter.starredOnly = false;
     filter.hideDuplicates = false; filter.hideEmpty = appSettings.hideEmpty; filter.duplicateHash.clear();
     search.clear(); pendingSearch.clear();
-    analysisDetails.setText("Select a sample to inspect its measured audio features.",juce::dontSendNotification);
+    analysisCard.showPlaceholder("Select a sample to inspect its measured audio features.");
     selectedTags.setTags({});
     writeRepo->refreshDuplicates();
     folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored);
@@ -5074,7 +5087,8 @@ void MainComponent::resized()
     }
     stageLabel.setBounds(analysis.removeFromBottom(metadataHeight));
     analysisViewport.setBounds(analysis);
-    analysisDetails.setBounds(0,0,juce::jmax(1,analysis.getWidth()-14),550);
+    const int cardWidth = juce::jmax(1, analysis.getWidth() - 14);
+    analysisCard.setBounds(0, 0, cardWidth, analysisCard.preferredHeight(cardWidth));
     auto list = r.reduced(14,14); auto bar = list.removeFromTop(32);
     pageSizeBox.setBounds(bar.removeFromRight(92).withSizeKeepingCentre(92, studio::controlHeight));
     bar.removeFromRight(studio::spacingTight);

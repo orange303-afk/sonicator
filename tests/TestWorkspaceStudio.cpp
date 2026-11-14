@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "ui/MainComponent.h"
+#include "ui/analysis/AnalysisCard.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/library/SearchField.h"
 #include "core/database/SampleRepository.h"
@@ -94,4 +95,79 @@ TEST_CASE("A selected library row carries the accent stripe", "[ui][studio]")
     REQUIRE(image.getPixelAt(table->getX(), y) == theme::accent);
     REQUIRE(image.getPixelAt(table->getX() + 1, y) == theme::accent);
     REQUIRE(image.getPixelAt(table->getX() + 20, y) != theme::accent);
+}
+
+TEST_CASE("The analysis card shows one tile per statistic", "[ui][studio]")
+{
+    AnalysisCard card;
+    AnalysisContent content;
+    content.title = "FINE_CRASH_01.wav";
+    content.meta = "WAV · 2 ch · 48 kHz";
+    content.stats = { { "2.184 s", "Length" }, { "48.0 kHz", "Rate" }, { "-0.3 dBFS", "Peak" } };
+    content.notes = { "Shown copy is not the catalog representative." };
+    card.setContent(content);
+    card.setSize(270, 400);
+    card.resized();
+    REQUIRE(card.content().stats.size() == 3);
+    REQUIRE(card.getNumChildComponents() == 6);   // title, meta, three tiles, one note
+    REQUIRE(AnalysisCard::columnsFor(270) == 2);
+    REQUIRE(AnalysisCard::columnsFor(220) == 1);
+    // Two columns are shorter than one, which is the whole point of the grid.
+    REQUIRE(card.preferredHeight(270) < card.preferredHeight(220));
+}
+
+TEST_CASE("The analysis card keeps every note the old label printed", "[ui][studio]")
+{
+    AnalysisCard card;
+    AnalysisContent content;
+    content.title = "x.wav";
+    content.notes = { "File is missing", "Inside image disc.iso" };
+    card.setContent(content);
+    card.setSize(270, 300);
+    card.resized();
+    REQUIRE(card.getNumChildComponents() == 3);   // title and both notes
+}
+
+TEST_CASE("Selecting a sample fills the analysis card and keeps its notes", "[ui][studio]")
+{
+    TestDirectory t;
+    const auto dbPath = t.dir.getChildFile("analysis.sqlite");
+    const auto good = t.wave("b_ok.wav", 440.0, 2);
+    const auto broken = t.dir.getChildFile("a_broken.wav");
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        repo.createTables();
+        auto ok = BasicAnalyzer().analyze(good);
+        ok.fileName = "b_ok.wav";
+        repo.upsert(ok);
+        auto bad = ok;
+        bad.filePath = broken.getFullPathName();
+        bad.fileName = "a_broken.wav";
+        bad.missing = true;
+        bad.error = "Not a supported format";
+        repo.upsert(bad);
+        repo.addRoot(t.dir.getFullPathName());
+    }
+    MainComponent app(dbPath, false, {}, t.dir.getChildFile("analysis-settings.json"));
+    app.setSize(1200, 800);
+    app.resized();
+    auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
+    REQUIRE(library != nullptr);
+    REQUIRE(library->getNumRows() == 2);
+    auto* card = dynamic_cast<AnalysisCard*>(findDescendantWithID(app, "analysisDetails"));
+    REQUIRE(card != nullptr);
+
+    library->selectRows({ 0 });
+    REQUIRE(card->content().title == "a_broken.wav");
+    REQUIRE(card->content().notes.size() >= 2);
+    juce::StringArray notes;
+    for (const auto& note : card->content().notes) notes.add(note);
+    REQUIRE(notes.contains("File is missing"));
+    REQUIRE(notes.contains("Not a supported format"));
+
+    library->selectRows({ 1 });
+    REQUIRE(card->content().title == "b_ok.wav");
+    REQUIRE(card->content().stats.size() >= 8);
+    REQUIRE(card->content().tooltip.endsWith("b_ok.wav"));
 }
