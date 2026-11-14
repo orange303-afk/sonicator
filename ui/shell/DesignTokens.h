@@ -26,6 +26,8 @@ inline constexpr int circleButtonSize = 36;
 inline constexpr int chipHeight = 30;
 inline constexpr int chipSmallHeight = 26;
 inline constexpr int chipRadius = 15;
+// A short label ("Tags") still has to read as a pill, not a dot.
+inline constexpr int chipMinWidth = 64;
 inline constexpr int headerHeight = 72;
 inline constexpr int brandingWidth = 298;
 inline constexpr int tableRowHeight = 36;

@@ -134,14 +134,16 @@ private:
     int totalCatalogCount = 0;
     int64_t selectedSampleId = 0;
     SearchField search;
-    juce::TextButton libraryMenu { "LIBRARY" };
+    studio::Chip libraryMenu { "LIBRARY" };
     juce::TextButton addFolder { "+ Add folder" }, rescan { "Rescan" }, reanalyze { "Reanalyze all" }, newFiles { "New files" }, smartButton { "Smart metadata" };
     juce::TextButton pause { "Pause" }, cancel { "Cancel" };
     studio::IconButton settings { ActionIcon::settings, "Settings" };
-    juce::TextButton tagFilter { "Tags" }, starredButton { "Starred" },
-                     clearFilters { "Clear filters" }, editTags { "Edit tags..." };
-    juce::ToggleButton hideEmpty { "Hide empty and unsupported" };
-    juce::TextButton previousPage { "<" }, nextPage { ">" };
+    studio::Chip tagFilter { "Tags" }, starredButton { "Starred" },
+                 clearFilters { "Clear filters" };
+    juce::TextButton editTags { "Edit tags..." };
+    studio::CheckChip hideEmpty { "Hide empty" };
+    studio::IconButton previousPage { ActionIcon::chevronLeft, "<" };
+    studio::IconButton nextPage { ActionIcon::chevronRight, ">" };
     juce::ComboBox pageSizeBox;
     juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel, selectionStatus;
     ActivityDot activityDot;
@@ -204,7 +206,7 @@ private:
     juce::String sessionSamplePath;
     bool sessionDirty = false, restoringSession = false, persistSessionState = false;
     juce::String pendingSearch;
-    juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds;
+    juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds, filterSeparatorBounds;
     // Effective split of the panel row and the preview band, rebuilt on every resize.
     PanelLayoutPreferences layoutPreferences;
     PanelLayoutBounds layoutBounds;

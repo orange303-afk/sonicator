@@ -910,8 +910,8 @@ TEST_CASE("Hide empty and unsupported hides incompatible assets and keeps their 
     auto* library = dynamic_cast<FileListPanel*>(app.findChildWithID("library"));
     auto* hide = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty"));
     REQUIRE(library != nullptr); REQUIRE(hide != nullptr);
-    REQUIRE(hide->getButtonText() == "Hide empty and unsupported");
-    REQUIRE(hide->getWidth() >= 170);
+    REQUIRE(hide->getButtonText() == "Hide empty");
+    REQUIRE(hide->getWidth() >= 100);
     REQUIRE(hide->getToggleState());
     REQUIRE(library->getNumRows() == 1);
     hide->setToggleState(false, juce::sendNotificationSync);

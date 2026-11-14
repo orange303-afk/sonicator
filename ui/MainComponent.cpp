@@ -789,6 +789,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     smartButton.setTooltip("Read Type / BPM / Key metadata for missing or changed files in the background");
     addAndMakeVisible(libraryMenu);
     libraryMenu.setComponentID("libraryMenu");
+    libraryMenu.setTrailingIcon(ActionIcon::chevronDown);
     libraryMenu.setWantsKeyboardFocus(false);
     libraryMenu.setMouseClickGrabsKeyboardFocus(false);
     for (auto* c : { &addFolder, &rescan, &newFiles, &reanalyze, &smartButton }) c->setVisible(false);
@@ -860,7 +861,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     filter.hideEmpty = appSettings.hideEmpty;
     filter.showIgnored = appSettings.showIgnored;
     hideEmpty.setToggleState(filter.hideEmpty,juce::dontSendNotification);
-    hideEmpty.setTooltip("Hide files quieter than -60 dBFS (peak below 0.001)");
+    hideEmpty.setTooltip("Hide empty and unsupported files: silence below -60 dBFS, or a format this build cannot read");
     hideEmpty.onClick = [this]
     {
         filter.hideEmpty = hideEmpty.getToggleState();
@@ -1603,6 +1604,8 @@ void MainComponent::updateTagControls()
     starredButton.setToggleState(filter.starredOnly,juce::dontSendNotification);
     hideEmpty.setToggleState(filter.hideEmpty,juce::dontSendNotification);
     clearFilters.setEnabled(filter.hasTextOrTagFilter());
+    // Chips measure their own text, and "Tags (2)" is wider than "Tags".
+    resized();
 }
 void MainComponent::updateSelectionStatus(const SampleRecord& r)
 {
@@ -4993,6 +4996,8 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillRoundedRectangle(sidebarBounds.toFloat(), 10.0f);
     g.fillRoundedRectangle(analysisBounds.toFloat(), 10.0f);
     g.setColour(theme::line); g.drawHorizontalLine(headerBounds.getBottom(),0,(float) getWidth());
+    if (! filterSeparatorBounds.isEmpty())
+        g.fillRect(filterSeparatorBounds);
     if (logoWordmark.isValid() && theme::isDark)
         g.drawImage(logoWordmark,
                     juce::Rectangle<float>((float) studio::spacingWide,
@@ -5071,15 +5076,42 @@ void MainComponent::resized()
     analysisViewport.setBounds(analysis);
     analysisDetails.setBounds(0,0,juce::jmax(1,analysis.getWidth()-14),550);
     auto list = r.reduced(14,14); auto bar = list.removeFromTop(32);
-    pageSizeBox.setBounds(bar.removeFromRight(92)); bar.removeFromRight(8);
-    nextPage.setBounds(bar.removeFromRight(30)); bar.removeFromRight(4);
-    previousPage.setBounds(bar.removeFromRight(30)); countLabel.setBounds(bar);
+    pageSizeBox.setBounds(bar.removeFromRight(92).withSizeKeepingCentre(92, studio::controlHeight));
+    bar.removeFromRight(studio::spacingTight);
+    nextPage.setBounds(bar.removeFromRight(studio::iconButtonSize));
+    bar.removeFromRight(studio::spacingUnit);
+    previousPage.setBounds(bar.removeFromRight(studio::iconButtonSize));
+    countLabel.setBounds(bar);
     list.removeFromTop(4);
-    auto filterBar = list.removeFromTop(30);
-    tagFilter.setBounds(filterBar.removeFromLeft(64)); filterBar.removeFromLeft(6);
-    starredButton.setBounds(filterBar.removeFromLeft(76)); filterBar.removeFromLeft(6);
-    hideEmpty.setBounds(filterBar.removeFromLeft(186)); filterBar.removeFromLeft(6);
-    clearFilters.setBounds(filterBar.removeFromLeft(92));
+    // Chips measure themselves from their text, so "Tags (2)" and the page count never clip.
+    auto filterBar = list.removeFromTop(studio::chipHeight);
+    auto chipWidth = [](const juce::Button& button, int extra)
+    {
+        return juce::jmax(studio::chipMinWidth,
+                          juce::GlyphArrangement::getStringWidthInt(studio::controlFont(),
+                                                                    button.getButtonText())
+                              + 2 * studio::spacing + extra);
+    };
+    auto placeChip = [&filterBar, &chipWidth](juce::Button& chip, int extra)
+    {
+        chip.setBounds(filterBar.removeFromLeft(chipWidth(chip, extra)));
+        filterBar.removeFromLeft(studio::spacingTight);
+    };
+    placeChip(tagFilter, 0);
+    placeChip(starredButton, 0);
+    placeChip(hideEmpty, 24);   // the tick box needs its own room inside the pill
+    filterSeparatorBounds = {};
+    // Clear filters is the first control to go: it is also in the LIBRARY menu. Hide it only when
+    // the measured row really cannot hold it, so a 880 px window keeps it.
+    const int clearNeeds = studio::spacingUnit + 1 + studio::spacingTight + chipWidth(clearFilters, 0);
+    clearFilters.setVisible(filterBar.getWidth() >= clearNeeds);
+    if (clearFilters.isVisible())
+    {
+        filterBar.removeFromLeft(studio::spacingUnit);
+        filterSeparatorBounds = filterBar.removeFromLeft(1).withSizeKeepingCentre(1, 20);
+        filterBar.removeFromLeft(1 + studio::spacingTight);
+        placeChip(clearFilters, 0);
+    }
     list.removeFromTop(8); library.setBounds(list);
     if (discBrowser != nullptr) discBrowser->setBounds(library.getBounds());
 }
