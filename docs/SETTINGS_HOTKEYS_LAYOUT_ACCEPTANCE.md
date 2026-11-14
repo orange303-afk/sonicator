@@ -14,10 +14,8 @@ Date: 2026-11-14. Branch: `stage-settings-hotkeys-layout` (based on `2730ae0`).
 - Three dividers resize Folders, Analysis and Preview. Sizes persist per profile (standalone and
   DAW plugin separately), survive window shrinking, and reset per panel or all at once.
 - Studio visual layer: spacing/typography tokens, a vector icon set, colour-id driven buttons and
-  left-aligned navigation. Applied to **Settings and Hotkeys only**. The workspace still uses the
-  previous styling: the icon set is not used by any button yet, and the library table, toolbar,
-  Analysis panel, preview transport and dialogs have not been restyled. Finishing that pass is a
-  separate stage.
+  left-aligned navigation. Applied to **Settings and Hotkeys only** in this stage. The workspace was
+  restyled by the following stage — see `docs/WORKSPACE_STUDIO_ACCEPTANCE.md`.
 
 ## Verification actually run
 

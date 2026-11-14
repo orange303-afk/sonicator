@@ -21,3 +21,4 @@ Always consult `~/Documents/orange303/Sonicator Features.md` when:
 - Genre column: implemented (schema 17); see `docs/GENRE.md`, spec `docs/superpowers/specs/2026-11-14-genre-column-design.md`.
 - Customizable keyboard shortcuts: implemented in `stage-settings-hotkeys-layout`; see `docs/COMMANDS.md`, `docs/SHORTCUTS.md`, spec `docs/superpowers/specs/2026-11-14-customizable-shortcuts-design.md`.
 - Settings navigation: implemented in `stage-settings-hotkeys-layout`; see `docs/SETTINGS_HOTKEYS_LAYOUT_ACCEPTANCE.md`, spec `docs/superpowers/specs/2026-11-14-settings-navigation-design.md`.
+- Workspace Studio styling (header, toolbar, table, Analysis, Preview, dialogs): implemented in `stage-workspace-studio`; see `docs/WORKSPACE_STUDIO_ACCEPTANCE.md`, spec `docs/superpowers/specs/2026-11-14-workspace-studio-design.md`, plan `docs/superpowers/plans/2026-11-14-workspace-studio.md`.
