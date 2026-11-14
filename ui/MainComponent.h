@@ -58,6 +58,9 @@ class MainComponent final : public juce::Component,
 {
 public:
     static juce::File defaultDatabaseFile();
+    // The settings file this window reads and writes. Exposed so tests can prove they never
+    // touch the owner's live preferences.
+    juce::File settingsFile() const;
     // hostEngine and embeddedUi are used by the DAW plugin: the processor owns the audio engine
     // (no device is opened) and dialogs render inside the editor instead of separate windows.
     explicit MainComponent(const juce::File& databaseFile = defaultDatabaseFile(),

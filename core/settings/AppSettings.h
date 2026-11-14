@@ -57,6 +57,12 @@ struct AppSettings
     static constexpr int currentContributionConsentVersion = 4;
     static juce::String defaultContributionEndpoint();
     static juce::File defaultSettingsFile();
+    // Tests point this at a temporary folder so a UI component that builds its own settings
+    // store can never read or overwrite the owner's live preferences. Empty in the application.
+    static void setTestSettingsDirectory(const juce::File&);
+    static juce::File testSettingsDirectory();
+    // The live settings file normally; a fresh file inside the test directory while it is set.
+    static juce::File nextUiSettingsFile();
     static juce::String themeToString(ThemeMode);
     static ThemeMode themeFromString(const juce::String&);
     static int clampScale(int);

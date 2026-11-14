@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/settings/AppSettings.h"
+#include "ui/MainComponent.h"
 #include "TestHelpers.h"
 using namespace sonicator;
 TEST_CASE("Hide empty defaults on and survives unrelated settings updates", "[settings][hide-empty]")
@@ -273,4 +274,20 @@ TEST_CASE("Always overwrite original files defaults off and round-trips", "[sett
     // A malformed value must not be read as "on": it would silently rewrite originals.
     REQUIRE(store.file().replaceWithText("{\"alwaysOverwriteOriginalFiles\":\"yes\"}"));
     REQUIRE_FALSE(store.load().alwaysOverwriteOriginalFiles);
+}
+
+TEST_CASE("UI components under tests use an isolated settings file", "[settings][isolation]")
+{
+    TestDirectory t;
+    const auto previous = AppSettings::testSettingsDirectory();
+    AppSettings::setTestSettingsDirectory(t.dir);
+    {
+        MainComponent app(t.dir.getChildFile("catalog.sqlite"), false);
+        REQUIRE(app.settingsFile().isAChildOf(t.dir));
+        REQUIRE(app.settingsFile() != AppSettings::defaultSettingsFile());
+        // The live path must never be reachable while tests run.
+        REQUIRE(app.settingsFile() != juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+            .getChildFile("Sonicator/settings.json"));
+    }
+    AppSettings::setTestSettingsDirectory(previous);
 }

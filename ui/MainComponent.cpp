@@ -239,10 +239,14 @@ juce::File MainComponent::defaultDatabaseFile()
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
         .getChildFile("Sonicator/sonicator.sqlite");
 }
+juce::File MainComponent::settingsFile() const
+{
+    return settingsStore.file();
+}
 MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppSettings initialSettings,
                              juce::File settingsFile,AudioEngine* hostEngine,bool embeddedUiMode)
     : dbPath(databaseFile), appSettings(std::move(initialSettings)),
-      settingsStore(settingsFile != juce::File() ? std::move(settingsFile) : AppSettings::defaultSettingsFile()),
+      settingsStore(settingsFile != juce::File() ? std::move(settingsFile) : AppSettings::nextUiSettingsFile()),
       ownedEngine(openDevice && hostEngine == nullptr),
       engine(hostEngine != nullptr ? *hostEngine : ownedEngine),
       embeddedUi(embeddedUiMode),

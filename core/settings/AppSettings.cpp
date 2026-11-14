@@ -1,10 +1,34 @@
 #include "AppSettings.h"
 #include <stdexcept>
 namespace sonicator {
+namespace
+{
+// One process-wide test folder, set once by the test runner. A component that asks for "the"
+// settings file is given a fresh child, never the live file.
+juce::File& testSettingsDirectoryStorage()
+{
+    static juce::File directory;
+    return directory;
+}
+}
 juce::File AppSettings::defaultSettingsFile()
 {
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
         .getChildFile("Sonicator/settings.json");
+}
+void AppSettings::setTestSettingsDirectory(const juce::File& directory)
+{
+    testSettingsDirectoryStorage() = directory;
+}
+juce::File AppSettings::testSettingsDirectory()
+{
+    return testSettingsDirectoryStorage();
+}
+juce::File AppSettings::nextUiSettingsFile()
+{
+    const auto directory = testSettingsDirectory();
+    if (directory == juce::File()) return defaultSettingsFile();
+    return directory.getNonexistentChildFile("settings", ".json");
 }
 juce::String AppSettings::defaultContributionEndpoint()
 {
