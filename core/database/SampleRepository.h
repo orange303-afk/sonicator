@@ -36,6 +36,10 @@ struct FolderRemoval
     int rowsRemoved = 0;
     bool wasRoot = false;
 };
+struct FolderGenreAssignment
+{
+    int total = 0, assigned = 0, conflicts = 0;
+};
 struct RelocationResult
 {
     int64_t movedFiles = 0, conflicts = 0;
@@ -206,6 +210,11 @@ public:
     void markSmartError(int64_t sampleId, const juce::String& code, const juce::String& message);
     std::optional<SmartFailure> smartFailure(int64_t sampleId) const;
     void setSmartOverride(int64_t sampleId, SmartField field, const SmartOverride&);
+    // One-time recursive manual assignment. Ignores table filters; excludes ignored paths but
+    // includes hidden stereo partners. A conflicting override blocks ALL writes unless confirmed.
+    // One transaction; safe to run on a worker. No audio files or other fields are changed.
+    FolderGenreAssignment setGenreInFolder(const juce::String& folder, const juce::String& genre,
+                                           bool replaceManual = false);
     void clearSmartOverride(int64_t sampleId, SmartField field);
     SmartOverrideMap smartOverrides(int64_t sampleId) const;
     std::vector<SmartExtraction> smartExtractions(int64_t sampleId) const;

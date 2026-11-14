@@ -2870,6 +2870,69 @@ void SampleRepository::setSmartOverride(int64_t sampleId, SmartField field, cons
         throw;
     }
 }
+FolderGenreAssignment SampleRepository::setGenreInFolder(const juce::String& folder,
+                                                        const juce::String& genre,
+                                                        bool replaceManual)
+{
+    FolderGenreAssignment outcome;
+    const auto name = genre.trim();
+    if (folder.trim().isEmpty() || name.isEmpty()) return outcome;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        std::vector<int64_t> changed;
+        {
+            auto [lower, upper] = folderRange(folder);
+            FilterSql parts;
+            parts.where += " AND samples.path>=? AND samples.path<?";
+            parts.params.emplace_back(lower); parts.params.emplace_back(upper);
+            appendIgnore(parts, ignoredPathsLocked());
+            // Unlike the table, this action includes both physical members of a stereo pair.
+            detail::Statement scope(db.handle,
+                ("SELECT samples.id,o.sample_id,o.cleared,o.not_applicable,o.text_value FROM samples"
+                 " LEFT JOIN smart_overrides o ON o.sample_id=samples.id AND o.field='genre'"
+                 + parts.where + " ORDER BY samples.id").toRawUTF8());
+            bindFilter(scope, parts);
+            while (scope.step())
+            {
+                ++outcome.total;
+                const bool manual = scope.integer(1) != 0;
+                const bool same = manual && scope.integer(2) == 0 && scope.integer(3) == 0
+                    && scope.text(4) == name;
+                if (same) continue;
+                if (manual) ++outcome.conflicts;
+                changed.push_back(scope.integer(0));
+            }
+        }
+        if (outcome.conflicts == 0 || replaceManual)
+        {
+            detail::Statement insert(db.handle,
+                "INSERT OR REPLACE INTO smart_overrides"
+                "(sample_id,field,cleared,not_applicable,text_value,numeric_value,aux_value,aux_text,updated_at)"
+                " VALUES(?,'genre',0,0,?,0,0,'',?)");
+            const auto now = juce::Time::currentTimeMillis();
+            for (const auto id : changed)
+            {
+                insert.integer(1, id); insert.text(2, name); insert.integer(3, now);
+                insert.step(); insert.reset();
+                bool found = false;
+                auto result = resolvedFromStored(db.handle, id, &found);
+                ++result.revision;
+                result.analyzedAt = now;
+                writeResult(db.handle, id, result);
+                ++outcome.assigned;
+            }
+        }
+        detail::exec(db.handle, "COMMIT;");
+        return outcome;
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
 void SampleRepository::clearSmartOverride(int64_t sampleId, SmartField field)
 {
     std::lock_guard lock(db.mutex);

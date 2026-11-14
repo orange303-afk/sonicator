@@ -44,6 +44,26 @@ Right-click one or more rows → **Genre ▶**:
 
 Assigning a genre changes only the genre; tags, stars, Type, BPM and key are untouched.
 
+### Assigning a whole folder
+
+Right-click a folder in the library tree → **Set genre... ▶** → a genre name or
+**+ Custom genre...**. This assigns a manual Genre to catalogued files in the folder and
+**all its subfolders**, regardless of the table's search, tag/star filters, duplicate view or page.
+Ignored paths are excluded; both members of a merged mono stereo pair are included.
+
+If any file has a different manual genre (including explicit Unknown or not applicable), a
+**Replace manual genres?** dialog shows the folder, file count and conflict count. Nothing has
+been changed yet. **Replace** applies the genre to the whole scope; **Cancel** changes nothing.
+Files already carrying the same manual genre do not need replacement.
+
+The catalog operation runs in the background and is atomic: a database error rolls back the
+whole assignment. Original audio files are never edited. The action also works with catalogued
+folders that are temporarily offline; the virtual **All samples** node is not a target.
+
+This is a **one-time assignment**, not a folder inheritance rule: newly added files receive no
+manual genre from this action. Clear a file's override through its row menu to return to automatic
+inference. Automatic folder/name matching is unchanged.
+
 ## Querying
 
 - Column `GENRE`, sortable; empty values sort last.

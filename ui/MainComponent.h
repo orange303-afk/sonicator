@@ -26,6 +26,7 @@
 #include "ui/shell/PanelSplitter.h"
 #include "ui/settings/SettingsSection.h"
 #include <mutex>
+#include <future>
 namespace sonicator {
 class SplitDialog;
 class ExtractDialog;
@@ -171,6 +172,10 @@ private:
     std::unique_ptr<SplitService> splitter;
     std::unique_ptr<ExtractService> extractor;
     std::unique_ptr<NormalizeService> normalizer;
+    // Poll on the message thread; join before destroying/replacing the catalog repositories.
+    std::future<FolderGenreAssignment> folderGenreWork;
+    juce::String folderGenrePath, folderGenreName;
+    bool folderGenreReplacement = false;
     // Guards the contribution fields, which the scheduler reads off the message thread.
     juce::CriticalSection contributionLock;
     std::shared_ptr<contribute::Uploader> contributionUploader;
@@ -288,6 +293,8 @@ private:
     void showEditTagsMenu();
     void showSampleContextMenu(const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> screenPosition);
     void showFolderContextMenu(const juce::String& path, bool allSamples, juce::Point<int> screenPosition);
+    void setGenreForFolder(const juce::String& path, const juce::String& genre, bool replaceManual = false);
+    void finishFolderGenre();
     void showFavoriteContextMenu(const juce::String& path, juce::Point<int> screenPosition);
     void promptRenameFolder(const juce::String& path);
     void clearSampleSelection();

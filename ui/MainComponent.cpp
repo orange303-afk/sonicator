@@ -1070,6 +1070,7 @@ MainComponent::~MainComponent()
     removeKeyListener(&enterKeyListener);
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
     stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
+    if (folderGenreWork.valid()) folderGenreWork.wait();
     embeddedSettingsPanel = nullptr;
     embeddedSettingsHost.deleteAndZero();
     settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
@@ -1261,7 +1262,7 @@ bool MainComponent::removeFolderFromLibrary(const juce::String& path)
     if (readRepo == nullptr || writeRepo == nullptr) return false;
     const auto target = canonicalFolderPath(path);
     if (target.isEmpty()) return false;
-    if (isSplitRunning() || (indexer != nullptr && indexer->progress().running)
+    if (folderGenreWork.valid() || isSplitRunning() || (indexer != nullptr && indexer->progress().running)
         || (smart != nullptr && smart->progress().running)
         || (tagging != nullptr && tagging->progress().running)
         || (autoTag != nullptr && autoTag->progress().running))
@@ -3188,7 +3189,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
 #else
     const juce::String openLabel = "Open folder";
 #endif
-    juce::PopupMenu menu, tagMenu;
+    juce::PopupMenu menu, tagMenu, genreMenu;
     menu.setLookAndFeel(&look);
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagMenu.addItem(7100 + i, allTags[(size_t) i].name, true, false,
@@ -3230,6 +3231,13 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     menu.addItem(7004, "AutoTag folder...", autoTagIdle && catalogued > 0);
     menu.addSeparator();
     menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0 && ! splitBusy);
+    const auto genreNames = GenreContextExtractor::canonicalGenres();
+    for (int i = 0; i < genreNames.size(); ++i)
+        genreMenu.addItem(7050 + i, genreNames[i]);
+    genreMenu.addSeparator();
+    genreMenu.addItem(7090, "+ Custom genre...");
+    menu.addSubMenu("Set genre...", genreMenu,
+                   catalogued > 0 && writeRepo != nullptr && normalizeJobIdle() && ! isNormalizeRunning());
     menu.addItem(7005, "Reset tags...", catalogued > 0 && autoTagIdle && autoTagDialog == nullptr);
     const bool removable = available || readRepo->roots().contains(path);
     if (removable)
@@ -3242,9 +3250,15 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                            { screenPosition.x, screenPosition.y, 1, 1 })
                            .withMaximumNumColumns(1)
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
-        [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued, exactIgnore](int result)
+        [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued, exactIgnore,
+         catalogPath = dbPath](int result)
         {
-            if (safe == nullptr || result == 0) return;
+            if (safe == nullptr || result == 0 || safe->dbPath != catalogPath) return;
+            if (safe->folderGenreWork.valid() && result != 7001 && result != 7006 && result != 7011)
+            {
+                safe->status.setText("Wait for folder genre assignment to finish.", juce::dontSendNotification);
+                return;
+            }
             if (safe->isSplitRunning() && result != 7001 && result != 7006 && result != 7007
                 && result != 7011)
             {
@@ -3253,6 +3267,23 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
             }
             try
             {
+                if (result >= 7050 && result < 7090)
+                {
+                    const auto names = GenreContextExtractor::canonicalGenres();
+                    const int index = result - 7050;
+                    if (index < names.size()) safe->setGenreForFolder(folderPath, names[index]);
+                    return;
+                }
+                if (result == 7090)
+                {
+                    dialogs::showPrompt(*safe, "Set folder genre", "Genre name", {},
+                        [safe, folderPath, catalogPath](const juce::String& name)
+                        {
+                            if (safe != nullptr && safe->dbPath == catalogPath)
+                                safe->setGenreForFolder(folderPath, name);
+                        });
+                    return;
+                }
                 if (result == 7012)
                 {
                     const juce::File image(folderPath);
@@ -3386,6 +3417,71 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                 safe->status.setText(juce::String::fromUTF8(e.what()), juce::dontSendNotification);
             }
         });
+}
+void MainComponent::setGenreForFolder(const juce::String& path, const juce::String& genre,
+                                       bool replaceManual)
+{
+    const auto name = genre.trim();
+    if (path.isEmpty() || name.isEmpty() || writeRepo == nullptr) return;
+    if (! normalizeJobIdle() || isNormalizeRunning())
+    {
+        status.setText("Wait for the current catalog operation to finish before setting genre.",
+                       juce::dontSendNotification);
+        return;
+    }
+    try
+    {
+        folderGenrePath = path;
+        folderGenreName = name;
+        folderGenreReplacement = replaceManual;
+        folderGenreWork = std::async(std::launch::async,
+            [repo = writeRepo.get(), path, name, replaceManual]
+            {
+                return repo->setGenreInFolder(path, name, replaceManual);
+            });
+        status.setText("Setting genre to " + name + " in " + path, juce::dontSendNotification);
+    }
+    catch (const std::exception& e)
+    {
+        status.setText("Could not set folder genre: " + juce::String::fromUTF8(e.what()),
+                       juce::dontSendNotification);
+    }
+}
+void MainComponent::finishFolderGenre()
+{
+    if (! folderGenreWork.valid()
+        || folderGenreWork.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+    try
+    {
+        const auto result = folderGenreWork.get();
+        if (result.conflicts > 0 && ! folderGenreReplacement)
+        {
+            const auto path = folderGenrePath;
+            const auto name = folderGenreName;
+            dialogs::showAlert(*this, "Replace manual genres?",
+                "Folder:\n" + path + "\n\nIncludes every subfolder."
+                    + "\nCatalogued files: " + juce::String(result.total)
+                    + "\nDifferent manual genres (including Unknown): " + juce::String(result.conflicts)
+                    + "\n\nSet genre to " + name + " for these files?"
+                    + "\nNo changes have been made. Original audio files are not changed.",
+                { { "Replace", 1 }, { "Cancel", 0 } },
+                [safe = juce::Component::SafePointer<MainComponent>(this), catalogPath = dbPath, path, name](int choice)
+                {
+                    if (safe != nullptr && safe->dbPath == catalogPath && choice == 1)
+                        safe->setGenreForFolder(path, name, true);
+                }, juce::MessageBoxIconType::WarningIcon);
+            return;
+        }
+        reloadLibrary();
+        status.setText("Genre set to " + folderGenreName + " for " + juce::String(result.assigned)
+            + " sample(s) in folder and subfolders (" + juce::String(result.total) + " catalogued).",
+            juce::dontSendNotification);
+    }
+    catch (const std::exception& e)
+    {
+        status.setText("Could not set folder genre: " + juce::String::fromUTF8(e.what()),
+                       juce::dontSendNotification);
+    }
 }
 std::vector<SampleRecord> MainComponent::normalizeCandidates(
     const std::vector<SampleRecord>& selection)
@@ -3549,7 +3645,7 @@ bool MainComponent::analysisAllows(const juce::String& operation, bool pauseIsEn
 
 bool MainComponent::normalizeJobIdle() const
 {
-    return ! (indexer && indexer->progress().running)
+    return ! folderGenreWork.valid() && ! (indexer && indexer->progress().running)
         && ! (smart && smart->progress().running)
         && ! (tagging && tagging->progress().running)
         && ! (autoTag && autoTag->progress().running)
@@ -4287,10 +4383,11 @@ void MainComponent::timerCallback()
     const bool splitRunning = sp.running;
     const bool extractRunning = ep.running;
     const bool normalizeRunning = np.running;
-    const bool busy = p.running || smartRunning || taggingRunning || autoTagRunning
+    const bool genreRunning = folderGenreWork.valid();
+    const bool busy = genreRunning || p.running || smartRunning || taggingRunning || autoTagRunning
         || splitRunning || extractRunning || normalizeRunning;
     activityDot.setActive(busy);
-    pause.setEnabled(! splitRunning && (p.running || smartRunning)); cancel.setEnabled(busy);
+    pause.setEnabled(! splitRunning && (p.running || smartRunning)); cancel.setEnabled(busy && ! genreRunning);
     addFolder.setEnabled(! busy); rescan.setEnabled(! busy);
     reanalyze.setEnabled(! busy); newFiles.setEnabled(! busy);
     smartButton.setEnabled(! busy);
@@ -4487,6 +4584,7 @@ void MainComponent::timerCallback()
         pageOffset = 0;
         reloadLibrary();
     }
+    finishFolderGenre();
 }
 void MainComponent::lookAndFeelChanged()
 {
@@ -4925,6 +5023,11 @@ void MainComponent::showSettings()
 bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, juce::String& error)
 {
     error.clear();
+    if (folderGenreWork.valid())
+    {
+        error = "Wait for folder genre assignment to finish before switching catalogs.";
+        return false;
+    }
     if (indexer && indexer->progress().running)
     {
         error = "Stop indexing before switching catalogs.";
