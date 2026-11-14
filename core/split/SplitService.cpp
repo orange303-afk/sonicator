@@ -1,6 +1,7 @@
 #include "SplitService.h"
 #include "core/audio/SonicatorFormats.h"
 #include "core/export/AudioExporter.h"
+#include "core/edit/NormalizeService.h"
 #include "core/scanner/FileScanner.h"
 #include <algorithm>
 #include <cmath>
@@ -188,6 +189,21 @@ void SplitService::run()
                 break;
             }
             result.parts.push_back(exported.file);
+            if (splitOptions.normalize)
+            {
+                // The part is a fresh WAV that nothing else reads yet; normalizeFile replaces it
+                // atomically after verifying the result. A silent part stays as written.
+                const auto normalized = normalizeFile(exported.file, NormalizeOptions{ true },
+                                                      cancelCheck);
+                if (normalized.state == NormalizeFileState::failed
+                    || normalized.state == NormalizeFileState::cancelled)
+                {
+                    result.error = cancelled ? juce::String("Cancelled")
+                                             : "Normalize failed: " + normalized.error;
+                    failed = true;
+                    break;
+                }
+            }
         }
         if (failed)
         {

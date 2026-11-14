@@ -29,6 +29,7 @@ private:
     juce::Slider threshold, minSilence, minPart;
     juce::ToggleButton sameFolder { "Save next to each original file" };
     juce::ToggleButton moveToTrash { "Move originals to Trash after a successful split" };
+    juce::ToggleButton normalize { "Normalize each part to -0.1 dBFS" };
     juce::TextEditor folder;
     juce::TextButton browse { "Browse..." }, accept { "Split" }, cancel { "Cancel" }, ok { "OK" };
     juce::Label progressLabel, resultLabel;

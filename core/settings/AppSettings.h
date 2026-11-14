@@ -27,6 +27,7 @@ struct AppSettings
     int splitMinPartMs = 100;
     bool splitSameFolder = true;
     bool splitMoveToTrash = false;
+    bool splitNormalize = false;
     // Extract samples: one output folder shared by the batch, or each source's own folder.
     bool extractSameFolder = true;
     bool extractNormalize = false;

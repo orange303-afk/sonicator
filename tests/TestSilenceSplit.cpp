@@ -3,6 +3,7 @@
 #include "core/split/SilenceDetector.h"
 #include "core/split/SplitService.h"
 #include "TestHelpers.h"
+#include "core/edit/NormalizeService.h"
 using namespace sonicator;
 namespace
 {
@@ -219,4 +220,33 @@ TEST_CASE("Sidecar discovery finds Ableton and stem variants", "[split][sidecar]
     REQUIRE(paths.contains(able.getFullPathName()));
     REQUIRE(paths.contains(asd.getFullPathName()));
     REQUIRE(paths.contains(pk.getFullPathName()));
+}
+
+TEST_CASE("Split normalizes each part to -0.1 dBFS on request", "[split][service][normalize]")
+{
+    TestDirectory t;
+    auto source = segments(t.dir.getChildFile("quiet.wav"),
+        { { 44100, true }, { 44100, false }, { 44100, true } });
+    SplitService service;
+    SplitOptions options;
+    options.normalize = true;
+    REQUIRE(service.start({ source }, options));
+    REQUIRE(service.waitUntilFinished(20000));
+    const auto results = service.results();
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].state == SplitFileState::split);
+    REQUIRE(results[0].parts.size() == 2);
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    for (const auto& part : results[0].parts)
+    {
+        std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(part));
+        REQUIRE(reader != nullptr);
+        juce::AudioBuffer<float> buffer((int) reader->numChannels,
+                                        (int) reader->lengthInSamples);
+        REQUIRE(reader->read(&buffer, 0, (int) reader->lengthInSamples, 0, true, true));
+        INFO(part.getFileName());
+        REQUIRE(std::abs(buffer.getMagnitude(0, buffer.getNumSamples())
+                         - normalizePeakTarget) < 2.0e-4f);
+    }
 }

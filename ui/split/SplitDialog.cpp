@@ -15,7 +15,7 @@ SplitDialog::SplitDialog(std::vector<juce::File> inputSources, const AppSettings
                          std::function<bool(SplitOptions)> onAccept)
     : sources(std::move(inputSources)), acceptCallback(std::move(onAccept))
 {
-    setSize(560, 440);
+    setSize(560, 470);
     title.setText("Split " + juce::String((int) sources.size()) + " file(s) by silence",
                   juce::dontSendNotification);
     title.setFont(juce::FontOptions(15.0f, juce::Font::bold));
@@ -50,6 +50,8 @@ SplitDialog::SplitDialog(std::vector<juce::File> inputSources, const AppSettings
     sameFolder.setToggleState(settings.splitSameFolder, juce::dontSendNotification);
     moveToTrash.setComponentID("splitMoveToTrash");
     moveToTrash.setToggleState(settings.splitMoveToTrash, juce::dontSendNotification);
+    normalize.setComponentID("splitNormalize");
+    normalize.setToggleState(settings.splitNormalize, juce::dontSendNotification);
     folder.setText(sources.empty() ? juce::String()
                                    : sources.front().getParentDirectory().getFullPathName());
     folder.setMultiLine(false);
@@ -128,6 +130,7 @@ SplitDialog::SplitDialog(std::vector<juce::File> inputSources, const AppSettings
     addAndMakeVisible(minPartLabel); addAndMakeVisible(minPart);
     addAndMakeVisible(sameFolder);
     addAndMakeVisible(moveToTrash);
+    addAndMakeVisible(normalize);
     addAndMakeVisible(folder); addAndMakeVisible(browse);
     addAndMakeVisible(error);
     addAndMakeVisible(progressBar); addAndMakeVisible(progressLabel);
@@ -160,6 +163,8 @@ void SplitDialog::resized()
     sameFolder.setBounds(area.removeFromTop(24));
     area.removeFromTop(4);
     moveToTrash.setBounds(area.removeFromTop(24));
+    area.removeFromTop(4);
+    normalize.setBounds(area.removeFromTop(24));
     area.removeFromTop(8);
     auto folderRow = area.removeFromTop(26);
     browse.setBounds(folderRow.removeFromRight(96));
@@ -192,6 +197,7 @@ SplitOptions SplitDialog::currentOptions() const
     options.silence.edgePaddingMs = 5.0;
     options.sameFolder = sameFolder.getToggleState();
     options.moveToTrash = moveToTrash.getToggleState();
+    options.normalize = normalize.getToggleState();
     options.outputFolder = options.sameFolder ? juce::File()
                                               : juce::File(folder.getText().trim());
     return options;
@@ -203,6 +209,7 @@ void SplitDialog::setInputsEnabled(bool enabled)
     minPart.setEnabled(enabled);
     sameFolder.setEnabled(enabled);
     moveToTrash.setEnabled(enabled);
+    normalize.setEnabled(enabled);
     folder.setEnabled(enabled && ! sameFolder.getToggleState());
     browse.setEnabled(enabled && ! sameFolder.getToggleState());
 }

@@ -11,6 +11,9 @@ struct SplitOptions
     juce::File outputFolder;
     bool sameFolder = true;
     bool moveToTrash = false;
+    // Each written part is peak-normalized to -0.1 dBFS on its own, with one gain for all its
+    // channels (the batch design's "steps after Split act on every fragment").
+    bool normalize = false;
 };
 enum class SplitFileState { split, noSplit, skipped, failed, cancelled };
 struct SplitFileResult

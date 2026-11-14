@@ -21,6 +21,20 @@ namespace sonicator {
 class SplitDialog;
 class ExtractDialog;
 class SettingsPanel;
+// Blinks red while a background job runs and stays green when the app is idle. It sits left of the
+// status line, so a long analysis is visible even when its counters are not.
+class ActivityDot final : public juce::Component,
+                          public juce::SettableTooltipClient,
+                          private juce::Timer
+{
+public:
+    ActivityDot();
+    void setActive(bool);
+    void paint(juce::Graphics&) override;
+private:
+    void timerCallback() override;
+    bool active = false, lit = true;
+};
 class FavoritesSplitter final : public juce::Component
 {
 public:
@@ -114,6 +128,7 @@ private:
     juce::TextButton previousPage { "<" }, nextPage { ">" };
     juce::ComboBox pageSizeBox;
     juce::Label heading, subtitle, libraryHeading, rootsLabel, status, countLabel, analysisHeading, analysisDetails, tagsLabel, selectionStatus;
+    ActivityDot activityDot;
     TagStrip selectedTags;
     juce::Viewport analysisViewport;
     juce::Label stageLabel;
@@ -245,6 +260,14 @@ private:
     bool isNormalizeRunning() const { return normalizer != nullptr && normalizer->progress().running; }
     // No other writer/analysis job is running, so Normalize may start and Cancel is unambiguous.
     bool normalizeJobIdle() const;
+    // True when `operation` may start now. While a library scan or smart analysis runs it shows a
+    // dialog that says so and offers to pause (only when `pauseIsEnough`: the operation writes new
+    // files and never races the paused reader) or cancel the job; `retry` runs after that choice.
+    bool analysisAllows(const juce::String& operation, bool pauseIsEnough, std::function<void()> retry);
+    // The library scan or smart analysis that blocks an operation; paused jobs block only when
+    // pausing is not enough.
+    bool analysisBlocks(bool pauseIsEnough) const;
+    void runWhenAnalysisStops(std::function<void()> retry, int attemptsLeft);
     void requestSplitScan(const juce::StringArray& folders);
     void closeSplitDialog();
     void requestCloseSplit();

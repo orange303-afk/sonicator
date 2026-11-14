@@ -174,6 +174,34 @@ public:
     std::function<void()> onClose;
 };
 }
+ActivityDot::ActivityDot()
+{
+    setTooltip("Background job running");
+    startTimerHz(2);
+}
+void ActivityDot::setActive(bool running)
+{
+    if (active == running) return;
+    active = running;
+    lit = true;
+    setTooltip(active ? "Background job running" : "Idle");
+    repaint();
+}
+void ActivityDot::timerCallback()
+{
+    if (! active) return;
+    lit = ! lit;
+    repaint();
+}
+void ActivityDot::paint(juce::Graphics& g)
+{
+    const auto green = juce::Colour(0xff3fb950);
+    const auto red = juce::Colour(0xffe5534b);
+    auto colour = active ? red : green;
+    if (active && ! lit) colour = colour.withAlpha(0.25f);
+    g.setColour(colour);
+    g.fillEllipse(getLocalBounds().toFloat());
+}
 FavoritesSplitter::FavoritesSplitter()
 {
     setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
@@ -224,9 +252,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     persistSessionState = juce::JUCEApplicationBase::getInstance() != nullptr;
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,32>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
+    for (auto* c : std::array<juce::Component*,33>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
          &pause,&cancel,&settings,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
-         &libraryHeading,&rootsLabel,&status,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
+         &libraryHeading,&rootsLabel,&status,&activityDot,&countLabel,&analysisHeading,&analysisDetails,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel,&selectionStatus})
         if (c != nullptr) addAndMakeVisible(c);
     heading.setText("SONICATOR",juce::dontSendNotification);
@@ -2180,16 +2208,10 @@ void MainComponent::startAutoTagSelected(const std::vector<int64_t>& sampleIds)
         status.setText("Another bulk tagging operation is already running.", juce::dontSendNotification);
         return;
     }
-    if (indexer && indexer->progress().running)
-    {
-        status.setText("Wait for the scan to finish before AutoTag.", juce::dontSendNotification);
+    if (! analysisAllows("AutoTag", false,
+            [safe = juce::Component::SafePointer<MainComponent>(this), sampleIds]
+            { if (safe != nullptr) safe->startAutoTagSelected(sampleIds); }))
         return;
-    }
-    if (smart && smart->progress().running)
-    {
-        status.setText("Wait for smart analysis to finish before AutoTag.", juce::dontSendNotification);
-        return;
-    }
     if (autoTag->startSelected(visible))
     {
         autoTagPreparing = true;
@@ -2219,16 +2241,10 @@ void MainComponent::startAutoTagFolder(const juce::String& folder)
         status.setText("Another bulk tagging operation is already running.", juce::dontSendNotification);
         return;
     }
-    if (indexer && indexer->progress().running)
-    {
-        status.setText("Wait for the scan to finish before AutoTag.", juce::dontSendNotification);
+    if (! analysisAllows("AutoTag", false,
+            [safe = juce::Component::SafePointer<MainComponent>(this), folder]
+            { if (safe != nullptr) safe->startAutoTagFolder(folder); }))
         return;
-    }
-    if (smart && smart->progress().running)
-    {
-        status.setText("Wait for smart analysis to finish before AutoTag.", juce::dontSendNotification);
-        return;
-    }
     if (autoTag->startFolder(folder))
     {
         autoTagPreparing = true;
@@ -2264,11 +2280,16 @@ void MainComponent::startSplit(const std::vector<juce::File>& files)
         status.setText("Split is already running.", juce::dontSendNotification);
         return;
     }
-    if ((indexer && indexer->progress().running) || (smart && smart->progress().running)
-        || (tagging && tagging->progress().running) || (autoTag && autoTag->progress().running)
-        || isExtractRunning())
+    // Split only reads the sources and writes new parts; its catalog follow-up waits for an idle
+    // indexer, so a paused scan or analysis is enough.
+    if (! analysisAllows("Split by silence", true,
+            [safe = juce::Component::SafePointer<MainComponent>(this), files]
+            { if (safe != nullptr) safe->startSplit(files); }))
+        return;
+    if ((tagging && tagging->progress().running) || (autoTag && autoTag->progress().running)
+        || isExtractRunning() || isNormalizeRunning())
     {
-        status.setText("Wait for the background job to finish before splitting.", juce::dontSendNotification);
+        status.setText("Wait for the running job to finish before splitting.", juce::dontSendNotification);
         return;
     }
     if (splitContent != nullptr)
@@ -2286,10 +2307,12 @@ void MainComponent::startSplit(const std::vector<juce::File>& files)
             safe->appSettings.splitMinPartMs = (int) options.silence.minPartMs;
             safe->appSettings.splitSameFolder = options.sameFolder;
             safe->appSettings.splitMoveToTrash = options.moveToTrash;
+            safe->appSettings.splitNormalize = options.normalize;
             try
             {
                 safe->settingsStore.update([options](AppSettings& saved)
                 {
+                    saved.splitNormalize = options.normalize;
                     saved.splitThresholdDb = options.silence.thresholdDb;
                     saved.splitMinSilenceMs = (int) options.silence.minSilenceMs;
                     saved.splitMinPartMs = (int) options.silence.minPartMs;
@@ -2411,11 +2434,14 @@ void MainComponent::startExtract(const std::vector<juce::File>& files,
         status.setText("Extract is already running.", juce::dontSendNotification);
         return;
     }
-    if ((indexer && indexer->progress().running) || (smart && smart->progress().running)
-        || (tagging && tagging->progress().running) || (autoTag && autoTag->progress().running)
-        || isSplitRunning())
+    if (! analysisAllows("Extract samples", true,
+            [safe = juce::Component::SafePointer<MainComponent>(this), files, discJobs]
+            { if (safe != nullptr) safe->startExtract(files, discJobs); }))
+        return;
+    if ((tagging && tagging->progress().running) || (autoTag && autoTag->progress().running)
+        || isSplitRunning() || isNormalizeRunning())
     {
-        status.setText("Wait for the background job to finish before extracting.",
+        status.setText("Wait for the running job to finish before extracting.",
                        juce::dontSendNotification);
         return;
     }
@@ -2680,9 +2706,20 @@ void MainComponent::finishSplit()
     status.setText(summary, juce::dontSendNotification);
     status.setTooltip(summary + (problems.isEmpty() ? juce::String()
                                                     : "\n" + problems.joinIntoString("\n")));
+    // The new parts must reach the catalog even when the summary dialog is still open: otherwise
+    // the list looks unchanged until the user leaves and re-enters the folder. The scan runs in
+    // the background; requestSplitScan leaves it pending while another job owns the indexer.
     pendingSplitScan = outputFolders;
     splitScanApproved = false;
-
+    if (! outputFolders.isEmpty())
+    {
+        // A split supersedes a queued extract scan; its sources may have just been moved away.
+        pendingExtractScan.clear();
+        pendingDiscExtract.clear();
+        pendingExtractSummary.clear();
+        pendingExtractProblems.clear();
+        requestSplitScan(outputFolders);
+    }
     if (splitContent != nullptr)
     {
         const double fraction = progress.total > 0
@@ -2691,16 +2728,9 @@ void MainComponent::finishSplit()
                                                                  : "\n\n" + problems.joinIntoString("\n")),
                                    fraction);
     }
-    else if (! pendingSplitScan.isEmpty())
-    {
-        const auto queued = pendingSplitScan;
-        pendingSplitScan.clear();
-    pendingExtractScan.clear();
-    pendingDiscExtract.clear();
-    pendingExtractSummary.clear();
-    pendingExtractProblems.clear();
-        requestSplitScan(queued);
-    }
+    // Parts written before this point may already be indexed; show them without waiting for the
+    // scan to finish.
+    reloadLibrary();
 }
 void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamples,
                                           juce::Point<int> screenPosition)
@@ -2952,6 +2982,12 @@ void MainComponent::startNormalizeSelected(const std::vector<SampleRecord>& sele
         status.setText("Normalize is already running.", juce::dontSendNotification);
         return;
     }
+    // Normalize rewrites files a paused scan may hold open, so only a finished or cancelled
+    // analysis lets it start.
+    if (! analysisAllows("Normalize", false,
+            [safe = juce::Component::SafePointer<MainComponent>(this), selection]
+            { if (safe != nullptr) safe->startNormalizeSelected(selection); }))
+        return;
     // Cancel acts on whichever job is running; keeping one writer job at a time makes that
     // unambiguous and keeps the catalog reanalysis from racing another writer.
     if (! normalizeJobIdle())
@@ -3010,6 +3046,71 @@ void MainComponent::startNormalizeSelected(const std::vector<SampleRecord>& sele
         dialogs::showAlert(*this, title, message,
             { { "Save copies", 2 }, { "Cancel", 0 } },
             [begin](int id) { if (id == 2) begin(false); });
+}
+
+bool MainComponent::analysisBlocks(bool pauseIsEnough) const
+{
+    const auto blocks = [pauseIsEnough](bool running, bool paused)
+    {
+        return running && ! (pauseIsEnough && paused);
+    };
+    const auto ip = indexer ? indexer->progress() : IndexingProgress {};
+    const auto sp = smart ? smart->progress() : SmartProgress {};
+    return blocks(ip.running, ip.paused) || blocks(sp.running, sp.paused);
+}
+
+void MainComponent::runWhenAnalysisStops(std::function<void()> retry, int attemptsLeft)
+{
+    // A cancelled worker stops at its next checkpoint; poll instead of joining on the message
+    // thread, then run the operation once the job has really ended.
+    if (! analysisBlocks(false)) { if (retry) retry(); return; }
+    if (attemptsLeft <= 0)
+    {
+        status.setText("The job is still stopping; try again in a moment.", juce::dontSendNotification);
+        return;
+    }
+    juce::Timer::callAfterDelay(100, [safe = juce::Component::SafePointer<MainComponent>(this),
+                                      retry, attemptsLeft]
+    {
+        if (safe != nullptr) safe->runWhenAnalysisStops(retry, attemptsLeft - 1);
+    });
+}
+
+bool MainComponent::analysisAllows(const juce::String& operation, bool pauseIsEnough,
+                                   std::function<void()> retry)
+{
+    if (! analysisBlocks(pauseIsEnough)) return true;
+    const bool scanning = indexer && indexer->progress().running;
+    const juce::String job = scanning ? "the library scan" : "smart analysis";
+    juce::String message = operation + " is unavailable while " + job + " is running.";
+    message += pauseIsEnough
+        ? " Pause it to continue, or cancel it. A paused job resumes from Pause."
+        : " Cancel it to continue, or wait until it finishes.";
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+    const auto choose = [safe, scanning, retry](int id)
+    {
+        if (safe == nullptr || id == 0) return;
+        if (id == 1)
+        {
+            if (scanning && safe->indexer) safe->indexer->setPaused(true);
+            else if (safe->smart) safe->smart->setPaused(true);
+            if (retry) retry();
+            return;
+        }
+        if (scanning && safe->indexer) safe->indexer->cancel();
+        else if (safe->smart) safe->smart->cancel();
+        safe->status.setText("Cancelling...", juce::dontSendNotification);
+        safe->runWhenAnalysisStops(retry, 100);
+    };
+    const auto title = operation + " is unavailable";
+    const auto cancelLabel = scanning ? juce::String("Cancel scan") : juce::String("Cancel analysis");
+    if (pauseIsEnough)
+        dialogs::showAlert(*this, title, message,
+            { { scanning ? "Pause scan" : "Pause analysis", 1 }, { cancelLabel, 2 }, { "Close", 0 } },
+            choose);
+    else
+        dialogs::showAlert(*this, title, message, { { cancelLabel, 2 }, { "Close", 0 } }, choose);
+    return false;
 }
 
 bool MainComponent::normalizeJobIdle() const
@@ -3163,8 +3264,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         ? "Extract samples from " + juce::String(extractCandidates.sourceCount()) + " item(s)..."
         : juce::String("Extract samples..."), ! extractCandidates.empty());
     menu.addItem(editCommandMenuItem(EditAction::normalizeSelected,
-                                     ! normalizeRecords.empty() && ! isNormalizeRunning()
-                                         && normalizeJobIdle()));
+                                     ! normalizeRecords.empty() && ! isNormalizeRunning()));
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
                          allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
@@ -3669,6 +3769,7 @@ void MainComponent::timerCallback()
     const bool normalizeRunning = np.running;
     const bool busy = p.running || smartRunning || taggingRunning || autoTagRunning
         || splitRunning || extractRunning || normalizeRunning;
+    activityDot.setActive(busy);
     pause.setEnabled(! splitRunning && (p.running || smartRunning)); cancel.setEnabled(busy);
     addFolder.setEnabled(! busy); rescan.setEnabled(! busy);
     reanalyze.setEnabled(! busy); newFiles.setEnabled(! busy);
@@ -4441,6 +4542,8 @@ void MainComponent::resized()
     auto footer = r.removeFromBottom(42).reduced(12,5);
     cancel.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
     pause.setBounds(footer.removeFromRight(70)); footer.removeFromRight(6);
+    activityDot.setBounds(footer.removeFromLeft(12).withSizeKeepingCentre(8, 8));
+    footer.removeFromLeft(6);
     status.setBounds(footer);
     sidebarBounds = r.removeFromLeft(getWidth() < 1100 ? 190 : 240); analysisBounds = r.removeFromRight(getWidth() < 1100 ? 230 : 270);
     auto sidebar = sidebarBounds.reduced(14,16);

@@ -72,6 +72,7 @@ AppSettings SettingsStore::load() const
         readNumber("splitMinPart", (double) settings.splitMinPartMs));
     settings.splitSameFolder = readBool("splitSameFolder", settings.splitSameFolder);
     settings.splitMoveToTrash = readBool("splitMoveToTrash", settings.splitMoveToTrash);
+    settings.splitNormalize = readBool("splitNormalize", settings.splitNormalize);
     settings.extractSameFolder = readBool("extractSameFolder", settings.extractSameFolder);
     settings.extractNormalize = readBool("extractNormalize", settings.extractNormalize);
     settings.extractTuneToSong = readBool("extractTuneToSong", settings.extractTuneToSong);
@@ -140,6 +141,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("splitMinPart", settings.splitMinPartMs);
     object->setProperty("splitSameFolder", settings.splitSameFolder);
     object->setProperty("splitMoveToTrash", settings.splitMoveToTrash);
+    object->setProperty("splitNormalize", settings.splitNormalize);
     object->setProperty("extractSameFolder", settings.extractSameFolder);
     object->setProperty("extractNormalize", settings.extractNormalize);
     object->setProperty("extractTuneToSong", settings.extractTuneToSong);

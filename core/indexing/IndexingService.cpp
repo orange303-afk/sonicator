@@ -175,7 +175,10 @@ void IndexingService::run()
         if (! cancelled)
         {
             { std::lock_guard lock(stateMutex); state.message = "Updating duplicate groups"; }
-            repo.refreshDuplicates([this] { return checkpoint(); });
+            // refreshDuplicates checks this inside BEGIN IMMEDIATE while holding the database
+            // mutex. A pause there would freeze every catalog write on the message thread until
+            // the user resumes, so this short phase only honours Cancel.
+            repo.refreshDuplicates([this] { return cancelled.load(); });
         }
         std::lock_guard lock(stateMutex);
         state.message = cancelled ? "Cancelled; completed results were saved"

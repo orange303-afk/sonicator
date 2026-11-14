@@ -163,6 +163,25 @@ A copy becomes a new row that inherits the template's tags and star but not its 
 samples, opening a disc image, clearing the selection or quitting while edits are unsaved asks
 Save / Discard / Cancel; Cancel puts the library selection back on the edited file.
 
+## Split by silence and background jobs
+
+`SplitService` reads each source and writes numbered WAV parts next to it (or into the chosen
+folder), validating every export before it reports the file as split; originals move to the Trash
+only when every part was written and nothing was dropped. The dialog can normalize each part on its
+own to -0.1 dBFS: the finished part is a fresh WAV, so it goes through the same two-pass
+`NormalizeService` replace path and stays out of the "deletable" state if that step fails. When the
+batch ends, the parts' folders are queued for a new-files scan immediately, even while the summary
+dialog is open, so the library shows the parts without leaving and re-entering the folder.
+`FolderTree::refresh` restores the selected folder and the vertical scroll position after a
+rebuild, so a mass operation does not throw the tree back to the top.
+
+Split, Extract, Normalize and AutoTag check `analysisAllows()` before starting. While a library scan
+or smart analysis runs they show a dialog that says the operation is unavailable and offers Pause
+or Cancel; Split and Extract may start on a paused job because they only read sources and write new
+files, while Normalize and AutoTag need it cancelled. Cancel does not block the message thread: the
+dialog polls at 100 ms until the worker leaves its checkpoint, then runs the operation. The status
+line has a dot that blinks red while any background job runs and stays green when the app is idle.
+
 ## Manual BPM and drag metadata
 
 Tempo can be corrected by hand. The sample context menu has a `BPM` submenu: `Set BPM...` (20-300,

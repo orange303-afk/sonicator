@@ -133,6 +133,11 @@ void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPa
     const juce::ScopedValueSetter<bool> restoreGuard(restoring,true);
     this->showIgnored = revealIgnored;
     ignoredEntries = repo.ignoredPaths();
+    // A mass operation (split, extract, scan) refreshes the tree. Rebuilding it would otherwise
+    // jump the list back to the top and drop the highlight from the current folder.
+    const auto selectedPath = tree.getSelectedItem(0) != nullptr
+        ? tree.getSelectedItem(0)->getUniqueName() : juce::String();
+    const auto scrollY = tree.getViewport() != nullptr ? tree.getViewport()->getViewPositionY() : 0;
     auto openness = tree.getOpennessState(false);
     tree.setRootItem(nullptr); root.reset(); children.clear(); images.clear(); failedImages.clear(); virtualFolders.clear(); roots = rootPaths;
     if (showAllSamples && ! revealIgnored)
@@ -188,6 +193,8 @@ void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPa
     root = std::make_unique<Item>(*this,juce::String(),showAllSamples);
     tree.setRootItem(root.get()); root->setOpen(true);
     if (openness) tree.restoreOpennessState(*openness,true);
+    if (selectedPath.isNotEmpty()) selectPath(selectedPath);
+    if (auto* viewport = tree.getViewport()) viewport->setViewPosition(0, scrollY);
 }
 void FolderTree::setIgnoredPaths(const std::vector<IgnoredPath>& entries, bool revealIgnored)
 {
