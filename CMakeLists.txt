@@ -80,7 +80,7 @@ if(NOT MSVC)
 endif()
 add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/diagnostics/Diagnostics.cpp
-    core/database/Database.cpp core/database/PathRelocation.cpp core/database/SearchSyntax.cpp core/database/SampleRepository.cpp core/settings/AppSettings.cpp
+    core/settings/ShortcutPreferences.cpp core/database/Database.cpp core/database/PathRelocation.cpp core/database/SearchSyntax.cpp core/database/SampleRepository.cpp core/settings/AppSettings.cpp
     core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/dsp/RhythmAnalyzer.cpp core/dsp/AnalysisAudio.cpp core/dsp/TonalAnalyzer.cpp core/dsp/AcousticFeatures.cpp core/dsp/FastAcousticRules.cpp core/dsp/FeatureExtractorV2.cpp core/dsp/FeatureJson.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/SonicatorFormats.cpp core/audio/PreviewReaderSource.cpp core/audio/SampleAudition.cpp core/audio/ContainerValidation.cpp
     core/emu/EblReader.cpp core/emu/EblAudioFormat.cpp
     core/voc/VocAudioFormat.cpp
@@ -134,7 +134,7 @@ juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png
     resources/ml/global_prototypes.json
     resources/ml/global_model.json)
-add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/commands/CommandRegistry.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/settings/SettingsPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp)
+add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/commands/CommandRegistry.cpp ui/commands/ShortcutBindings.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/settings/SettingsPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp)
 if(APPLE)
     target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.mm)
 else()

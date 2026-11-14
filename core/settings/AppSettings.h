@@ -1,8 +1,24 @@
 #pragma once
+#include "ShortcutPreferences.h"
 #include <juce_core/juce_core.h>
 #include <functional>
 namespace sonicator {
 enum class ThemeMode { System, Dark, Light };
+// Panel sizes the user dragged. Zero width means "the adaptive default for this window size";
+// an effective size is never written back here, so shrinking a window keeps the preference.
+struct PanelLayoutPreferences
+{
+    int foldersWidth = 0;
+    int analysisWidth = 0;
+    int previewHeight = 156;
+    int favoritesHeight = 200;
+    bool operator==(const PanelLayoutPreferences& other) const
+    {
+        return foldersWidth == other.foldersWidth && analysisWidth == other.analysisWidth
+            && previewHeight == other.previewHeight && favoritesHeight == other.favoritesHeight;
+    }
+    bool operator!=(const PanelLayoutPreferences& other) const { return ! (*this == other); }
+};
 struct AppSettings
 {
     ThemeMode theme = ThemeMode::System;
@@ -16,6 +32,10 @@ struct AppSettings
     // and every indexed path keep their real name.
     juce::StringPairArray folderAliases;
     int favoritesPanelHeight = 200;    // user-dragged divider position
+    PanelLayoutPreferences standaloneLayout;
+    PanelLayoutPreferences pluginLayout;
+    ShortcutPreferences shortcuts;
+    juce::String lastSettingsSection = "general";
     juce::String lastFolder;           // restored on the next launch when still in the catalog
     juce::String lastSamplePath;       // restored selection without starting preview playback
     bool hideEmpty = true;

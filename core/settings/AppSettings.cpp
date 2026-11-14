@@ -1,4 +1,5 @@
 #include "AppSettings.h"
+#include "ShortcutPreferences.h"
 #include <stdexcept>
 namespace sonicator {
 namespace
@@ -29,6 +30,35 @@ juce::File AppSettings::nextUiSettingsFile()
     const auto directory = testSettingsDirectory();
     if (directory == juce::File()) return defaultSettingsFile();
     return directory.getNonexistentChildFile("settings", ".json");
+}
+namespace
+{
+// Missing or absurd values fall back to the defaults instead of shrinking a panel to nothing.
+void applyLayoutPreferences(PanelLayoutPreferences& layout, const juce::var& value)
+{
+    const auto* object = value.getDynamicObject();
+    if (object == nullptr) return;
+    auto readInt = [object](const char* name, int fallback, int minimum, int maximum)
+    {
+        const auto property = object->getProperty(name);
+        if (! property.isInt() && ! property.isInt64() && ! property.isDouble()) return fallback;
+        const auto number = (int) property;
+        return number >= minimum && number <= maximum ? number : fallback;
+    };
+    layout.foldersWidth = readInt("foldersWidth", 0, 0, 4000);
+    layout.analysisWidth = readInt("analysisWidth", 0, 0, 4000);
+    layout.previewHeight = readInt("previewHeight", layout.previewHeight, 120, 2000);
+    layout.favoritesHeight = readInt("favoritesHeight", layout.favoritesHeight, 60, 2000);
+}
+juce::var layoutPreferencesToVar(const PanelLayoutPreferences& layout)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty("foldersWidth", layout.foldersWidth);
+    object->setProperty("analysisWidth", layout.analysisWidth);
+    object->setProperty("previewHeight", layout.previewHeight);
+    object->setProperty("favoritesHeight", layout.favoritesHeight);
+    return juce::var(object);
+}
 }
 juce::String AppSettings::defaultContributionEndpoint()
 {
@@ -140,6 +170,12 @@ AppSettings SettingsStore::load() const
     const int favoritesHeight = (int) object->getProperty("favoritesPanelHeight");
     if (favoritesHeight >= 60 && favoritesHeight <= 2000)
         settings.favoritesPanelHeight = favoritesHeight;
+    applyLayoutPreferences(settings.standaloneLayout, object->getProperty("layoutStandalone"));
+    applyLayoutPreferences(settings.pluginLayout, object->getProperty("layoutPlugin"));
+    settings.shortcuts = shortcutPreferencesFromVar(object->getProperty("shortcuts"));
+    const auto lastSection = object->getProperty("settingsSection").toString().trim();
+    if (lastSection.isNotEmpty() && lastSection.length() <= 32)
+        settings.lastSettingsSection = lastSection;
     settings.windowX = (int) object->getProperty("windowX");
     settings.windowY = (int) object->getProperty("windowY");
     settings.windowWidth = juce::jmax(0, (int) object->getProperty("windowWidth"));
@@ -201,6 +237,10 @@ void SettingsStore::save(const AppSettings& settings) const
     }
     object->setProperty("folderAliases", aliases);
     object->setProperty("favoritesPanelHeight", settings.favoritesPanelHeight);
+    object->setProperty("layoutStandalone", layoutPreferencesToVar(settings.standaloneLayout));
+    object->setProperty("layoutPlugin", layoutPreferencesToVar(settings.pluginLayout));
+    object->setProperty("shortcuts", shortcutPreferencesToVar(settings.shortcuts));
+    object->setProperty("settingsSection", settings.lastSettingsSection);
     object->setProperty("lastFolder", settings.lastFolder);
     object->setProperty("lastSamplePath", settings.lastSamplePath);
     object->setProperty("windowX", settings.windowX);
