@@ -6,8 +6,8 @@
 namespace sonicator {
 // Fields that Phase 2 derives from metadata and DSP. They are deliberately separate from
 // SampleRecord: measured Phase 1 descriptors and user tags must not be rewritten by them.
-enum class SmartField { Type, Structure, Bpm, Key, Pitch, RootNote };
-inline constexpr int smartFieldCount = 6;
+enum class SmartField { Type, Structure, Bpm, Key, Pitch, RootNote, Genre };
+inline constexpr int smartFieldCount = 7;
 juce::String smartFieldKey(SmartField);
 std::optional<SmartField> smartFieldFromKey(const juce::String&);
 
@@ -103,7 +103,7 @@ struct SmartExtraction
 // this is the resolved value with the manual override applied.
 struct SmartDisplay
 {
-    juce::String type, structure, key;
+    juce::String type, structure, key, genre;
     double bpm = 0;
     bool hasBpm = false;
     bool hasPitch = false;
@@ -114,11 +114,13 @@ struct SmartDisplay
     SmartState bpmState = SmartState::Unknown;
     SmartState keyState = SmartState::Unknown;
     SmartState pitchState = SmartState::Unknown;
+    SmartState genreState = SmartState::Unknown;
     OverrideState typeOverride = OverrideState::None;
     OverrideState structureOverride = OverrideState::None;
     OverrideState bpmOverride = OverrideState::None;
     OverrideState keyOverride = OverrideState::None;
     OverrideState pitchOverride = OverrideState::None;
+    OverrideState genreOverride = OverrideState::None;
     SmartPipelineState pipelineState = SmartPipelineState::NotAnalyzed;
 };
 
@@ -151,10 +153,11 @@ struct SmartResult
     SmartState pitchState = SmartState::Unknown;
     int rootNote = -1;         // sampler root note, never a musical key
     SmartState rootState = SmartState::Unknown;
-    juce::String typeSource, structureSource, bpmSource, keySource, pitchSource, rootSource;
+    juce::String typeSource, structureSource, bpmSource, keySource, pitchSource, rootSource, genreSource;
     OverrideState typeOverride = OverrideState::None, structureOverride = OverrideState::None;
     OverrideState bpmOverride = OverrideState::None, keyOverride = OverrideState::None;
     OverrideState pitchOverride = OverrideState::None, rootOverride = OverrideState::None;
+    OverrideState genreOverride = OverrideState::None;
     juce::String explanation;
     // Pipeline metadata. revision increments on every successful publication; a job publishes
     // only if it still expects the revision it read before starting.

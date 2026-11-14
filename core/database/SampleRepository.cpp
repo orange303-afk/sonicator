@@ -11,7 +11,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
-constexpr int schemaVersion = 16;
+constexpr int schemaVersion = 17;
 // Tag history started at schema 15 and must not follow later database bumps.
 constexpr int tagHistorySchemaVersion = 15;
 SampleRecord read(const detail::Statement& s)
@@ -578,18 +578,22 @@ void SampleRepository::createTables()
             "CREATE TABLE IF NOT EXISTS smart_results ("
             "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE,"
             "type TEXT NOT NULL DEFAULT '', structure TEXT NOT NULL DEFAULT '',"
+            "genre TEXT NOT NULL DEFAULT '',"
             "bpm REAL NOT NULL DEFAULT 0, has_bpm INTEGER NOT NULL DEFAULT 0,"
             "key_tonic INTEGER NOT NULL DEFAULT -1, key_mode TEXT NOT NULL DEFAULT '',"
             "root_note INTEGER NOT NULL DEFAULT -1,"
             "type_state TEXT NOT NULL DEFAULT 'unknown', structure_state TEXT NOT NULL DEFAULT 'unknown',"
+            "genre_state TEXT NOT NULL DEFAULT 'unknown',"
             "bpm_state TEXT NOT NULL DEFAULT 'unknown', key_state TEXT NOT NULL DEFAULT 'unknown',"
             "root_state TEXT NOT NULL DEFAULT 'unknown',"
             "pitch_midi INTEGER NOT NULL DEFAULT -1, pitch_cents REAL NOT NULL DEFAULT 0,"
             "pitch_state TEXT NOT NULL DEFAULT 'unknown',"
             "type_source TEXT NOT NULL DEFAULT '', structure_source TEXT NOT NULL DEFAULT '',"
+            "genre_source TEXT NOT NULL DEFAULT '',"
             "bpm_source TEXT NOT NULL DEFAULT '', key_source TEXT NOT NULL DEFAULT '',"
             "pitch_source TEXT NOT NULL DEFAULT '', root_source TEXT NOT NULL DEFAULT '',"
             "type_override TEXT NOT NULL DEFAULT 'none', structure_override TEXT NOT NULL DEFAULT 'none',"
+            "genre_override TEXT NOT NULL DEFAULT 'none',"
             "bpm_override TEXT NOT NULL DEFAULT 'none', key_override TEXT NOT NULL DEFAULT 'none',"
             "pitch_override TEXT NOT NULL DEFAULT 'none', root_override TEXT NOT NULL DEFAULT 'none',"
             "explanation TEXT NOT NULL DEFAULT '',"
@@ -725,6 +729,12 @@ void SampleRepository::createTables()
         // schema 1 and an empty v2 blob, so nothing has to be recomputed before the app can run.
         ensureColumn(db.handle, "ml_feedback_samples", "feature_schema", "INTEGER NOT NULL DEFAULT 1");
         ensureColumn(db.handle, "ml_feedback_samples", "features_v2", "BLOB");
+        // Schema 17: the musical genre, separate from the sample type. Existing rows stay empty
+        // and are filled by the next smart pass; nothing else gains a value by migration.
+        ensureColumn(db.handle, "smart_results", "genre", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_results", "genre_state", "TEXT NOT NULL DEFAULT 'unknown'");
+        ensureColumn(db.handle, "smart_results", "genre_source", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(db.handle, "smart_results", "genre_override", "TEXT NOT NULL DEFAULT 'none'");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS smart_results_pipeline"
                                 " ON smart_results(pipeline_state, sample_id);");
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS samples_pair_key ON samples(pair_key) WHERE pair_key != '';");
@@ -799,7 +809,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=16;");
+        detail::exec(db.handle, "PRAGMA user_version=17;");
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)

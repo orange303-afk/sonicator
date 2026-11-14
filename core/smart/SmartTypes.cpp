@@ -12,6 +12,7 @@ juce::String smartFieldKey(SmartField field)
         case SmartField::Key: return "key";
         case SmartField::Pitch: return "pitch";
         case SmartField::RootNote: return "root_note";
+        case SmartField::Genre: return "genre";
     }
     return {};
 }
@@ -23,6 +24,7 @@ std::optional<SmartField> smartFieldFromKey(const juce::String& key)
     if (key == "key") return SmartField::Key;
     if (key == "pitch") return SmartField::Pitch;
     if (key == "root_note") return SmartField::RootNote;
+    if (key == "genre") return SmartField::Genre;
     return std::nullopt;
 }
 juce::String candidateStatusKey(CandidateStatus status)
