@@ -2,6 +2,8 @@
 
 Date: 2026-11-14. Schema `user_version` 17.
 
+Reusable manual genre vocabulary added 2026-11-15 (schema 19).
+
 ## What it is
 
 `Genre` is a **musical genre** — House, Hip-Hop, Ambient — not a sample type (`Kick`, `Pad`), not a
@@ -44,6 +46,17 @@ Right-click one or more rows → **Genre ▶**:
 
 Assigning a genre changes only the genre; tags, stars, Type, BPM and key are untouched.
 
+Both row **Genre ▶** and folder **Set genre... ▶** menus show the same list: built-in genres,
+then remembered manual genres sorted by folded name. A successful **+ Custom genre...** assignment
+adds the trimmed name to the current catalog's vocabulary. Names are deduplicated without regard
+to case (including supported Cyrillic/Greek/Latin casing); built-in spelling takes precedence.
+
+The vocabulary survives restarting the application, clearing the last assignment and removing
+the file from the catalog. It travels with the catalog, not the user's global settings. Migration
+to schema 19 backfills existing manual genre names; automatic guesses, Unknown/not-applicable
+states and empty values are not collected. Cancelled, conflicted or failed assignments do not
+add a name. There is no separate vocabulary rename/delete UI in this version.
+
 ### Assigning a whole folder
 
 Right-click a folder in the library tree → **Set genre... ▶** → a genre name or
@@ -71,6 +84,10 @@ inference. Automatic folder/name matching is unchanged.
   `genre:!trap` excludes. The filter uses the manual value when one is set.
 
 ## Storage
+
+Schema 19 adds `custom_genres` (folded `name_key`, display `name`, `created_at`), backfilled once
+from ordinary manual overrides. Successful manual assignments register names in the same
+transaction as their overrides. Automatic extraction and its dictionary are unchanged.
 
 Schema 17 adds four columns to `smart_results` (`genre`, `genre_state`, `genre_source`,
 `genre_override`). They are added with `ensureColumn`, so a schema-16 catalog upgrades in place

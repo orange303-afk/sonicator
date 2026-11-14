@@ -217,6 +217,9 @@ public:
                                            bool replaceManual = false);
     void clearSmartOverride(int64_t sampleId, SmartField field);
     SmartOverrideMap smartOverrides(int64_t sampleId) const;
+    // Built-in genres followed by remembered manual names, folded-case deduplicated. Catalog-local;
+    // clearing/deleting an assignment does not forget its genre. Each menu captures this list.
+    juce::StringArray genreNames() const;
     std::vector<SmartExtraction> smartExtractions(int64_t sampleId) const;
     // Effective Type/BPM/Key for a block of rows, with overrides applied. Used by the library
     // columns and the selection status bar; never loads the whole catalog.

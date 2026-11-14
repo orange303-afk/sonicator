@@ -3,6 +3,7 @@
 #include "core/audio/StereoPair.h"
 #include "core/smart/KeyNames.h"
 #include "core/smart/SmartResolver.h"
+#include "core/smart/GenreContextExtractor.h"
 #include "PathRelocation.h"
 #include "SqliteHelpers.h"
 #include <algorithm>
@@ -11,7 +12,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
-constexpr int schemaVersion = 18;
+constexpr int schemaVersion = 19;
 // Tag history started at schema 15 and must not follow later database bumps.
 constexpr int tagHistorySchemaVersion = 15;
 SampleRecord read(const detail::Statement& s)
@@ -112,6 +113,16 @@ juce::String foldForSearch(const juce::String& text)
     out.preallocateBytes(text.getNumBytesAsUTF8());
     for (auto c : text) out += juce::String::charToString(foldCase(c));
     return out;
+}
+void rememberGenre(sqlite3* db, const juce::String& text)
+{
+    const auto name = text.trim();
+    if (name.isEmpty()) return;
+    detail::Statement insert(db,
+        "INSERT INTO custom_genres(name_key,name,created_at) VALUES(?,?,?)"
+        " ON CONFLICT(name_key) DO NOTHING");
+    insert.text(1, foldForSearch(name)); insert.text(2, name);
+    insert.integer(3, juce::Time::currentTimeMillis()); insert.step();
 }
 // Effective values used by whole-catalog sorting. The correlated subqueries are covered by the
 // primary keys (sample_id) and by (sample_id, field), so they stay index lookups per row.
@@ -677,6 +688,8 @@ void SampleRepository::createTables()
             "CREATE INDEX IF NOT EXISTS stereo_pairs_rep ON stereo_pairs(representative_id);"
             "CREATE TABLE IF NOT EXISTS custom_types ("
             "name TEXT PRIMARY KEY NOT NULL COLLATE NOCASE, created_at INTEGER NOT NULL);"
+            "CREATE TABLE IF NOT EXISTS custom_genres ("
+            "name_key TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL);"
             "CREATE TABLE IF NOT EXISTS ml_feedback_samples ("
             "sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE, file_hash TEXT NOT NULL,"
             "target_type TEXT NOT NULL COLLATE NOCASE, tags TEXT NOT NULL DEFAULT '',"
@@ -773,6 +786,14 @@ void SampleRepository::createTables()
         ensureColumn(db.handle, "smart_results", "genre_state", "TEXT NOT NULL DEFAULT 'unknown'");
         ensureColumn(db.handle, "smart_results", "genre_source", "TEXT NOT NULL DEFAULT ''");
         ensureColumn(db.handle, "smart_results", "genre_override", "TEXT NOT NULL DEFAULT 'none'");
+        // Schema 19 remembers manual genres independently of their current assignments.
+        if (current < 19)
+        {
+            detail::Statement manual(db.handle,
+                "SELECT DISTINCT text_value FROM smart_overrides WHERE field='genre'"
+                " AND cleared=0 AND not_applicable=0 AND trim(text_value)<>'' ORDER BY updated_at,text_value");
+            while (manual.step()) rememberGenre(db.handle, manual.text(0));
+        }
         // Schema 18: the resolved sort values live on the samples row and are indexed, so a
         // whole-catalog sort by Type, Genre, BPM or Key is an index scan instead of five
         // correlated subqueries per row. Unknown is NULL and sorts last, as before. Existing
@@ -880,7 +901,7 @@ void SampleRepository::createTables()
                 }
             }
         }
-        detail::exec(db.handle, "PRAGMA user_version=18;");
+        detail::exec(db.handle, ("PRAGMA user_version=" + juce::String(schemaVersion) + ";").toRawUTF8());
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -2835,6 +2856,11 @@ void SampleRepository::setSmartOverride(int64_t sampleId, SmartField field, cons
     try
     {
         SmartOverride stored = value;
+        if (field == SmartField::Genre && ! value.cleared && ! value.notApplicable)
+        {
+            stored.textValue = value.textValue.trim();
+            rememberGenre(db.handle, stored.textValue);
+        }
         // Keys and pitches are stored in a queryable form as well as text.
         if (field == SmartField::Key && ! value.cleared)
         {
@@ -2907,6 +2933,7 @@ FolderGenreAssignment SampleRepository::setGenreInFolder(const juce::String& fol
         }
         if (outcome.conflicts == 0 || replaceManual)
         {
+            if (outcome.total > 0) rememberGenre(db.handle, name);
             detail::Statement insert(db.handle,
                 "INSERT OR REPLACE INTO smart_overrides"
                 "(sample_id,field,cleared,not_applicable,text_value,numeric_value,aux_value,aux_text,updated_at)"
@@ -2961,6 +2988,17 @@ SmartOverrideMap SampleRepository::smartOverrides(int64_t sampleId) const
 {
     std::lock_guard lock(db.mutex);
     return readOverrides(db.handle, sampleId);
+}
+juce::StringArray SampleRepository::genreNames() const
+{
+    auto names = GenreContextExtractor::canonicalGenres();
+    std::set<juce::String> seen;
+    for (const auto& name : names) seen.insert(foldForSearch(name));
+    std::lock_guard lock(db.mutex);
+    detail::Statement stored(db.handle, "SELECT name,name_key FROM custom_genres ORDER BY name_key");
+    while (stored.step())
+        if (seen.insert(stored.text(1)).second) names.add(stored.text(0));
+    return names;
 }
 std::vector<SmartExtraction> SampleRepository::smartExtractions(int64_t sampleId) const
 {

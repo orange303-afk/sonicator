@@ -59,6 +59,9 @@ constexpr PaletteColour tagPalette[] = {
     { "Pink", 0xffd06ab8 }, { "Rose", 0xffd06a7a }, { "Grey", 0xff8a8f9c }
 };
 constexpr int pageSize = 10000;
+// Shared by the row and folder popups, above their tag/type/action ID ranges. The name list is
+// captured when each popup opens, so another owner's vocabulary update cannot shift the mapping.
+constexpr int genreMenuFirstId = 1000000;
 // Catalog rows for formats this build no longer indexes: archive metadata rows and older error
 // rows for protected Ableton AIFC samples. Source files are never opened beyond their headers.
 int purgeUnsupportedRows(SampleRepository& repo)
@@ -3231,9 +3234,9 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     menu.addItem(7004, "AutoTag folder...", autoTagIdle && catalogued > 0);
     menu.addSeparator();
     menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0 && ! splitBusy);
-    const auto genreNames = GenreContextExtractor::canonicalGenres();
+    const auto genreNames = readRepo->genreNames();
     for (int i = 0; i < genreNames.size(); ++i)
-        genreMenu.addItem(7050 + i, genreNames[i]);
+        genreMenu.addItem(genreMenuFirstId + i, genreNames[i]);
     genreMenu.addSeparator();
     genreMenu.addItem(7090, "+ Custom genre...");
     menu.addSubMenu("Set genre...", genreMenu,
@@ -3251,7 +3254,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                            .withMaximumNumColumns(1)
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued, exactIgnore,
-         catalogPath = dbPath](int result)
+         catalogPath = dbPath, genreNames](int result)
         {
             if (safe == nullptr || result == 0 || safe->dbPath != catalogPath) return;
             if (safe->folderGenreWork.valid() && result != 7001 && result != 7006 && result != 7011)
@@ -3267,11 +3270,10 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
             }
             try
             {
-                if (result >= 7050 && result < 7090)
+                if (result >= genreMenuFirstId)
                 {
-                    const auto names = GenreContextExtractor::canonicalGenres();
-                    const int index = result - 7050;
-                    if (index < names.size()) safe->setGenreForFolder(folderPath, names[index]);
+                    const int index = result - genreMenuFirstId;
+                    if (index < genreNames.size()) safe->setGenreForFolder(folderPath, genreNames[index]);
                     return;
                 }
                 if (result == 7090)
@@ -3866,7 +3868,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     menu.addSubMenu("BPM", bpmMenu);
 
     // Genre: one value per file, with a manual override that survives reanalysis.
-    const auto genreNames = GenreContextExtractor::canonicalGenres();
+    const auto genreNames = readRepo->genreNames();
     bool anyGenreOverride = false, anyGenreUnknown = false;
     juce::String commonGenre;
     bool haveCommonGenre = false, uniformGenre = true;
@@ -3882,7 +3884,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     }
     juce::PopupMenu genreMenu;
     for (int i = 0; i < genreNames.size(); ++i)
-        genreMenu.addItem(26100 + i, genreNames[i], true,
+        genreMenu.addItem(genreMenuFirstId + i, genreNames[i], true,
                           uniformGenre && commonGenre.equalsIgnoreCase(genreNames[i]));
     genreMenu.addSeparator();
     genreMenu.addItem(26190, "Unknown", true, anyGenreUnknown);
@@ -3923,9 +3925,9 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
          ignoredPaths, allIgnored, anyInherited, splitCandidates, extractCandidates, customList,
-         standardTypes, normalizeRecords](int result)
+          standardTypes, normalizeRecords, genreNames, catalogPath = dbPath](int result)
         {
-            if (safe == nullptr || result == 0) return;
+            if (safe == nullptr || result == 0 || safe->dbPath != catalogPath) return;
             if ((safe->isSplitRunning() || safe->isExtractRunning())
                 && result != 9000 && result != 9002 && result != 9004)
             {
@@ -3981,18 +3983,17 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     safe->clearBpmForRows(ids);
                     return;
                 }
-                if (result >= 26100 && result < 26190)
+                if (result >= genreMenuFirstId)
                 {
-                    const auto names = GenreContextExtractor::canonicalGenres();
-                    const int index = result - 26100;
-                    if (index < names.size())
+                    const int index = result - genreMenuFirstId;
+                    if (index < genreNames.size())
                     {
                         SmartOverride value;
-                        value.textValue = names[index];
+                        value.textValue = genreNames[index];
                         for (auto id : ids)
                             safe->writeRepo->setSmartOverride(id, SmartField::Genre, value);
                         safe->reloadLibrary();
-                        safe->status.setText("Genre set to " + names[index] + " for "
+                        safe->status.setText("Genre set to " + genreNames[index] + " for "
                                              + juce::String(ids.size()) + " sample(s)",
                                              juce::dontSendNotification);
                     }
@@ -4024,9 +4025,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                 {
                     dialogs::showPrompt(*safe, "Custom genre", "Genre name",
                                         juce::String(),
-                        [safe, ids](const juce::String& name)
+                        [safe, ids, catalogPath](const juce::String& name)
                         {
-                            if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr)
+                            if (safe == nullptr || safe->dbPath != catalogPath
+                                || name.trim().isEmpty() || safe->writeRepo == nullptr)
                                 return;
                             SmartOverride value;
                             value.textValue = name.trim();

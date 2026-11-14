@@ -254,7 +254,7 @@ TEST_CASE("Schema 17 upgrades in place and backfills the effective values", "[so
     REQUIRE(hasColumn(file, "samples", "eff_key_tonic"));
     REQUIRE(hasColumn(file, "samples", "eff_key_mode"));
     REQUIRE(hasColumn(file, "samples", "eff_genre"));
-    REQUIRE(rawScalar(file, "PRAGMA user_version") == 18);
+    REQUIRE(rawScalar(file, "PRAGMA user_version") == 19);
     const auto values = effectiveValues(file, id);
     REQUIRE(values.type == "'bass'");       // the manual override is the effective value
     REQUIRE(values.bpm == "128.0");

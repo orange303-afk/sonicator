@@ -180,7 +180,7 @@ TEST_CASE("A folder genre database error rolls back earlier rows", "[folder-genr
 }
 
 namespace {
-void chooseFolderGenre(MainComponent& app, const juce::String& folder, int item = 7051)
+void chooseFolderGenre(MainComponent& app, const juce::String& folder, int item = 1000001)
 {
     auto* tree = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree"));
     REQUIRE(tree != nullptr);
