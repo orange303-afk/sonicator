@@ -1,4 +1,5 @@
 #pragma once
+#include "core/database/FolderIndex.h"
 #include "core/database/SampleRepository.h"
 #include "core/disc/DiscFilesystem.h"
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -16,6 +17,9 @@ public:
     // hidden and the supplied folders appear as top-level expandable entries.
     void refresh(SampleRepository&, const juce::StringArray& rootPaths, bool showAllSamples,
                  bool showIgnored = false);
+    // Installs a folder structure built elsewhere (the background runner). The selection, the
+    // expanded folders and the scroll position survive the swap.
+    void applyIndex(FolderIndex, bool showAllSamples);
     void setIgnoredPaths(const std::vector<IgnoredPath>& entries, bool revealIgnored);
     void resized() override;
     void clearSelection();

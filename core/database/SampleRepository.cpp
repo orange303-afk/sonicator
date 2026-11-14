@@ -504,13 +504,34 @@ juce::String SampleRepository::searchKey(const juce::String& name, const juce::S
 {
     return foldForSearch(name) + "\n" + foldForSearch(path);
 }
+namespace
+{
+// The catalog stores full paths in one form, so a trailing separator is the only variation a
+// stored folder can have. Comparing strings keeps the hot path free of File construction: the
+// folder tree, the scanner and the repository call this once per catalogued row.
+juce::String withoutTrailingSeparator(juce::String path)
+{
+    while (path.length() > 1 && (path.endsWithChar('/') || path.endsWithChar('\\')))
+        path = path.dropLastCharacters(1);
+    return path;
+}
+bool isAtOrUnder(const juce::String& path, const juce::String& root)
+{
+    if (path == root) return true;
+    if (path.length() <= root.length() || ! path.startsWith(root)) return false;
+    const auto next = path[root.length()];
+    return next == '/' || next == '\\';
+}
+}
 bool isPathIgnored(const juce::String& path, const std::vector<IgnoredPath>& entries)
 {
-    const juce::File file(path);
+    if (entries.empty()) return false;
+    const auto candidate = withoutTrailingSeparator(path);
     for (const auto& entry : entries)
     {
-        if (file == juce::File(entry.path)) return true;
-        if (entry.folder && file.isAChildOf(juce::File(entry.path))) return true;
+        const auto ignored = withoutTrailingSeparator(entry.path);
+        if (candidate == ignored) return true;
+        if (entry.folder && isAtOrUnder(candidate, ignored)) return true;
     }
     return false;
 }

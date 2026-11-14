@@ -131,65 +131,35 @@ void FolderTree::refresh(SampleRepository& repo)
 void FolderTree::refresh(SampleRepository& repo, const juce::StringArray& rootPaths, bool showAllSamples,
                          bool revealIgnored)
 {
+    FolderIndexRequest request;
+    request.roots = rootPaths;
+    request.ignored = repo.ignoredPaths();
+    request.revealIgnored = revealIgnored;
+    request.showAllSamples = showAllSamples;
+    showIgnored = revealIgnored;
+    ignoredEntries = request.ignored;
+    applyIndex(buildFolderIndex(repo, request), showAllSamples);
+}
+void FolderTree::applyIndex(FolderIndex index, bool showAllSamples)
+{
     const juce::ScopedValueSetter<bool> restoreGuard(restoring,true);
-    this->showIgnored = revealIgnored;
-    ignoredEntries = repo.ignoredPaths();
     // A mass operation (split, extract, scan) refreshes the tree. Rebuilding it would otherwise
     // jump the list back to the top and drop the highlight from the current folder.
     const auto selectedPath = tree.getSelectedItem(0) != nullptr
         ? tree.getSelectedItem(0)->getUniqueName() : juce::String();
     const auto scrollY = tree.getViewport() != nullptr ? tree.getViewport()->getViewPositionY() : 0;
     auto openness = tree.getOpennessState(false);
-    tree.setRootItem(nullptr); root.reset(); children.clear(); images.clear(); failedImages.clear(); virtualFolders.clear(); roots = rootPaths;
-    if (showAllSamples && ! revealIgnored)
-        for (int i = roots.size(); --i >= 0;)
-            if (isPathIgnored(roots[i], ignoredEntries)) roots.remove(i);
+    tree.setRootItem(nullptr); root.reset(); virtualFolders.clear();
+    roots = index.roots;
+    children = std::move(index.children);
+    images = std::move(index.images);
+    failedImages = std::move(index.failedImages);
     tree.setRootItemVisible(showAllSamples);
     if (roots.isEmpty())
     {
         root = std::make_unique<Item>(*this,juce::String(),showAllSamples);
         tree.setRootItem(root.get()); root->setOpen(true);
         return;
-    }
-    std::set<juce::String> visitedFolders;
-    int64_t last = 0;
-    for (;;)
-    {
-        auto rows = repo.pathsAfterId(last,5000);
-        if (rows.empty()) break;
-        last = rows.back().id;
-        std::vector<int64_t> imageIds;
-        for (const auto& row : rows)
-        {
-            if (row.containerPath.isNotEmpty()) continue; // disc contents stay inside the image node
-            if (! revealIgnored && isPathIgnored(row.path, ignoredEntries)) continue;
-            auto folder = juce::File(row.path).getParentDirectory();
-            const juce::File nodeFile(row.path);
-            // A .bin/.img with a sibling .cue is the same image; show the cue only, once.
-            const bool representedByCue = nodeFile.hasFileExtension("bin;img")
-                && ! isDiscContentCandidate(nodeFile);
-            if (! representedByCue && nodeFile.hasFileExtension("iso;bin;mdx;cue;akai;img"))
-            {
-                images.insert(row.path);
-                imageIds.push_back(row.id);
-                children[folder.getFullPathName()].insert(row.path);
-            }
-            // Most files share folders. Build each ancestor chain once, not once per audio file.
-            if (! visitedFolders.insert(folder.getFullPathName()).second) continue;
-            for (const auto& r : roots)
-            {
-                const juce::File boundary(r);
-                if (folder != boundary && ! folder.isAChildOf(boundary)) continue;
-                while (folder != boundary)
-                {
-                    auto parent = folder.getParentDirectory();
-                    children[parent.getFullPathName()].insert(folder.getFullPathName()); folder = parent;
-                }
-                break;
-            }
-        }
-        for (const auto& image : repo.recordsByIds(imageIds))
-            if (isIncompatible(image.compatibility) || image.error.isNotEmpty()) failedImages.insert(image.filePath);
     }
     root = std::make_unique<Item>(*this,juce::String(),showAllSamples);
     tree.setRootItem(root.get()); root->setOpen(true);

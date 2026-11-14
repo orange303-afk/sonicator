@@ -866,6 +866,8 @@ TEST_CASE("Last folder and selected file are restored on restart", "[ui][session
         REQUIRE(folders != nullptr);
         auto* tree = dynamic_cast<juce::TreeView*>(folders->getChildComponent(0));
         REQUIRE(tree != nullptr);
+        // The tree is built on a worker thread; the session folder is selected when it lands.
+        REQUIRE(pumpUntil([tree] { return tree->getSelectedItem(0) != nullptr; }));
         REQUIRE(tree->getSelectedItem(0) != nullptr);
         REQUIRE(tree->getSelectedItem(0)->getUniqueName() == lib.getChildFile("Drums").getFullPathName());
         library->selectRow(0); // kick becomes the last selection
@@ -1014,4 +1016,34 @@ TEST_CASE("Startup drops CMB and RFL catalog rows but keeps files", "[ui][remove
     REQUIRE(repo.findByPath(broken.getFullPathName()).has_value());
     REQUIRE(repo.findByPath(wav.getFullPathName()).has_value());
     REQUIRE(protectedSample.existsAsFile());
+}
+
+TEST_CASE("The folder tree fills in after the window opens", "[ui][folder-tree]")
+{
+    TestDirectory t;
+    const auto lib = t.dir.getChildFile("Library");
+    lib.getChildFile("Drums").createDirectory();
+    const auto catalog = t.dir.getChildFile("tree.sqlite");
+    {
+        Database db(catalog);
+        SampleRepository repo(db);
+        repo.createTables();
+        repo.addRoot(lib.getFullPathName());
+        SampleRecord record;
+        record.filePath = lib.getChildFile("Drums").getChildFile("kick.wav").getFullPathName();
+        record.fileName = "kick.wav";
+        record.format = "WAV";
+        repo.upsert(record);
+    }
+
+    MainComponent app(catalog, false, {}, t.dir.getChildFile("tree-settings.json"));
+    auto* folders = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree"));
+    REQUIRE(folders != nullptr);
+    auto* tree = dynamic_cast<juce::TreeView*>(folders->getChildComponent(0));
+    REQUIRE(tree != nullptr);
+    // Construction no longer walks the catalog on the message thread: the tree arrives later.
+    REQUIRE(tree->getRootItem() == nullptr);
+    REQUIRE(pumpUntil([tree] { return tree->getRootItem() != nullptr; }));
+    REQUIRE(tree->getRootItem() != nullptr);
+    REQUIRE(tree->getRootItem()->getNumSubItems() == 1);
 }

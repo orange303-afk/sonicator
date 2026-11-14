@@ -87,6 +87,19 @@ so shrinking a window keeps the user's choice; a workspace smaller than the mini
 a compact layout. The three `PanelSplitter` handles edit the preference and commit it on mouse up.
 `Reset layout` restores these sizes and the Favorites height only.
 
+## Folder tree and large catalogs
+
+The library and favorites trees do not read the catalog on the message thread. A scan of the
+`samples` table is grouped into folders by `buildFolderIndex` (`core/database/FolderIndex.cpp`) on a
+worker thread (`ui/library/FolderIndexRunner.h`), and the finished structure is installed with
+`FolderTree::applyIndex`, which keeps the selected folder, the expanded folders and the scroll
+position. The favorites tree picks its own subtree out of the same build, so both trees cost one
+scan. Requests that arrive while a build runs are coalesced into one: the newest inputs win. Rows
+are streamed by id (`pathsAfterId`), never with `ORDER BY … OFFSET`; paths are compared as strings
+in `isPathIgnored` and the folder walk, which keeps a 300 000-row catalog's build near a second
+instead of blocking start-up for tens of seconds. `FolderTree::refresh` still builds synchronously
+for tests and simple callers.
+
 ## Settings, theme and catalogue switching
 
 Settings are stored as JSON at `Sonicator/settings.json` (atomic temp-file replace). The theme is a

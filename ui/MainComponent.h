@@ -5,6 +5,7 @@
 #include "ui/library/FileListPanel.h"
 #include "ui/library/SearchField.h"
 #include "ui/library/FolderTree.h"
+#include "ui/library/FolderIndexRunner.h"
 #include "ui/library/TagStrip.h"
 #include "ui/disc/DiscBrowserPanel.h"
 #include "ui/preview/PreviewPanel.h"
@@ -108,6 +109,10 @@ public:
     void persistPreviewSettings();
     // Writes the pending last folder/file immediately. Used by shutdown and session tests.
     void flushSessionState();
+    // Rebuilds the library and favorites trees off the message thread and installs the result.
+    void requestFolderTreeRefresh();
+    void applyFolderIndex(FolderIndex);
+    void applyFavoritesIndex();
     void setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny = false);
     // Restores the three panel sizes and the Favorites height to their defaults.
     void resetLayout();
@@ -155,6 +160,10 @@ private:
     juce::Label stageLabel;
     std::unique_ptr<Database> readDb, writeDb;
     std::unique_ptr<SampleRepository> readRepo, writeRepo;
+    // Declared after the repositories so it stops before they are destroyed.
+    std::unique_ptr<FolderIndexRunner> folderIndexRunner;
+    FolderIndex lastFolderIndex;
+    juce::String pendingTreeSelection;
     std::unique_ptr<IndexingService> indexer;
     std::unique_ptr<SmartAnalysisService> smart;
     std::unique_ptr<TaggingService> tagging;

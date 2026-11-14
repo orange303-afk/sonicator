@@ -843,8 +843,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
                         safe->pageOffset = 0;
                         safe->ensureSelectedFolderVisible();
                         safe->reloadLibrary();
-                        safe->folders.refresh(*safe->readRepo, safe->readRepo->roots(), true,
-                                              safe->filter.showIgnored);
+                        safe->requestFolderTreeRefresh();
                         safe->refreshFavorites();
                         break;
                     default: break;
@@ -941,6 +940,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
         loadShippedGlobalPrototypes();
+        folderIndexRunner = std::make_unique<FolderIndexRunner>(*readRepo);
         indexer = std::make_unique<IndexingService>(*writeRepo);
         // Only a real application startup may register the user's system pack folders.
         if (persistSessionState)
@@ -977,10 +977,11 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             && juce::File(appSettings.lastFolder).isDirectory()
             && readRepo->countInFolder(appSettings.lastFolder) > 0)
             selectedFolder = appSettings.lastFolder;
-        folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored);
-        refreshFavorites();
+        pendingTreeSelection = selectedFolder;
+        requestFolderTreeRefresh();
+        refreshFavorites();   // the favorites panel follows its visibility at once; its content
+                              // arrives with the background build
         reloadLibrary();
-        if (! selectedFolder.isEmpty()) folders.selectPath(selectedFolder);
         if (! appSettings.lastSamplePath.isEmpty())
         {
             if (const auto record = readRepo->findByPath(appSettings.lastSamplePath))
@@ -1250,7 +1251,7 @@ void MainComponent::beginImport(const juce::File& folder)
         // Adding a folder is an explicit request: a previous Remove or Ignore of this folder or
         // any ancestor no longer keeps the chosen subtree out of the scan.
         writeRepo->unignoreCoveringFolders(folder.getFullPathName());
-        writeRepo->addRoot(folder.getFullPathName()); folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored); refreshFavorites();
+        writeRepo->addRoot(folder.getFullPathName()); requestFolderTreeRefresh(); refreshFavorites();
         if (indexer->start({folder.getFullPathName()})) { wasRunning = true; reloadLibrary(); }
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
@@ -1324,7 +1325,7 @@ bool MainComponent::removeFolderFromLibrary(const juce::String& path)
         }
         writeRepo->refreshDuplicates();
         reloadLibrary();
-        folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored);
+        requestFolderTreeRefresh();
         refreshFavorites();
         ensureSelectedFolderVisible();
         status.setText("Removed " + juce::String(removal.rowsRemoved) + " catalogued file(s) from " + target
@@ -1501,12 +1502,8 @@ void MainComponent::showRelocateDialog()
             try { writeRepo->refreshDuplicates(); }
             catch (const std::exception& e) { refreshWarning = juce::String::fromUTF8(e.what()); }
             selectedFolder.clear(); selectedSampleId = 0; pageOffset = 0;
-            try { folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored); }
-            catch (const std::exception& e)
-            {
-                if (refreshWarning.isNotEmpty()) refreshWarning += "  |  ";
-                refreshWarning += juce::String::fromUTF8(e.what());
-            }
+            requestFolderTreeRefresh();
+            refreshFavorites();
             reloadLibrary();
 
             juce::String message = "Relocated " + juce::String(result.movedFiles) + " file(s) in "
@@ -2385,19 +2382,53 @@ void MainComponent::saveSessionState()
             juce::dontSendNotification);
     }
 }
-void MainComponent::refreshFavorites()
+void MainComponent::requestFolderTreeRefresh()
 {
     if (readRepo == nullptr) return;
+    if (folderIndexRunner == nullptr)
+        folderIndexRunner = std::make_unique<FolderIndexRunner>(*readRepo);
+
+    FolderIndexRequest request;
+    request.roots = readRepo->roots();
+    request.ignored = readRepo->ignoredPaths();
+    request.revealIgnored = filter.showIgnored;
+    request.showAllSamples = true;
+    juce::Component::SafePointer<MainComponent> safe(this);
+    folderIndexRunner->request(std::move(request), [safe](FolderIndex index)
+    {
+        if (safe != nullptr) safe->applyFolderIndex(std::move(index));
+    });
+}
+void MainComponent::applyFolderIndex(FolderIndex index)
+{
+    lastFolderIndex = std::move(index);
+    folders.applyIndex(lastFolderIndex, true);
+    applyFavoritesIndex();
+    if (pendingTreeSelection.isNotEmpty())
+    {
+        folders.selectPath(pendingTreeSelection);
+        pendingTreeSelection.clear();
+    }
+    resized();
+}
+void MainComponent::applyFavoritesIndex()
+{
     const bool hasFavorites = ! appSettings.favoriteFolders.isEmpty();
     if (hasFavorites)
-    {
-        try { favorites.refresh(*readRepo, appSettings.favoriteFolders, false, filter.showIgnored); }
-        catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
-    }
+        favorites.applyIndex(folderIndexUnderRoots(lastFolderIndex, appSettings.favoriteFolders), false);
+    else
+        favorites.applyIndex({}, false);
     favoritesLabel.setVisible(hasFavorites);
     favorites.setVisible(hasFavorites);
     favoritesSplitter.setVisible(hasFavorites);
     if (! hasFavorites) favorites.clearSelection();
+}
+void MainComponent::refreshFavorites()
+{
+    if (readRepo == nullptr) return;
+    // The folder structure comes from the last background build; changing favorites only picks a
+    // different subtree out of it, so this stays instant.
+    applyFavoritesIndex();
     resized();
 }
 bool MainComponent::isFavoriteFolder(const juce::String& path) const
@@ -3086,8 +3117,7 @@ void MainComponent::finishSplit()
                 writeRepo->removeByPaths(moved);
                 writeRepo->refreshDuplicates();
                 reloadLibrary();
-                if (readRepo != nullptr)
-                    folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored);
+                requestFolderTreeRefresh();
                 refreshFavorites();
             }
             catch (const std::exception& e)
@@ -3239,8 +3269,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                     else safe->writeRepo->ignorePath(folderPath, true);
                     safe->ensureSelectedFolderVisible();
                     safe->reloadLibrary();
-                    safe->folders.refresh(*safe->readRepo, safe->readRepo->roots(), true,
-                                          safe->filter.showIgnored);
+                    safe->requestFolderTreeRefresh();
                     safe->refreshFavorites();
                     safe->status.setText(exactIgnore ? "Ignoring removed for " + folderPath
                                                      : "Ignoring " + folderPath,
@@ -4373,7 +4402,7 @@ void MainComponent::timerCallback()
             try { writeRepo->refreshDuplicates(); }
             catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
         }
-        reloadLibrary(); folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored); refreshFavorites();
+        reloadLibrary(); requestFolderTreeRefresh(); refreshFavorites();
         // New or changed audio invalidates its smart result; rebuild metadata in the background.
         if (! p.cancelled && smart && ! smart->progress().running) smart->start();
     }
@@ -4977,9 +5006,13 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     catalogSyncRequests.clear();
     if (typeFeedbackWorker && typeFeedbackWorker->joinable()) typeFeedbackWorker->join();
     cancelFeedback = false;
+    folderIndexRunner.reset();
     writeRepo.reset(); writeDb.reset(); readRepo.reset(); readDb.reset();
     writeDb = std::move(newWriteDb); writeRepo = std::move(newWriteRepo);
     readDb = std::move(newReadDb); readRepo = std::move(newReadRepo);
+    lastFolderIndex = {};
+    pendingTreeSelection.clear();
+    folderIndexRunner = std::make_unique<FolderIndexRunner>(*readRepo);
     AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
     loadShippedGlobalPrototypes();
     {
@@ -5016,7 +5049,7 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     showAnalysisPlaceholder();
     selectedTags.setTags({});
     writeRepo->refreshDuplicates();
-    folders.refresh(*readRepo, readRepo->roots(), true, filter.showIgnored);
+    requestFolderTreeRefresh();
     refreshFavorites();
     reloadLibrary();
     juce::String message = "Catalog: " + dbPath.getFullPathName();

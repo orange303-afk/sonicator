@@ -12,6 +12,16 @@ inline juce::Component* findDescendantWithID(juce::Component& root, const juce::
     return nullptr;
 }
 
+// Runs the message loop until `done` is true or the timeout passes. Background work that posts
+// its result through MessageManager (the folder tree, disc decoding) needs this in tests.
+inline bool pumpUntil(const std::function<bool()>& done, int timeoutMs = 5000)
+{
+    const auto start = juce::Time::getMillisecondCounter();
+    while (! done() && juce::Time::getMillisecondCounter() - start < (juce::uint32) timeoutMs)
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
+    return done();
+}
+
 struct TestDirectory
 {
     juce::File dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
