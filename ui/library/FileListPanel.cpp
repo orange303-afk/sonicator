@@ -52,8 +52,10 @@ juce::String withSmartMarkers(juce::String value, const SmartDisplay& d, int col
 {
     const bool edited = column == 10 ? d.typeOverride != OverrideState::None
                       : column == 11 ? d.bpmOverride != OverrideState::None
-                                     : d.keyOverride != OverrideState::None;
-    const auto state = column == 10 ? d.typeState : column == 11 ? d.bpmState : d.keyState;
+                      : column == 12 ? d.keyOverride != OverrideState::None
+                                     : d.genreOverride != OverrideState::None;
+    const auto state = column == 10 ? d.typeState : column == 11 ? d.bpmState
+                     : column == 12 ? d.keyState : d.genreState;
     if (edited) value += " *";
     if (state == SmartState::Conflicting) value += " !";
     else if (state == SmartState::Ambiguous) value += " ?";
@@ -85,7 +87,7 @@ juce::String smartCellText(const SmartDisplay& d, int column)
         else if (d.bpmState == SmartState::Error) return "!";
         else value = notAnalyzed ? "--" : "?";
     }
-    else
+    else if (column == 12)
     {
         if (d.keyOverride == OverrideState::NotApplicable) return "n/a";
         if (d.keyOverride == OverrideState::Unknown) return "edited unknown";
@@ -94,6 +96,15 @@ juce::String smartCellText(const SmartDisplay& d, int column)
             return "n/a";
         else if (d.keyState == SmartState::Error) return "!";
         else value = notAnalyzed ? "--" : "?";
+    }
+    else
+    {
+        if (d.genreOverride == OverrideState::NotApplicable) return "n/a";
+        if (d.genreOverride == OverrideState::Unknown) return "edited unknown";
+        if (d.genre.isNotEmpty()) value = d.genre;
+        else if (d.genreState == SmartState::Error) return "!";
+        // Empty is the honest answer when nothing named the genre; "--" only before a pass.
+        else value = notAnalyzed ? "--" : "-";
     }
     return withSmartMarkers(value, d, column);
 }
@@ -110,6 +121,7 @@ FileListPanel::FileListPanel()
     h.addColumn("TYPE",10,80,50,170);
     h.addColumn("BPM",11,54,40,110);
     h.addColumn("KEY",12,74,50,160);
+    h.addColumn("GENRE",13,84,60,180);
     h.addColumn("FORMAT",2,66,48,120);
     h.addColumn("LENGTH",3,78,56,140);
     h.addColumn("RATE",4,78,56,140);
@@ -527,7 +539,7 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
         }
         return;
     }
-    if (col == 10 || col == 11 || col == 12)
+    if (col == 10 || col == 11 || col == 12 || col == 13)
     {
         const auto found = smartDisplays.find(r.id);
         const auto value = found == smartDisplays.end() ? juce::String("--")

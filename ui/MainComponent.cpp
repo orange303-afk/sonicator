@@ -18,6 +18,7 @@
 #include "core/dsp/AnalysisAudio.h"
 #include "core/smart/AcousticClassifierService.h"
 #include "core/smart/NameHeuristics.h"
+#include "core/smart/GenreContextExtractor.h"
 #include "core/Version.h"
 #include "core/ml/AdaptiveClassifier.h"
 #include <algorithm>
@@ -643,6 +644,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             case 10: filter.sort = LibrarySort::Type; break;
             case 11: filter.sort = LibrarySort::Bpm; break;
             case 12: filter.sort = LibrarySort::Key; break;
+            case 13: filter.sort = LibrarySort::Genre; break;
             default: filter.sort = LibrarySort::Name; break;
         }
         filter.ascending = ascending; pageOffset = 0; reloadLibrary();
@@ -1922,6 +1924,23 @@ void MainComponent::loadSelectedSample(const SampleRecord& r)
         details += "\n\nInside image  " + juce::File(r.containerPath).getFileName()
             + "\nEntry         " + r.discPath
             + "\n\nDecoded on demand; the image is never extracted.";
+    if (readRepo != nullptr)
+    {
+        // Where a genre came from decides how much a person should trust it, so the card names
+        // the source next to the value.
+        const auto displays = readRepo->smartDisplays({ r.id });
+        const auto found = displays.find(r.id);
+        if (found != displays.end() && found->second.genre.isNotEmpty())
+        {
+            const auto& d = found->second;
+            const auto source = d.genreOverride == OverrideState::Value ? juce::String("manual")
+                : d.genreState == SmartState::Ambiguous ? juce::String("ambiguous")
+                : juce::String("automatic");
+            details += "\n\nGenre        " + d.genre + "  (" + source + ")";
+        }
+        else if (found != displays.end() && found->second.genreOverride == OverrideState::Unknown)
+            details += "\n\nGenre        edited unknown";
+    }
     if (r.missing) details += "\n\nFile is missing";
     if (r.error.isNotEmpty()) details += "\n\n" + r.error;
     if (readRepo != nullptr)
@@ -3656,6 +3675,31 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     bpmMenu.addItem(25003, "Clear manual BPM", anyManualBpm);
     menu.addSubMenu("BPM", bpmMenu);
 
+    // Genre: one value per file, with a manual override that survives reanalysis.
+    const auto genreNames = GenreContextExtractor::canonicalGenres();
+    bool anyGenreOverride = false, anyGenreUnknown = false;
+    juce::String commonGenre;
+    bool haveCommonGenre = false, uniformGenre = true;
+    for (const auto id : ids)
+    {
+        const auto it = displays.find(id);
+        if (it == displays.end()) { uniformGenre = false; continue; }
+        const auto& d = it->second;
+        if (d.genreOverride != OverrideState::None) anyGenreOverride = true;
+        if (d.genreOverride == OverrideState::Unknown) anyGenreUnknown = true;
+        if (! haveCommonGenre) { commonGenre = d.genre; haveCommonGenre = true; }
+        else if (! commonGenre.equalsIgnoreCase(d.genre)) uniformGenre = false;
+    }
+    juce::PopupMenu genreMenu;
+    for (int i = 0; i < genreNames.size(); ++i)
+        genreMenu.addItem(26100 + i, genreNames[i], true,
+                          uniformGenre && commonGenre.equalsIgnoreCase(genreNames[i]));
+    genreMenu.addSeparator();
+    genreMenu.addItem(26190, "Unknown", true, anyGenreUnknown);
+    genreMenu.addItem(26191, "Clear manual genre", anyGenreOverride);
+    genreMenu.addItem(26192, "+ Custom genre...");
+    menu.addSubMenu("Genre", genreMenu);
+
     menu.addItem(9001, allStarred ? "Unstar" : "Star", true, false, starMenuImage());
     const bool smartAvailable = smart != nullptr && ! (indexer && indexer->progress().running);
     menu.addItem(9005, selection.size() > 1 ? "Analyze selected (" + juce::String(selection.size()) + ")"
@@ -3745,6 +3789,61 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                 if (result == 25003)
                 {
                     safe->clearBpmForRows(ids);
+                    return;
+                }
+                if (result >= 26100 && result < 26190)
+                {
+                    const auto names = GenreContextExtractor::canonicalGenres();
+                    const int index = result - 26100;
+                    if (index < names.size())
+                    {
+                        SmartOverride value;
+                        value.textValue = names[index];
+                        for (auto id : ids)
+                            safe->writeRepo->setSmartOverride(id, SmartField::Genre, value);
+                        safe->reloadLibrary();
+                        safe->status.setText("Genre set to " + names[index] + " for "
+                                             + juce::String(ids.size()) + " sample(s)",
+                                             juce::dontSendNotification);
+                    }
+                    return;
+                }
+                if (result == 26190 || result == 26191)
+                {
+                    for (auto id : ids)
+                    {
+                        if (result == 26191)
+                        {
+                            safe->writeRepo->clearSmartOverride(id, SmartField::Genre);
+                        }
+                        else
+                        {
+                            SmartOverride unknown;
+                            unknown.cleared = true;
+                            safe->writeRepo->setSmartOverride(id, SmartField::Genre, unknown);
+                        }
+                    }
+                    safe->reloadLibrary();
+                    safe->status.setText((result == 26191 ? "Manual genre cleared for "
+                                                          : "Genre marked unknown for ")
+                                         + juce::String(ids.size()) + " sample(s)",
+                                         juce::dontSendNotification);
+                    return;
+                }
+                if (result == 26192)
+                {
+                    dialogs::showPrompt(*safe, "Custom genre", "Genre name",
+                                        juce::String(),
+                        [safe, ids](const juce::String& name)
+                        {
+                            if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr)
+                                return;
+                            SmartOverride value;
+                            value.textValue = name.trim();
+                            for (auto id : ids)
+                                safe->writeRepo->setSmartOverride(id, SmartField::Genre, value);
+                            safe->reloadLibrary();
+                        });
                     return;
                 }
                 if (result == 9020)
