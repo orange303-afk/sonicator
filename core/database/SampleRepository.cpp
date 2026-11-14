@@ -149,6 +149,15 @@ juce::String effectiveKeyModeSql()
            " ELSE (SELECT NULLIF(sr.key_mode,'') FROM smart_results sr"
            " WHERE sr.sample_id=samples.id) END)";
 }
+// The manual genre is the effective one, so a hand-set value must win over the automatic one.
+juce::String effectiveGenreSql()
+{
+    return "(CASE WHEN EXISTS(SELECT 1 FROM smart_overrides so WHERE so.sample_id=samples.id"
+           " AND so.field='genre') THEN (SELECT NULLIF(so.text_value,'') FROM smart_overrides so"
+           " WHERE so.sample_id=samples.id AND so.field='genre' AND so.cleared=0)"
+           " ELSE (SELECT NULLIF(sr.genre,'') FROM smart_results sr"
+           " WHERE sr.sample_id=samples.id) END)";
+}
 juce::String orderBy(LibrarySort sort, bool ascending)
 {
     juce::String column;
@@ -162,6 +171,12 @@ juce::String orderBy(LibrarySort sort, bool ascending)
         case LibrarySort::Type:
         {
             const auto expr = effectiveTypeSql();
+            return "(" + expr + " IS NULL) ASC, " + expr + " COLLATE NOCASE "
+                 + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
+        }
+        case LibrarySort::Genre:
+        {
+            const auto expr = effectiveGenreSql();
             return "(" + expr + " IS NULL) ASC, " + expr + " COLLATE NOCASE "
                  + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
         }
@@ -307,6 +322,17 @@ FilterSql buildFilterSql(const LibraryFilter& filter, const std::vector<IgnoredP
                     sql.where += " AND " + cond;
                 sql.params.emplace_back(tVal);
                 sql.params.emplace_back(tVal);
+                break;
+            }
+            case SearchKind::GenreOnly:
+            {
+                const auto expr = effectiveGenreSql();
+                juce::String cond = juce::String("(") + expr + " LIKE ? ESCAPE '\\')";
+                if (term.negated)
+                    sql.where += " AND NOT " + cond;
+                else
+                    sql.where += " AND " + cond;
+                sql.params.emplace_back(like(term.text));
                 break;
             }
             case SearchKind::TypeOrText:
@@ -2501,33 +2527,36 @@ void writeResult(sqlite3* h, int64_t sampleId, const SmartResult& r)
 {
     detail::Statement s(h,
         "INSERT OR REPLACE INTO smart_results"
-        "(sample_id,type,structure,bpm,has_bpm,key_tonic,key_mode,root_note,"
-        "type_state,structure_state,bpm_state,key_state,root_state,"
+        "(sample_id,type,structure,genre,bpm,has_bpm,key_tonic,key_mode,root_note,"
+        "type_state,structure_state,genre_state,bpm_state,key_state,root_state,"
         "pitch_midi,pitch_cents,pitch_state,"
-        "type_source,structure_source,bpm_source,key_source,pitch_source,root_source,"
-        "type_override,structure_override,bpm_override,key_override,pitch_override,root_override,"
+        "type_source,structure_source,genre_source,bpm_source,key_source,pitch_source,root_source,"
+        "type_override,structure_override,genre_override,bpm_override,key_override,pitch_override,root_override,"
         "explanation,revision,generation,pipeline_state,extractor_version,resolver_version,dsp_version,"
         "analyzed_at,error_code,error_detail,updated_at)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     s.integer(1, sampleId);
-    s.text(2, r.type); s.text(3, r.structure);
-    s.real(4, r.bpm); s.integer(5, r.hasBpm ? 1 : 0);
-    s.integer(6, r.keyTonic); s.text(7, r.keyMode); s.integer(8, r.rootNote);
-    s.text(9, smartStateKey(r.typeState)); s.text(10, smartStateKey(r.structureState));
-    s.text(11, smartStateKey(r.bpmState)); s.text(12, smartStateKey(r.keyState));
-    s.text(13, smartStateKey(r.rootState));
-    s.integer(14, r.pitchMidi); s.real(15, r.pitchCents); s.text(16, smartStateKey(r.pitchState));
-    s.text(17, r.typeSource); s.text(18, r.structureSource); s.text(19, r.bpmSource);
-    s.text(20, r.keySource); s.text(21, r.pitchSource); s.text(22, r.rootSource);
-    s.text(23, overrideStateKey(r.typeOverride)); s.text(24, overrideStateKey(r.structureOverride));
-    s.text(25, overrideStateKey(r.bpmOverride)); s.text(26, overrideStateKey(r.keyOverride));
-    s.text(27, overrideStateKey(r.pitchOverride)); s.text(28, overrideStateKey(r.rootOverride));
-    s.text(29, r.explanation);
-    s.integer(30, r.revision); s.integer(31, r.generation);
-    s.text(32, smartPipelineStateKey(r.pipelineState));
-    s.integer(33, r.extractorVersion); s.integer(34, r.resolverVersion); s.integer(35, r.dspVersion);
-    s.integer(36, r.analyzedAt); s.text(37, r.errorCode); s.text(38, r.errorDetail);
-    s.integer(39, juce::Time::currentTimeMillis());
+    s.text(2, r.type); s.text(3, r.structure); s.text(4, r.genre);
+    s.real(5, r.bpm); s.integer(6, r.hasBpm ? 1 : 0);
+    s.integer(7, r.keyTonic); s.text(8, r.keyMode); s.integer(9, r.rootNote);
+    s.text(10, smartStateKey(r.typeState)); s.text(11, smartStateKey(r.structureState));
+    s.text(12, smartStateKey(r.genreState));
+    s.text(13, smartStateKey(r.bpmState)); s.text(14, smartStateKey(r.keyState));
+    s.text(15, smartStateKey(r.rootState));
+    s.integer(16, r.pitchMidi); s.real(17, r.pitchCents); s.text(18, smartStateKey(r.pitchState));
+    s.text(19, r.typeSource); s.text(20, r.structureSource); s.text(21, r.genreSource);
+    s.text(22, r.bpmSource);
+    s.text(23, r.keySource); s.text(24, r.pitchSource); s.text(25, r.rootSource);
+    s.text(26, overrideStateKey(r.typeOverride)); s.text(27, overrideStateKey(r.structureOverride));
+    s.text(28, overrideStateKey(r.genreOverride));
+    s.text(29, overrideStateKey(r.bpmOverride)); s.text(30, overrideStateKey(r.keyOverride));
+    s.text(31, overrideStateKey(r.pitchOverride)); s.text(32, overrideStateKey(r.rootOverride));
+    s.text(33, r.explanation);
+    s.integer(34, r.revision); s.integer(35, r.generation);
+    s.text(36, smartPipelineStateKey(r.pipelineState));
+    s.integer(37, r.extractorVersion); s.integer(38, r.resolverVersion); s.integer(39, r.dspVersion);
+    s.integer(40, r.analyzedAt); s.text(41, r.errorCode); s.text(42, r.errorDetail);
+    s.integer(43, juce::Time::currentTimeMillis());
     s.step();
 }
 int64_t nextGeneration(sqlite3* h)
@@ -2819,7 +2848,7 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
         detail::Statement results(db.handle,
             ("SELECT sample_id,type,type_state,structure,structure_state,bpm,has_bpm,bpm_state,"
              "key_tonic,key_mode,key_state,pitch_midi,pitch_cents,pitch_state,"
-             "pipeline_state FROM smart_results WHERE sample_id IN (" + placeholders + ")").toRawUTF8());
+             "pipeline_state,genre,genre_state FROM smart_results WHERE sample_id IN (" + placeholders + ")").toRawUTF8());
         for (size_t i = start; i < end; ++i) results.integer((int) (i - start + 1), sampleIds[i]);
         while (results.step())
         {
@@ -2841,19 +2870,22 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
             d.pitchState = smartStateFromKey(results.text(13)).value_or(SmartState::Unknown);
             d.hasPitch = d.pitchMidi >= 0 && d.pitchState != SmartState::Unknown
                          && d.pitchState != SmartState::NotApplicable;
+            d.genre = results.text(15);
+            d.genreState = smartStateFromKey(results.text(16)).value_or(SmartState::Unknown);
             d.pipelineState = smartPipelineStateFromKey(results.text(14))
                                   .value_or(SmartPipelineState::NotAnalyzed);
             // A pre-v7 row can carry values without a pipeline state. It is not "never analyzed":
             // show the values with the stale marker until a pass rewrites them.
             if (d.pipelineState == SmartPipelineState::NotAnalyzed
-                && (d.type.isNotEmpty() || d.hasBpm || d.key.isNotEmpty() || d.hasPitch))
+                && (d.type.isNotEmpty() || d.hasBpm || d.key.isNotEmpty() || d.hasPitch
+                    || d.genre.isNotEmpty()))
                 d.pipelineState = SmartPipelineState::Stale;
             out[id] = d;
         }
         detail::Statement overrides(db.handle,
             ("SELECT sample_id,field,cleared,not_applicable,text_value,numeric_value,aux_value"
              " FROM smart_overrides WHERE sample_id IN (" + placeholders + ")"
-             " AND field IN ('type','structure','bpm','key','pitch')").toRawUTF8());
+             " AND field IN ('type','structure','bpm','key','pitch','root_note','genre')").toRawUTF8());
         for (size_t i = start; i < end; ++i) overrides.integer((int) (i - start + 1), sampleIds[i]);
         while (overrides.step())
         {
@@ -2896,6 +2928,12 @@ std::map<int64_t, SmartDisplay> SampleRepository::smartDisplays(const std::vecto
                         d.key = overrides.text(4);
                 }
                 else d.key.clear();
+            }
+            else if (field == "genre")
+            {
+                d.genreOverride = state;
+                if (state == OverrideState::Value) d.genre = overrides.text(4);
+                else d.genre.clear();
             }
             else if (field == "pitch")
             {

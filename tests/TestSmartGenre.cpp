@@ -189,3 +189,128 @@ TEST_CASE("The same source contradicting itself is noise, not a conflict", "[gen
     REQUIRE(result.genreState == SmartState::Resolved);
     REQUIRE(result.genre.isNotEmpty());
 }
+
+namespace
+{
+struct GenreFixture
+{
+    TestDirectory t;
+    juce::File file = t.dir.getChildFile("catalog.sqlite");
+    std::unique_ptr<Database> db;
+    std::unique_ptr<SampleRepository> repo;
+    int64_t id = 0;
+
+    GenreFixture()
+    {
+        db = std::make_unique<Database>(file);
+        repo = std::make_unique<SampleRepository>(*db);
+        repo->createTables();
+        SampleRecord r;
+        r.filePath = t.dir.getChildFile("a.wav").getFullPathName();
+        r.fileName = "a.wav";
+        r.fileHash = "h";
+        id = repo->upsert(r);
+    }
+
+    SmartPublicationOutcome publish(std::vector<SmartCandidate> candidates)
+    {
+        SmartPublication publication;
+        publication.sampleId = id;
+        publication.expectedRevision = repo->smartRevision(id);
+        publication.candidates = std::move(candidates);
+        publication.catalogPath = repo->catalogPath();
+        return repo->publishSmartAnalysis(publication);
+    }
+};
+
+SmartCandidate genreCandidate(const juce::String& source, const juce::String& value)
+{
+    SmartCandidate c;
+    c.field = SmartField::Genre;
+    c.source = source;
+    c.textValue = value;
+    c.status = CandidateStatus::Valid;
+    return c;
+}
+}
+
+TEST_CASE("A published genre is read back and a manual value survives reanalysis", "[genre][database]")
+{
+    GenreFixture f;
+    auto first = f.publish({ genreCandidate("folder", "House") });
+    REQUIRE(first.published);
+    REQUIRE(first.result.genre == "House");
+    const auto display = f.repo->smartDisplays({ f.id });
+    REQUIRE(display.at(f.id).genre == "House");
+    REQUIRE(display.at(f.id).genreState == SmartState::Resolved);
+
+    SmartOverride manual;
+    manual.textValue = "Jazz";
+    f.repo->setSmartOverride(f.id, SmartField::Genre, manual);
+    auto overridden = f.repo->smartDisplays({ f.id });
+    REQUIRE(overridden.at(f.id).genre == "Jazz");
+    REQUIRE(overridden.at(f.id).genreOverride == OverrideState::Value);
+
+    // A later pass that finds a different genre must not overwrite the manual value.
+    auto second = f.publish({ genreCandidate("folder", "Techno") });
+    REQUIRE(second.published);
+    const auto afterRepublish = f.repo->smartDisplays({ f.id });
+    REQUIRE(afterRepublish.at(f.id).genre == "Jazz");
+
+    f.repo->clearSmartOverride(f.id, SmartField::Genre);
+    const auto cleared = f.repo->smartDisplays({ f.id });
+    REQUIRE(cleared.at(f.id).genre == "Techno");
+}
+
+TEST_CASE("An unknown genre override blocks the automatic value", "[genre][database]")
+{
+    GenreFixture f;
+    REQUIRE(f.publish({ genreCandidate("folder", "House") }).published);
+    SmartOverride unknown;
+    unknown.cleared = true;
+    f.repo->setSmartOverride(f.id, SmartField::Genre, unknown);
+    const auto display = f.repo->smartDisplays({ f.id });
+    REQUIRE(display.at(f.id).genre.isEmpty());
+    REQUIRE(display.at(f.id).genreOverride == OverrideState::Unknown);
+}
+
+TEST_CASE("Genre sorts, filters and searches the whole catalog", "[genre][database]")
+{
+    GenreFixture f;
+    REQUIRE(f.publish({ genreCandidate("folder", "Deep House") }).published);
+    SampleRecord second;
+    second.filePath = f.t.dir.getChildFile("b.wav").getFullPathName();
+    second.fileName = "housekeeper.wav";
+    second.fileHash = "h2";
+    const auto secondId = f.repo->upsert(second);
+    SmartPublication publication;
+    publication.sampleId = secondId;
+    publication.candidates = { genreCandidate("filename", "Trap") };
+    publication.catalogPath = f.repo->catalogPath();
+    REQUIRE(f.repo->publishSmartAnalysis(publication).published);
+
+    LibraryFilter byGenre;
+    byGenre.text = "genre:house";
+    const auto matches = f.repo->queryIds(byGenre);
+    REQUIRE(matches.size() == 1);
+    REQUIRE(matches[0] == f.id);
+
+    LibraryFilter all;
+    all.sort = LibrarySort::Genre;
+    all.ascending = true;
+    const auto sorted = f.repo->queryIds(all);
+    REQUIRE(sorted.size() == 2);
+    // "Deep House" sorts before "Trap".
+    REQUIRE(sorted[0] == f.id);
+    REQUIRE(sorted[1] == secondId);
+
+    // A manual genre becomes the effective sort/filter value.
+    SmartOverride manual;
+    manual.textValue = "Ambient";
+    f.repo->setSmartOverride(secondId, SmartField::Genre, manual);
+    LibraryFilter ambient;
+    ambient.text = "genre:ambient";
+    const auto manualMatch = f.repo->queryIds(ambient);
+    REQUIRE(manualMatch.size() == 1);
+    REQUIRE(manualMatch[0] == secondId);
+}

@@ -112,6 +112,13 @@ std::vector<SearchTerm> parseSearchTerms(const juce::String& query)
             term.text = canonical.isNotEmpty() ? canonical : value;
             term.typeValue = term.text;
         }
+        else if (lower.startsWith("genre:"))
+        {
+            const auto value = raw.fromFirstOccurrenceOf(":", false, false).trim();
+            if (value.isEmpty()) continue;
+            term.kind = SearchKind::GenreOnly;
+            term.text = value;
+        }
         else if (lower.startsWith("key:"))
         {
             const auto value = raw.fromFirstOccurrenceOf(":", false, false);

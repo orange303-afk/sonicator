@@ -14,6 +14,7 @@ enum class SearchKind
     TypeOnly,         // type:pad
     KeyOrText,        // bare key/note token ("Amin", "C4"): smart key or text
     KeyOnly,          // key:Am
+    GenreOnly,        // genre:house (manual or automatic genre, substring)
     NoteOnly          // note:C4: sampler root note, excluding defaults
 };
 struct SearchTerm
