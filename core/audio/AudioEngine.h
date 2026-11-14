@@ -218,6 +218,9 @@ private:
     PreviewOutput output {source,sampler,sf2Sampler,rexSampler,sf2Audition,externalSampler,trackerSong,sampleVoices};
     juce::AudioSourcePlayer player;
     void attach();
+    // Drops the ordinary-file transport before another preview kind takes over. Without it a long
+    // file keeps sounding under a disc, instrument or tracker source.
+    void releaseFileTransport();
     void detachRender();
     void attachRender();
     bool stopTransport();

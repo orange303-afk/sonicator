@@ -130,16 +130,23 @@ void AudioEngine::attach()
     source.setSource(reader.get(), readAheadSamples,
                      readAheadSamples > 0 ? &readAhead : nullptr, inputRate);
 }
+void AudioEngine::releaseFileTransport()
+{
+    // Transport stop needs the still-connected callback to acknowledge its fade-out.
+    stopTransport();
+    source.setSource(nullptr);
+    reader.reset();
+    readerRangeLoop = false;
+}
+
 bool AudioEngine::loadFile(const juce::File& file)
 {
     const bool midi = isMidiPreview();
-    // Transport stop needs the still-connected callback to acknowledge its fade-out.
-    stopTransport();
+    releaseFileTransport();
     detachRender();
     sampler.clear();
     clearContainers();
     loadedFile = juce::File(); audibleStart = -1; startAtNextPlay = true;
-    source.setSource(nullptr); reader.reset(); readerRangeLoop = false;
     if (file.hasFileExtension("cmb;repatch;rfl"))
     {
         reasonMetadata=readReasonPatch(file);
@@ -389,6 +396,7 @@ bool AudioEngine::selectSoundFontSample(SampleId id)
 }
 bool AudioEngine::previewFileInstrument(const juce::File& file)
 {
+    releaseFileTransport();
     detachRender();
     clearContainers();
     const auto extension = file.getFileExtension().toLowerCase();
@@ -460,6 +468,7 @@ bool AudioEngine::selectExternalSample(SampleId id)
 }
 bool AudioEngine::previewTracker(const juce::File& file)
 {
+    releaseFileTransport();
     detachRender();
     clearContainers();
     juce::String error;
@@ -602,6 +611,7 @@ bool AudioEngine::setDiscSample(const SampleAudioPtr& audio, bool looping, int64
         lastError = "The decoded disc sample is empty";
         return false;
     }
+    releaseFileTransport();
     detachRender();
     clearContainers();
     {
@@ -622,6 +632,7 @@ bool AudioEngine::setDiscSample(const SampleAudioPtr& audio, bool looping, int64
 
 void AudioEngine::clearDiscSample()
 {
+    releaseFileTransport();
     detachRender();
     {
         const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
@@ -640,6 +651,7 @@ void AudioEngine::clearDiscSample()
 
 bool AudioEngine::previewRex2(const juce::File& file, int startNote)
 {
+    releaseFileTransport();
     detachRender();
     clearContainers();
     juce::String error;
@@ -660,6 +672,7 @@ bool AudioEngine::previewRex2(const juce::File& file, int startNote)
 }
 bool AudioEngine::previewSoundFont(const juce::File& file, int presetIndex)
 {
+    releaseFileTransport();
     detachRender();
     clearContainers();
     juce::String error;
