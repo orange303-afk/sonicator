@@ -133,7 +133,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/edit/AudioEditWriter.cpp
     core/edit/AudioFileWriter.cpp
     core/edit/NormalizeService.cpp
-    core/batch/BatchTypes.cpp core/batch/BatchSources.cpp core/batch/BatchPaths.cpp core/batch/BatchPipeline.cpp core/batch/BatchResampler.cpp core/batch/BatchQuantizer.cpp core/batch/BatchMetadata.cpp core/batch/BatchPublisher.cpp core/batch/BatchEncoder.cpp
+    core/batch/BatchTypes.cpp core/batch/BatchSources.cpp core/batch/BatchPaths.cpp core/batch/BatchPipeline.cpp core/batch/BatchResampler.cpp core/batch/BatchQuantizer.cpp core/batch/BatchMetadata.cpp core/batch/BatchPublisher.cpp core/batch/BatchEncoder.cpp core/batch/BatchService.cpp
     core/indexing/CatalogFileSync.cpp
     core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp
     core/updates/UpdateCheck.cpp

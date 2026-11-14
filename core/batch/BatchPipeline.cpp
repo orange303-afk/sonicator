@@ -131,6 +131,7 @@ PreparedAudio::PreparedAudio(std::unique_ptr<juce::AudioFormatReader> input, int
         if (stage.kind != StageSpec::Kind::trim) continue;
         const auto begin = clampFrames(stage.trimBegin, 0, length);
         const auto end = clampFrames(stage.trimEnd, 0, length);
+        firstFrame += begin;
         length = std::max<int64_t>(0, end - begin);
     }
 }

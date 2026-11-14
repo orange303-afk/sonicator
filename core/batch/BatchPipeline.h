@@ -44,6 +44,8 @@ public:
     PreparedAudio(const PreparedAudio&) = delete;
     PreparedAudio& operator=(const PreparedAudio&) = delete;
     int64_t frames() const { return length; }
+    // First source frame that survives the trim chain, used by the honest A/B preview.
+    int64_t startFrame() const { return firstFrame; }
     int sampleRate() const { return rate; }
     int channels() const { return channelCount; }
     const std::vector<StepOutcome>& stepOutcomes() const { return outcomes; }
@@ -57,7 +59,7 @@ private:
     ReadResult readBlock(int capacity, int& produced, CancelCheck);
     std::unique_ptr<juce::AudioFormatReader> reader;
     int rate = 0, channelCount = 0;
-    int64_t sourceFrames = 0, length = 0;
+    int64_t sourceFrames = 0, length = 0, firstFrame = 0;
     std::vector<StageSpec> stages;
     std::vector<Runtime> runtime;
     std::vector<StepOutcome> outcomes;
