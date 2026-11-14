@@ -14,3 +14,10 @@ Always consult `~/Documents/orange303/Sonicator Features.md` when:
 - Graphify knowledge graph is stored in `graphify-out/`.
 - After modifying code, run `graphify update .` to keep the graph current.
 - Architecture details are documented in `docs/ARCHITECTURE.md`.
+
+## Feature Specifications
+- Batch Processing and audio converter plan and requirements: `docs/superpowers/specs/2026-11-14-batch-audio-converter-design.md` (design only; not implemented).
+- User plugin system plan and requirements: `docs/superpowers/specs/2026-11-14-user-plugins-design.md` (design only; not implemented).
+- Genre column plan and requirements: `docs/superpowers/specs/2026-11-14-genre-column-design.md` (design only; not implemented).
+- Customizable keyboard shortcuts: implemented in `stage-settings-hotkeys-layout`; see `docs/COMMANDS.md`, `docs/SHORTCUTS.md`, spec `docs/superpowers/specs/2026-11-14-customizable-shortcuts-design.md`.
+- Settings navigation: implemented in `stage-settings-hotkeys-layout`; see `docs/SETTINGS_HOTKEYS_LAYOUT_ACCEPTANCE.md`, spec `docs/superpowers/specs/2026-11-14-settings-navigation-design.md`.
