@@ -3,6 +3,7 @@
 #include "core/database/SampleRepository.h"
 #include "core/smart/SmartTypes.h"
 #include "core/smart/SmartResolver.h"
+#include "core/smart/GenreContextExtractor.h"
 #include "TestHelpers.h"
 #include <sqlite3.h>
 
@@ -97,4 +98,94 @@ TEST_CASE("A catalog from schema 16 gains genre columns without losing data", "[
     const auto overrides = repo.smartOverrides(sampleId);
     REQUIRE(overrides.count(SmartField::Type) == 1);
     REQUIRE(overrides.at(SmartField::Type).textValue == "Kick");
+}
+
+TEST_CASE("A library or drive name never assigns a genre", "[genre]")
+{
+    // Two nearest folders only: "samples" and "_Kurzweil" carry no genre, and "1TBSSD" is a volume.
+    const juce::File deep("/Volumes/1TBSSD/samples/_Kurzweil/Programs/strings.wav");
+    REQUIRE(GenreContextExtractor::candidates(deep).empty());
+    const juce::File driveRoot("/Volumes/1TBSSD/Techno/kick.wav");
+    // "Techno" is a real folder one level above the file, so it does match; a volume is never
+    // consulted, but a genuine genre folder next to the file is.
+    REQUIRE(GenreContextExtractor::candidates(driveRoot).size() == 1);
+}
+
+TEST_CASE("Whole tokens only: housekeeper is not house", "[genre]")
+{
+    const juce::File file("/Samples/Various/housekeeper_01.wav");
+    REQUIRE(GenreContextExtractor::candidates(file).empty());
+    const juce::File real("/Samples/Various/house_loop.wav");
+    const auto candidates = GenreContextExtractor::candidates(real);
+    REQUIRE(candidates.size() == 1);
+    REQUIRE(candidates[0].textValue == "House");
+    REQUIRE(candidates[0].source == "filename");
+}
+
+TEST_CASE("Metadata outranks the folder and the file name", "[genre]")
+{
+    SmartCandidate metadata;
+    metadata.field = SmartField::Genre;
+    metadata.source = "id3";
+    metadata.textValue = "Ambient";
+    SmartCandidate folder;
+    folder.field = SmartField::Genre;
+    folder.source = "folder";
+    folder.textValue = "Rock";
+    const auto result = resolveSmart({ metadata, folder });
+    REQUIRE(result.genre == "Ambient");
+    REQUIRE(result.genreSource == "id3");
+    REQUIRE(result.genreState == SmartState::Resolved);
+}
+
+TEST_CASE("Two disagreeing sources leave the genre ambiguous, not guessed", "[genre]")
+{
+    SmartCandidate folder;
+    folder.field = SmartField::Genre;
+    folder.source = "folder";
+    folder.textValue = "House";
+    SmartCandidate name;
+    name.field = SmartField::Genre;
+    name.source = "filename";
+    name.textValue = "Trap";
+    const auto result = resolveSmart({ folder, name });
+    REQUIRE(result.genreState == SmartState::Ambiguous);
+    REQUIRE(result.genre.isEmpty());
+    REQUIRE(result.explanation.contains("sources disagree"));
+}
+
+TEST_CASE("A manual genre beats a confident candidate and unknown blocks guessing", "[genre]")
+{
+    SmartCandidate folder;
+    folder.field = SmartField::Genre;
+    folder.source = "folder";
+    folder.textValue = "House";
+    SmartOverride manual;
+    manual.textValue = "Jazz";
+    SmartOverrideMap overrides;
+    overrides[SmartField::Genre] = manual;
+    const auto overridden = resolveSmart({ folder }, overrides);
+    REQUIRE(overridden.genre == "Jazz");
+    REQUIRE(overridden.genreSource == "override");
+    REQUIRE(overridden.genreOverride == OverrideState::Value);
+
+    SmartOverride unknown;
+    unknown.cleared = true;
+    overrides[SmartField::Genre] = unknown;
+    const auto cleared = resolveSmart({ folder }, overrides);
+    REQUIRE(cleared.genre.isEmpty());
+    REQUIRE(cleared.genreOverride == OverrideState::Unknown);
+}
+
+TEST_CASE("The same source contradicting itself is noise, not a conflict", "[genre]")
+{
+    SmartCandidate first;
+    first.field = SmartField::Genre;
+    first.source = "filename";
+    first.textValue = "House";
+    SmartCandidate second = first;
+    second.textValue = "Techno";
+    const auto result = resolveSmart({ first, second });
+    REQUIRE(result.genreState == SmartState::Resolved);
+    REQUIRE(result.genre.isNotEmpty());
 }

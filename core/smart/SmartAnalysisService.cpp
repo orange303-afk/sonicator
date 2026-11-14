@@ -324,22 +324,15 @@ SmartCollection SmartAnalysisService::collect(const SampleRecord& record, Cancel
         extraction.updatedAt = juce::Time::currentTimeMillis();
         out.extractions.push_back(std::move(extraction));
     }
-    const auto genreResult = GenreContextExtractor::extract(file, out.candidates);
-    if (genreResult.confidence >= 0.80 && (genreResult.subgenre.isNotEmpty() || genreResult.genre.isNotEmpty()))
-    {
-        SmartCandidate c;
-        c.field = SmartField::Type;
-        c.source = genreResult.source;
-        c.textValue = genreResult.subgenre.isNotEmpty() ? genreResult.subgenre : genreResult.genre;
-        c.detail = genreResult.genre;
-        c.numericValue = genreResult.confidence;
-        c.status = CandidateStatus::Valid;
-        c.extractorId = genreResult.source == "path" ? "name" : (genreResult.source == "metadata" ? "container" : genreResult.source);
-        c.extractorVersion = smartExtractorsVersion;
-        c.rawValue = c.textValue;
-        c.limitation = "genre context inferred from path or metadata";
-        out.candidates.push_back(std::move(c));
-    }
+    // Genre is its own field. It is never turned into a sample Type: a "House" folder does not
+    // make the kick inside it a "House" sample.
+    if (const auto genreCandidates = GenreContextExtractor::candidates(file); ! genreCandidates.empty())
+        for (const auto& candidate : genreCandidates)
+        {
+            auto c = candidate;
+            c.extractorVersion = smartExtractorsVersion;
+            out.candidates.push_back(std::move(c));
+        }
     // One bounded decode feeds both DSP analyses. The rhythm pass still runs only when metadata
     // lacks a tempo (or structure is needed for the pitch gate); the tonal pass applies its own
     // per-field gates. A file that cannot be decoded is recorded as unsupported so the next pass

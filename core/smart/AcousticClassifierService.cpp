@@ -16,14 +16,17 @@ std::optional<SmartCandidate> extractGenreCandidate(
     const auto genreResult = GenreContextExtractor::extract(file, existingCandidates);
     if (genreResult.confidence >= 0.80 && (genreResult.subgenre.isNotEmpty() || genreResult.genre.isNotEmpty()))
     {
+        // Genre is its own field: it is context for the classifier's features, never a sample type.
         SmartCandidate c;
-        c.field = SmartField::Type;
-        c.source = genreResult.source;
+        c.field = SmartField::Genre;
+        c.source = genreResult.source == "folder" ? "folder"
+            : genreResult.source == "filename" ? "filename"
+            : genreResult.source == "id3" ? "id3" : "info";
         c.textValue = genreResult.subgenre.isNotEmpty() ? genreResult.subgenre : genreResult.genre;
-        c.detail = genreResult.genre;
+        c.detail = genreResult.matchedFragment.isNotEmpty() ? genreResult.matchedFragment : genreResult.genre;
         c.numericValue = genreResult.confidence;
         c.status = CandidateStatus::Valid;
-        c.extractorId = genreResult.source == "path" ? "name" : (genreResult.source == "metadata" ? "container" : genreResult.source);
+        c.extractorId = "genre_context";
         c.extractorVersion = smartExtractorsVersion;
         c.rawValue = c.textValue;
         c.limitation = "genre context inferred from path or metadata";

@@ -3,7 +3,8 @@
 namespace sonicator {
 namespace {
 
-struct SubgenreRule {
+struct SubgenreRule
+{
     const char* canonicalSubgenre;
     const char* parentGenre;
     const char* aliases; // pipe-separated
@@ -26,7 +27,8 @@ constexpr SubgenreRule subgenreRules[] = {
     { "Riddim", "Dubstep", "riddim" }
 };
 
-struct TopGenreRule {
+struct TopGenreRule
+{
     const char* canonicalGenre;
     const char* aliases; // pipe-separated
 };
@@ -48,46 +50,18 @@ constexpr TopGenreRule topGenreRules[] = {
     { "Reggae", "reggae" }
 };
 
-struct GenreAlias {
-    const char* canonical;
-    const char* aliases; // pipe-separated
-};
-
-constexpr GenreAlias genreAliases[] = {
-    { "Drum & Bass", "drum & bass|drum and bass|drum&bass|drumandbass|dnb" },
-    { "Trap", "trap|drill" },
-    { "Hip-Hop", "hip-hop|hip hop|hiphop|boombap|boom bap|rap" },
-    { "Techno", "techno|minimal techno" },
-    { "House", "house|tech house|deep house|electro house|progressive house|acid house" },
-    { "Lo-Fi", "lo-fi|lofi|lo fi" },
-    { "Synthwave", "synthwave|retrowave|vaporwave|chillwave" },
-    { "Dubstep", "dubstep|riddim" },
-    { "Ambient", "ambient|drone" },
-    { "Electronic", "electronic|electro|edm" },
-    { "Rock", "rock" },
-    { "Pop", "pop" },
-    { "Funk", "funk" },
-    { "Jazz", "jazz" },
-    { "Reggae", "reggae|dub|dancehall" }
-};
-
 bool matchSubgenreAlias(const juce::String& text, juce::String& outGenre, juce::String& outSubgenre)
 {
     const auto lower = text.trim().toLowerCase();
     if (lower.isEmpty()) return false;
-
     for (const auto& rule : subgenreRules)
-    {
         for (const auto& alias : juce::StringArray::fromTokens(rule.aliases, "|", ""))
-        {
             if (lower == alias.trim().toLowerCase())
             {
                 outSubgenre = juce::String(rule.canonicalSubgenre);
                 outGenre = juce::String(rule.parentGenre);
                 return true;
             }
-        }
-    }
     return false;
 }
 
@@ -95,204 +69,196 @@ bool matchTopGenreAlias(const juce::String& text, juce::String& outGenre)
 {
     const auto lower = text.trim().toLowerCase();
     if (lower.isEmpty()) return false;
-
     for (const auto& rule : topGenreRules)
-    {
         for (const auto& alias : juce::StringArray::fromTokens(rule.aliases, "|", ""))
-        {
             if (lower == alias.trim().toLowerCase())
             {
                 outGenre = juce::String(rule.canonicalGenre);
                 return true;
             }
-        }
-    }
     return false;
 }
 
-juce::StringArray tokenizeFolder(const juce::String& folderName)
+// Whole tokens only: "housekeeper" is one token and must never match "house".
+juce::StringArray tokenize(const juce::String& text)
 {
-    juce::String clean = folderName.replace("&", " and ");
+    juce::String clean = text.replace("&", " and ");
     juce::String spaced;
     for (int i = 0; i < clean.length(); ++i)
     {
         const auto ch = clean[i];
-        if (juce::CharacterFunctions::isLetterOrDigit(ch))
-            spaced += ch;
-        else
-            spaced += ' ';
+        spaced += juce::String::charToString(
+            juce::CharacterFunctions::isLetterOrDigit(ch) ? ch : (juce::juce_wchar) ' ');
     }
     return juce::StringArray::fromTokens(spaced, " ", "");
 }
 
-bool analyzeFolderTokens(const juce::StringArray& tokens,
-                         juce::String& outGenre,
-                         juce::String& outSubgenre,
-                         bool& isSubgenre)
+// Longest phrase wins: "deep house" is tried before "house".
+bool matchTokens(const juce::StringArray& tokens, juce::String& display, juce::String& family,
+                 juce::String& fragment)
 {
-    if (tokens.isEmpty()) return false;
-
-    // Check n-grams from length 4 down to 1
     const int maxLen = juce::jmin(4, tokens.size());
     for (int len = maxLen; len >= 1; --len)
-    {
         for (int start = 0; start <= tokens.size() - len; ++start)
         {
-            juce::String phrase;
-            juce::String joined;
-            for (int i = 0; i < len; ++i)
+            juce::StringArray slice;
+            for (int i = 0; i < len; ++i) slice.add(tokens[start + i]);
+            const auto phrase = slice.joinIntoString(" ");
+            juce::String sub, parent;
+            if (matchSubgenreAlias(phrase, parent, sub))
             {
-                if (i > 0) phrase += " ";
-                phrase += tokens[start + i];
-                joined += tokens[start + i];
+                display = sub;
+                family = parent;
+                fragment = phrase;
+                return true;
             }
-
-            juce::String g, sg;
-            if (matchSubgenreAlias(phrase, g, sg) || matchSubgenreAlias(joined, g, sg))
+            juce::String top;
+            if (matchTopGenreAlias(phrase, top))
             {
-                outGenre = g;
-                outSubgenre = sg;
-                isSubgenre = true;
+                display = top;
+                family = top;
+                fragment = phrase;
                 return true;
             }
         }
-    }
-
-    // If no subgenre matched, check top-level genres
-    for (int len = maxLen; len >= 1; --len)
-    {
-        for (int start = 0; start <= tokens.size() - len; ++start)
-        {
-            juce::String phrase;
-            juce::String joined;
-            for (int i = 0; i < len; ++i)
-            {
-                if (i > 0) phrase += " ";
-                phrase += tokens[start + i];
-                joined += tokens[start + i];
-            }
-
-            juce::String g;
-            if (matchTopGenreAlias(phrase, g) || matchTopGenreAlias(joined, g))
-            {
-                outGenre = g;
-                outSubgenre = {};
-                isSubgenre = false;
-                return true;
-            }
-        }
-    }
-
     return false;
+}
+
+// A volume or drive name is never evidence of a genre.
+bool isVolumeName(const juce::String& part)
+{
+    return part.isEmpty() || part.endsWith(":") || part.equalsIgnoreCase("Volumes")
+        || part.equalsIgnoreCase("Users") || part.equalsIgnoreCase("home");
+}
+
+// juce::File does not treat a backslash as a separator on macOS, so the stem is taken from the
+// normalized path instead of getFileNameWithoutExtension().
+juce::String fileStem(const juce::File& file)
+{
+    const auto path = file.getFullPathName().replaceCharacter('\\', '/');
+    const auto name = path.substring(path.lastIndexOfChar('/') + 1);
+    return name.upToLastOccurrenceOf(".", false, false);
 }
 
 } // namespace
 
+bool GenreContextExtractor::interpret(const juce::String& raw, juce::String& display, juce::String& family)
+{
+    juce::String sub, parent;
+    if (matchSubgenreAlias(raw, parent, sub))
+    {
+        display = sub;
+        family = parent;
+        return true;
+    }
+    juce::String top;
+    if (matchTopGenreAlias(raw, top))
+    {
+        display = top;
+        family = top;
+        return true;
+    }
+    // A metadata value the dictionary does not know is still a genre the exporter wrote, so it is
+    // shown as written; only the family stays empty.
+    const auto trimmed = raw.trim();
+    if (trimmed.isEmpty()) return false;
+    if (const auto normal = normalizeGenreToken(trimmed); normal.isNotEmpty())
+    {
+        display = normal;
+        family = normal;
+        return true;
+    }
+    return false;
+}
+
+std::vector<SmartCandidate> GenreContextExtractor::candidates(const juce::File& file)
+{
+    std::vector<SmartCandidate> out;
+    auto make = [](const juce::String& source, const juce::String& display, const juce::String& family,
+                   const juce::String& fragment, double confidence)
+    {
+        SmartCandidate c;
+        c.field = SmartField::Genre;
+        c.source = source;
+        c.textValue = display;
+        c.rawValue = fragment;
+        c.detail = source + "=" + fragment
+            + (family.isNotEmpty() && family != display ? " (" + family + ")" : "");
+        c.numericValue = confidence;
+        c.extractorId = "genre_" + source;
+        c.extractorVersion = genreDictionaryVersion;
+        c.limitation = source == "folder"
+            ? "genre inferred from a folder name, not from the audio"
+            : "genre inferred from the file name, not from the audio";
+        c.status = CandidateStatus::Valid;
+        return c;
+    };
+
+    // File name first: it is the most specific thing a person wrote about this file.
+    if (const auto stem = fileStem(file); stem.isNotEmpty())
+    {
+        juce::String display, family, fragment;
+        if (matchTokens(tokenize(stem), display, family, fragment))
+            out.push_back(make("filename", display, family, fragment, 0.6));
+    }
+
+    // Only the two nearest folders. A library or drive name further up must not assign one genre
+    // to every file below it. Splitting the full path by hand keeps Windows-style separators
+    // working on macOS, where juce::File does not treat a backslash as a path separator.
+    auto parts = juce::StringArray::fromTokens(
+        file.getFullPathName().replaceCharacter('\\', '/'), "/", "");
+    if (! parts.isEmpty()) parts.remove(parts.size() - 1); // the file itself
+    int visited = 0;
+    for (int i = parts.size() - 1; i >= 0 && visited < 2; --i)
+    {
+        const auto part = parts[i];
+        if (isVolumeName(part)) break;
+        ++visited;
+        juce::String display, family, fragment;
+        if (matchTokens(tokenize(part), display, family, fragment))
+        {
+            out.push_back(make("folder", display, family, fragment, 0.55));
+            break; // the nearest folder that names a genre wins
+        }
+    }
+    return out;
+}
+
 GenreContextResult GenreContextExtractor::extract(const juce::File& file,
                                                  const std::vector<SmartCandidate>& existingCandidates)
 {
-    // 1. First check existingCandidates for ID3 or INFO genre candidates
+    // 1. Metadata written by the exporter.
     for (const auto& c : existingCandidates)
     {
-        if (c.status == CandidateStatus::Invalid || c.status == CandidateStatus::Unsupported)
-            continue;
-        if (c.textValue.trim().isEmpty())
-            continue;
-
-        const bool isNonGenreField = (c.field == SmartField::Bpm || c.field == SmartField::Key
-                                      || c.field == SmartField::Pitch || c.field == SmartField::RootNote);
-        if (isNonGenreField)
-            continue;
-
-        const bool isId3 = c.source.equalsIgnoreCase("id3");
-        const bool isInfoOrMeta = c.source.equalsIgnoreCase("info") || c.source.equalsIgnoreCase("metadata");
-        const bool isGenreDetail = c.detail.containsIgnoreCase("genre")
-                                    || c.detail.startsWithIgnoreCase("TCON")
-                                    || c.detail.startsWithIgnoreCase("IGNR");
-
-        if (isId3 || isInfoOrMeta || isGenreDetail)
-        {
-            GenreContextResult res;
-            res.confidence = 0.9;
-            res.source = isId3 ? "id3" : "metadata";
-
-            juce::String genre, subgenre;
-            if (matchSubgenreAlias(c.textValue, genre, subgenre))
-            {
-                res.genre = genre;
-                res.subgenre = subgenre;
-            }
-            else if (matchTopGenreAlias(c.textValue, genre))
-            {
-                res.genre = genre;
-                res.subgenre = {};
-            }
-            else
-            {
-                auto norm = normalizeGenreToken(c.textValue);
-                if (norm.isNotEmpty())
-                {
-                    res.genre = norm;
-                    res.subgenre = {};
-                }
-                else
-                {
-                    res.genre = c.textValue.trim();
-                    res.subgenre = {};
-                }
-            }
-            return res;
-        }
-    }
-
-    // 2. Traverse parent folder names from root down to file's parent
-    juce::String fullPath = file.getFullPathName().replaceCharacter('\\', '/');
-    const int lastSlash = fullPath.lastIndexOfChar('/');
-    const juce::String parentPath = (lastSlash >= 0) ? fullPath.substring(0, lastSlash) : fullPath;
-    const auto folderParts = juce::StringArray::fromTokens(parentPath, "/", "");
-
-    juce::String currentGenre;
-    juce::String currentSubgenre;
-    bool found = false;
-
-    for (const auto& part : folderParts)
-    {
-        if (part.length() <= 2 && part.endsWith(":"))
-            continue; // Skip Windows drive letters like "C:"
-
-        const auto tokens = tokenizeFolder(part);
-        juce::String folderGenre, folderSubgenre;
-        bool isSub = false;
-
-        if (analyzeFolderTokens(tokens, folderGenre, folderSubgenre, isSub))
-        {
-            found = true;
-            if (isSub)
-            {
-                currentGenre = folderGenre;
-                currentSubgenre = folderSubgenre;
-            }
-            else
-            {
-                if (currentSubgenre.isEmpty() || currentGenre.isEmpty())
-                {
-                    currentGenre = folderGenre;
-                }
-            }
-        }
-    }
-
-    if (found)
-    {
+        if (c.field != SmartField::Genre) continue;
+        if (c.status != CandidateStatus::Valid || c.textValue.trim().isEmpty()) continue;
+        juce::String display, family;
+        if (! interpret(c.textValue, display, family)) display = c.textValue.trim();
         GenreContextResult res;
-        res.genre = currentGenre;
-        res.subgenre = currentSubgenre;
-        res.confidence = 0.85; // >= 0.8
-        res.source = "path";
+        res.genre = family.isNotEmpty() ? family : display;
+        res.subgenre = display != res.genre ? display : juce::String();
+        res.source = c.source == "id3" ? "id3"
+            : (c.source == "folder" || c.source == "filename") ? c.source
+            : "metadata";
+        res.confidence = 0.9;
+        res.matchedFragment = c.rawValue.isNotEmpty() ? c.rawValue : c.textValue;
         return res;
     }
 
-    // 3. None found: empty result with 0.0 confidence
+    // 2. Name and nearest folders.
+    for (const auto& c : candidates(file))
+    {
+        juce::String family = c.detail.contains("(") ? c.detail.fromFirstOccurrenceOf("(", false, false)
+                                                            .upToFirstOccurrenceOf(")", false, false)
+                                                     : c.textValue;
+        GenreContextResult res;
+        res.genre = family.isNotEmpty() ? family : c.textValue;
+        res.subgenre = c.textValue != res.genre ? c.textValue : juce::String();
+        res.source = c.source;
+        res.confidence = c.source == "folder" ? 0.85 : 0.7;
+        res.matchedFragment = c.rawValue;
+        return res;
+    }
     return {};
 }
 
@@ -300,37 +266,17 @@ juce::String GenreContextExtractor::normalizeGenreToken(const juce::String& toke
 {
     const auto clean = token.trim().toLowerCase();
     if (clean.isEmpty()) return {};
-
-    for (const auto& item : genreAliases)
-    {
-        for (const auto& alias : juce::StringArray::fromTokens(item.aliases, "|", ""))
-        {
-            if (clean == alias.trim().toLowerCase())
-                return juce::String(item.canonical);
-        }
-    }
+    juce::String sub, parent;
+    if (matchSubgenreAlias(clean, parent, sub)) return sub;
+    juce::String top;
+    if (matchTopGenreAlias(clean, top)) return top;
     return {};
 }
 
 juce::StringArray GenreContextExtractor::canonicalGenres()
 {
-    return {
-        "Electronic",
-        "House",
-        "Techno",
-        "Hip-Hop",
-        "Drum & Bass",
-        "Trap",
-        "Dubstep",
-        "Ambient",
-        "Lo-Fi",
-        "Synthwave",
-        "Rock",
-        "Pop",
-        "Funk",
-        "Jazz",
-        "Reggae"
-    };
+    return { "Electronic", "House", "Techno", "Hip-Hop", "Drum & Bass", "Trap", "Dubstep",
+             "Ambient", "Lo-Fi", "Synthwave", "Rock", "Pop", "Funk", "Jazz", "Reggae" };
 }
 
 } // namespace sonicator

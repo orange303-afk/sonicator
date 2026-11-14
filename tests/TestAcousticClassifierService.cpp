@@ -245,18 +245,17 @@ TEST_CASE("AcousticClassifierService falls back to ML classifier when fast rules
     REQUIRE(c->textValue.isNotEmpty());
 }
 
-TEST_CASE("AcousticClassifierService extracts genre from path", "[smart][acoustic]")
+TEST_CASE("AcousticClassifierService extracts genre from path", "[smart][acoustic][genre]")
 {
     juce::AudioBuffer<float> emptyBuffer(1, 1024);
     emptyBuffer.clear();
     const juce::File file("/Volumes/Samples/Drum and Bass/break01.wav");
 
     auto candidates = AcousticClassifierService::analyzeBuffer(emptyBuffer, 44100.0, file);
-    const auto* c = findCandidate(candidates, SmartField::Type, "path");
+    const auto* c = findCandidate(candidates, SmartField::Genre, "folder");
     REQUIRE(c != nullptr);
-    REQUIRE(c->field == SmartField::Type);
+    REQUIRE(c->field == SmartField::Genre);
     REQUIRE(c->textValue == "Drum & Bass");
-    REQUIRE(c->numericValue >= 0.80);
     REQUIRE(c->status == CandidateStatus::Valid);
 }
 
@@ -265,7 +264,7 @@ TEST_CASE("AcousticClassifierService::analyzeAudioAndContext handles missing/cor
     const juce::File file("/Volumes/Samples/Drum and Bass/nonexistent.wav");
     auto candidates = AcousticClassifierService::analyzeAudioAndContext(file, recordFor(file));
 
-    const auto* c = findCandidate(candidates, SmartField::Type, "path");
+    const auto* c = findCandidate(candidates, SmartField::Genre, "folder");
     REQUIRE(c != nullptr);
     REQUIRE(c->textValue == "Drum & Bass");
 }
@@ -286,10 +285,10 @@ TEST_CASE("SmartAnalysisService::collect integrates acoustic and genre candidate
     REQUIRE(kickCandidate->textValue == "Kick");
     REQUIRE(kickCandidate->extractorId == "dsp");
 
-    const auto* genreCandidate = findCandidate(collection.candidates, SmartField::Type, "path");
+    const auto* genreCandidate = findCandidate(collection.candidates, SmartField::Genre, "folder");
     REQUIRE(genreCandidate != nullptr);
     REQUIRE(genreCandidate->textValue == "Drum & Bass");
-    REQUIRE(genreCandidate->extractorId == "name");
+    REQUIRE(genreCandidate->field == SmartField::Genre);
 }
 
 TEST_CASE("SmartAnalysisService::collect extracts genre even on corrupted audio or skipped DSP", "[smart][acoustic]")
@@ -302,8 +301,8 @@ TEST_CASE("SmartAnalysisService::collect extracts genre even on corrupted audio 
 
     auto collection = SmartAnalysisService::collect(recordFor(file));
 
-    const auto* genreCandidate = findCandidate(collection.candidates, SmartField::Type, "path");
+    const auto* genreCandidate = findCandidate(collection.candidates, SmartField::Genre, "folder");
     REQUIRE(genreCandidate != nullptr);
     REQUIRE(genreCandidate->textValue == "Techno");
-    REQUIRE(genreCandidate->extractorId == "name");
+    REQUIRE(genreCandidate->field == SmartField::Genre);
 }

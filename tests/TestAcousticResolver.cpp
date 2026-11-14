@@ -105,16 +105,16 @@ TEST_CASE("A filename instrument outranks a learned prototype guess", "[smart][r
     REQUIRE(res.explanation.contains("interpretations differ"));
 }
 
-TEST_CASE("SmartResolver: Genre candidate (source=path) does not conflict with instrument type", "[smart][resolver][acoustic][genre]")
+TEST_CASE("SmartResolver: a genre never decides the sample type", "[smart][resolver][acoustic][genre]")
 {
     auto ac = makeCandidate(SmartField::Type, "dsp_acoustic", "Kick");
-    auto genre = makeCandidate(SmartField::Type, "path", "Trap");
+    auto genre = makeCandidate(SmartField::Genre, "folder", "Trap");
     auto res = resolveSmart({ ac, genre });
     REQUIRE(res.type == "Kick");
     REQUIRE(res.typeState == SmartState::Resolved);
     REQUIRE(res.typeSource == "dsp_acoustic");
-    REQUIRE(res.explanation.contains("path=Trap"));
-    REQUIRE(res.explanation.contains("genre context"));
+    REQUIRE(res.genre == "Trap");
+    REQUIRE(res.genreSource == "folder");
     REQUIRE_FALSE(res.explanation.contains("interpretations differ"));
 }
 

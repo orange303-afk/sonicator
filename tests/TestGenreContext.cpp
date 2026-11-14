@@ -10,7 +10,7 @@ TEST_CASE("GenreContextExtractor path extraction for top-level genre", "[genre]"
     auto res = GenreContextExtractor::extract(file);
     REQUIRE(res.genre == "Drum & Bass");
     REQUIRE(res.subgenre.isEmpty());
-    REQUIRE(res.source == "path");
+    REQUIRE(res.source == "folder");
     REQUIRE(res.confidence >= 0.8);
 }
 
@@ -20,7 +20,7 @@ TEST_CASE("GenreContextExtractor path extraction for subgenre and parent genre",
     auto res = GenreContextExtractor::extract(file);
     REQUIRE(res.subgenre == "Trap");
     REQUIRE(res.genre == "Hip-Hop");
-    REQUIRE(res.source == "path");
+    REQUIRE(res.source == "folder");
     REQUIRE(res.confidence >= 0.8);
 }
 
@@ -28,6 +28,7 @@ TEST_CASE("GenreContextExtractor existing metadata candidate precedence", "[genr
 {
     juce::File file("/Packs/Whatever/file.wav");
     SmartCandidate cand;
+    cand.field = SmartField::Genre;
     cand.source = "id3";
     cand.textValue = "Techno";
     auto res = GenreContextExtractor::extract(file, { cand });
@@ -63,18 +64,18 @@ TEST_CASE("GenreContextExtractor normalizeGenreToken alias mapping", "[genre]")
     REQUIRE(GenreContextExtractor::normalizeGenreToken("drum and bass") == "Drum & Bass");
     REQUIRE(GenreContextExtractor::normalizeGenreToken("drum & bass") == "Drum & Bass");
     REQUIRE(GenreContextExtractor::normalizeGenreToken("trap") == "Trap");
-    REQUIRE(GenreContextExtractor::normalizeGenreToken("drill") == "Trap");
+    REQUIRE(GenreContextExtractor::normalizeGenreToken("drill") == "Drill");
     REQUIRE(GenreContextExtractor::normalizeGenreToken("hiphop") == "Hip-Hop");
     REQUIRE(GenreContextExtractor::normalizeGenreToken("hip hop") == "Hip-Hop");
-    REQUIRE(GenreContextExtractor::normalizeGenreToken("boombap") == "Hip-Hop");
+    REQUIRE(GenreContextExtractor::normalizeGenreToken("boombap") == "Boom Bap");
     REQUIRE(GenreContextExtractor::normalizeGenreToken("techno") == "Techno");
     REQUIRE(GenreContextExtractor::normalizeGenreToken("house") == "House");
-    REQUIRE(GenreContextExtractor::normalizeGenreToken("tech house") == "House");
-    REQUIRE(GenreContextExtractor::normalizeGenreToken("deep house") == "House");
+    REQUIRE(GenreContextExtractor::normalizeGenreToken("tech house") == "Tech House");
+    REQUIRE(GenreContextExtractor::normalizeGenreToken("deep house") == "Deep House");
     REQUIRE(GenreContextExtractor::normalizeGenreToken("lofi") == "Lo-Fi");
     REQUIRE(GenreContextExtractor::normalizeGenreToken("lo-fi") == "Lo-Fi");
     REQUIRE(GenreContextExtractor::normalizeGenreToken("synthwave") == "Synthwave");
-    REQUIRE(GenreContextExtractor::normalizeGenreToken("retrowave") == "Synthwave");
+    REQUIRE(GenreContextExtractor::normalizeGenreToken("retrowave") == "Retrowave");
 }
 
 TEST_CASE("GenreContextExtractor path extraction with subfolder refinement", "[genre]")
@@ -83,14 +84,14 @@ TEST_CASE("GenreContextExtractor path extraction with subfolder refinement", "[g
     auto res = GenreContextExtractor::extract(file);
     REQUIRE(res.genre == "House");
     REQUIRE(res.subgenre == "Deep House");
-    REQUIRE(res.source == "path");
+    REQUIRE(res.source == "folder");
     REQUIRE(res.confidence >= 0.8);
 
     juce::File winFile = juce::File::createFileWithoutCheckingPath("C:\\Packs\\Hip-Hop\\Drill Collection\\kick.wav");
     auto winRes = GenreContextExtractor::extract(winFile);
     REQUIRE(winRes.genre == "Hip-Hop");
     REQUIRE(winRes.subgenre == "Drill");
-    REQUIRE(winRes.source == "path");
+    REQUIRE(winRes.source == "folder");
     REQUIRE(winRes.confidence >= 0.8);
 }
 
@@ -100,6 +101,7 @@ TEST_CASE("GenreContextExtractor existing metadata candidate handling details", 
 
     // Subgenre in metadata
     SmartCandidate cand1;
+    cand1.field = SmartField::Genre;
     cand1.source = "id3";
     cand1.textValue = "Trap";
     auto res1 = GenreContextExtractor::extract(file, { cand1 });
@@ -120,6 +122,7 @@ TEST_CASE("GenreContextExtractor existing metadata candidate handling details", 
 
     // INFO / metadata candidate
     SmartCandidate candInfo;
+    candInfo.field = SmartField::Genre;
     candInfo.source = "info";
     candInfo.detail = "genre";
     candInfo.textValue = "Drum & Bass";

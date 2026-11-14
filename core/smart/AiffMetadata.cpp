@@ -1,4 +1,5 @@
 #include "AiffMetadata.h"
+#include "GenreContextExtractor.h"
 #include "BinaryReader.h"
 #include <cmath>
 #include <cstring>
@@ -147,12 +148,27 @@ AiffMetadataResult extractAiffMetadata(const juce::File& file)
             const auto strings = cStrings(payload);
             if (! strings.empty())
             {
-                auto type = normalizedCategory(strings.front());
-                if (type.isNotEmpty())
+                const auto raw = strings.front();
+                juce::String display, family;
+                if (GenreContextExtractor::interpret(raw, display, family))
                 {
-                    SmartCandidate c; c.field = SmartField::Type; c.source = "aiff_cate";
-                    c.textValue = type; c.detail = strings.front();
+                    // "cate" is a category field: when it names a musical genre it is a genre,
+                    // not a sample type. "Drums" is not a genre and keeps the old type path.
+                    SmartCandidate c; c.field = SmartField::Genre; c.source = "aiff_cate";
+                    c.textValue = display; c.rawValue = raw;
+                    c.detail = raw + (family.isNotEmpty() && family != display ? " (" + family + ")" : "");
+                    c.status = CandidateStatus::Valid;
                     result.candidates.push_back(c);
+                }
+                else
+                {
+                    auto type = normalizedCategory(raw);
+                    if (type.isNotEmpty())
+                    {
+                        SmartCandidate c; c.field = SmartField::Type; c.source = "aiff_cate";
+                        c.textValue = type; c.detail = raw;
+                        result.candidates.push_back(c);
+                    }
                 }
             }
         }

@@ -52,7 +52,19 @@ void parseInfo(const std::vector<juce::uint8>& payload, std::vector<SmartCandida
                         | ((juce::uint32) payload[p + 6] << 16) | ((juce::uint32) payload[p + 7] << 24);
         const size_t body = p + 8;
         if (body + size > payload.size()) break;
-        if (idIs(id, "IKEY"))
+        if (idIs(id, "IGNR"))
+        {
+            // RIFF INFO genre: a musical genre, never a sample type.
+            const auto raw = decodeText(payload.data() + body, (int) size);
+            if (raw.isNotEmpty())
+            {
+                SmartCandidate c; c.field = SmartField::Genre; c.source = "info";
+                c.textValue = raw; c.rawValue = raw; c.detail = "IGNR=" + raw;
+                c.status = CandidateStatus::Valid;
+                out.push_back(c);
+            }
+        }
+        else if (idIs(id, "IKEY"))
         {
             const auto raw = decodeText(payload.data() + body, (int) size);
             SmartCandidate c; c.field = SmartField::Key; c.source = "info";
@@ -131,7 +143,17 @@ void parseId3(const std::vector<juce::uint8>& payload, std::vector<SmartCandidat
         if (frameSize == 0 || p + frameSize > end) break;
         const auto text = id3Text(payload.data() + p, (int) frameSize);
         p += frameSize;
-        if (idIs(id, "TBPM"))
+        if (idIs(id, "TCON"))
+        {
+            if (text.isNotEmpty())
+            {
+                SmartCandidate c; c.field = SmartField::Genre; c.source = "id3";
+                c.textValue = text; c.rawValue = text; c.detail = "TCON=" + text;
+                c.status = CandidateStatus::Valid;
+                out.push_back(c);
+            }
+        }
+        else if (idIs(id, "TBPM"))
         {
             addBpm(out, "id3", text.getDoubleValue(), "TBPM=" + text);
         }

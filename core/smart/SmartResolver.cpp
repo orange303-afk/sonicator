@@ -1,6 +1,7 @@
 #include "SmartResolver.h"
 #include "KeyNames.h"
 #include "NameHeuristics.h"
+#include "GenreContextExtractor.h"
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -96,29 +97,8 @@ void resolveText(const std::vector<SmartCandidate>& all,
         return;
     }
 
-    std::vector<SmartCandidate> primaryList;
-    std::vector<SmartCandidate> genreCandidates;
-
-    if (field == SmartField::Type)
-    {
-        std::vector<SmartCandidate> instrumentCandidates;
-        for (const auto& c : list)
-        {
-            if (c.source == "path")
-                genreCandidates.push_back(c);
-            else
-                instrumentCandidates.push_back(c);
-        }
-
-        if (! instrumentCandidates.empty())
-            primaryList = std::move(instrumentCandidates);
-        else
-            primaryList = list;
-    }
-    else
-    {
-        primaryList = list;
-    }
+    // Genre is no longer mixed into Type: a folder that names a genre never decides a sample type.
+    const auto primaryList = list;
 
     std::set<juce::String> distinct;
     for (const auto& c : primaryList)
@@ -138,11 +118,6 @@ void resolveText(const std::vector<SmartCandidate>& all,
 
     juce::String note = label + ": " + describe(primaryList)
                       + (distinct.size() > 1 ? " (interpretations differ)" : agreementNote(primaryList));
-    if (! genreCandidates.empty() && primaryList.size() != list.size())
-    {
-        note += " (genre context: " + describe(genreCandidates) + ")";
-    }
-
     explanation += (explanation.isEmpty() ? "" : " ") + note;
 }
 bool isHalfDouble(double a, double b)
@@ -328,6 +303,76 @@ void resolvePitch(const std::vector<SmartCandidate>& all, SmartResult& out)
         + juce::String("pitch: ") + describe(list)
         + (out.pitchState == SmartState::Resolved ? agreementNote(list) : " (competing pitches)");
 }
+// Metadata written by the exporter outranks a folder, which outranks the file name. Agreement
+// between independent groups is not required: one metadata value is enough, while two different
+// strong values are a conflict, never a coin flip.
+int genreRank(const juce::String& source)
+{
+    if (source == "id3" || source == "info" || source == "aiff_cate") return 0;
+    if (source == "folder") return 1;
+    if (source == "filename") return 2;
+    return 3;
+}
+// Metadata written by the exporter and a name written by a person are different evidence
+// families: a disagreement between them is settled by priority, while two names that disagree
+// (a folder says House, the file says Trap) leave the value ambiguous.
+juce::String genreFamily(const juce::String& source)
+{
+    return genreRank(source) == 0 ? "metadata" : "name";
+}
+void resolveGenre(const std::vector<SmartCandidate>& all, SmartResult& out)
+{
+    struct Entry { juce::String display, family, source, fragment; };
+    std::vector<Entry> entries;
+    for (const auto& c : all)
+    {
+        if (c.field != SmartField::Genre) continue;
+        if (c.status != CandidateStatus::Valid || c.textValue.trim().isEmpty()) continue;
+        juce::String display, family;
+        if (! GenreContextExtractor::interpret(c.textValue, display, family))
+            display = c.textValue.trim();
+        if (family.isEmpty()) family = display;
+        entries.push_back({ display, family, c.source,
+                            c.rawValue.isNotEmpty() ? c.rawValue : c.textValue });
+    }
+    if (entries.empty())
+    {
+        out.genreState = SmartState::Unknown;
+        return;
+    }
+    std::stable_sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b)
+    {
+        const int byRank = genreRank(a.source) - genreRank(b.source);
+        return byRank != 0 ? byRank < 0 : a.source < b.source;
+    });
+    const auto& chosen = entries.front();
+    out.genre = chosen.display;
+    out.genreSource = chosen.source;
+    out.genreState = SmartState::Resolved;
+
+    // Only a source of the same strength can contradict the chosen value. A folder that disagrees
+    // with the exporter's metadata is shown in the explanation, not turned into an empty column.
+    bool conflict = false;
+    for (const auto& e : entries)
+    {
+        if (e.display.equalsIgnoreCase(chosen.display)) continue;
+        if (genreFamily(e.source) != genreFamily(chosen.source)) continue;
+        if (e.source == chosen.source) continue; // one source contradicting itself is noise
+        conflict = true;
+    }
+    if (conflict)
+    {
+        // Two independent sources name different genres: show nothing rather than pick one.
+        out.genreState = SmartState::Ambiguous;
+        out.genre.clear();
+    }
+    juce::StringArray parts;
+    for (const auto& e : entries)
+        parts.add(e.source + "=" + e.display + (e.family != e.display ? " [" + e.family + "]" : ""));
+    out.explanation += (out.explanation.isEmpty() ? "" : " ") + juce::String("genre: ")
+        + parts.joinIntoString("; ")
+        + (conflict ? " (sources disagree)" : "");
+}
 void resolveRoot(const std::vector<SmartCandidate>& all, SmartResult& out)
 {
     const auto list = select(all, SmartField::RootNote, [](const SmartCandidate& c)
@@ -412,6 +457,11 @@ void applyOverride(const SmartOverrideMap& overrides, SmartField field, SmartRes
                                           : 0.0;
             out.pitchSource = out.hasPitch ? "override" : juce::String();
             note("pitch"); break;
+        case SmartField::Genre:
+            out.genreOverride = state;
+            if (cleared) out.genre.clear(); else out.genre = value.textValue;
+            out.genreSource = cleared ? juce::String() : juce::String("override");
+            note("genre"); break;
         case SmartField::RootNote:
             out.rootOverride = state;
             out.rootNote = cleared ? -1 : (int) std::lround(value.numericValue);
@@ -457,12 +507,14 @@ SmartResult resolveSmart(const std::vector<SmartCandidate>& candidates, const Sm
     resolveKey(candidates, out);
     resolvePitch(candidates, out);
     resolveRoot(candidates, out);
+    resolveGenre(candidates, out);
     applyOverride(overrides, SmartField::Type, out);
     applyOverride(overrides, SmartField::Structure, out);
     applyOverride(overrides, SmartField::Bpm, out);
     applyOverride(overrides, SmartField::Key, out);
     applyOverride(overrides, SmartField::Pitch, out);
     applyOverride(overrides, SmartField::RootNote, out);
+    applyOverride(overrides, SmartField::Genre, out);
     return out;
 }
 } // namespace sonicator

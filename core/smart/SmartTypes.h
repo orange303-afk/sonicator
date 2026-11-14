@@ -17,8 +17,8 @@ std::optional<SmartField> smartFieldFromKey(const juce::String&);
 // - resolver: bump when selection rules change; results can then be recomputed from the stored
 //   candidates without reading any audio again.
 // - DSP: bump when the DSP stage changes (1 = rhythm structure and BPM).
-inline constexpr int smartExtractorsVersion = 5;
-inline constexpr int smartResolverVersion = 4;
+inline constexpr int smartExtractorsVersion = 6; // 6 = genre as its own field, not Type
+inline constexpr int smartResolverVersion = 5; // 5 = genre resolution and conflicts
 inline constexpr int smartDspVersion = 2; // 1 = rhythm; 2 = rhythm + key + one-shot pitch
 
 // Invalid means "the field was present but its value is not usable"; Unsupported means the
@@ -138,8 +138,9 @@ struct SmartFailure
 
 struct SmartResult
 {
-    juce::String type, structure;
+    juce::String type, structure, genre;
     SmartState typeState = SmartState::Unknown, structureState = SmartState::Unknown;
+    SmartState genreState = SmartState::Unknown;
     double bpm = 0;
     bool hasBpm = false;
     SmartState bpmState = SmartState::Unknown;
@@ -153,7 +154,8 @@ struct SmartResult
     SmartState pitchState = SmartState::Unknown;
     int rootNote = -1;         // sampler root note, never a musical key
     SmartState rootState = SmartState::Unknown;
-    juce::String typeSource, structureSource, bpmSource, keySource, pitchSource, rootSource, genreSource;
+    juce::String typeSource, structureSource, bpmSource, keySource, pitchSource, rootSource;
+    juce::String genreSource;
     OverrideState typeOverride = OverrideState::None, structureOverride = OverrideState::None;
     OverrideState bpmOverride = OverrideState::None, keyOverride = OverrideState::None;
     OverrideState pitchOverride = OverrideState::None, rootOverride = OverrideState::None;

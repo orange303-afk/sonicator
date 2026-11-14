@@ -652,18 +652,17 @@ TEST_CASE("Acoustic classification end-to-end pipeline integration", "[acceptanc
         REQUIRE(kickCandidate->field == SmartField::Type);
         REQUIRE(kickCandidate->textValue == "Kick");
 
-        // 2. Genre candidate produced from path: Subgenre "Trap", Genre "Hip-Hop"
-        const auto* genreCandidate = findCandidate(collection.candidates, SmartField::Type, "path");
+        // 2. A genre candidate, separate from the sample type
+        const auto* genreCandidate = findCandidate(collection.candidates, SmartField::Genre, "folder");
         REQUIRE(genreCandidate != nullptr);
-        REQUIRE(genreCandidate->field == SmartField::Type);
+        REQUIRE(genreCandidate->field == SmartField::Genre);
         REQUIRE(genreCandidate->textValue == "Trap");
-        REQUIRE(genreCandidate->detail == "Hip-Hop");
 
         // 3. GenreContextExtractor produces both Subgenre "Trap" and Genre "Hip-Hop"
         auto genreResult = GenreContextExtractor::extract(trapKickFile, collection.candidates);
         REQUIRE(genreResult.subgenre == "Trap");
         REQUIRE(genreResult.genre == "Hip-Hop");
-        REQUIRE(genreResult.source == "path");
+        REQUIRE(genreResult.source == "folder");
         REQUIRE(genreResult.confidence >= 0.80);
 
         // 4. SmartResolver resolves Type as Kick
@@ -676,7 +675,10 @@ TEST_CASE("Acoustic classification end-to-end pipeline integration", "[acceptanc
         REQUIRE(resolved.type.equalsIgnoreCase("Kick"));
         REQUIRE(resolved.typeSource == "folder");
         REQUIRE(resolved.typeState == SmartState::Resolved);
-        REQUIRE(resolved.explanation.contains("genre context"));
+        // Genre is a separate field now; the type explanation no longer mixes it in.
+        REQUIRE(resolved.genre == "Trap");
+        REQUIRE(resolved.genreSource == "folder");
+        REQUIRE(resolved.explanation.contains("genre: folder=Trap"));
 
         // 5. AutoTagRules proposes Kick tag with AutoTagRule::SmartType
         AutoTagInput in;
