@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Главное окно в стиле Studio — макет</title>
+<style>
+  :root{
+    --font-sans: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  html,body{margin:0;padding:0;background:transparent}
+  body{font-family:var(--font-sans);color:var(--foreground);font-size:1rem}
+  .scroller{overflow-x:auto;padding-bottom:6px}
+  .win{width:1120px;height:720px;position:relative;font-size:12px;overflow:hidden;display:flex;flex-direction:column}
+  .dark{background:#17181a;color:#eeeef0;
+    --bg:#17181a;--panel:#202124;--raised:#303236;--hover:#3a3c40;--sel:#484b50;
+    --table:#131416;--alt:#191a1d;--text:#eeeef0;--muted:#a3a5a9;--line:#34363a;--accent:#f39a43}
+  .light{background:#eef0f2;color:#1a1b1d;
+    --bg:#eef0f2;--panel:#f8f9fa;--raised:#e4e6e9;--hover:#d9dbdf;--sel:#cfd2d7;
+    --table:#fbfbfc;--alt:#f3f4f6;--text:#1a1b1d;--muted:#63666a;--line:#d4d7db;--accent:#c2611c}
+
+  /* header */
+  .header{height:72px;flex:0 0 72px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:10px;width:298px;flex:0 0 298px}
+  .mark{display:flex;align-items:flex-end;gap:2px;height:22px}
+  .mark i{display:block;width:3px;border-radius:2px;background:#9fa7ad}
+  .wordmark{font-size:19px;letter-spacing:4.4px;font-weight:700;color:var(--text)}
+  .search{flex:1 1 auto;height:32px;border-radius:7px;background:var(--panel);border:1px solid var(--line);
+    display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--muted)}
+  .search.placeholder{opacity:.85}
+  .iconbtn{width:32px;height:32px;border-radius:7px;background:var(--raised);display:grid;place-items:center;color:var(--muted)}
+  .iconbtn.primary{background:var(--accent);color:#1a1b1d}
+
+  /* body */
+  .body{flex:1 1 auto;display:flex;min-height:0}
+  .sidebar{width:232px;flex:0 0 232px;padding:12px 12px 12px 14px;display:flex;flex-direction:column;gap:8px;
+    background:var(--panel);border-radius:10px;margin:0 0 0 4px}
+  .menu{height:30px;border-radius:6px;background:var(--raised);display:flex;align-items:center;justify-content:space-between;
+    padding:0 10px;font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--text)}
+  .caption{font-size:10.5px;font-weight:700;letter-spacing:1.26px;color:var(--muted);margin:8px 0 0 2px}
+  .tree{display:flex;flex-direction:column;gap:1px;font-size:12px;color:var(--muted)}
+  .tree div{height:24px;display:flex;align-items:center;gap:6px;padding:0 6px;border-radius:5px}
+  .tree div.on{background:var(--sel);color:var(--text)}
+  .tree .child{padding-left:22px}
+  .divider-v{width:8px;flex:0 0 8px}
+  .centre{flex:1 1 auto;display:flex;flex-direction:column;min-width:0;padding:12px 14px 10px}
+  .analysis{width:262px;flex:0 0 262px;background:var(--panel);border-radius:10px;padding:14px 14px 12px;margin-right:4px;
+    display:flex;flex-direction:column;gap:8px;overflow:hidden}
+
+  /* library toolbar */
+  .topbar{height:30px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
+  .topbar .grow{flex:1 1 auto}
+  .pager{display:flex;align-items:center;gap:4px}
+  .page{width:30px;height:30px;border-radius:6px;background:var(--raised);display:grid;place-items:center;color:var(--text)}
+  .size{height:30px;min-width:80px;border-radius:6px;background:var(--panel);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;padding:0 8px;color:var(--text)}
+  .filters{height:30px;display:flex;align-items:center;gap:8px;margin-top:8px}
+  .chip{height:30px;border-radius:15px;border:1px solid var(--line);background:var(--panel);color:var(--muted);
+    display:flex;align-items:center;gap:6px;padding:0 12px}
+  .chip.on{background:var(--sel);color:var(--text);border-color:var(--sel)}
+  .sep{width:1px;height:20px;background:var(--line);margin:0 4px}
+
+  /* table */
+  .table{margin-top:8px;flex:1 1 auto;min-height:0;border-radius:8px;overflow:hidden;background:var(--table)}
+  .thead,.trow{display:flex;align-items:center;height:36px;font-size:11px}
+  .thead{font-size:10px;font-weight:700;letter-spacing:1.2px;color:var(--muted);border-bottom:1px solid var(--line);background:var(--table)}
+  .trow{border-bottom:1px solid rgba(120,125,130,.14)}
+  .trow:nth-child(even){background:var(--alt)}
+  .trow.sel{background:var(--sel);box-shadow:inset 2px 0 0 0 var(--accent)}
+  .c{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0 8px;color:var(--muted)}
+  .c.name{color:var(--text)}
+  .star{width:30px;flex:0 0 30px;display:grid;place-items:center;color:var(--muted)}
+  .star.on{color:var(--text)}
+  .w-sample{flex:1 1 170px}
+  .w-type{flex:0 0 62px}
+  .w-bpm{flex:0 0 40px}
+  .w-key{flex:0 0 46px}
+  .w-genre{flex:0 0 58px}
+  .w-format{flex:0 0 48px}
+  .w-len{flex:0 0 52px}
+  .w-rate{flex:0 0 52px}
+  .w-ch{flex:0 0 28px}
+  .w-tags{flex:0 0 78px}
+  .dash{color:var(--muted);opacity:.5}
+
+  /* status line */
+  .statusline{height:24px;flex:0 0 24px;display:flex;align-items:center;gap:8px;padding:0 14px;font-size:11px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:4px;background:#4caf50}
+
+  /* preview */
+  .preview{height:156px;flex:0 0 156px;margin:0 4px 0 8px;background:var(--panel);border-radius:12px 12px 0 0;
+    padding:12px 16px;display:flex;gap:16px}
+  .preview .left{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:8px}
+  .ptitle{display:flex;align-items:baseline;gap:12px}
+  .pname{font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .time{font-family:var(--font-mono);font-size:15px;color:var(--text);font-variant-numeric:tabular-nums}
+  .format{font-size:10.5px;color:var(--muted)}
+  .wave{flex:1 1 auto;background:var(--table);border-radius:8px;border:1px solid var(--line);position:relative;overflow:hidden}
+  .wave svg{display:block;width:100%;height:100%}
+  .controls{width:300px;flex:0 0 300px;display:flex;flex-direction:column;gap:4px}
+  .timeblock{height:30px;display:flex;flex-direction:column;justify-content:center}
+  .transport{display:flex;align-items:center;gap:10px;height:36px}
+  .play{width:36px;height:36px;border-radius:18px;background:var(--accent);display:grid;place-items:center;color:#17181a}
+  .light .play{color:#fbfbfc}
+  .stop{width:32px;height:32px;border-radius:7px;background:var(--raised);display:grid;place-items:center;color:var(--text)}
+  .vol{flex:1 1 auto;height:14px;display:flex;align-items:center}
+  .track{height:4px;border-radius:2px;background:var(--line);width:100%;position:relative}
+  .track i{position:absolute;left:0;top:0;bottom:0;width:62%;border-radius:2px;background:var(--muted)}
+  .track b{position:absolute;left:62%;top:-3px;width:10px;height:10px;border-radius:5px;background:var(--text);margin-left:-5px}
+  .rowchips{display:flex;gap:6px}
+  .chip.sm{height:26px;font-size:11px;padding:0 10px;border-radius:13px}
+  .tick{width:10px;height:10px;border-radius:2px;border:1px solid var(--muted);display:inline-block;position:relative}
+  .chip.on .tick{background:var(--text);border-color:var(--text)}
+  .chip.on .tick::after{content:"";position:absolute;left:2px;top:0;width:3px;height:6px;border:solid var(--panel);border-width:0 1.5px 1.5px 0;transform:rotate(40deg)}
+  .pfoot{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+  .pfoot .btn{height:26px;border-radius:6px;background:var(--raised);color:var(--text);display:flex;align-items:center;padding:0 10px}
+
+  /* analysis card */
+  .aname{font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ameta{font-size:10.5px;color:var(--muted)}
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;margin-top:4px}
+  .tile .v{font-size:17px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+  .tile .k{font-size:10.5px;color:var(--muted);margin-top:1px}
+  .tile.wide{grid-column:1 / -1}
+  .note{font-size:10.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px}
+  .editTags{height:30px;border-radius:6px;background:var(--raised);color:var(--text);display:flex;align-items:center;justify-content:center;font-size:12px}
+  .tagrow{display:flex;flex-wrap:wrap;gap:6px}
+  .tag{display:flex;align-items:center;gap:5px;height:22px;border-radius:11px;border:1px solid var(--line);padding:0 8px;font-size:11px;color:var(--text)}
+  .tag i{width:6px;height:6px;border-radius:3px;display:block}
+
+  /* dialog */
+  .dialog{width:470px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;
+    display:flex;flex-direction:column;gap:12px}
+  .dialog h3{margin:0 0 4px;font-size:16px;color:var(--text)}
+  .field{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted);height:30px}
+  .field span.lbl{width:140px;flex:0 0 140px}
+  .field .box{flex:1 1 auto;height:30px;border-radius:6px;background:var(--bg);border:1px solid var(--line);color:var(--text);
+    display:flex;align-items:center;padding:0 8px}
+  .sldr{flex:1 1 auto;height:30px;display:flex;align-items:center}
+  .sldrtrack{height:4px;border-radius:2px;background:var(--line);width:100%;position:relative}
+  .sldrtrack i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--muted)}
+  .sldrtrack b{position:absolute;top:-3px;width:10px;height:10px;border-radius:5px;background:var(--text);margin-left:-5px}
+  .value{width:90px;flex:0 0 90px;height:22px;border-radius:5px;background:var(--bg);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:flex-end;padding:0 6px;color:var(--text);font-size:11px;font-variant-numeric:tabular-nums}
+  .check{display:flex;align-items:center;gap:10px;height:24px;font-size:12px;color:var(--text)}
+  .cbox{width:14px;height:14px;border-radius:3px;border:1px solid var(--line);background:var(--table);position:relative;flex:0 0 14px}
+  .cbox.on{background:var(--text);border-color:var(--text)}
+  .cbox.on::after{content:"";position:absolute;left:3px;top:0.5px;width:4px;height:8px;border:solid var(--panel);border-width:0 1.6px 1.6px 0;transform:rotate(40deg)}
+  .dialog .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+  .btn{height:32px;border-radius:6px;padding:0 16px;display:flex;align-items:center;font-size:13px;background:var(--raised);color:var(--text)}
+  .btn.primary{background:var(--accent);color:#17181a;font-weight:600}
+  .light .btn.primary{color:#fbfbfc}
+  .cap{font-size:.8rem;color:var(--muted);margin:0 0 6px}
+  h2.section{font-size:.9rem;margin:18px 0 6px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted)}
+</style>
+</head>
+<body>
+<h2 class="section" style="margin-top:0">Тёмная тема · 1120×720 (логический размер при 125%)</h2>
+<div class="scroller"><div class="win dark" id="w1"></div></div>
+
+<h2 class="section">Светлая тема</h2>
+<div class="scroller"><div class="win light" id="w2"></div></div>
+
+<h2 class="section">Диалог через общий каркас</h2>
+<div class="scroller"><div class="win dark" id="w3" style="height:470px;padding:24px"></div></div>
+
+<script>
+const gear = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="2.4"/><path d="M8 1.9v2.5M8 11.6v2.5M1.9 8h2.5M11.6 8h2.5M3.7 3.7l1.8 1.8M10.5 10.5l1.8 1.8M12.3 3.7l-1.8 1.8M5.5 10.5l-1.8 1.8"/></svg>';
+const search = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.8" cy="6.8" r="4.3"/><path d="M10 10l4 4"/></svg>';
+const down = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6.5l4 3.5 4-3.5"/></svg>';
+const left = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3.5L6 8l4 4.5"/></svg>';
+const right = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3.5L10 8l-4 4.5"/></svg>';
+const play = '<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.5l8 4.5-8 4.5z"/></svg>';
+const stop = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="4" width="8" height="8"/></svg>';
+
+const rows = [
+  {star:1,name:'FINE_CRASH_01.wav',type:'Cymbal',bpm:'—',key:'—',genre:'Tech House',fmt:'WAV',len:'2.18 s',rate:'48.0',ch:'2',tags:['crash','analog'],dup:'--',sel:true},
+  {star:1,name:'BD_909_04.wav',type:'Kick',bpm:'124',key:'Am',genre:'House',fmt:'WAV',len:'0.42 s',rate:'44.1',ch:'1',tags:['kick','909'],dup:'×2'},
+  {star:0,name:'PAD_WARM_A#m.rx2',type:'Pad',bpm:'120',key:'A#m',genre:'Ambient',fmt:'RX2',len:'4.00 s',rate:'44.1',ch:'2',tags:['pad'],dup:'--'},
+  {star:0,name:'PERC_03.wav',type:'Perc',bpm:'—',key:'C',genre:'-',fmt:'WAV',len:'0.31 s',rate:'44.1',ch:'1',tags:['perc'],dup:'--'},
+  {star:1,name:'SUB_BASS_F.wav',type:'Bass',bpm:'140',key:'F',genre:'Techno',fmt:'WAV',len:'1.02 s',rate:'48.0',ch:'1',tags:['sub','bass'],dup:'--'},
+  {star:0,name:'HAT_CLOSED_07.wav',type:'Hi-hat',bpm:'124',key:'—',genre:'House',fmt:'WAV',len:'0.19 s',rate:'44.1',ch:'1',tags:['hat'],dup:'--'},
+  {star:0,name:'SNARE_LAYERED.wav',type:'Snare',bpm:'—',key:'—',genre:'-',fmt:'WAV',len:'0.55 s',rate:'96.0',ch:'2',tags:['snare','layer'],dup:'×3'},
+  {star:0,name:'HOOVER_STAB.wav',type:'Stab',bpm:'132',key:'Cm',genre:'Rave',fmt:'WAV',len:'0.88 s',rate:'44.1',ch:'2',tags:['stab'],dup:'--'},
+  {star:0,name:'SINE_C3.sfz',type:'Tone',bpm:'—',key:'C',genre:'-',fmt:'SFZ',len:'—',rate:'—',ch:'1',tags:['tone'],dup:'--'},
+  {star:1,name:'AMEN_165.wav',type:'Loop',bpm:'165',key:'—',genre:'Breakbeat',fmt:'WAV',len:'4.65 s',rate:'44.1',ch:'2',tags:['break','amen'],dup:'--'}
+];
+
+function table(){
+  const head = '<div class="thead"><div class="star">★</div><div class="c name w-sample">SAMPLE</div>'
+    + '<div class="c w-type">TYPE</div><div class="c w-bpm">BPM</div><div class="c w-key">KEY</div>'
+    + '<div class="c w-genre">GENRE</div><div class="c w-format">FORMAT</div><div class="c w-len">LENGTH</div>'
+    + '<div class="c w-rate">RATE</div><div class="c w-ch">CH</div><div class="c w-tags">TAGS</div><div class="c">DUP</div></div>';
+  const body = rows.map(r => {
+    const tags = r.tags.map((t,i) => '<span style="display:inline-flex;align-items:center;gap:4px;margin-right:8px">'
+      + '<i style="width:6px;height:6px;border-radius:3px;background:'+(i?'#6aa6d8':'#d8a86a')+';display:inline-block"></i>'+t+'</span>').join('');
+    return '<div class="trow'+(r.sel?' sel':'')+'">'
+      + '<div class="star'+(r.star?' on':'')+'">'+(r.star?'★':'☆')+'</div>'
+      + '<div class="c name w-sample">'+r.name+'</div>'
+      + '<div class="c w-type">'+r.type+'</div>'
+      + '<div class="c w-bpm">'+(r.bpm==='—'?'<span class="dash">--</span>':r.bpm)+'</div>'
+      + '<div class="c w-key">'+(r.key==='—'?'<span class="dash">--</span>':r.key)+'</div>'
+      + '<div class="c w-genre">'+(r.genre==='-'?'<span class="dash">-</span>':r.genre)+'</div>'
+      + '<div class="c w-format">'+r.fmt+'</div>'
+      + '<div class="c w-len">'+r.len+'</div>'
+      + '<div class="c w-rate">'+r.rate+'</div>'
+      + '<div class="c w-ch">'+r.ch+'</div>'
+      + '<div class="c w-tags">'+tags+'</div>'
+      + '<div class="c">'+(r.dup==='--'?'<span class="dash">--</span>':r.dup)+'</div></div>';
+  }).join('');
+  return '<div class="table">'+head+body+'</div>';
+}
+
+function analysis(){
+  const tiles = [
+    ['2.184 s','Length'],['48.0 kHz','Rate'],['24 bit','Bit depth'],['−0.3 dBFS','Peak'],
+    ['−14.2 dBFS','RMS'],['3 812 Hz','Centroid'],['8 640 Hz','Rolloff'],['0.0214','Flatness'],
+    ['Tech House','Genre · automatic'],['×2 copies','Duplicates']
+  ].map(t => '<div class="tile"><div class="v">'+t[0]+'</div><div class="k">'+t[1]+'</div></div>').join('');
+  return '<div class="analysis">'
+    + '<div class="aname">FINE_CRASH_01.wav</div>'
+    + '<div class="ameta">WAV · 2 ch · 48 kHz · 24 bit</div>'
+    + '<div class="tiles">'+tiles+'</div>'
+    + '<div class="tagrow"><span class="tag"><i style="background:#d8a86a"></i>crash</span><span class="tag"><i style="background:#6aa6d8"></i>analog</span></div>'
+    + '<div class="note">Shown copy is the catalog representative. Second copy lives in <b>/Drums/Archive</b>.</div>'
+    + '</div>';
+}
+
+function sidebar(){
+  const items = ['All samples','Drums','Bass','Synths','Vocals','Loops','Field recordings','Archive'];
+  return '<div class="sidebar">'
+    + '<div class="menu"><span>LIBRARY</span>'+down+'</div>'
+    + '<div class="caption">FOLDERS</div>'
+    + '<div class="tree">'+items.map((n,i)=>'<div class="'+(i===0?'on':'')+(i?' child':'')+'">'
+      + (i===0?'':'▸ ')+n+'</div>').join('')+'</div>'
+    + '<div class="caption" style="margin-top:auto">FAVORITES</div>'
+    + '<div class="tree"><div>▸ Kicks</div><div>▸ Pads</div></div>'
+    + '</div>';
+}
+
+// A dense min/max waveform, the way WaveformDisplay draws it: one vertical stroke per pixel column,
+// transients standing out of the envelope. The mockup only has to look like the real thing.
+function wave(){
+  let d=''; let seed=17;
+  for(let x=0;x<=700;x+=2){
+    seed=(seed*1103515245+12345)%2147483648;
+    const r=seed/2147483648;
+    const env=0.28+0.72*Math.pow(Math.sin(Math.PI*Math.min(1,x/700)),0.65);
+    const nearTransient=Math.min(Math.abs(x-40),Math.abs(x-178),Math.abs(x-392),Math.abs(x-556));
+    const hit=nearTransient<16?1.0:0.62;
+    const amp=(0.30+0.70*r)*env*hit*33;
+    d+='M'+x+','+(40-amp).toFixed(1)+'L'+x+','+(40+amp).toFixed(1);
+  }
+  return '<div class="wave"><svg viewBox="0 0 700 80" preserveAspectRatio="none">'
+    + '<path d="'+d+'" stroke="#8d939a" stroke-width="1.1" fill="none"/>'
+    + '<line x1="520" y1="0" x2="520" y2="80" stroke="#f39a43" stroke-width="1.5"/></svg></div>';
+}
+
+function preview(){
+  return '<div class="preview">'
+    + '<div class="left"><div class="ptitle"><div class="pname">FINE_CRASH_01.wav</div></div>'
+    + wave()
+    + '<div class="pfoot"><span>0.50 s selected</span><span style="flex:1"></span><span class="btn">Clear</span><span class="btn">Drag sample</span></div></div>'
+    + '<div class="controls">'
+    + '<div class="timeblock"><div class="time">0:12.48 <span style="color:var(--muted)">/ 2:18.40</span></div>'
+    + '<div class="format">WAV · 48 kHz · Stereo</div></div>'
+    + '<div class="transport"><div class="play">'+play+'</div><div class="stop">'+stop+'</div>'
+    + '<div class="vol"><div class="track"><i></i><b></b></div></div></div>'
+    + '<div class="rowchips"><span class="chip sm on">Loop</span><span class="chip sm">Auto Preview</span></div>'
+    + '<div class="rowchips"><span class="chip sm">MIDI Preview</span><span class="chip sm">Skip Silence</span></div>'
+    + '</div></div>';
+}
+
+function windowHTML(){
+  return '<div class="header"><div class="brand"><div class="mark"><i style="height:8px"></i><i style="height:14px"></i><i style="height:20px"></i><i style="height:12px"></i><i style="height:6px"></i></div>'
+    + '<div class="wordmark">SONICATOR</div></div>'
+    + '<div class="search placeholder">'+search+'<span>Search: *.rx2, ext:wav, type:pad, key:Am, C4</span></div>'
+    + '<div class="iconbtn">'+gear+'</div></div>'
+    + '<div class="body">'+sidebar()+'<div class="divider-v"></div>'
+    + '<div class="centre"><div class="topbar"><div class="grow">1 248 samples</div>'
+    + '<div class="pager"><div class="page">'+left+'</div><div class="page">'+right+'</div><div class="size"><span>10000</span>'+down+'</div></div></div>'
+    + '<div class="filters"><span class="chip on">Tags · 2</span><span class="chip">Starred</span>'
+    + '<span class="chip"><span class="tick"></span>Hide empty</span>'
+    + '<span class="sep"></span><span class="chip">Clear filters</span></div>'
+    + table()+'</div>'
+    + '<div class="divider-v"></div>'+analysis()+'</div>'
+    + '<div class="statusline"><span class="dot"></span><span>Ready · 1 248 samples · 12 ignored</span></div>'
+    + preview();
+}
+
+document.getElementById('w1').innerHTML = windowHTML();
+document.getElementById('w2').innerHTML = windowHTML();
+
+function sliderRow(label, value, percent){
+  return '<div class="field"><span class="lbl">'+label+'</span>'
+    + '<div class="sldr"><div class="sldrtrack"><i style="width:'+percent+'%"></i><b style="left:'+percent+'%"></b></div></div>'
+    + '<div class="value">'+value+'</div></div>';
+}
+function checkRow(label, on){
+  return '<div class="check"><span class="cbox'+(on?' on':'')+'"></span>'+label+'</div>';
+}
+document.getElementById('w3').innerHTML =
+  '<div class="dialog"><h3>Split by silence</h3>'
+  + sliderRow('Threshold', '−45.0 dBFS', 55)
+  + sliderRow('Minimum silence', '0.30 s', 30)
+  + sliderRow('Minimum part', '0.25 s', 25)
+  + '<div class="field"><span class="lbl">Save to</span><div class="box" style="color:var(--muted)">/Users/me/Samples/Drums</div>'
+  + '<span class="btn" style="height:30px">Browse...</span></div>'
+  + checkRow('Save next to each original file', true)
+  + checkRow('Move originals to Trash after a successful split', false)
+  + checkRow('Normalize each part to −0.1 dBFS', true)
+  + '<div class="buttons"><span class="btn">Cancel</span><span class="btn primary">Split</span></div></div>';
+</script>
+</body>
+</html>
