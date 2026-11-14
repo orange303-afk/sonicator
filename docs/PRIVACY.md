@@ -1,7 +1,7 @@
 # Privacy
 
-Sonicator works on your computer. There is no telemetry, no account and no hidden reporting. Two
-things can leave the machine, and both are visible to you before they go.
+Sonicator works on your computer. There is no telemetry, no account and no hidden reporting. Three
+things can leave the machine, and each one is visible to you before it goes.
 
 ## Reports you send yourself
 
@@ -11,6 +11,14 @@ the log and, if the previous session crashed, its backtrace. Your home folder be
 catalog path becomes `<catalog>` and your account name becomes `<user>`. File names inside the
 catalog stay, because a report without the failing file is usually useless. Details:
 `docs/DIAGNOSTICS.md`.
+
+## Update check: only when you press it
+
+Settings → About → "Check for updates" asks `https://api.github.com` for the newest published
+release of the project and compares its version with the running one. The request carries the app
+version in its `User-Agent` and the project name in the URL; it sends no catalog, file, path,
+machine or account data. The application never checks on its own, and a failed check changes
+nothing.
 
 ## Training data: off by default
 

@@ -96,6 +96,21 @@ the palette at paint time; components with constructor-set colours re-apply them
 `lookAndFeelChanged`. In the light theme the silver wordmark is replaced by typeset product text.
 Interface scale uses `Desktop::setGlobalScaleFactor` at startup and immediately after a change.
 
+The About page shows the running version under the product name and offers `Check for updates`.
+That button asks `api.github.com` for the newest release of `orange303-afk/sonicator` on a worker
+thread (`core/updates/UpdateCheck`), compares dotted tags against `version()` and reports the
+answer inline; an empty release list is a normal state, not an error. Nothing is checked at start-up
+and nothing about the library, files or machine is sent. See `docs/PRIVACY.md`.
+
+Typography is Manrope, embedded in the binary (`resources/fonts/`, SIL Open Font License): the four
+static faces are registered by `fonts::install()` at start-up, and the default LookAndFeel points the
+`<Sans-Serif>` placeholder at the family, so a font created from a size alone still follows it. All
+interface fonts go through `fonts::font(size, weight)` in `ui/shell/AppFonts.h`; JUCE sizes a font by
+its ascent+descent box, and Manrope's box is taller than the system sans, so the helper multiplies by
+`heightCalibration` to keep the optical size the layouts were measured with. Long notes and the About
+credits use `studio::Paragraph`, which wraps at the component width and reports its own height instead
+of letting a `juce::Label` squeeze or clip the text.
+
 The Settings dialog can copy the current catalog to a new path through `backupTo` and switch every
 repository to it, or open an existing catalog. The old file is kept. Switching is refused while
 indexing and for files that fail `SampleRepository::isCatalog` (a `samples` and `roots` schema with

@@ -46,7 +46,7 @@ public:
     {
         if (row < 0 || row >= getNumRows()) return;
         const auto& proposal = owner.result.proposals[(size_t) row];
-        g.setFont(juce::FontOptions(12.0f));
+        g.setFont(fonts::font(12.0f));
         g.setColour(theme::text);
         auto area = juce::Rectangle<int>(0, 0, width, height).reduced(6, 0);
         if (column == 1)
@@ -106,7 +106,7 @@ public:
     {
         if (row < 0 || row >= getNumRows()) return;
         const auto& skipped = owner.result.skipped[(size_t) row];
-        g.setFont(juce::FontOptions(12.0f));
+        g.setFont(fonts::font(12.0f));
         g.setColour(theme::text);
         auto area = juce::Rectangle<int>(0, 0, width, height).reduced(6, 0);
         if (column == 1) g.drawText(skipped.fileName, area, juce::Justification::centredLeft, true);
@@ -130,11 +130,11 @@ AutoTagDialog::AutoTagDialog(AutoTagResult prepared, AutoTagService& s,
     addAndMakeVisible(tabs);
     addAndMakeVisible(apply);
     addAndMakeVisible(cancel);
-    summary.setFont(juce::FontOptions(12.5f));
+    summary.setFont(fonts::font(12.5f));
     summary.setColour(juce::Label::textColourId, theme::text);
-    selectedLabel.setFont(juce::FontOptions(12.0f));
+    selectedLabel.setFont(fonts::font(12.0f));
     selectedLabel.setColour(juce::Label::textColourId, theme::muted);
-    progress.setFont(juce::FontOptions(12.0f));
+    progress.setFont(fonts::font(12.0f));
     progress.setColour(juce::Label::textColourId, theme::muted);
 
     proposalModel = std::make_unique<ProposalModel>(*this);

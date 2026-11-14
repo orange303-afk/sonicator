@@ -7,11 +7,11 @@ namespace sonicator
 TapTempoDialog::TapTempoDialog(juce::String titleText)
 {
     title.setText(titleText, juce::dontSendNotification);
-    title.setFont(juce::FontOptions(14, juce::Font::bold));
+    title.setFont(fonts::font(14, fonts::Weight::bold));
     title.setColour(juce::Label::textColourId, theme::text);
     title.setJustificationType(juce::Justification::centred);
     value.setText(juce::String::charToString(0x2014), juce::dontSendNotification);
-    value.setFont(juce::FontOptions(40, juce::Font::bold));
+    value.setFont(fonts::font(40, fonts::Weight::bold));
     value.setColour(juce::Label::textColourId, theme::accent);
     value.setJustificationType(juce::Justification::centred);
     for (auto* component : std::array<juce::Component*, 6>{ &title, &value, &tapButton, &loopButton,

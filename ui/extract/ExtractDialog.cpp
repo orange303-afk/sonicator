@@ -20,7 +20,7 @@ ExtractDialog::ExtractDialog(std::vector<juce::File> inputSources, const AppSett
     setSize(560, 500);
     title.setText("Extract samples from " + juce::String((int) sources.size()) + " file(s)",
                   juce::dontSendNotification);
-    title.setFont(juce::FontOptions(15.0f, juce::Font::bold));
+    title.setFont(fonts::font(15.0f, fonts::Weight::bold));
     sameFolder.setComponentID("extractSameFolder");
     sameFolder.setToggleState(settings.extractSameFolder, juce::dontSendNotification);
     normalize.setComponentID("extractNormalize");

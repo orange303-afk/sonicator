@@ -58,7 +58,7 @@ void SongProgress::paint(juce::Graphics& g)
     g.fillRect(juce::Rectangle<float>(playhead - 1.0f, area.getY(), 2.0f, area.getHeight()));
 
     g.setColour(theme::text);
-    g.setFont(juce::FontOptions(15.0f));
+    g.setFont(fonts::font(15.0f));
     g.drawText(formatTime(positionSeconds) + " / " + formatTime(lengthSeconds),
                getLocalBounds(), juce::Justification::centred, false);
 }

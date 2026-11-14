@@ -1,4 +1,5 @@
 #pragma once
+#include "AppFonts.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 
 namespace sonicator::studio
@@ -32,35 +33,36 @@ inline constexpr int headerHeight = 72;
 inline constexpr int brandingWidth = 298;
 inline constexpr int tableRowHeight = 36;
 
+// Manrope carries all four weights; a heavier face is asked for by name, not synthesized.
 inline juce::Font bodyFont()
 {
-    return juce::Font(juce::FontOptions(14.0f));
+    return fonts::font(14.0f);
 }
 inline juce::Font controlFont()
 {
-    return juce::Font(juce::FontOptions(13.0f));
+    return fonts::font(13.0f);
 }
 inline juce::Font captionFont()
 {
-    return juce::Font(juce::FontOptions(12.0f));
+    return fonts::font(12.0f);
 }
 // Small uppercase group caption, the "APPEARANCE" style heading.
 inline juce::Font sectionFont()
 {
-    return juce::Font(juce::FontOptions(10.5f, juce::Font::bold)).withExtraKerningFactor(0.12f);
+    return fonts::font(10.5f, fonts::Weight::semiBold).withExtraKerningFactor(0.12f);
 }
 inline juce::Font pageTitleFont()
 {
-    return juce::Font(juce::FontOptions(24.0f, juce::Font::bold));
+    return fonts::font(24.0f, fonts::Weight::semiBold);
 }
 inline juce::Font pageSubtitleFont()
 {
-    return juce::Font(juce::FontOptions(13.0f));
+    return fonts::font(13.0f);
 }
 // The larger line of a value + caption pair (the Analysis card).
 inline juce::Font statValueFont()
 {
-    return juce::Font(juce::FontOptions(17.0f, juce::Font::bold));
+    return fonts::font(17.0f, fonts::Weight::semiBold);
 }
 inline juce::Font statCaptionFont()
 {
@@ -69,12 +71,12 @@ inline juce::Font statCaptionFont()
 // The large number of the Analysis hero block (Key, BPM).
 inline juce::Font heroValueFont()
 {
-    return juce::Font(juce::FontOptions(26.0f, juce::Font::bold));
+    return fonts::font(26.0f, fonts::Weight::semiBold);
 }
 // Table column headers: the section size, but without the tracking that makes "FORMAT" wider
 // than its minimum column.
 inline juce::Font tableHeaderFont()
 {
-    return juce::Font(juce::FontOptions(10.5f, juce::Font::bold));
+    return fonts::font(10.5f, fonts::Weight::semiBold);
 }
 } // namespace sonicator::studio

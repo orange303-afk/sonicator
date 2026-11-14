@@ -512,7 +512,7 @@ std::vector<FileListPanel::TagHit> FileListPanel::tagHits(const std::vector<Tag>
     for (const auto& tag : tags)
     {
         if (x >= width - 12) break;
-        const int textWidth = juce::GlyphArrangement::getStringWidthInt(juce::FontOptions(11), tag.name);
+        const int textWidth = juce::GlyphArrangement::getStringWidthInt(fonts::font(11), tag.name);
         const int textArea = juce::jmax(0, width - x - 6);
         const int drawn = juce::jmin(textWidth, textArea);
         hits.push_back({ { x, 0, 10 + drawn, 22 }, tag.name, tag.id });
@@ -546,19 +546,19 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
     {
         if (stereoPartners.count(r.id) != 0)
         {
-            g.setColour(theme::muted); g.setFont(juce::FontOptions(12));
+            g.setColour(theme::muted); g.setFont(fonts::font(12));
             g.drawText("L+R", 8, 0, w - 12, h, juce::Justification::centredLeft, true);
             return;
         }
         const auto found = duplicateCounts.find(r.id);
         if (found == duplicateCounts.end() || found->second < 2)
         {
-            g.setColour(theme::muted.withAlpha(0.4f)); g.setFont(juce::FontOptions(12));
+            g.setColour(theme::muted.withAlpha(0.4f)); g.setFont(fonts::font(12));
             g.drawText("--",8,0,w-12,h,juce::Justification::centredLeft,true);
         }
         else
         {
-            g.setColour(theme::muted); g.setFont(juce::FontOptions(12));
+            g.setColour(theme::muted); g.setFont(fonts::font(12));
             g.drawText(juce::String(juce::CharPointer_UTF8("\xc3\x97")) + juce::String(found->second),
                        8,0,w-12,h,juce::Justification::centredLeft,true);
         }
@@ -570,7 +570,7 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
         const auto value = found == smartDisplays.end() ? juce::String("--")
                                                         : smartCellText(found->second, col);
         g.setColour(value == "--" ? theme::muted.withAlpha(0.5f) : theme::muted);
-        g.setFont(juce::FontOptions(12));
+        g.setFont(fonts::font(12));
         g.drawText(value, 8, 0, w - 12, h, juce::Justification::centredLeft, true);
         return;
     }
@@ -579,11 +579,11 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
         const auto found = rowTags.find(r.id);
         if (found == rowTags.end() || found->second.empty())
         {
-            g.setColour(theme::muted.withAlpha(0.5f)); g.setFont(juce::FontOptions(12));
+            g.setColour(theme::muted.withAlpha(0.5f)); g.setFont(fonts::font(12));
             g.drawText("--",10,0,w-16,h,juce::Justification::centredLeft,true);
             return;
         }
-        g.setFont(juce::FontOptions(11));
+        g.setFont(fonts::font(11));
         const auto hits = tagHits(found->second, w);
         for (const auto& hit : hits)
         {
@@ -612,7 +612,7 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
     }
     g.setColour(isIncompatible(r.compatibility) || r.error.isNotEmpty()
         ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e))
-        : (ignored ? theme::muted : (col == 1 ? theme::text : theme::muted))); g.setFont(juce::FontOptions(13));
+        : (ignored ? theme::muted : (col == 1 ? theme::text : theme::muted))); g.setFont(fonts::font(13));
     g.drawText(value,10,0,w-16,h,juce::Justification::centredLeft,true);
 }
 void FileListPanel::cellClicked(int row, int, const juce::MouseEvent& event)

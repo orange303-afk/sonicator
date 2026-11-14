@@ -328,89 +328,109 @@ double WaveformDisplay::minimumSelectionLength() const
 }
 void WaveformDisplay::paint(juce::Graphics& g)
 {
-    g.setColour(theme::table); g.fillRect(getLocalBounds());
-    const auto total = totalLength();
-    if (total <= 0)
+    // The wave is a rounded card of its own: the fill and every mark inside are clipped to the
+    // same shape, and the outline closes the card against the preview panel behind it.
+    const auto cardBounds = getLocalBounds().toFloat().reduced(0.5f);
+    const auto corner = (float) studio::panelRadius;
+    juce::Path card;
+    card.addRoundedRectangle(cardBounds, corner);
+    g.setColour(theme::table);
+    g.fillPath(card);
+
+    const auto drawContent = [this, &g]
     {
-        g.setColour(theme::muted); g.drawText("Select a sample to preview",getLocalBounds(),juce::Justification::centred); return;
-    }
-    const auto view = effectiveView();
-    const auto area = getLocalBounds().reduced(6,10).toFloat();
-    if (editedAudio != nullptr)
-    {
-        drawEditedPeaks(g, area, view);
-    }
-    else if (! peakMin.empty())
-    {
-        const auto centre = area.getCentreY();
-        const auto half = area.getHeight() * 0.5f;
-        g.setColour(theme::accent);
-        for (int bin = 0; bin < (int) peakMin.size(); ++bin)
+        const auto total = totalLength();
+        if (total <= 0)
         {
-            const auto binStart = total * bin / (double) peakMin.size();
-            const auto binEnd = total * (bin + 1) / (double) peakMin.size();
-            if (binEnd <= view.start || binStart >= view.end) continue;
-            const auto x = waveview::xAtTime((binStart + binEnd) * 0.5, getWidth(), view);
-            g.drawVerticalLine((int) x, centre - peakMax[(size_t) bin] * half,
-                               centre - peakMin[(size_t) bin] * half);
+            g.setColour(theme::muted); g.drawText("Select a sample to preview",getLocalBounds(),juce::Justification::centred); return;
         }
-        for (size_t i = 0; i < sliceTimes.size(); ++i)
+        const auto view = effectiveView();
+        const auto area = getLocalBounds().reduced(6,10).toFloat();
+        if (editedAudio != nullptr)
         {
-            const auto x = waveview::xAtTime(sliceTimes[i], getWidth(), view);
-            g.setColour(theme::muted.withAlpha(0.55f));
-            g.drawVerticalLine((int) x, area.getY(), area.getBottom());
-            if (std::find(activeSlices.begin(), activeSlices.end(), (int) i) != activeSlices.end())
+            drawEditedPeaks(g, area, view);
+        }
+        else if (! peakMin.empty())
+        {
+            const auto centre = area.getCentreY();
+            const auto half = area.getHeight() * 0.5f;
+            g.setColour(theme::accent);
+            for (int bin = 0; bin < (int) peakMin.size(); ++bin)
             {
-                const auto next = i + 1 < sliceTimes.size() ? sliceTimes[i + 1] : total;
-                const auto x2 = waveview::xAtTime(next, getWidth(), view);
-                g.setColour(theme::accent.withAlpha(0.28f));
-                g.fillRect(juce::Rectangle<float>(x, area.getY(), juce::jmax(1.0f, x2 - x), area.getHeight()));
+                const auto binStart = total * bin / (double) peakMin.size();
+                const auto binEnd = total * (bin + 1) / (double) peakMin.size();
+                if (binEnd <= view.start || binStart >= view.end) continue;
+                const auto x = waveview::xAtTime((binStart + binEnd) * 0.5, getWidth(), view);
+                g.drawVerticalLine((int) x, centre - peakMax[(size_t) bin] * half,
+                                   centre - peakMin[(size_t) bin] * half);
             }
+            for (size_t i = 0; i < sliceTimes.size(); ++i)
+            {
+                const auto x = waveview::xAtTime(sliceTimes[i], getWidth(), view);
+                g.setColour(theme::muted.withAlpha(0.55f));
+                g.drawVerticalLine((int) x, area.getY(), area.getBottom());
+                if (std::find(activeSlices.begin(), activeSlices.end(), (int) i) != activeSlices.end())
+                {
+                    const auto next = i + 1 < sliceTimes.size() ? sliceTimes[i + 1] : total;
+                    const auto x2 = waveview::xAtTime(next, getWidth(), view);
+                    g.setColour(theme::accent.withAlpha(0.28f));
+                    g.fillRect(juce::Rectangle<float>(x, area.getY(), juce::jmax(1.0f, x2 - x), area.getHeight()));
+                }
+            }
+            g.setColour(theme::accent);
         }
-        g.setColour(theme::accent);
-    }
-    else
-    {
-        g.setColour(theme::accent);
-        const auto framesPerPixel = zoomSampleRate > 0
-            ? view.length() * (double) zoomSampleRate / (double) juce::jmax(1, getWidth()) : 0.0;
-        if (zoomReader != nullptr && framesPerPixel < 16.0)
-            drawFileSamples(g, area, view);
         else
-            thumbnail.drawChannels(g,area.toNearestInt(),view.start,view.end,0.85f);
-    }
-    if (currentSelection.valid())
+        {
+            g.setColour(theme::accent);
+            const auto framesPerPixel = zoomSampleRate > 0
+                ? view.length() * (double) zoomSampleRate / (double) juce::jmax(1, getWidth()) : 0.0;
+            if (zoomReader != nullptr && framesPerPixel < 16.0)
+                drawFileSamples(g, area, view);
+            else
+                thumbnail.drawChannels(g,area.toNearestInt(),view.start,view.end,0.85f);
+        }
+        if (currentSelection.valid())
+        {
+            const auto x1 = waveview::xAtTime(currentSelection.start, getWidth(), view);
+            const auto x2 = waveview::xAtTime(currentSelection.end, getWidth(), view);
+            g.setColour(theme::accent.withAlpha(0.20f));
+            g.fillRect(juce::Rectangle<float>(x1, 6.0f, juce::jmax(1.0f, x2 - x1), (float) getHeight() - 12.0f));
+            g.setColour(theme::accent.withAlpha(0.85f));
+            g.drawVerticalLine((int) x1, 5.0f, (float) getHeight() - 5.0f);
+            g.drawVerticalLine((int) x2, 5.0f, (float) getHeight() - 5.0f);
+            const auto label = selection::formatRange(currentSelection);
+            g.setFont(fonts::font(11));
+            const auto labelWidth = 104;
+            const auto labelX = juce::jlimit(6.0f, juce::jmax(6.0f, (float) getWidth() - labelWidth - 6.0f), x1 + 4.0f);
+            const juce::Rectangle<float> labelBounds(labelX, 6.0f, (float) labelWidth, 18.0f);
+            g.setColour(theme::panel);
+            g.fillRoundedRectangle(labelBounds, 4.0f);
+            g.setColour(theme::text);
+            g.drawText(label, labelBounds, juce::Justification::centred);
+        }
+        const auto progress = waveview::xAtTime(position, getWidth(), view);
+        g.setColour(theme::accent); g.drawVerticalLine((int) progress,5,(float) getHeight()-5);
+        if (! waveview::isWholeFile(view, total))
+        {
+            const juce::Rectangle<float> strip((float) selection::inset, (float) getHeight() - 12.0f,
+                                               (float) getWidth() - 2.0f * (float) selection::inset, 8.0f);
+            g.setColour(theme::panel); g.fillRoundedRectangle(strip, 2.0f);
+            const auto frameStart = strip.getX() + strip.getWidth() * (float) (view.start / total);
+            const auto frameEnd = strip.getX() + strip.getWidth() * (float) (view.end / total);
+            g.setColour(theme::accent.withAlpha(0.55f));
+            g.fillRoundedRectangle(juce::Rectangle<float>(frameStart, strip.getY(),
+                juce::jmax(2.0f, frameEnd - frameStart), strip.getHeight()), 2.0f);
+        }
+    };
+
     {
-        const auto x1 = waveview::xAtTime(currentSelection.start, getWidth(), view);
-        const auto x2 = waveview::xAtTime(currentSelection.end, getWidth(), view);
-        g.setColour(theme::accent.withAlpha(0.20f));
-        g.fillRect(juce::Rectangle<float>(x1, 6.0f, juce::jmax(1.0f, x2 - x1), (float) getHeight() - 12.0f));
-        g.setColour(theme::accent.withAlpha(0.85f));
-        g.drawVerticalLine((int) x1, 5.0f, (float) getHeight() - 5.0f);
-        g.drawVerticalLine((int) x2, 5.0f, (float) getHeight() - 5.0f);
-        const auto label = selection::formatRange(currentSelection);
-        g.setFont(juce::FontOptions(11));
-        const auto labelWidth = 104;
-        const auto labelX = juce::jlimit(6.0f, juce::jmax(6.0f, (float) getWidth() - labelWidth - 6.0f), x1 + 4.0f);
-        const juce::Rectangle<float> labelBounds(labelX, 6.0f, (float) labelWidth, 18.0f);
-        g.setColour(theme::panel);
-        g.fillRoundedRectangle(labelBounds, 4.0f);
-        g.setColour(theme::text);
-        g.drawText(label, labelBounds, juce::Justification::centred);
+        const juce::Graphics::ScopedSaveState clipped(g);
+        g.reduceClipRegion(card);
+        drawContent();
     }
-    const auto progress = waveview::xAtTime(position, getWidth(), view);
-    g.setColour(theme::accent); g.drawVerticalLine((int) progress,5,(float) getHeight()-5);
-    if (! waveview::isWholeFile(view, total))
-    {
-        const juce::Rectangle<float> strip((float) selection::inset, (float) getHeight() - 12.0f,
-                                           (float) getWidth() - 2.0f * (float) selection::inset, 8.0f);
-        g.setColour(theme::panel); g.fillRoundedRectangle(strip, 2.0f);
-        const auto frameStart = strip.getX() + strip.getWidth() * (float) (view.start / total);
-        const auto frameEnd = strip.getX() + strip.getWidth() * (float) (view.end / total);
-        g.setColour(theme::accent.withAlpha(0.55f));
-        g.fillRoundedRectangle(juce::Rectangle<float>(frameStart, strip.getY(),
-            juce::jmax(2.0f, frameEnd - frameStart), strip.getHeight()), 2.0f);
-    }
+
+    g.setColour(theme::line);
+    g.strokePath(card, juce::PathStrokeType(1.0f));
 }
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {

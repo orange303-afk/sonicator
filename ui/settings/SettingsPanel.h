@@ -1,5 +1,7 @@
 #pragma once
 #include "SettingsSection.h"
+#include "ui/shell/WrappedText.h"
+#include "core/updates/UpdateCheck.h"
 #include "core/settings/AppSettings.h"
 #include "core/settings/ShortcutPreferences.h"
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -57,8 +59,18 @@ public:
     std::function<void()> onResetLayout;
     void setContributionEnabled(bool);
 
+    // A check is in flight while the worker talks to GitHub.
+    bool updateInFlight = false;
+    bool updateAvailable = false;
+    juce::TextButton checkUpdates { "Check for updates" };
+    juce::HyperlinkButton releasesLink { "Releases on GitHub", juce::URL() };
+    studio::Paragraph updateStatus;
+
 private:
     void notifySettings();
+    // Asks GitHub for the newest release on a worker thread and shows the answer in About.
+    void startUpdateCheck();
+    void showUpdateResult(const updates::Release&);
     void showContributionPreview();
     void confirmContributionDelete();
     void chooseDatabase(bool moveCurrent);
@@ -81,9 +93,12 @@ private:
     juce::Label title, appearance, themeLabel, scaleLabel, languageHeading, languageLabel,
                  languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
                  editingHeading, alwaysOverwriteNote, workspaceHeading, workspaceNote,
-                 audioHeading, audioNote, reportHeading, reportNote, aboutHeading, productLabel,
-                 authorLabel, supportLabel, creditsLabel, prototypesLabel,
+                 audioHeading, audioNote, reportHeading, aboutHeading, productLabel, authorLabel,
+                 versionLabel, linksHeading, supportHeading, creditsHeading, prototypesLabel,
                  pluginsHeading, pluginsNote, privacyHeading;
+    // The About page is a document, not a form: notes and credits are paragraphs that measure
+    // their own height, so a longer sentence wraps instead of clipping.
+    studio::Paragraph reportNote, supportNote, creditsText;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::ToggleButton contributeDataToggle;
     juce::ToggleButton alwaysOverwriteToggle { "Always overwrite original files" };
@@ -112,6 +127,7 @@ private:
 
     std::vector<juce::Rectangle<float>> sectionRules;
     std::vector<juce::Rectangle<float>> aboutRules;
+    std::vector<juce::Rectangle<float>> aboutCards;
     juce::Rectangle<int> databaseFieldBounds;
 };
 } // namespace sonicator

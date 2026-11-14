@@ -49,6 +49,16 @@ TEST_CASE("The header keeps search and settings on the grid", "[ui][studio]")
     REQUIRE(settings->getRight() <= app.getWidth() - 8);
     REQUIRE(search->getRight() < settings->getX());
     REQUIRE(search->getWidth() >= 300);
+
+    // The clear control sits in the field whether or not there is text, and it still clears.
+    auto* clear = dynamic_cast<juce::TextButton*>(findDescendantWithID(*search, "clearSearch"));
+    REQUIRE(clear != nullptr);
+    REQUIRE(search->getText().isEmpty());
+    REQUIRE(clear->isVisible());
+    search->setText("kick", juce::sendNotificationSync);
+    REQUIRE(clear->isVisible());
+    clear->onClick();
+    REQUIRE(search->getText().isEmpty());
 }
 
 TEST_CASE("Filter chips keep their state and the shorter hide-empty label", "[ui][studio]")
@@ -302,7 +312,7 @@ TEST_CASE("Every dialog lays its content out from the shared surface", "[ui][stu
     }
 }
 
-TEST_CASE("The header hides its clear control while the search is empty", "[ui][studio]")
+TEST_CASE("The header keeps the search clear control in place", "[ui][studio]")
 {
     TestDirectory t;
     MainComponent app(t.dir.getChildFile("clear.sqlite"), false);
@@ -314,15 +324,16 @@ TEST_CASE("The header hides its clear control while the search is empty", "[ui][
     for (auto* child : search->getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child)) clear = button;
     REQUIRE(clear != nullptr);
-    REQUIRE_FALSE(clear->isVisible());
-    // TextEditor dispatches its change callback through the message queue.
+    // The owner wants the control always in place: a control that vanishes is one a user hunts.
+    REQUIRE(clear->isVisible());
     const auto pump = [] { juce::MessageManager::getInstance()->runDispatchLoopUntil(50); };
     search->setText("pad", true);
     pump();
     REQUIRE(clear->isVisible());
-    search->clear();
+    clear->onClick();
     pump();
-    REQUIRE_FALSE(clear->isVisible());
+    REQUIRE(search->getText().isEmpty());
+    REQUIRE(clear->isVisible());
 }
 
 TEST_CASE("A restored session shows its sample in the analysis card", "[ui][studio]")
@@ -391,7 +402,9 @@ TEST_CASE("The analysis meta line wraps in a narrow panel", "[ui][studio]")
     content.title = "x.wav";
     content.meta = "WAV \xc2\xb7 2 ch \xc2\xb7 44.1 kHz \xc2\xb7 16 bit";
     card.setContent(content);
-    card.setSize(154, 200);
+    // Manrope sets this line about 8% tighter than the system sans, so the 154 px minimum panel
+    // holds it on one line; the wrap has to be checked at a genuinely narrow width.
+    card.setSize(120, 200);
     card.resized();
     REQUIRE(card.getNumChildComponents() == 2);
     REQUIRE(card.getChildComponent(1)->getHeight()

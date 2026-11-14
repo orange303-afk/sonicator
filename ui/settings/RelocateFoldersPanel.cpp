@@ -24,14 +24,14 @@ struct RelocateFoldersPanel::Row final : juce::Component
 
         oldPath.setText(info.path, juce::dontSendNotification);
         oldPath.setTooltip(info.path);
-        oldPath.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+        oldPath.setFont(fonts::font(13.0f, fonts::Weight::bold));
         oldPath.setMinimumHorizontalScale(0.5f);
         count.setText(juce::String(info.fileCount) + " file(s) in the catalog", juce::dontSendNotification);
-        count.setFont(juce::FontOptions(11.5f));
-        chosen.setFont(juce::FontOptions(12.0f));
+        count.setFont(fonts::font(11.5f));
+        chosen.setFont(fonts::font(12.0f));
         chosen.setMinimumHorizontalScale(0.5f);
         chosen.setText("Not chosen", juce::dontSendNotification);
-        probe.setFont(juce::FontOptions(11.5f));
+        probe.setFont(fonts::font(11.5f));
         probe.setJustificationType(juce::Justification::centredRight);
         probe.setMinimumHorizontalScale(0.6f);
         choose.setWantsKeyboardFocus(false);
@@ -114,16 +114,16 @@ RelocateFoldersPanel::RelocateFoldersPanel(std::vector<RelocateRootInfo> roots)
         addAndMakeVisible(c);
 
     title.setText("Relocate sample folders", juce::dontSendNotification);
-    title.setFont(juce::FontOptions(20.0f, juce::Font::bold));
+    title.setFont(fonts::font(20.0f, fonts::Weight::bold));
     explanation.setText(
         "These catalog folders were not found on this computer. Choose where each one lives now. "
         "Only stored paths are rewritten; analysis, tags, stars and hashes are kept.\n\n"
         "Each new location must keep the same folder structure inside it.",
         juce::dontSendNotification);
-    explanation.setFont(juce::FontOptions(12.0f));
+    explanation.setFont(fonts::font(12.0f));
     explanation.setJustificationType(juce::Justification::topLeft);
     explanation.setMinimumHorizontalScale(0.8f);
-    errorLabel.setFont(juce::FontOptions(12.0f));
+    errorLabel.setFont(fonts::font(12.0f));
     errorLabel.setJustificationType(juce::Justification::centredLeft);
     errorLabel.setMinimumHorizontalScale(0.7f);
 

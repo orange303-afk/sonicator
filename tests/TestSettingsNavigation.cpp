@@ -4,6 +4,8 @@
 #include "ui/settings/HotkeysPanel.h"
 #include "ui/commands/CommandRegistry.h"
 #include "ui/MainComponent.h"
+#include "ui/shell/Theme.h"
+#include "core/Version.h"
 #include "TestHelpers.h"
 
 using namespace sonicator;
@@ -157,4 +159,79 @@ TEST_CASE("An embedded window offers the working Settings pages", "[settings][na
     REQUIRE(hotkeys != nullptr);
     // The embedded window registers the whole command catalogue, not a demo list.
     REQUIRE(hotkeys->commandRows() > 20);
+}
+
+TEST_CASE("Scrolling a Settings page keeps its decorations inside the page", "[settings][navigation][ui]")
+{
+    theme::apply(ThemeMode::Dark);
+    SonicatorLookAndFeel look;
+    SettingsPanel panel(AppSettings{}, juce::File("/tmp/catalog.sqlite"), false);
+    panel.setLookAndFeel(&look);
+    // A short window scrolls far enough that a card straddles the top edge of the page.
+    panel.setSize(820, 400);
+    panel.selectSection(SettingsSection::about);
+
+    // The About page is taller than the viewport; its cards and section rules are painted in
+    // panel space from the scrolled content, so they must be clipped to the page.
+    juce::Viewport* about = nullptr;
+    for (int i = 0; i < panel.getNumChildComponents(); ++i)
+        if (auto* viewport = dynamic_cast<juce::Viewport*>(panel.getChildComponent(i)))
+            if (viewport->isVisible()) about = viewport;
+    REQUIRE(about != nullptr);
+    REQUIRE(about->getViewedComponent() != nullptr);
+    REQUIRE(about->getViewedComponent()->getHeight() > about->getHeight());
+
+    const auto before = panel.createComponentSnapshot(panel.getLocalBounds());
+    // Scroll so the author/support cards cross the top edge of the viewport.
+    about->setViewPosition(0, 230);
+    REQUIRE(about->getViewPositionY() == 230);
+    const auto scrolled = panel.createComponentSnapshot(panel.getLocalBounds());
+    REQUIRE(before.isValid());
+    REQUIRE(scrolled.isValid());
+
+    // Everything outside the page rectangle, the title band above it and the band below, must be
+    // untouched: a card or section rule must never paint there.
+    const auto page = about->getBounds();
+    int different = 0;
+    for (int y = 0; y < panel.getHeight(); ++y)
+        for (int x = 0; x < panel.getWidth(); x += 3)
+        {
+            const bool outside = y < page.getY() || y >= page.getBottom();
+            if (! outside) continue;
+            if (before.getPixelAt(x, y) != scrolled.getPixelAt(x, y)) ++different;
+        }
+    REQUIRE(different == 0);
+
+    look.refreshColours();
+    panel.setLookAndFeel(nullptr);
+    theme::apply(ThemeMode::System);
+}
+
+TEST_CASE("About shows the running version and offers an update check", "[settings][navigation][ui]")
+{
+    SettingsPanel panel(AppSettings{}, juce::File("/tmp/catalog.sqlite"), false);
+    panel.setSize(820, 640);
+    panel.selectSection(SettingsSection::about);
+
+    auto* check = dynamic_cast<juce::Button*>(findDescendantWithID(panel, "settingsCheckUpdates"));
+    REQUIRE(check != nullptr);
+    REQUIRE(check->getButtonText() == "Check for updates");
+    REQUIRE(check->isVisible());
+
+    juce::Label* versionShown = nullptr;
+    std::function<void(juce::Component&)> walk = [&walk, &versionShown](juce::Component& node)
+    {
+        for (int i = 0; i < node.getNumChildComponents(); ++i)
+        {
+            auto* child = node.getChildComponent(i);
+            if (auto* label = dynamic_cast<juce::Label*>(child);
+                label != nullptr && label->getText() == juce::String("Version ") + version())
+                versionShown = label;
+            walk(*child);
+        }
+    };
+    walk(panel);
+    REQUIRE(versionShown != nullptr);
+    REQUIRE(versionShown->isVisible());
+    REQUIRE(versionShown->getBounds().getRight() <= panel.getWidth());
 }

@@ -5,7 +5,7 @@ namespace {
 // Tags sit in the Analysis panel next to the large Key/BPM numbers, so they are readable at a
 // glance rather than only hovering them.
 constexpr int chipHeight = 26, gap = 6, padding = 11, dotSize = 9;
-juce::Font chipFont() { return juce::FontOptions(12.5f); }
+juce::Font chipFont() { return fonts::font(12.5f); }
 int chipWidth(const Tag& tag)
 {
     return padding + dotSize + 6 + juce::GlyphArrangement::getStringWidthInt(chipFont(), tag.name) + padding;

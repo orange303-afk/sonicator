@@ -52,7 +52,7 @@ AnalysisCard::~AnalysisCard() = default;
 AnalysisCard::AnalysisCard() : meta(std::make_unique<WrappedNote>())
 {
     addChildComponent(title);
-    styleLabel(title, juce::Font(juce::FontOptions(studio::bodyFont().getHeight(), juce::Font::bold)),
+    styleLabel(title, fonts::font(14.0f, fonts::Weight::bold),
                theme::text);
 }
 

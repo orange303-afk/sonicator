@@ -16,27 +16,21 @@ public:
         clearButton.onClick = [this]
         {
             clear();
-            updateClearControl();   // clear() does not send a change message
             if (onClear) onClear();
             grabKeyboardFocus();
         };
         // Room for the magnifier on the left and the clear control on the right.
         setBorder(juce::BorderSize<int>(0, 26, 0, 30));
-        clearButton.setVisible(false);
+        // The stock editor font is 14 px and skips the calibrated scale; the field has to read at
+        // the same height as the rest of the header.
+        setFont(studio::controlFont());
         onTextChange = [this]
         {
-            updateClearControl();
             if (onTextChanged) onTextChanged();
         };
     }
     ActionIcon leadingIcon() const { return leading; }
-    // TextEditor::clear() sends no change message, so the clear control is updated here.
-    void clear()
-    {
-        juce::TextEditor::clear();
-        updateClearControl();
-    }
-    // The owner's single text callback: the field keeps its own clear control in step first.
+    // The owner's single text callback: the field forwards it and nothing else.
     std::function<void()> onTextChanged;
     void paintOverChildren(juce::Graphics& g) override
     {
@@ -52,7 +46,6 @@ public:
     {
         juce::TextEditor::resized();
         clearButton.setBounds(getWidth() - 29, 3, 26, juce::jmax(0, getHeight() - 6));
-        updateClearControl();
     }
     std::function<void()> onClear;
     std::function<void()> onHistoryRequest;
@@ -62,9 +55,9 @@ public:
         if (event.mods.isLeftButtonDown() && onHistoryRequest) onHistoryRequest();
     }
 private:
-    // The clear control only exists while there is something to clear.
-    void updateClearControl() { clearButton.setVisible(getText().isNotEmpty()); }
     ActionIcon leading = ActionIcon::search;
+    // The control stays in place whether or not there is text: it is how the field reads as
+    // clearable at a glance, and a control that vanishes is one a user hunts for.
     juce::TextButton clearButton { juce::String::charToString(0x00d7) };
 };
 } // namespace sonicator

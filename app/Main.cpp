@@ -1,4 +1,5 @@
 #include "ui/MainComponent.h"
+#include "ui/shell/AppFonts.h"
 #include "ui/shell/WindowBounds.h"
 #include "core/settings/AppSettings.h"
 #include "core/database/SampleRepository.h"
@@ -12,6 +13,8 @@ public:
     const juce::String getApplicationVersion() override { return sonicator::version(); }
     void initialise(const juce::String&) override
     {
+        // The interface font is installed before any component can create a Font.
+        sonicator::fonts::install();
         // Logging and the crash marker start before anything else can fail.
         sonicator::diagnostics::install();
         juce::Logger::writeToLog("SONICATOR " + juce::String(sonicator::version()) + " starting on "

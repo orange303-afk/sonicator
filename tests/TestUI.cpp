@@ -235,16 +235,20 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
     REQUIRE(urls.count("https://naukograd.bandcamp.com") == 1);
     REQUIRE(urls.count("https://ko-fi.com/ilyaorange") == 1);
     REQUIRE(urls.count("https://boosty.to/ilyaorange") == 1);
-    bool credits = false;
+    // The About page draws its long blocks as paragraphs that measure their own height.
+    bool credits = false, licence = false, fits = false;
     for (auto* child : descendants)
-        if (auto* label = dynamic_cast<juce::Label*>(child))
-            credits = credits || (label->getText().contains("JUCE")
-                                  && label->getText().contains("No telemetry"));
+        if (auto* paragraph = dynamic_cast<studio::Paragraph*>(child))
+        {
+            const auto& text = paragraph->getText();
+            credits = credits || (text.contains("JUCE") && text.contains("No telemetry"));
+            if (text.contains("AGPL-3.0-or-later"))
+            {
+                licence = true;
+                fits = paragraph->getHeight() >= paragraph->heightForWidth(paragraph->getWidth());
+            }
+        }
     REQUIRE(credits);
-    bool licence = false;
-    for (auto* child : descendants)
-        if (auto* label = dynamic_cast<juce::Label*>(child))
-            licence = licence || label->getText().contains("AGPL-3.0-or-later");
     REQUIRE(licence);
     std::set<juce::String> buttonText;
     for (auto* child : descendants)
@@ -255,13 +259,13 @@ TEST_CASE("Settings panel exposes theme, scale and the support links", "[ui][set
     REQUIRE(buttonText.count("Ask or discuss...") == 1);
     REQUIRE(buttonText.count("What will be sent...") == 1);
     REQUIRE(buttonText.count("Delete my contributed data...") == 1);
-    panel.setBounds(0,0,560,panel.getHeight());
-    // The credits block must still hold all four lines after the licence line was added.
-    bool fits = false;
+    // The credits block must still hold every line after the licence line was added, at the
+    // width the panel gets in a narrow window.
+    fits = false;
     for (auto* child : descendants)
-        if (auto* label = dynamic_cast<juce::Label*>(child))
-            if (label->getText().contains("AGPL-3.0-or-later"))
-                fits = label->getHeight() >= juce::roundToInt(label->getFont().getHeight() * 4.0f);
+        if (auto* paragraph = dynamic_cast<studio::Paragraph*>(child))
+            if (paragraph->getText().contains("AGPL-3.0-or-later"))
+            fits = paragraph->getHeight() >= paragraph->heightForWidth(paragraph->getWidth());
     REQUIRE(fits);
     const auto image = panel.createComponentSnapshot(panel.getLocalBounds());
     REQUIRE(image.isValid());

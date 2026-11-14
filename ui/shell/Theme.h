@@ -119,20 +119,21 @@ public:
 
     juce::Font getTextButtonFont(juce::TextButton&, int) override
     {
-        return juce::Font(juce::FontOptions(13.0f));
+        // Medium, not Bold: Manrope Bold at button size reads as a headline.
+        return fonts::font(13.0f, fonts::Weight::medium);
     }
 
     juce::Font getAlertWindowTitleFont() override
     {
-        return juce::Font(juce::FontOptions(16.0f, juce::Font::bold));
+        return fonts::font(16.0f, fonts::Weight::semiBold);
     }
     juce::Font getAlertWindowMessageFont() override
     {
-        return juce::Font(juce::FontOptions(12.5f));
+        return fonts::font(12.5f);
     }
     juce::Font getAlertWindowFont() override
     {
-        return juce::Font(juce::FontOptions(12.0f));
+        return fonts::font(12.0f);
     }
     int getAlertWindowButtonHeight() override { return 32; }
 
@@ -169,7 +170,7 @@ public:
             g.fillEllipse(iconBounds);
             g.setColour(iconColour);
             g.drawEllipse(iconBounds, 1.5f);
-            g.setFont(juce::Font(juce::FontOptions(17.0f, juce::Font::bold)));
+            g.setFont(fonts::font(17.0f, fonts::Weight::semiBold));
             g.drawText(symbol, iconBounds, juce::Justification::centred, false);
 
             iconSpaceUsed = 44;
@@ -204,7 +205,7 @@ public:
                 g.setColour(down ? theme::selection : (highlighted ? theme::hover : theme::raised));
                 g.fillRoundedRectangle(buttonArea, 7.0f);
                 g.setColour(theme::text);
-                g.setFont(juce::Font(juce::FontOptions(13.0f)));
+                g.setFont(fonts::font(13.0f));
                 g.drawText(juce::String::charToString(0x00d7), getLocalBounds(),
                            juce::Justification::centred, false);
             }
@@ -237,7 +238,7 @@ public:
         if (icon != nullptr && icon->isValid())
             g.drawImageWithin(*icon, 8, 0, height, height, juce::RectanglePlacement::centred);
         g.setColour(theme::text);
-        g.setFont(juce::Font(juce::FontOptions(13.0f, juce::Font::bold)));
+        g.setFont(fonts::font(13.0f, fonts::Weight::semiBold));
         g.drawFittedText(window.getName(), titleSpaceX, 0, titleSpaceW, height,
                          drawTitleTextOnLeft ? juce::Justification::centredLeft
                                              : juce::Justification::centred, 1);
@@ -414,7 +415,7 @@ public:
             g.fillPath(tick, tick.getTransformToScaleToFit(boxArea.reduced(3.0f, 3.5f), false));
         }
 
-        g.setFont(juce::Font(juce::FontOptions(12.5f)));
+        g.setFont(fonts::font(12.5f));
         g.setColour(button.isEnabled() ? theme::text : theme::muted);
         g.drawFittedText(button.getButtonText(),
                          button.getLocalBounds().withTrimmedLeft(juce::roundToInt(boxArea.getRight()) + 6)
@@ -469,7 +470,7 @@ public:
 
     juce::Font getComboBoxFont(juce::ComboBox&) override
     {
-        return juce::Font(juce::FontOptions(12.5f));
+        return fonts::font(12.5f);
     }
 
     void fillTextEditorBackground(juce::Graphics& g, int width, int height, juce::TextEditor&) override

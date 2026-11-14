@@ -49,7 +49,6 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
       boosty("boosty.to/ilyaorange", juce::URL("https://boosty.to/ilyaorange"))
 {
     setWantsKeyboardFocus(true);
-    setSize(760, 640);
 
     // --- general page controls -------------------------------------------------------------
     for (auto* c : std::array<juce::Component*, 20> {
@@ -77,11 +76,14 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
                       "the devices, so this page is hidden.", juce::dontSendNotification);
 
     // --- about page controls ---------------------------------------------------------------
-    for (auto* c : std::array<juce::Component*, 14> {
-             &reportHeading, &reportNote, &aboutHeading, &productLabel, &authorLabel, &supportLabel,
-             &creditsLabel, &prototypesLabel, &reportBug, &reportFeature, &reportFormat,
-             &reportDiscuss, &gumroad, &bandcamp })
+    for (auto* c : std::array<juce::Component*, 20> {
+             &reportHeading, &reportNote, &aboutHeading, &productLabel, &authorLabel,
+             &versionLabel, &checkUpdates, &releasesLink, &updateStatus,
+             &linksHeading, &supportHeading, &supportNote, &creditsHeading, &creditsText,
+             &prototypesLabel, &reportBug, &reportFeature, &reportFormat, &reportDiscuss,
+             &gumroad })
         aboutContent.addAndMakeVisible(c);
+    aboutContent.addAndMakeVisible(bandcamp);
     aboutContent.addAndMakeVisible(naukograd);
     aboutContent.addAndMakeVisible(kofi);
     aboutContent.addAndMakeVisible(boosty);
@@ -97,9 +99,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
                                     "is sent automatically.")
                        + (pendingCrash.isNotEmpty() ? " The previous session ended unexpectedly and its crash "
                                                       "trace will be included." : ""),
-                       juce::dontSendNotification);
-    reportNote.setFont(noteFont());
-    reportNote.setJustificationType(juce::Justification::topLeft);
+                       fonts::font(12.5f), theme::muted, 4);
     const auto openReport = [this](diagnostics::ReportKind kind)
     {
         diagnostics::ReportContext context;
@@ -185,24 +185,43 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
 
     aboutHeading.setText("ABOUT", juce::dontSendNotification); aboutHeading.setFont(sectionFont());
     productLabel.setText("Sonicator", juce::dontSendNotification);
-    productLabel.setFont(juce::Font(juce::FontOptions(18, juce::Font::bold)));
+    productLabel.setFont(fonts::font(24.0f, fonts::Weight::semiBold));
     authorLabel.setText("by Ilya Orange", juce::dontSendNotification);
-    authorLabel.setFont(studio::controlFont());
-    supportLabel.setText("Sonicator is free, but you can support further development:",
-                         juce::dontSendNotification);
-    supportLabel.setFont(noteFont()); supportLabel.setJustificationType(juce::Justification::centredLeft);
-    creditsLabel.setText(juce::String::fromUTF8(
+    authorLabel.setFont(fonts::font(14.0f));
+    authorLabel.setColour(juce::Label::textColourId, theme::muted);
+    versionLabel.setText("Version " + juce::String(version()), juce::dontSendNotification);
+    versionLabel.setFont(fonts::font(12.5f));
+    versionLabel.setColour(juce::Label::textColourId, theme::muted);
+    checkUpdates.setTooltip("Asks github.com for the newest published release");
+    checkUpdates.onClick = [this] { startUpdateCheck(); };
+    checkUpdates.setComponentID("settingsCheckUpdates");
+    releasesLink.setComponentID("settingsReleaseLink");
+    releasesLink.setFont(fonts::font(12.5f), false);
+    releasesLink.setJustificationType(juce::Justification::centredLeft);
+    releasesLink.setVisible(false);
+    linksHeading.setText("BY THE AUTHOR", juce::dontSendNotification);
+    linksHeading.setFont(sectionFont());
+    linksHeading.setColour(juce::Label::textColourId, theme::muted);
+    supportHeading.setText("SUPPORT", juce::dontSendNotification);
+    supportHeading.setFont(sectionFont());
+    supportHeading.setColour(juce::Label::textColourId, theme::muted);
+    supportNote.setText("Sonicator is free. You can help support further development.",
+                        fonts::font(13.0f), theme::muted, 3);
+    creditsHeading.setText("TECHNOLOGY & CREDITS", juce::dontSendNotification);
+    creditsHeading.setFont(sectionFont());
+    creditsText.setText(juce::String::fromUTF8(
         "JUCE 9.0.5  ·  SQLite 3.47.2  ·  libxmp 4.6.2  ·  ONNX Runtime 1.20.1  ·  Catch2 (tests)\n"
-        "Analysis: own DSP - YIN pitch, chroma key, spectral-flux rhythm, adaptive prototypes.\n"
-        "No telemetry. Training data leaves only with your consent. No pretrained weights.\n"
+        "\n"
+        "Analysis: own DSP - YIN pitch, chroma key, spectral-flux rhythm, adaptive prototypes. "
         "REX2 decoder based on VelociLoops (Unlicense).\n"
+        "\n"
+        "No telemetry. Training data leaves only with your consent. No pretrained weights.\n"
+        "\n"
         "Model trained on NSynth, Freesound One-Shot Percussive Sounds, FSD50K, ESC-50 and UrbanSound8K; "
         "see docs/DATA_CREDITS.md.\n"
+        "\n"
         "Licensed under AGPL-3.0-or-later."),
-        juce::dontSendNotification);
-    creditsLabel.setFont(juce::Font(juce::FontOptions(10.5f)));
-    creditsLabel.setJustificationType(juce::Justification::topLeft);
-    creditsLabel.setMinimumHorizontalScale(0.7f);
+        fonts::font(12.5f), theme::muted, 5);
     {
         const auto& classifier = AcousticClassifierService::getSharedAdaptiveClassifier();
         const auto generatedAt = classifier.globalGeneratedAt();
@@ -212,12 +231,13 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
                                           + juce::String(classifier.globalLabelCount()) + " labels"
                                     : juce::String(kind) + ": none in this build",
                                 juce::dontSendNotification);
-        prototypesLabel.setFont(noteFont());
+        prototypesLabel.setFont(fonts::font(12.5f));
         prototypesLabel.setJustificationType(juce::Justification::centredLeft);
+        prototypesLabel.setColour(juce::Label::textColourId, theme::muted);
     }
     for (auto* link : std::array<juce::HyperlinkButton*, 5> { &gumroad, &bandcamp, &naukograd, &kofi, &boosty })
     {
-        link->setFont(juce::Font(juce::FontOptions(12)), false);
+        link->setFont(fonts::font(13.0f), false);
         link->setJustificationType(juce::Justification::centredLeft);
     }
     for (auto* button : std::array<juce::Button*, 12> { &moveDatabase, &openDatabase, &relocateDatabase,
@@ -312,6 +332,9 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     nav[(size_t) section].setToggleState(true, juce::dontSendNotification);
     updateSectionVisibility();
     setBusyState(busy);
+    // The default size is set last: the About page measures its paragraphs, so their text has to
+    // exist before the first layout runs.
+    setSize(760, 640);
 }
 
 SettingsPanel::~SettingsPanel() = default;
@@ -518,14 +541,20 @@ void SettingsPanel::lookAndFeelChanged()
     authorLabel.setColour(juce::Label::textColourId, theme::muted);
     productLabel.setColour(juce::Label::textColourId, theme::text);
     title.setColour(juce::Label::textColourId, theme::text);
+    versionLabel.setColour(juce::Label::textColourId, theme::muted);
+    updateStatus.setTextColour(updateAvailable ? theme::accent : theme::muted);
     reportHeading.setColour(juce::Label::textColourId, theme::muted);
-    reportNote.setColour(juce::Label::textColourId, theme::muted);
-    supportLabel.setColour(juce::Label::textColourId, theme::muted);
-    creditsLabel.setColour(juce::Label::textColourId, theme::muted);
+    reportNote.setTextColour(theme::muted);
+    linksHeading.setColour(juce::Label::textColourId, theme::muted);
+    supportHeading.setColour(juce::Label::textColourId, theme::muted);
+    creditsHeading.setColour(juce::Label::textColourId, theme::muted);
+    supportNote.setTextColour(theme::muted);
+    creditsText.setTextColour(theme::muted);
     prototypesLabel.setColour(juce::Label::textColourId, theme::muted);
     pluginsHeading.setColour(juce::Label::textColourId, theme::muted);
     pluginsNote.setColour(juce::Label::textColourId, theme::muted);
-    for (auto* link : std::array<juce::HyperlinkButton*, 5> { &gumroad, &bandcamp, &naukograd, &kofi, &boosty })
+    for (auto* link : std::array<juce::HyperlinkButton*, 6> { &gumroad, &bandcamp, &naukograd, &kofi,
+                                                             &boosty, &releasesLink })
         link->setColour(juce::HyperlinkButton::textColourId, theme::accent);
     for (auto& button : nav)
     {
@@ -553,17 +582,93 @@ void SettingsPanel::paint(juce::Graphics& g)
     };
     if (!databaseFieldBounds.isEmpty() && generalViewport.isVisible())
     {
+        // The page scrolls, so a decoration translated into panel space must not escape the
+        // viewport: without this clip a scrolled field or card paints over the navigation column.
+        const juce::Graphics::ScopedSaveState clipped(g);
+        g.reduceClipRegion(generalViewport.getBounds());
         const auto field = toPanel(generalContent, databaseFieldBounds.toFloat()).reduced(0.5f);
         g.setColour(theme::background);
         g.fillRoundedRectangle(field, studio::controlRadius);
         g.setColour(theme::line);
         g.drawRoundedRectangle(field, studio::controlRadius, 1.0f);
     }
-    g.setColour(theme::line);
     if (generalViewport.isVisible())
+    {
+        const juce::Graphics::ScopedSaveState clipped(g);
+        g.reduceClipRegion(generalViewport.getBounds());
+        g.setColour(theme::line);
         for (const auto& rule : sectionRules) g.fillRect(toPanel(generalContent, rule));
+    }
     if (aboutViewport.isVisible())
+    {
+        const juce::Graphics::ScopedSaveState clipped(g);
+        g.reduceClipRegion(aboutViewport.getBounds());
+        for (const auto& card : aboutCards)
+        {
+            const auto area = toPanel(aboutContent, card).reduced(0.5f);
+            g.setColour(theme::panel);
+            g.fillRoundedRectangle(area, studio::panelRadius);
+            g.setColour(theme::line.withAlpha(0.65f));
+            g.drawRoundedRectangle(area, studio::panelRadius, 1.0f);
+        }
+        g.setColour(theme::line);
         for (const auto& rule : aboutRules) g.fillRect(toPanel(aboutContent, rule));
+    }
+}
+
+void SettingsPanel::startUpdateCheck()
+{
+    if (updateInFlight) return;
+    updateInFlight = true;
+    updateAvailable = false;
+    checkUpdates.setEnabled(false);
+    checkUpdates.setButtonText("Checking...");
+    releasesLink.setVisible(false);
+    updateStatus.setText("Looking for the latest release on GitHub.", fonts::font(12.5f), theme::muted, 4);
+    resized();
+
+    // The request runs off the message thread; a stale answer is dropped because the panel may be
+    // gone by the time it arrives.
+    juce::Component::SafePointer<SettingsPanel> safe(this);
+    juce::Thread::launch([safe]
+    {
+        juce::MessageManager::callAsync([safe, release = updates::checkForUpdate(version())]
+        {
+            if (safe != nullptr) safe->showUpdateResult(release);
+        });
+    });
+}
+
+void SettingsPanel::showUpdateResult(const updates::Release& release)
+{
+    updateInFlight = false;
+    checkUpdates.setEnabled(true);
+    checkUpdates.setButtonText("Check for updates");
+    updateAvailable = release.published && release.newer;
+    releasesLink.setVisible(false);
+
+    if (release.error.isNotEmpty())
+        updateStatus.setText("Could not check: " + release.error, fonts::font(12.5f), theme::muted, 4);
+    else if (! release.published)
+    {
+        updateStatus.setText("No release has been published yet.", fonts::font(12.5f), theme::muted, 4);
+        releasesLink.setButtonText("Releases on GitHub");
+        releasesLink.setURL(juce::URL(updates::releasesPageUrl()));
+        releasesLink.setVisible(true);
+    }
+    else if (release.newer)
+    {
+        updateStatus.setText("Version " + release.tag + " is available.", fonts::font(12.5f),
+                             theme::accent, 4);
+        releasesLink.setButtonText("Download " + release.tag);
+        releasesLink.setURL(juce::URL(release.url));
+        releasesLink.setVisible(true);
+    }
+    else
+        updateStatus.setText("You are up to date (" + release.tag + ").", fonts::font(12.5f),
+                             theme::muted, 4);
+
+    resized();
 }
 
 void SettingsPanel::setContributionEnabled(bool enabled)
@@ -723,6 +828,7 @@ void SettingsPanel::layoutGeneralPage(juce::Rectangle<int> area)
 void SettingsPanel::layoutAboutPage(juce::Rectangle<int> area)
 {
     aboutRules.clear();
+    aboutCards.clear();
     const int width = juce::jmax(320, area.getWidth() - 6);
     Rows rows;
     auto add = [&rows](int height, int gap, std::function<void(juce::Rectangle<int>)> place)
@@ -742,39 +848,82 @@ void SettingsPanel::layoutAboutPage(juce::Rectangle<int> area)
         });
     };
 
-    section(reportHeading, 0);
-    add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)
-    {
-        auto right = area.withTrimmedLeft(labelColumn);
-        const auto width = (right.getWidth() - 24) / 4;
-        reportBug.setBounds(right.removeFromLeft(width));
-        right.removeFromLeft(8);
-        reportFeature.setBounds(right.removeFromLeft(width));
-        right.removeFromLeft(8);
-        reportFormat.setBounds(right.removeFromLeft(width));
-        right.removeFromLeft(8);
-        reportDiscuss.setBounds(right);
-    });
-    add(42, 6, [this](juce::Rectangle<int> area) { reportNote.setBounds(area.withTrimmedLeft(labelColumn)); });
+    // About is a document page: every line starts at the page edge, and the two groups that carry
+    // short lists sit side by side on a panel so they read as groups, not as a form.
+    const int cardGap = studio::spacingWide;
+    const int cardPadding = studio::spacingWide;
+    const int cardWidth = (width - cardGap) / 2;
+    const int captionHeight = 14;
+    const int linkHeight = 22;
+    const int supportTextHeight = supportNote.heightForWidth(cardWidth - 2 * cardPadding);
+    const int cardHeight = 2 * cardPadding
+        + juce::jmax(captionHeight + 10 + 3 * linkHeight,
+                     captionHeight + 10 + supportTextHeight + studio::spacing + studio::controlHeight);
 
-    section(aboutHeading, studio::spacingSection);
-    add(26, 2, [this](juce::Rectangle<int> area) { productLabel.setBounds(area); });
-    add(18, 0, [this](juce::Rectangle<int> area) { authorLabel.setBounds(area); });
-    add(64, 4, [this](juce::Rectangle<int> area)
+    section(aboutHeading, 0);
+    add(34, studio::spacingTight, [this](juce::Rectangle<int> row) { productLabel.setBounds(row); });
+    add(studio::controlHeight, 0, [this](juce::Rectangle<int> row)
     {
-        auto r = area;
+        checkUpdates.setBounds(row.removeFromRight(176));
+        row.removeFromRight(studio::spacingWide);
+        versionLabel.setBounds(row);
+    });
+    add(21, 0, [this](juce::Rectangle<int> row) { authorLabel.setBounds(row); });
+    add(updateStatus.heightForWidth(width), studio::spacingTight,
+        [this](juce::Rectangle<int> row) { updateStatus.setBounds(row); });
+    if (releasesLink.isVisible())
+        add(20, 4, [this](juce::Rectangle<int> row) { releasesLink.setBounds(row); });
+
+    add(cardHeight, studio::spacingSection,
+        [this, width, cardWidth, cardGap, cardPadding, captionHeight, linkHeight, supportTextHeight]
+        (juce::Rectangle<int> row)
+    {
+        const auto left = row.withWidth(cardWidth);
+        const auto right = juce::Rectangle<int>(row.getX() + cardWidth + cardGap, row.getY(),
+                                                width - cardWidth - cardGap, row.getHeight());
+        aboutCards.push_back(left.toFloat());
+        aboutCards.push_back(right.toFloat());
+
+        auto links = left.reduced(cardPadding);
+        linksHeading.setBounds(links.removeFromTop(captionHeight));
+        links.removeFromTop(10);
         for (auto* link : { &gumroad, &bandcamp, &naukograd })
-            link->setBounds(r.removeFromTop(20));
+            link->setBounds(links.removeFromTop(linkHeight));
+
+        auto support = right.reduced(cardPadding);
+        supportHeading.setBounds(support.removeFromTop(captionHeight));
+        support.removeFromTop(10);
+        supportNote.setBounds(support.removeFromTop(supportTextHeight));
+
+        auto buttons = support.removeFromBottom(studio::controlHeight);
+        const auto buttonWidth = (buttons.getWidth() - studio::spacingTight) / 2;
+        kofi.setBounds(buttons.removeFromLeft(buttonWidth));
+        buttons.removeFromLeft(studio::spacingTight);
+        boosty.setBounds(buttons);
     });
-    add(24, 6, [this](juce::Rectangle<int> area) { supportLabel.setBounds(area); });
-    add(22, 2, [this](juce::Rectangle<int> area)
+
+    section(reportHeading, studio::spacingSection);
+    add(studio::controlHeight, studio::spacingTight, [this, width](juce::Rectangle<int> row)
     {
-        auto left = area.removeFromLeft(area.getWidth() / 2);
-        kofi.setBounds(left);
-        boosty.setBounds(area);
+        const auto buttonWidth = (width - studio::spacingTight) / 2;
+        reportBug.setBounds(row.removeFromLeft(buttonWidth));
+        row.removeFromLeft(studio::spacingTight);
+        reportFeature.setBounds(row.removeFromLeft(buttonWidth));
     });
-    add(96, 10, [this](juce::Rectangle<int> area) { creditsLabel.setBounds(area); });
-    add(20, 2, [this](juce::Rectangle<int> area) { prototypesLabel.setBounds(area); });
+    add(studio::controlHeight, studio::spacingTight, [this, width](juce::Rectangle<int> row)
+    {
+        const auto buttonWidth = (width - studio::spacingTight) / 2;
+        reportFormat.setBounds(row.removeFromLeft(buttonWidth));
+        row.removeFromLeft(studio::spacingTight);
+        reportDiscuss.setBounds(row.removeFromLeft(buttonWidth));
+    });
+    add(reportNote.heightForWidth(width), studio::spacingTight,
+        [this](juce::Rectangle<int> row) { reportNote.setBounds(row); });
+
+    section(creditsHeading, studio::spacingSection);
+    add(creditsText.heightForWidth(width), studio::spacingTight,
+        [this](juce::Rectangle<int> row) { creditsText.setBounds(row); });
+    add(20, studio::spacing, [this](juce::Rectangle<int> row) { prototypesLabel.setBounds(row); });
     add(studio::spacingSection, 0, [](juce::Rectangle<int>) {});
 
     placeRows(aboutContent, width, rows, area.getHeight(), &aboutRules);

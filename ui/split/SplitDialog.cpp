@@ -19,7 +19,7 @@ SplitDialog::SplitDialog(std::vector<juce::File> inputSources, const AppSettings
     setSize(560, 470);
     title.setText("Split " + juce::String((int) sources.size()) + " file(s) by silence",
                   juce::dontSendNotification);
-    title.setFont(juce::FontOptions(15.0f, juce::Font::bold));
+    title.setFont(fonts::font(15.0f, fonts::Weight::bold));
     thresholdLabel.setText("Silence threshold", juce::dontSendNotification);
     minSilenceLabel.setText("Minimum silence", juce::dontSendNotification);
     minPartLabel.setText("Minimum part", juce::dontSendNotification);

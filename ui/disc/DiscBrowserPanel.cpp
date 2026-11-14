@@ -13,10 +13,10 @@ DiscBrowserPanel::DiscBrowserPanel()
     addAndMakeVisible(statusLabel);
     backButton.onClick = [this] { back(); };
     exitButton.onClick = [this] { if (onExit) onExit(); };
-    pathLabel.setFont(juce::FontOptions(14, juce::Font::bold));
+    pathLabel.setFont(fonts::font(14, fonts::Weight::bold));
     statusLabel.setComponentID("discStatus");
     statusLabel.setColour(juce::Label::textColourId, theme::muted);
-    statusLabel.setFont(juce::FontOptions(12));
+    statusLabel.setFont(fonts::font(12));
     list.setRowHeight(24);
     list.setWantsKeyboardFocus(true);
     startTimerHz(30);
@@ -91,7 +91,7 @@ void DiscBrowserPanel::paintListBoxItem(int row, juce::Graphics& g, int width, i
     if (entry.kind == DiscEntryKind::directory) name += "/";
     g.setColour(entry.capability.isEmpty() ? theme::text
         : (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e)));
-    g.setFont(juce::FontOptions(13));
+    g.setFont(fonts::font(13));
     g.drawText(name, area.removeFromLeft(juce::jmax(120, width - 200)),
                juce::Justification::centredLeft, true);
     if (entry.declaredBytes > 0)

@@ -85,6 +85,19 @@ TEST_CASE("Settings pages render their content", "[ui][studio]")
     const auto hotkeys = panel.createComponentSnapshot(panel.getLocalBounds());
     REQUIRE(hotkeys.isValid());
     writeIfRequested(hotkeys, "SONICATOR_SETTINGS_HOTKEYS_SCREENSHOT");
+    panel.selectSection(SettingsSection::about);
+    const auto about = panel.createComponentSnapshot(panel.getLocalBounds());
+    REQUIRE(about.isValid());
+    writeIfRequested(about, "SONICATOR_SETTINGS_ABOUT_SCREENSHOT");
+    theme::apply(ThemeMode::Light);
+    look.refreshColours();
+    panel.sendLookAndFeelChange();
+    const auto aboutLight = panel.createComponentSnapshot(panel.getLocalBounds());
+    REQUIRE(aboutLight.isValid());
+    writeIfRequested(aboutLight, "SONICATOR_SETTINGS_ABOUT_LIGHT_SCREENSHOT");
+    theme::apply(ThemeMode::Dark);
+    look.refreshColours();
+    panel.sendLookAndFeelChange();
     panel.setLookAndFeel(nullptr);
     theme::apply(ThemeMode::System);
 }
@@ -174,3 +187,4 @@ TEST_CASE("The workspace renders its Studio parts for acceptance", "[ui][studio]
 {
     writeAcceptanceShots();
 }
+

@@ -551,30 +551,30 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
          &selectedTags,&analysisViewport,&stageLabel,&selectionStatus})
         if (c != nullptr) addAndMakeVisible(c);
     heading.setText("SONICATOR",juce::dontSendNotification);
-    heading.setFont(juce::FontOptions(24,juce::Font::bold));
+    heading.setFont(fonts::font(24, fonts::Weight::bold));
     subtitle.setText("INTELLIGENT SAMPLE EXPLORER",juce::dontSendNotification);
-    subtitle.setFont(juce::FontOptions(11)); subtitle.setColour(juce::Label::textColourId,theme::muted);
+    subtitle.setFont(fonts::font(11)); subtitle.setColour(juce::Label::textColourId,theme::muted);
     brandedLogo = logoWordmark.isValid();
     heading.setVisible(! brandedLogo); subtitle.setVisible(! brandedLogo);
     libraryHeading.setText("LIBRARY",juce::dontSendNotification);
     libraryHeading.setColour(juce::Label::textColourId,theme::muted);
     rootsLabel.setText("Add your sample folders.\nOriginal files stay untouched.",juce::dontSendNotification);
     rootsLabel.setJustificationType(juce::Justification::topLeft);
-    rootsLabel.setColour(juce::Label::textColourId,theme::muted); rootsLabel.setFont(juce::FontOptions(12));
+    rootsLabel.setColour(juce::Label::textColourId,theme::muted); rootsLabel.setFont(fonts::font(12));
     analysisHeading.setText("Sample Analysis",juce::dontSendNotification);
-    analysisHeading.setFont(juce::FontOptions(17,juce::Font::bold));
+    analysisHeading.setFont(fonts::font(17, fonts::Weight::bold));
     showAnalysisPlaceholder();
     analysisViewport.setViewedComponent(&analysisCard,false);
     analysisViewport.setScrollBarsShown(true,false);
     addChildComponent(preview.containerSourceList());
     preview.onSourcesChanged = [this] { resized(); };
     stageLabel.setText("SMART METADATA\n\nType, BPM and Key are in the\nlibrary columns. Smart metadata\nanalyzes new or changed files.",juce::dontSendNotification);
-    stageLabel.setFont(juce::FontOptions(11)); stageLabel.setColour(juce::Label::textColourId,theme::muted);
+    stageLabel.setFont(fonts::font(11)); stageLabel.setColour(juce::Label::textColourId,theme::muted);
     stageLabel.setJustificationType(juce::Justification::topLeft);
-    status.setFont(juce::FontOptions(12)); status.setColour(juce::Label::textColourId,theme::muted);
-    countLabel.setFont(juce::FontOptions(12));
+    status.setFont(fonts::font(12)); status.setColour(juce::Label::textColourId,theme::muted);
+    countLabel.setFont(fonts::font(12));
     tagsLabel.setText("TAGS",juce::dontSendNotification);
-    tagsLabel.setFont(juce::FontOptions(11)); tagsLabel.setColour(juce::Label::textColourId,theme::muted);
+    tagsLabel.setFont(fonts::font(11)); tagsLabel.setColour(juce::Label::textColourId,theme::muted);
     search.setTextToShowWhenEmpty("Search: *.rx2, ext:wav, type:pad, key:Am, C4",theme::muted);
     search.setJustification(juce::Justification::centredLeft);
     search.onTextChanged = [this]
@@ -601,7 +601,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     preview.setComponentID("preview");
     library.setComponentID("library"); status.setComponentID("importStatus"); analysisCard.setComponentID("analysisDetails");
     selectionStatus.setComponentID("selectionStatus");
-    selectionStatus.setFont(juce::FontOptions(11));
+    selectionStatus.setFont(fonts::font(11));
     selectionStatus.setColour(juce::Label::textColourId,theme::muted);
     selectionStatus.setJustificationType(juce::Justification::centredLeft);
     selectionStatus.setText("No sample selected",juce::dontSendNotification);
@@ -671,7 +671,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     addAndMakeVisible(favoritesLabel); addAndMakeVisible(favorites); addAndMakeVisible(favoritesSplitter);
     favorites.setFolderAliases(appSettings.folderAliases);
     favoritesLabel.setText("FAVORITES",juce::dontSendNotification);
-    favoritesLabel.setFont(juce::FontOptions(11)); favoritesLabel.setColour(juce::Label::textColourId,theme::muted);
+    favoritesLabel.setFont(fonts::font(11)); favoritesLabel.setColour(juce::Label::textColourId,theme::muted);
     favoritesLabel.setComponentID("favoritesLabel"); favorites.setComponentID("favoritesTree");
     favoritesSplitter.setComponentID("favoritesSplitter");
     favoritesLabel.setVisible(false); favorites.setVisible(false); favoritesSplitter.setVisible(false);

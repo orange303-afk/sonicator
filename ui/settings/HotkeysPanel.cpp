@@ -26,6 +26,10 @@ HotkeysPanel::HotkeysPanel(const CommandRegistry& commandRegistry)
     searchBox.onTextChange = [this] { setSearch(searchBox.getText()); };
     searchBox.setComponentID("hotkeySearch");
     searchBox.setIndents(10, 0);
+    // The stock editor draws its text and placeholder at the top; in a 30 px field that reads as
+    // a misaligned line. Centre it and give it the interface font, like the library search.
+    searchBox.setJustification(juce::Justification::centredLeft);
+    searchBox.setFont(studio::controlFont());
 
     addAndMakeVisible(list);
     list.setModel(this);
@@ -431,32 +435,44 @@ void HotkeysPanel::resized()
         auto buttons = footer.removeFromTop(studio::controlHeight);
         cancelKey.setBounds(buttons.removeFromLeft(96));
         hintLabel.setBounds(buttons.removeFromLeft(buttons.getWidth()));
+        hintLabel.setVisible(true);   // the capture hint owns this row on its own
         return;
     }
+    // Both footer rows share one four-column grid, so the buttons line up in columns instead of
+    // ending at four different edges.
+    const int columnGap = 6;
     auto capture = footer.removeFromTop(studio::controlHeight);
-    currentLabel.setBounds(capture.removeFromLeft(juce::jmax(120, capture.getWidth() - 330)));
-    cancelKey.setBounds(capture.removeFromRight(88)); capture.removeFromRight(6);
-    applyKey.setBounds(capture.removeFromRight(88)); capture.removeFromRight(6);
-    replaceKey.setBounds(capture.removeFromRight(88));
+    const int columnWidth = (capture.getWidth() - 3 * columnGap) / 4;
+    auto column = [&capture, columnWidth, columnGap](int index)
+    {
+        return juce::Rectangle<int>(capture.getX() + index * (columnWidth + columnGap), capture.getY(),
+                                    columnWidth, capture.getHeight());
+    };
+    currentLabel.setBounds(column(0));
+    replaceKey.setBounds(column(1));
+    applyKey.setBounds(column(2));
+    cancelKey.setBounds(column(3));
     footer.removeFromTop(studio::spacingTight);
-    auto actions = footer.removeFromTop(studio::controlHeight);
-    addKey.setBounds(actions.removeFromLeft(120)); actions.removeFromLeft(6);
-    removeKey.setBounds(actions.removeFromLeft(96)); actions.removeFromLeft(6);
-    resetCommand.setBounds(actions.removeFromLeft(120)); actions.removeFromLeft(6);
-    resetEverything.setBounds(actions.removeFromLeft(96));
-    hintLabel.setBounds(actions.withTrimmedLeft(8));
+    addKey.setBounds(column(0).withY(footer.getY()));
+    removeKey.setBounds(column(1).withY(footer.getY()));
+    resetCommand.setBounds(column(2).withY(footer.getY()));
+    resetEverything.setBounds(column(3).withY(footer.getY()));
+    footer.removeFromTop(studio::controlHeight);
+    // The grid fills that row, so the reminder moves to the status line instead of overlapping it.
+    hintLabel.setVisible(false);
+    hintLabel.setBounds({});
     footer.removeFromTop(4);
     const bool hasDiagnostics = ! diagnostics.isEmpty();
     const int diagnosticsHeight = hasDiagnostics ? (int) juce::jmin(44, 16 * diagnostics.size()) : 0;
     if (hasDiagnostics) statusLabel.setBounds(footer.removeFromBottom(diagnosticsHeight));
     else statusLabel.setBounds(footer.removeFromTop(18));
-    hintLabel.setText(conflicts.isNotEmpty() ? conflicts
-        : "Select a command, then add a shortcut. Escape cancels a capture.",
-        juce::dontSendNotification);
-    hintLabel.setColour(juce::Label::textColourId, conflicts.isNotEmpty() ? theme::accent : theme::muted);
-    statusLabel.setText(hasDiagnostics ? diagnostics.joinIntoString("  ") : status,
+    const auto hint = juce::String("Select a command, then add a shortcut. Escape cancels a capture.");
+    statusLabel.setText(hasDiagnostics ? diagnostics.joinIntoString("  ")
+                                       : (conflicts.isNotEmpty() ? conflicts
+                                                                 : (status.isNotEmpty() ? status : hint)),
                         juce::dontSendNotification);
-    statusLabel.setColour(juce::Label::textColourId, hasDiagnostics ? theme::accent : theme::muted);
+    statusLabel.setColour(juce::Label::textColourId,
+        hasDiagnostics || conflicts.isNotEmpty() ? theme::accent : theme::muted);
 }
 
 void HotkeysPanel::paint(juce::Graphics& g)
@@ -469,6 +485,11 @@ void HotkeysPanel::lookAndFeelChanged()
     searchBox.setColour(juce::TextEditor::backgroundColourId, theme::panel);
     searchBox.setColour(juce::TextEditor::textColourId, theme::text);
     hintLabel.setColour(juce::Label::textColourId, conflicts.isNotEmpty() ? theme::accent : theme::muted);
+    // Four buttons leave little room on this row; a hint cut off with an ellipsis reads worse than
+    // no hint, so it only shows when it fits. A conflict message still takes the row - it matters.
+    hintLabel.setVisible(conflicts.isNotEmpty()
+        || hintLabel.getWidth() >= juce::GlyphArrangement::getStringWidthInt(hintLabel.getFont(),
+                                                                            hintLabel.getText()));
     statusLabel.setColour(juce::Label::textColourId, theme::muted);
     currentLabel.setColour(juce::Label::textColourId, selectedCommand() != nullptr ? theme::text : theme::muted);
     list.setColour(juce::ListBox::backgroundColourId, theme::background);

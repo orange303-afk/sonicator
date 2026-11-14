@@ -16,7 +16,7 @@ public:
     {
         return all ? "All samples" : (path.isEmpty() ? juce::String("Favorites") : path);
     }
-    int getItemHeight() const override { return 26; }
+    int getItemHeight() const override { return 28; }
     void paintItem(juce::Graphics& g,int w,int h) override
     {
         if (! all && path.isEmpty()) return; // hidden container root
@@ -27,7 +27,8 @@ public:
         const bool ignored = path.isNotEmpty() && isPathIgnored(path, owner.ignoredEntries);
         g.setColour(owner.failedImages.count(path)
             ? (theme::isDark ? juce::Colour(0xffff8b8b) : juce::Colour(0xffb3261e))
-            : (ignored ? theme::muted : (missing ? theme::muted : theme::text))); g.setFont(13.0f);
+            : (ignored ? theme::muted : (missing ? theme::muted : theme::text)));
+        g.setFont(studio::bodyFont());
         auto baseName = virtualFolder ? owner.virtualFolders.at(path).name
             : (image ? "[IMG] " : "") + juce::File(path).getFileName();
         // Only a registered root can be renamed from the library tree; subfolders keep the real name.

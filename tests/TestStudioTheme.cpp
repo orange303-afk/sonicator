@@ -27,8 +27,11 @@ TEST_CASE("Studio typography is a readable hierarchy", "[ui][studio]")
     REQUIRE(studio::controlFont().getHeight() <= studio::bodyFont().getHeight());
     REQUIRE(studio::bodyFont().getHeight() < studio::pageTitleFont().getHeight());
     // The sizes are logical pixels; the interface scale multiplies them at paint time only.
-    REQUIRE(studio::bodyFont().getHeight() == Catch::Approx(14.0).margin(1.5));
-    REQUIRE(studio::pageTitleFont().getHeight() == Catch::Approx(24.0).margin(2.0));
+    // Manrope's ascent+descent box runs taller than the system sans, so the nominal size is
+    // scaled by the calibration and keeps the optical size the layout was measured with.
+    REQUIRE(studio::bodyFont().getHeight() == Catch::Approx(14.0f * fonts::heightCalibration).margin(0.5));
+    REQUIRE(studio::pageTitleFont().getHeight()
+            == Catch::Approx(24.0f * fonts::heightCalibration).margin(0.5));
 }
 
 TEST_CASE("Every action icon is drawable inside its box", "[ui][studio]")

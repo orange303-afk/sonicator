@@ -24,7 +24,7 @@ void PreviewPanel::paintListBoxItem(int row, juce::Graphics& g, int width, int h
     {
         const auto& ref=engine.reasonPatch().references[(size_t)row];
         g.setColour(ref.isLocal() ? theme::text : theme::muted);
-        g.setFont(juce::FontOptions(12));
+        g.setFont(fonts::font(12));
         g.drawText(ref.name + (ref.isLocal() ? "" : "  ·  "+ref.message),8,0,width-16,height,juce::Justification::centredLeft);
         return;
     }
@@ -106,25 +106,25 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     formatLine.setJustificationType(juce::Justification::centredLeft);
     studio::setCircle(play, true);
     studio::setIcon(play, ActionIcon::play);
-    time.setFont(juce::Font(juce::FontOptions(15.0f)));
+    time.setFont(fonts::font(15.0f));
     presetBox.setVisible(false); sampleBox.setVisible(false); rexGate.setVisible(false); rexInfo.setVisible(false);
     trackerBox.setVisible(false); sampleDragButton.setVisible(false); songProgress.setVisible(false);
     addChildComponent(sourceList);
     addChildComponent(reasonInfo);
     reasonInfo.setComponentID("reasonInfo");
-    reasonInfo.setFont(juce::FontOptions(12));
+    reasonInfo.setFont(fonts::font(12));
     reasonInfo.setJustificationType(juce::Justification::topLeft);
     reasonInfo.setColour(juce::Label::textColourId,theme::text);
     addChildComponent(abletonInfo);
     abletonInfo.setComponentID("abletonInfo");
-    abletonInfo.setFont(juce::FontOptions(12));
+    abletonInfo.setFont(fonts::font(12));
     abletonInfo.setJustificationType(juce::Justification::centredLeft);
     abletonInfo.setColour(juce::Label::textColourId,theme::muted);
     sourceList.setComponentID("containerSources");
     sourceList.setRowHeight(30);
     songProgress.setComponentID("songProgress");
     songProgress.onSeek = [this](double seconds) { engine.seek(seconds); };
-    rexInfo.setFont(juce::FontOptions(12));
+    rexInfo.setFont(fonts::font(12));
     rexInfo.setColour(juce::Label::textColourId,theme::muted);
     rexInfo.setJustificationType(juce::Justification::centredLeft);
     presetBox.setTooltip("Program of the loaded bank (SoundFont preset, or a K2000 program); "
@@ -233,7 +233,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
         if (onSettingsChanged) onSettingsChanged();
     };
     filename.setText("No sample selected",juce::dontSendNotification);
-    filename.setFont(juce::FontOptions(14,juce::Font::bold));
+    filename.setFont(fonts::font(14, fonts::Weight::bold));
     time.setColour(juce::Label::textColourId,theme::muted);
     volume.setRange(0,1,0.01); volume.setValue(engine.getVolume(),juce::dontSendNotification);
     volume.setSliderStyle(juce::Slider::LinearHorizontal); volume.setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);
@@ -279,7 +279,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     clearSelectionButton.onClick = [this] { clearSelection(); };
     selectionStatus.setComponentID("selectionStatus");
     selectionStatus.setColour(juce::Label::textColourId,theme::muted);
-    selectionStatus.setFont(juce::FontOptions(12));
+    selectionStatus.setFont(fonts::font(12));
     selectionStatus.setJustificationType(juce::Justification::centredLeft);
     for (auto* button : std::array<juce::Button*,8>{&play,&stop,&loop,&midi,&skipSilence,&autoPreview,&clearSelectionButton,&rexGate})
     {
@@ -1324,25 +1324,31 @@ void PreviewPanel::resized()
     waveform.setBounds(r);
     songProgress.setBounds(r);
 
-    // Right column: time and format, the transport, then two rows of toggles. At the default
-    // 156 px panel this is 30 + 4 + 36 + 4 + 26 + 4 + 26 = 130 of the 132 px available.
+    // Right column: time and format sit with the title row, then the transport is level with the
+    // wave window instead of hanging high above it, and the two toggle rows follow underneath.
     auto block = controls.removeFromTop(30);
     time.setBounds(block.removeFromTop(17));
     formatLine.setBounds(block);
-    controls.removeFromTop(gap);
 
-    auto transport = controls.removeFromTop(studio::circleButtonSize);
+    const int clusterBelow = 2 * studio::chipSmallHeight + gap;
+    int transportTop = waveform.getY() + waveform.getHeight() / 2 - studio::circleButtonSize / 2;
+    transportTop = juce::jmax(block.getBottom() + gap, transportTop);
+    transportTop = juce::jmin(transportTop, controls.getBottom() - clusterBelow
+                                                 - studio::circleButtonSize);
+    auto transport = juce::Rectangle<int>(controls.getX(), transportTop, controls.getWidth(),
+                                          studio::circleButtonSize);
     play.setBounds(transport.removeFromLeft(studio::circleButtonSize));
     transport.removeFromLeft(studio::spacingTight);
     stop.setBounds(transport.removeFromLeft(studio::iconButtonSize)
                        .withSizeKeepingCentre(studio::iconButtonSize, studio::iconButtonSize));
     transport.removeFromLeft(studio::spacingTight);
     volume.setBounds(transport);
-    controls.removeFromTop(gap);
 
     // Row A carries Loop, Auto Preview and, in REx mode, the gate; row B the two preview toggles.
+    auto rowA = juce::Rectangle<int>(controls.getX(), transportTop + studio::circleButtonSize + gap,
+                                     controls.getWidth(), studio::chipSmallHeight);
     {
-        auto row = controls.removeFromTop(studio::chipSmallHeight);
+        auto row = rowA;
         const int count = rexGate.isVisible() ? 3 : 2;
         const int width = (row.getWidth() - gap * (count - 1)) / count;
         loop.setBounds(row.removeFromLeft(width)); row.removeFromLeft(gap);
@@ -1350,9 +1356,8 @@ void PreviewPanel::resized()
         if (rexGate.isVisible()) rexGate.setBounds(row);
         else rexGate.setBounds({});
     }
-    controls.removeFromTop(gap);
     {
-        auto row = controls.removeFromTop(studio::chipSmallHeight);
+        auto row = rowA.withY(rowA.getBottom() + gap);
         const int width = (row.getWidth() - gap) / 2;
         midi.setBounds(row.removeFromLeft(width)); row.removeFromLeft(gap);
         skipSilence.setBounds(row);
