@@ -314,3 +314,41 @@ TEST_CASE("Genre sorts, filters and searches the whole catalog", "[genre][databa
     REQUIRE(manualMatch.size() == 1);
     REQUIRE(manualMatch[0] == secondId);
 }
+
+TEST_CASE("Genre corpus: the expected value or an honest empty result", "[genre][corpus]")
+{
+    struct Case { const char* path; const char* expected; };
+    const Case cases[] = {
+        // A genre folder one or two levels up.
+        { "/lib/Packs/Deep House/bass_01.wav", "Deep House" },
+        { "/lib/Packs/Drum and Bass/Breaks/break_01.wav", "Drum & Bass" },
+        // A file name that names the genre.
+        { "/lib/Various/trap_kick_01.wav", "Trap" },
+        // A metadata-style folder with no genre word.
+        { "/lib/Samples/One Shots/kick.wav", nullptr },
+        // A library and a volume name are not evidence.
+        { "/Volumes/1TBSSD/samples/_Kurzweil/strings.wav", nullptr },
+        // A word that merely contains a genre name.
+        { "/lib/Various/housekeeper.wav", nullptr },
+        // A genre word that is also a common instrument word is still a genre token here.
+        { "/lib/Packs/House/kick.wav", "House" },
+        // Ambiguous folder: two genre words, the longest phrase wins.
+        { "/lib/Packs/Deep House House/kick.wav", "Deep House" },
+        // Unknown language and noise stay empty.
+        { "/lib/_private/rec_0042.wav", nullptr },
+    };
+    for (const auto& item : cases)
+    {
+        INFO(item.path);
+        const auto candidates = GenreContextExtractor::candidates(juce::File(item.path));
+        if (item.expected == nullptr)
+        {
+            REQUIRE(candidates.empty());
+            continue;
+        }
+        REQUIRE(candidates.size() == 1);
+        REQUIRE(candidates[0].textValue == item.expected);
+        REQUIRE(candidates[0].field == SmartField::Genre);
+        REQUIRE(candidates[0].rawValue.isNotEmpty());
+    }
+}
