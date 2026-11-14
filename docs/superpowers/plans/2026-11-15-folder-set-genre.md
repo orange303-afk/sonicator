@@ -50,8 +50,8 @@ timer, and asks for replacement confirmation when necessary.
   catalog changes and shutdown while work is outstanding.
 - [x] Add Set genre submenu and custom prompt, async result handling, replacement warning,
   refresh/status handling and catalog/shutdown lifecycle guards.
-- [ ] Run focused tests and full `ctest --preset debug`; build release Sonicator.
-- [ ] Document behavior, run `graphify update .`, review diff and run final verification.
+- [x] Run focused tests and full `ctest --preset debug`; build release Sonicator.
+- [x] Document behavior, run `graphify update .`, review diff and run final verification.
 
 ## Execution ledger
 
@@ -80,3 +80,9 @@ timer, and asks for replacement confirmation when necessary.
   restarted as background jobs to allow completion without that limit.
 - Full debug test binary passed: 1,099 test cases / 15,233 assertions. Some existing test inputs
   emit JUCE String debug assertions (the test process still passes); no warning-free claim made.
+- Release `Sonicator` build completed successfully; app linked and ad-hoc signed at
+  `~/Library/Caches/sonicator-build/release/Sonicator_artefacts/Release/SONICATOR.app`.
+- Feature committed as `6373c38`, fast-forwarded to `main`; merged-result
+  `ctest --preset debug` passed 1/1 (77.97 s).
+- Task 2: complete. No blocking review findings. Minor lifecycle-test determinism enhancement
+  is deferred; no claim of manual visual acceptance or large-library timing.
