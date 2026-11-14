@@ -1,4 +1,5 @@
 #include "TapTempoDialog.h"
+#include "ui/shell/DialogSurface.h"
 #include "ui/shell/Theme.h"
 
 namespace sonicator
@@ -9,7 +10,7 @@ TapTempoDialog::TapTempoDialog(juce::String titleText)
     title.setFont(juce::FontOptions(14, juce::Font::bold));
     title.setColour(juce::Label::textColourId, theme::text);
     title.setJustificationType(juce::Justification::centred);
-    value.setText("\u2014", juce::dontSendNotification);
+    value.setText(juce::String::charToString(0x2014), juce::dontSendNotification);
     value.setFont(juce::FontOptions(40, juce::Font::bold));
     value.setColour(juce::Label::textColourId, theme::accent);
     value.setJustificationType(juce::Justification::centred);
@@ -65,7 +66,7 @@ void TapTempoDialog::tap()
 
 void TapTempoDialog::updateLabels()
 {
-    value.setText(tempo.hasValue() ? juce::String(tempo.bpm(), 1) : juce::String("\u2014"),
+    value.setText(tempo.hasValue() ? juce::String(tempo.bpm(), 1) : juce::String::charToString(0x2014),
                   juce::dontSendNotification);
     applyButton.setEnabled(tempo.hasValue());
 }
@@ -114,21 +115,28 @@ void TapTempoDialog::closeDialog()
         window->exitModalState(0);
 }
 
+void TapTempoDialog::paint(juce::Graphics& g)
+{
+    surface.paint(g, getLocalBounds());
+}
+
 void TapTempoDialog::resized()
 {
-    auto area = getLocalBounds().reduced(16);
+    using dialogs::Surface;
+    auto area = Surface::contentArea(getLocalBounds());
     title.setBounds(area.removeFromTop(24));
-    area.removeFromTop(6);
+    area.removeFromTop(studio::spacingUnit);
     value.setBounds(area.removeFromTop(64));
-    area.removeFromTop(6);
+    area.removeFromTop(studio::spacingUnit);
     auto tapArea = area.removeFromTop(48);
     tapButton.setBounds(tapArea.reduced(40, 0));
-    area.removeFromTop(8);
+    area.removeFromTop(studio::spacingTight);
     loopButton.setBounds(area.removeFromTop(26));
-    area.removeFromTop(8);
-    auto buttons = area.removeFromTop(28);
+
+    auto buttons = Surface::footerArea(getLocalBounds());
     applyButton.setBounds(buttons.removeFromLeft(buttons.getWidth() / 2 - 4));
-    cancelButton.setBounds(buttons.removeFromRight(buttons.getWidth() - 8));
+    buttons.removeFromLeft(studio::spacingTight);
+    cancelButton.setBounds(buttons);
 }
 
 void TapTempoDialog::parentHierarchyChanged()

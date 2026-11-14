@@ -1,4 +1,5 @@
 #include "ExtractDialog.h"
+#include "ui/shell/DialogSurface.h"
 #include "core/extract/EmbeddedSamples.h"
 #include "ui/shell/Theme.h"
 #include <cmath>
@@ -138,32 +139,35 @@ ExtractDialog::ExtractDialog(std::vector<juce::File> inputSources, const AppSett
 }
 void ExtractDialog::paint(juce::Graphics& g)
 {
-    g.fillAll(theme::panel);
+    surface.paint(g, getLocalBounds());
 }
 void ExtractDialog::resized()
 {
-    auto area = getLocalBounds().reduced(18);
-    title.setBounds(area.removeFromTop(28));
-    area.removeFromTop(4);
-    sameFolder.setBounds(area.removeFromTop(24));
-    area.removeFromTop(4);
-    normalize.setBounds(area.removeFromTop(24));
-    area.removeFromTop(4);
-    tuneToSong.setBounds(area.removeFromTop(24));
-    area.removeFromTop(8);
-    auto folderRow = area.removeFromTop(26);
+    using dialogs::Surface;
+    auto area = Surface::contentArea(getLocalBounds());
+    title.setBounds(area.removeFromTop(24));
+    area.removeFromTop(studio::spacingUnit);
+    Surface::placeCheck(area, sameFolder);
+    Surface::placeCheck(area, normalize);
+    Surface::placeCheck(area, tuneToSong);
+    area.removeFromTop(studio::spacing);
+
+    auto folderRow = area.removeFromTop(studio::controlHeight);
     browse.setBounds(folderRow.removeFromRight(96));
-    folderRow.removeFromRight(8);
+    folderRow.removeFromRight(studio::spacingTight);
     folder.setBounds(folderRow);
-    area.removeFromTop(8);
+    area.removeFromTop(studio::spacingTight);
+
     error.setBounds(area.removeFromTop(20));
     progressBar.setBounds(area.removeFromTop(18));
     progressLabel.setBounds(area.removeFromTop(20));
     resultLabel.setBounds(area.removeFromTop(54));
     details.setBounds(area.removeFromTop(24));
-    if (problems.isVisible()) problems.setBounds(area.removeFromTop(
-        juce::jmax(0, area.getHeight() - 44)));
-    auto buttons = area.removeFromBottom(32);
+    if (problems.isVisible())
+        problems.setBounds(area.removeFromTop(
+            juce::jmax(0, area.getHeight() - studio::iconButtonSize - studio::spacingTight)));
+
+    auto buttons = Surface::footerArea(getLocalBounds());
     const int buttonWidth = 110;
     if (ok.isVisible())
     {
@@ -172,10 +176,11 @@ void ExtractDialog::resized()
     else
     {
         accept.setBounds(buttons.removeFromRight(buttonWidth));
-        buttons.removeFromRight(8);
+        buttons.removeFromRight(studio::spacingTight);
         cancel.setBounds(buttons.removeFromRight(90));
     }
 }
+
 ExtractOptions ExtractDialog::currentOptions() const
 {
     ExtractOptions options;

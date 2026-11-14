@@ -1,6 +1,7 @@
 #pragma once
 #include "core/extract/ExtractService.h"
 #include "core/settings/AppSettings.h"
+#include "ui/shell/DialogSurface.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 #include <memory>
@@ -26,6 +27,7 @@ public:
     std::function<void()> onCancel, onOk;
 private:
     std::vector<juce::File> sources;
+    dialogs::Surface surface;
     juce::Label title, error, progressLabel, resultLabel;
     juce::ToggleButton sameFolder { "Save next to each original file" };
     juce::ToggleButton normalize { "Normalize each sample to -0.1 dBFS" };

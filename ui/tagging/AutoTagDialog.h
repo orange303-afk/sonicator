@@ -1,5 +1,6 @@
 #pragma once
 #include "core/tagging/AutoTagService.h"
+#include "ui/shell/DialogSurface.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 namespace sonicator {
@@ -23,6 +24,7 @@ private:
     AutoTagResult result;
     AutoTagService& service;
     std::function<void()> appliedCallback;
+    dialogs::Surface surface;
     juce::Label summary, selectedLabel, progress;
     juce::TableListBox proposals { "AutoTag proposals", nullptr };
     juce::TableListBox skips { "Skipped files", nullptr };

@@ -1,5 +1,6 @@
 #pragma once
 #include "core/smart/TapTempo.h"
+#include "ui/shell/DialogSurface.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <functional>
 
@@ -26,6 +27,7 @@ public:
     double currentBpm() const { return tempo.bpm(); }
     bool keyPressed(const juce::KeyPress&) override;
     bool keyPressed(const juce::KeyPress&, juce::Component*) override;
+    void paint(juce::Graphics&) override;
     void resized() override;
     void parentHierarchyChanged() override;
     void visibilityChanged() override;
@@ -37,6 +39,7 @@ public:
 private:
     TapTempo tempo;
     std::function<int64_t()> clock;
+    dialogs::Surface surface;
     juce::Label title, value;
     juce::TextButton tapButton { "Tap" }, loopButton { "Start loop" },
                      applyButton { "Apply" }, cancelButton { "Cancel" };

@@ -1,4 +1,5 @@
 #include "AutoTagDialog.h"
+#include "ui/shell/DialogSurface.h"
 #include "ui/shell/Theme.h"
 #include <algorithm>
 namespace sonicator {
@@ -191,20 +192,22 @@ AutoTagDialog::~AutoTagDialog()
 }
 void AutoTagDialog::paint(juce::Graphics& g)
 {
-    g.fillAll(theme::background);
+    surface.paint(g, getLocalBounds());
 }
 void AutoTagDialog::resized()
 {
-    auto area = getLocalBounds().reduced(14);
+    using dialogs::Surface;
+    auto area = Surface::contentArea(getLocalBounds())
+                    .withTrimmedBottom(studio::iconButtonSize + studio::spacingTight);
     summary.setBounds(area.removeFromTop(22));
     selectedLabel.setBounds(area.removeFromTop(20));
-    auto buttons = area.removeFromBottom(34).withTrimmedTop(8);
+    tabs.setBounds(area);
+
+    auto buttons = Surface::footerArea(getLocalBounds());
     cancel.setBounds(buttons.removeFromRight(110));
-    buttons.removeFromRight(8);
+    buttons.removeFromRight(studio::spacingTight);
     apply.setBounds(buttons.removeFromRight(150));
     progress.setBounds(buttons);
-    area.removeFromBottom(8);
-    tabs.setBounds(area);
 }
 void AutoTagDialog::toggleRow(int row)
 {

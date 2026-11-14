@@ -5,6 +5,10 @@
 #include "ui/library/SearchField.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/split/SplitDialog.h"
+#include "ui/extract/ExtractDialog.h"
+#include "ui/tagging/AutoTagDialog.h"
+#include "ui/library/TapTempoDialog.h"
+#include "core/tagging/AutoTagService.h"
 #include "core/database/SampleRepository.h"
 #include "core/dsp/BasicAnalyzer.h"
 #include "ui/shell/Theme.h"
@@ -226,4 +230,48 @@ TEST_CASE("The split dialog keeps its sliders and visible check boxes", "[ui][st
     REQUIRE(title != nullptr);
     REQUIRE(title->getX() == 20);
     REQUIRE(title->getY() == 20);
+}
+
+TEST_CASE("Every dialog lays its content out from the shared surface", "[ui][studio]")
+{
+    TestDirectory t;
+    ExtractDialog extract({ juce::File("/tmp/bank.sf2") }, AppSettings{},
+                          [](ExtractOptions) { return true; });
+    Database db(t.dir.getChildFile("auto.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+    AutoTagService service(repo);
+    AutoTagResult result;
+    result.checked = 1;
+    result.scope = "selected files";
+    AutoTagDialog autoTag(std::move(result), service, [] {});
+    TapTempoDialog tap("Tap tempo");
+    {
+        // The idle value is an em dash, stored as a code point rather than a mishandled literal.
+        bool foundValue = false;
+        for (auto* child : tap.getChildren())
+            if (auto* label = dynamic_cast<juce::Label*>(child); label != nullptr
+                && label->getFont().getHeight() > 30.0f)
+            {
+                foundValue = true;
+                REQUIRE(label->getText() == juce::String::charToString(0x2014));
+            }
+        REQUIRE(foundValue);
+    }
+    struct Case { juce::Component* dialog; int width, height; };
+    for (const auto& one : std::array<Case, 3> { Case { &extract, 560, 500 },
+                                                 Case { &autoTag, 980, 620 },
+                                                 Case { &tap, 340, 260 } })
+    {
+        one.dialog->setSize(one.width, one.height);
+        one.dialog->resized();
+        for (auto* child : one.dialog->getChildren())
+        {
+            if (! child->isVisible()) continue;   // hidden controls keep their old bounds
+            REQUIRE(child->getX() >= 20);
+            REQUIRE(child->getY() >= 20);
+            REQUIRE(child->getBounds().getRight() <= one.dialog->getWidth() - 20);
+            REQUIRE(child->getBottom() <= one.dialog->getHeight() - 20);
+        }
+    }
 }
