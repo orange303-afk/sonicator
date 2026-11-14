@@ -165,11 +165,13 @@ juce::String orderBy(LibrarySort sort, bool ascending)
     {
         case LibrarySort::Format:   column = "samples.format COLLATE NOCASE"; break;
         case LibrarySort::Duration: column = "samples.duration"; break;
-        case LibrarySort::Rate:     column = "samples.sampleRate"; break;
-        case LibrarySort::Channels: column = "samples.numChannels"; break;
+        case LibrarySort::Rate:     column = "samples.rate"; break;
+        case LibrarySort::Channels: column = "samples.channels"; break;
         case LibrarySort::Status:   column = "samples.error COLLATE NOCASE"; break;
         // Schema 18 keeps the resolved values on the samples row, so the ORDER BY terms below
-        // match an index and the query no longer runs a correlated subquery per row.
+        // match an index. Ascending sorts are index scans; descending sorts keep the unknown flag
+        // ascending (unknown stays last) and use a temporary B-tree for the value terms, which is
+        // still far cheaper than the old correlated-subquery form.
         case LibrarySort::Type:
             return juce::String("(samples.eff_type IS NULL) ASC, samples.eff_type COLLATE NOCASE ")
                  + (ascending ? "ASC" : "DESC") + ", samples.id ASC";
@@ -791,7 +793,8 @@ void SampleRepository::createTables()
         detail::exec(db.handle, "CREATE INDEX IF NOT EXISTS smart_results_pipeline"
                                 " ON smart_results(pipeline_state, sample_id);");
         // Each effective index starts with the unknown flag, so "unknown last" holds for both
-        // directions without a temporary B-tree.
+        // directions. Ascending order scans the index; descending order scans it too and sorts
+        // only the value terms in a temporary B-tree.
         detail::exec(db.handle,
             "CREATE INDEX IF NOT EXISTS samples_eff_type ON samples((eff_type IS NULL),"
             " eff_type COLLATE NOCASE, id);"
@@ -1277,6 +1280,21 @@ std::vector<int64_t> SampleRepository::queryIds(const LibraryFilter& filter) con
     std::vector<int64_t> ids;
     while (s.step()) ids.push_back(s.integer(0));
     return ids;
+}
+juce::String SampleRepository::explainQueryIds(const LibraryFilter& filter) const
+{
+    std::lock_guard lock(db.mutex);
+    const auto parts = buildFilterSql(filter, ignoredPathsLocked());
+    auto sql = "EXPLAIN QUERY PLAN SELECT samples.id FROM samples" + parts.where
+        + " ORDER BY " + orderBy(filter.sort, filter.ascending);
+    detail::Statement s(db.handle, sql.toRawUTF8()); bindFilter(s, parts);
+    juce::String plan;
+    while (s.step())
+    {
+        if (plan.isNotEmpty()) plan += "\n";
+        plan += s.text(3);
+    }
+    return plan;
 }
 std::vector<SampleRecord> SampleRepository::recordsByIds(const std::vector<int64_t>& ids) const
 {    std::lock_guard lock(db.mutex);

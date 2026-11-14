@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
+#include <sqlite3.h>
 using namespace sonicator;
 TEST_CASE("Indexer persists, skips unchanged files, detects duplicates and retries changes", "[indexing]")
 {
@@ -341,4 +342,31 @@ TEST_CASE("Parallel analysis stores the same rows as sequential analysis", "[ind
     REQUIRE(index.waitUntilFinished(30000));
     REQUIRE(index.progress().analyzed == 0);
     REQUIRE(index.progress().skipped == (int) files.size());
+}
+
+TEST_CASE("A catalog write failure ends the scan instead of stranding its workers", "[indexing][parallel][abort]")
+{
+    TestDirectory t;
+    const auto folder = t.dir.getChildFile("abort");
+    folder.createDirectory();
+    for (int i = 0; i < 40; ++i)
+        t.wave("abort/take" + juce::String::formatted("%02d", i) + ".wav", 220 + i * 5);
+    const auto dbFile = t.dir.getChildFile("abort.sqlite");
+    Database db(dbFile); SampleRepository repo(db); repo.createTables();
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(dbFile.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        REQUIRE(sqlite3_exec(raw,
+            "CREATE TRIGGER fail_insert BEFORE INSERT ON samples"
+            " WHEN NEW.path LIKE '%/abort/%' BEGIN SELECT RAISE(ABORT,'boom'); END;",
+            nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(raw);
+    }
+    IndexingService index(repo);
+    REQUIRE(index.start({ folder.getFullPathName() }));
+    // Before the writer was exception-safe, this unwound while workers were still parked in the
+    // pipeline and the service thread never finished.
+    REQUIRE(index.waitUntilFinished(15000));
+    REQUIRE_FALSE(index.progress().running);
+    REQUIRE(index.progress().message.containsIgnoreCase("boom"));
 }

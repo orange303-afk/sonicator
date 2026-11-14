@@ -96,6 +96,9 @@ public:
     LibraryPage query(const LibraryFilter&, int limit = 10000, int offset = 0) const;
     // Every matching ID in the same order as query(). Used by the virtual all-on-one-page view.
     std::vector<int64_t> queryIds(const LibraryFilter&) const;
+    // Diagnostic: the plan SQLite chooses for the ID query above. Sorts are expected to reach a
+    // matching index; a regression here is a whole-catalog temporary sort.
+    juce::String explainQueryIds(const LibraryFilter&) const;
     std::vector<SampleRecord> recordsByIds(const std::vector<int64_t>&) const;
     // The subset of ids that is not hidden by an ignore entry, preserving input order.
     std::vector<int64_t> visibleIds(const std::vector<int64_t>& ids) const;

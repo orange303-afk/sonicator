@@ -72,12 +72,15 @@ int rawScalar(const juce::File& file, const char* sql)
     return value;
 }
 
-int64_t addSample(SampleRepository& repo, const juce::String& name)
+int64_t addSample(SampleRepository& repo, const juce::String& name, double rate = 0,
+                  int channels = 0)
 {
     SampleRecord r;
     r.filePath = "/lib/" + name;
     r.fileName = name;
     r.fileHash = "h-" + name;
+    r.sampleRate = rate;
+    r.numChannels = channels;
     return repo.upsert(r);
 }
 
@@ -166,8 +169,10 @@ TEST_CASE("Sorting uses the effective-value indexes", "[sort][schema][database]"
     TestDirectory t;
     const auto file = t.dir.getChildFile("sort-plan.sqlite");
     Database db(file); SampleRepository repo(db); repo.createTables();
-    publish(repo, addSample(repo, "a.wav"), "kick", 128, "C minor", "House");
-    publish(repo, addSample(repo, "b.wav"), "pad", 90, "A minor", "Trap");
+    const auto a = addSample(repo, "a.wav", 44100, 1);
+    const auto b = addSample(repo, "b.wav", 48000, 2);
+    publish(repo, a, "kick", 128, "C minor", "House");
+    publish(repo, b, "pad", 90, "A minor", "Trap");
 
     for (const auto* index : { "samples_eff_type", "samples_eff_bpm", "samples_eff_key",
                                "samples_eff_genre", "samples_format", "samples_duration",
@@ -178,23 +183,40 @@ TEST_CASE("Sorting uses the effective-value indexes", "[sort][schema][database]"
             ("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='" + std::string(index) + "'").c_str()) == 1);
     }
 
-    sqlite3* raw = nullptr;
-    REQUIRE(sqlite3_open(file.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
-    auto planFor = [&raw](const char* orderBy)
+    LibraryFilter filter;
+    const auto planFor = [&repo, &filter](LibrarySort sort, bool ascending)
     {
-        auto sql = std::string("EXPLAIN QUERY PLAN SELECT id FROM samples ORDER BY ") + orderBy;
-        sqlite3_stmt* s = nullptr;
-        REQUIRE(sqlite3_prepare_v2(raw, sql.c_str(), -1, &s, nullptr) == SQLITE_OK);
-        std::string plan;
-        while (sqlite3_step(s) == SQLITE_ROW) { plan += columnText(s, 3); plan += "\n"; }
-        sqlite3_finalize(s);
-        return plan;
+        filter.sort = sort;
+        filter.ascending = ascending;
+        return repo.explainQueryIds(filter);
     };
-    REQUIRE(planFor("(eff_type IS NULL) ASC, eff_type COLLATE NOCASE ASC, id ASC").find("samples_eff_type") != std::string::npos);
-    REQUIRE(planFor("(eff_bpm IS NULL) ASC, eff_bpm ASC, id ASC").find("samples_eff_bpm") != std::string::npos);
-    REQUIRE(planFor("(eff_key_tonic IS NULL) ASC, eff_key_tonic ASC, eff_key_mode COLLATE NOCASE ASC, id ASC").find("samples_eff_key") != std::string::npos);
-    REQUIRE(planFor("(eff_genre IS NULL) ASC, eff_genre COLLATE NOCASE ASC, id ASC").find("samples_eff_genre") != std::string::npos);
-    sqlite3_close(raw);
+    // Ascending is a covering index scan for every sort column.
+    REQUIRE(planFor(LibrarySort::Type, true).contains("samples_eff_type"));
+    REQUIRE(planFor(LibrarySort::Genre, true).contains("samples_eff_genre"));
+    REQUIRE(planFor(LibrarySort::Bpm, true).contains("samples_eff_bpm"));
+    REQUIRE(planFor(LibrarySort::Key, true).contains("samples_eff_key"));
+    REQUIRE(planFor(LibrarySort::Format, true).contains("samples_format"));
+    REQUIRE(planFor(LibrarySort::Duration, true).contains("samples_duration"));
+    REQUIRE(planFor(LibrarySort::Rate, true).contains("samples_rate"));
+    REQUIRE(planFor(LibrarySort::Channels, true).contains("samples_channels"));
+    REQUIRE(planFor(LibrarySort::Status, true).contains("samples_status"));
+    // Descending reverses every index term, so "unknown last" (an ASC flag) keeps the index for
+    // the scan but the value terms need a short temporary B-tree. This is the accepted shape:
+    // it stays far cheaper than the old correlated-subquery sort and never changes the order.
+    const auto typeDesc = planFor(LibrarySort::Type, false);
+    REQUIRE(typeDesc.contains("samples_eff_type"));
+    REQUIRE(typeDesc.contains("TEMP B-TREE"));
+    const auto keyDesc = planFor(LibrarySort::Key, false);
+    REQUIRE(keyDesc.contains("samples_eff_key"));
+    REQUIRE(keyDesc.contains("TEMP B-TREE"));
+
+    // Rate and Channels read the stored columns (rate, channels), not the record's field names.
+    LibraryFilter byRate;
+    byRate.sort = LibrarySort::Rate;
+    byRate.ascending = true;
+    REQUIRE(repo.queryIds(byRate) == std::vector<int64_t>{ a, b });
+    byRate.sort = LibrarySort::Channels;
+    REQUIRE(repo.queryIds(byRate) == std::vector<int64_t>{ a, b });
 }
 
 TEST_CASE("Schema 17 upgrades in place and backfills the effective values", "[sort][schema][migration]")

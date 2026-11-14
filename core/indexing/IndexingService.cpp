@@ -19,7 +19,7 @@ class AnalysisWorker final : private juce::Thread
 public:
     explicit AnalysisWorker(std::function<void()> work)
         : Thread("Library analysis"), body(std::move(work)) {}
-    void start() { startThread(Priority::low); } // below normal, so audio and UI stay responsive
+    bool start() { return startThread(Priority::low); } // below normal, so audio and UI stay responsive
     void join() { waitForThreadToExit(-1); }
 private:
     void run() override { body(); }
@@ -68,6 +68,11 @@ bool IndexingService::beginScan(const juce::StringArray& roots, bool force, Scan
 void IndexingService::cancel()
 {
     cancelled = true;
+    // The flags are atomics, but each waiter evaluates its predicate under one of these mutexes.
+    // Passing through both after the store closes the check-then-wait window, so a Cancel that
+    // lands at the wrong moment cannot be missed.
+    { std::lock_guard lock(pauseMutex); }
+    { std::lock_guard lock(pipelineMutex); }
     pauseCondition.notify_all();
     pipelineChanged.notify_all();
     pipelineSpace.notify_all();
@@ -114,17 +119,41 @@ void IndexingService::analyzePending(const std::vector<AudioFileInfo>& pending)
     { std::lock_guard lock(stateMutex); state.workers = workerCount; }
     std::deque<AnalysisOutcome> completed;
     std::atomic<size_t> nextIndex { 0 };
-    std::atomic<int> runningWorkers { workerCount };
+    // Bumped before a worker starts, so a fast first file cannot decrement before the increment.
+    std::atomic<int> runningWorkers { 0 };
+    // Set when the writer cannot continue (a catalog write threw). Unlike Cancel it drops every
+    // unqueued result but must still release the workers: they are joined before the rethrow.
+    std::atomic<bool> abort { false };
     bool allWorkersDone = false; // guarded by pipelineMutex
     // Bounded, so a fast analyzer cannot pile thousands of records up in memory.
     const size_t maxPending = (size_t) workerCount * 2 + 1;
+    const auto stopRequested = [this, &abort] { return cancelled.load() || abort.load(); };
+
+    struct WorkerDone
+    {
+        std::atomic<int>& running;
+        bool& allDone;
+        std::mutex& mutex;
+        std::condition_variable& changed;
+        // A scope guard: a throwing worker body still books its completion instead of leaving
+        // the writer waiting for a thread that no longer exists.
+        ~WorkerDone()
+        {
+            {
+                std::lock_guard lock(mutex);
+                if (--running == 0) allDone = true;
+            }
+            changed.notify_all();
+        }
+    };
 
     auto body = [this, &pending, &completed, &nextIndex, &runningWorkers, &allWorkersDone,
-                 maxPending]
+                 maxPending, &stopRequested]
     {
+        WorkerDone done { runningWorkers, allWorkersDone, pipelineMutex, pipelineChanged };
         for (;;)
         {
-            if (cancelled.load()) break;
+            if (stopRequested()) break;
             const size_t index = nextIndex.fetch_add(1);
             if (index >= pending.size()) break;
             if (checkpoint()) break; // pause and cancel are honoured between files
@@ -154,53 +183,77 @@ void IndexingService::analyzePending(const std::vector<AudioFileInfo>& pending)
                     ? metadataOnlyVersion : basicFeaturesVersion;
             }
             // Cancelled work keeps the previous row: the writer never sees this record.
-            if (cancelled.load()) break;
+            if (stopRequested()) break;
             {
                 std::unique_lock lock(pipelineMutex);
-                pipelineSpace.wait(lock, [this, &completed, maxPending]
-                    { return cancelled.load() || completed.size() < maxPending; });
-                if (cancelled.load()) break;
+                pipelineSpace.wait(lock, [&stopRequested, &completed, maxPending]
+                    { return stopRequested() || completed.size() < maxPending; });
+                if (stopRequested()) break;
                 completed.push_back({ entry, std::move(result) });
             }
             pipelineChanged.notify_one();
         }
-        {
-            std::lock_guard lock(pipelineMutex);
-            if (--runningWorkers == 0) allWorkersDone = true;
-        }
-        pipelineChanged.notify_one();
     };
 
     std::vector<std::unique_ptr<AnalysisWorker>> workers;
     for (int i = 0; i < workerCount; ++i)
-        workers.push_back(std::make_unique<AnalysisWorker>(body));
-    for (auto& worker : workers) worker->start();
+    {
+        ++runningWorkers;
+        auto worker = std::make_unique<AnalysisWorker>(body);
+        if (worker->start())
+        {
+            workers.push_back(std::move(worker));
+        }
+        else
+        {
+            // A thread the OS refused to start must not leave the writer waiting forever.
+            std::lock_guard lock(pipelineMutex);
+            if (--runningWorkers == 0) allWorkersDone = true;
+            pipelineChanged.notify_one();
+        }
+    }
 
     // The service thread is the only writer, so SQLite sees one connection and one order.
-    for (;;)
+    try
     {
-        AnalysisOutcome outcome;
+        for (;;)
         {
-            std::unique_lock lock(pipelineMutex);
-            pipelineChanged.wait(lock, [this, &completed, &allWorkersDone]
-                { return ! completed.empty() || allWorkersDone || cancelled.load(); });
-            if (completed.empty())
+            AnalysisOutcome outcome;
             {
-                if (allWorkersDone || cancelled.load()) break;
-                continue;
+                std::unique_lock lock(pipelineMutex);
+                pipelineChanged.wait(lock, [&]
+                    { return ! completed.empty() || allWorkersDone || stopRequested(); });
+                if (completed.empty())
+                {
+                    if (allWorkersDone || stopRequested()) break;
+                    continue;
+                }
+                outcome = std::move(completed.front());
+                completed.pop_front();
             }
-            outcome = std::move(completed.front());
-            completed.pop_front();
+            pipelineSpace.notify_one();
+            if (stopRequested()) break;
+            repo.upsert(outcome.result);
+            const bool duplicate = outcome.result.fileHash.isNotEmpty()
+                && repo.countHash(outcome.result.fileHash) > 1;
+            std::lock_guard lock(stateMutex);
+            ++state.processed;
+            if (outcome.result.error.isEmpty()) ++state.analyzed; else ++state.failed;
+            if (duplicate) ++state.duplicates;
         }
-        pipelineSpace.notify_one();
-        if (cancelled.load()) break;
-        repo.upsert(outcome.result);
-        const bool duplicate = outcome.result.fileHash.isNotEmpty()
-            && repo.countHash(outcome.result.fileHash) > 1;
-        std::lock_guard lock(stateMutex);
-        ++state.processed;
-        if (outcome.result.error.isEmpty()) ++state.analyzed; else ++state.failed;
-        if (duplicate) ++state.duplicates;
+    }
+    catch (...)
+    {
+        // Abort the pipeline and join every worker before the exception reaches run(), so no
+        // thread is left parked in the queue while the service unwinds.
+        {
+            std::lock_guard lock(pipelineMutex);
+            abort = true;
+        }
+        pipelineChanged.notify_all();
+        pipelineSpace.notify_all();
+        for (auto& worker : workers) worker->join();
+        throw;
     }
 
     for (auto& worker : workers) worker->join();

@@ -6,7 +6,7 @@
 
 ## Threads and lifecycle
 
-- Message thread: controls, device setup, file selection/reader replacement, debounced whole-catalog queries, user-triggered database backup, rendering. Search, sorting and tag filtering stay on this thread because the measured whole-catalog query is below a perceptible hitch: since schema 18 every sort column has a matching index (effective Type/Genre/BPM/Key included), and the `All` view's ID query sorts a 375k-row catalog in ~0.05 s; no UI-queue callbacks are posted per keypress.
+- Message thread: controls, device setup, file selection/reader replacement, debounced whole-catalog queries, user-triggered database backup, rendering. Search, sorting and tag filtering stay on this thread because the measured whole-catalog query is below a perceptible hitch: since schema 18 every sort column has a matching index (effective Type/Genre/BPM/Key included), and the `All` view's ID query sorts a 375k-row catalog in ~0.05 s ascending, ~0.10 s descending; no UI-queue callbacks are posted per keypress.
 - Indexing thread: directory enumeration and reconciliation of missing paths, plus a single-threaded precheck (catalog lookup and skip rules) and the writer that upserts results. Decoding, DSP and SHA-256 run in a pool of up to four low-priority analysis threads; a bounded result queue keeps records from piling up in memory, and only the indexing thread touches the database.
 - Dedicated preview read-ahead thread: JUCE buffering source, independent of the analyzer. While **Loop** is on with a waveform selection, the ordinary preview is re-attached without read-ahead so the range loop is sample-accurate and live edits are heard immediately; clearing the loop restores read-ahead.
 - Dedicated tracker render thread: libxmp decodes the whole module into a bounded preallocated ring; the device callback only copies stereo frames from that ring. Loading, seeking and source decoding run on the message thread while the output is detached, or on the render thread, never inside the device callback.
@@ -38,10 +38,12 @@ wrote a genre word into `Type`, and the extractor bump (`smartExtractorsVersion`
 rows on the next pass. `docs/GENRE.md` records the resolution order and the conflict rule.
 Version 18 materialises the effective sort values on the `samples` row (`eff_type`, `eff_genre`,
 `eff_bpm`, `eff_key_tonic`, `eff_key_mode`) and indexes them with the unknown flag first, so
-"unknown last" holds in both directions without a temporary sort. `writeResult` — the single path
-shared by publication, override and clear — refreshes them, so a sort value cannot drift from the
-value the UI shows; the upgrade backfills the whole catalog once (measured 7.8 s for 375k rows).
-Format, Duration, Rate, Channels and Status gain `(value, id)` indexes as well.
+"unknown last" holds in both directions. `writeResult` — the single path shared by publication,
+override and clear — refreshes them, so a sort value cannot drift from the value the UI shows;
+the upgrade backfills the whole catalog once (measured 7.8 s for 375k rows). An ascending sort is
+a plain index scan; a descending sort scans the same index and sorts only the value terms in a
+temporary B-tree, which remains far cheaper than the old correlated-subquery sort. Format,
+Duration, Rate, Channels and Status gain `(value, id)` indexes as well.
 A reanalysed audio row now marks its smart result `stale` instead of deleting it, so the last completed values stay inspectable but are never presented as current. Publishing candidates, extractions, fingerprints and the resolved result happens in one `BEGIN IMMEDIATE` transaction guarded by the expected revision and the catalog identity. A job that read an older revision, or an override edit that happened meanwhile, is never overwritten. Each result also stores the extractor, resolver and DSP versions independently; a version mismatch makes it a candidate for the next pass without re-hashing audio or recomputing measured features. Standard tags are seeded only when the tag table is created, so a rename is not undone; sample IDs are stable across upserts, so assignments survive rescan and reanalysis. Upgrading first writes an online SQLite backup beside the database (`<name>.backup-<timestamp>`); the backup uses the SQLite API because WAL may still hold committed pages. A user-triggered backup uses the same API into `Sonicator/backups/sonicator-<timestamp>.sqlite` and refuses to overwrite an existing file or the live database. Settings updates load-modify-save only the fields they own, so window geometry and theme/catalog writers do not overwrite each other. Saved window bounds are validated against connected displays and clamped to a minimum size and the current work area.
 
 Catalog portability: when a catalog's stored roots do not exist on this computer, the UI offers to relocate them. `SampleRepository::relocateRoots` streams the sample rows once inside one transaction, picks the longest matching old root for each path, and rewrites `path` plus `search_key` through the pure `pathrelocation` helpers. Both `/` and `\` are treated as separators on input and `File::getSeparatorChar()` is written on output, so macOS and Windows catalogs work in both directions. IDs, tags, stars, hashes and measured features are untouched; `missing` is not changed and Rescan remains the reconciliation authority. A target-path collision merges the relocated row's tags and star into the existing row and deletes the duplicate. Before applying, the UI writes `<name>.relocate-<timestamp>.sqlite` with the SQLite backup API.
@@ -143,7 +145,8 @@ option never loads every record: `queryIds` returns only the matching primary ke
 (measured ~35 ms for 300k rows by name, ~130 ms with a text filter in a Debug build), and the table
 reports that length as its row count. Since schema 18 every sort column has a matching
 `(value, id)` index, including the materialised effective Type/Genre/BPM/Key values: the ID query
-for Type on a 375k-row catalog takes ~0.05 s, against ~0.52 s for the previous correlated-subquery
+for Type on a 375k-row catalog takes ~0.05 s ascending (descending ~0.10 s, because the value
+terms are sorted in a temporary B-tree), against ~0.52 s for the previous correlated-subquery
 form. Painting a row outside the cache asks the owner for a
 400-row block; `recordsByIds` plus the tag and duplicate lookups fill that block (~2 ms), and rows
 within ±2000 of the current position are kept up to a 4000-row cap. Selection is stored by sample
