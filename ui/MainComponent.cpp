@@ -4237,8 +4237,17 @@ void MainComponent::showSettings()
             else if (safePanel != nullptr) safePanel->setDatabaseStatus(error,true);
         };
     panel->setLookAndFeel(&look);
+    // The settings panel has a fixed height. On a smaller display a taller panel would be clipped
+    // at the bottom, so it scrolls inside a viewport that fits the screen.
+    const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect(getScreenBounds());
+    const int available = (display != nullptr ? display->userArea.getHeight() : 900) - 60;
+    auto* viewport = new juce::Viewport();
+    viewport->setViewedComponent(panel, true);
+    viewport->setScrollBarsShown(true, false);
+    viewport->setSize(panel->getWidth() + (panel->getHeight() > available ? 12 : 0),
+                      juce::jmin(panel->getHeight(), available));
     auto* window = new SettingsDialogWindow();
-    window->setContentOwned(panel, true);
+    window->setContentOwned(viewport, true);
     window->setLookAndFeel(&look);
     window->setUsingNativeTitleBar(false);
     window->setResizable(false, false);

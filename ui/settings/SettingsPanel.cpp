@@ -197,7 +197,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         if (onClose) { onClose(); return; }
         if (auto* dialog = findParentComponentOfClass<juce::DialogWindow>()) dialog->exitModalState(0);
     };
-    setSize(560,1110);
+    setSize(560,1134);
 }
 void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
 {
@@ -210,7 +210,7 @@ void SettingsPanel::setPluginMode(bool shouldUsePluginMode)
     for (auto* c : hidden)
         c->setVisible(! pluginMode);
     close.setVisible(pluginMode);
-    setSize(560, pluginMode ? 780 : 1110);
+    setSize(560, pluginMode ? 794 : 1134);
     resized();
 }
 void SettingsPanel::notifySettings()
