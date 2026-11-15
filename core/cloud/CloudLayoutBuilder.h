@@ -6,10 +6,10 @@ namespace sonicator::cloud
 {
 struct CloudLayoutOptions
 {
-    float islandBaseRadius = 14.0f;   // a tag with one file still gets a visible island
-    float islandRadiusScale = 1.5f;   // area grows with the file count, so Dubtechno cannot eat the map
-    float islandGap = 12.0f;
-    float pointSpread = 0.62f;        // share of the island radius the acoustic projection may use
+    float islandBaseRadius = 13.0f;   // a tag with one file still gets a visible island
+    float islandRadiusScale = 1.15f;   // area grows with the file count, so Dubtechno cannot eat the map
+    float islandGap = 10.0f;
+    float pointSpread = 0.66f;        // share of the island radius the acoustic projection may use
     float multiTagSpread = 0.7f;      // a bridge point stays inside the narrower of its islands
     float v2Spread = 0.4f;            // cap for the 84-value refinement displacement
     float refinementAlpha = 0.35f;

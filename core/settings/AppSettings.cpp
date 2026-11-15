@@ -102,6 +102,8 @@ AppSettings SettingsStore::load() const
     settings.databasePath = object->getProperty("database").toString();
     const auto hide = object->getProperty("hideEmpty");
     settings.hideEmpty = hide.isBool() ? (bool) hide : true;
+    const auto cloud = object->getProperty("cloudView");
+    settings.cloudView = cloud.isBool() ? (bool) cloud : false;
     settings.lastFolder = object->getProperty("lastFolder").toString();
     settings.lastSamplePath = object->getProperty("lastSamplePath").toString();
     auto readBool = [object](const char* key, bool fallback)
@@ -195,6 +197,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("pageSize", settings.pageSize);
     object->setProperty("database", settings.databasePath);
     object->setProperty("hideEmpty", settings.hideEmpty);
+    object->setProperty("cloudView", settings.cloudView);
     object->setProperty("showIgnored", settings.showIgnored);
     object->setProperty("reasonPacksAdded", settings.reasonPacksAdded);
     object->setProperty("abletonPacksAdded", settings.abletonPacksAdded);

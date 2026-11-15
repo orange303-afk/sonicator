@@ -497,3 +497,37 @@ no-clobber link (Rename) or a verified atomic replace.
 writes audio and the preview service owns no audio device. All new tests are tagged `[batch]` plus a
 narrow tag, use `TestDirectory` for settings and scratch audio, and never touch the live catalog or
 settings file.
+
+## Cloud tag map
+
+`core/cloud` is the second library view: one node per tagged file, tag islands as the skeleton and
+real acoustic descriptors for the local neighbourhood. `loadCloudInput` reads the tagged rows, their
+tags and the stored schema-2 vectors in one batch and computes a fingerprint over exactly what the
+layout depends on (algorithm version, tag ids/colours/counts, assignments, descriptor and v2
+availability, the v2 values, analysis timestamps). `buildCloudLayout` is a pure, deterministic
+function: co-occurrence springs place the islands, a circle-separation pass guarantees no island
+overlaps another, each file sits at the mean of its tags' centres, and the 8 universal descriptors
+(projected by principal components and stretched to each island's own 2-98 percentile) place it
+inside that island. Files with the 84-value vector get two kNN attraction passes capped at a share of
+the island radius, so the acoustics sharpen local adjacency without tearing the tag structure apart.
+Metadata-only containers and unreadable files sit at the island centre with `cloudNoPosition`: they
+have no sound position and never sound on hover.
+
+`CloudBuildService` owns the worker: it opens its own catalog connection, checks the layout cache
+(`~/Library/Sonicator/cache/cloud/layout-<fingerprint>.bin`, at most two files), builds and
+publishes only for the generation that started it. A filter change never rebuilds: the filter is
+visibility, and `CloudView` dims the non-matching points instead. Tag edits are caught by a cheap
+poll of the tag table (id, colour, count) rather than by hooking every write path.
+
+`ui/cloud/CloudView` is a single component. Islands and points are rendered once into world-space
+`juce::Image` layers at layout time; the camera only blits them, which is what keeps 35 636 points
+inside a frame. Zoomed in, the visible subset is drawn live and crisp. A uniform grid answers hover
+hit tests, labels are culled against each other, and the camera is a scale plus a pan with an
+animated history.
+
+`core/audio/HoverAudition` is a separate voice in `PreviewOutput`: bounded clip (10 s), 10 ms ramp
+in and out, its own gain, generation-guarded decoding on a one-thread pool. Hovering never touches
+the selected sample, its waveform edits or the preview transport; while the transport plays, the
+hover voice stays silent. Only formats the shared analysis decoder opens produce sound (basic
+formats plus EBL and VOC); RX2, EXS, NKI, SF2, AKAI and tracker modules are silent with an honest
+caption.

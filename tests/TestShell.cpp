@@ -62,7 +62,7 @@ TEST_CASE("Toolbar buttons do not steal keyboard focus from library navigation",
     for (auto* child : app.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    REQUIRE(buttons == 16); // includes the compact library menu
+    REQUIRE(buttons == 18); // includes the compact library menu and the List/Cloud switch
 }
 TEST_CASE("Hide empty restores on startup and saves toggles without losing other settings", "[ui][settings][hide-empty]")
 {

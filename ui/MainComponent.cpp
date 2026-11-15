@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include <unordered_set>
 #include "core/dsp/FeatureExtractorV2.h"
 #include "core/ml/FeatureV2Backfill.h"
 #include "core/ableton/AbletonPacks.h"
@@ -683,6 +684,18 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     selectionStatus.setJustificationType(juce::Justification::centredLeft);
     selectionStatus.setText("No sample selected",juce::dontSendNotification);
     library.onSelected = [this](const SampleRecord& r) { selectSample(r); };
+    addAndMakeVisible(listTab); addAndMakeVisible(cloudTab);
+    listTab.onClick = [this] { setCloudMode(false); };
+    cloudTab.onClick = [this] { setCloudMode(true); };
+    cloudPanel = std::make_unique<cloud::CloudView>();
+    cloudPanel->setComponentID("cloudView");
+    addChildComponent(*cloudPanel);
+    cloudPanel->onActivate = [this](int64_t id) { cloudActivate(id); };
+    cloudPanel->onHover = [this](int64_t id) { cloudHover(id); };
+    cloudPanel->onHoverEnd = [this] { cloudHoverEnd(); };
+    cloudBuilder = std::make_unique<cloud::CloudBuildService>();
+    hoverPool = std::make_unique<juce::ThreadPool>(1); // one decode at a time; stale ones are skipped
+    cloudTagSnapshot = readRepo != nullptr ? readRepo->tags() : std::vector<Tag> {};
     library.onTagAltClicked = [this](int64_t sampleId, int64_t tagId)
     {
         std::vector<int64_t> ids { sampleId };
@@ -1133,6 +1146,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     }
     // From here on every selection change is the user's, and may be stored in the project.
     sessionLive = true;
+    if (appSettings.cloudView) setCloudMode(true);
 }
 MainComponent::~MainComponent()
 {
@@ -1144,6 +1158,9 @@ MainComponent::~MainComponent()
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
     stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
     if (folderGenreWork.valid()) folderGenreWork.wait();
+    if (cloudBuilder) cloudBuilder.reset(); // joins the layout worker
+    if (hoverPool) { hoverPool->removeAllJobs(true, -1); hoverPool.reset(); }
+    ++(*cloudHoverGeneration);
     embeddedSettingsPanel = nullptr;
     embeddedSettingsHost.deleteAndZero();
     embeddedDialogHost.deleteAndZero();
@@ -1259,6 +1276,170 @@ void MainComponent::persistPreviewSettings()
     catch (const std::exception& e)
     { status.setText("Cannot save preview settings: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification); }
 }
+
+void MainComponent::showCloudView(bool show)
+{
+    setCloudMode(show);
+}
+
+void MainComponent::setCloudMode(bool show)
+{
+    if (cloudVisible == show && cloudPanel != nullptr && cloudPanel->isVisible() == show)
+    {
+        listTab.setToggleState(! show, juce::dontSendNotification);
+        cloudTab.setToggleState(show, juce::dontSendNotification);
+        return;
+    }
+    cloudVisible = show;
+    if (cloudPanel != nullptr) cloudPanel->setVisible(show);
+    library.setVisible(! show);
+    if (discBrowser != nullptr) discBrowser->setVisible(! show);
+    listTab.setToggleState(! show, juce::dontSendNotification);
+    cloudTab.setToggleState(show, juce::dontSendNotification);
+    previousPage.setVisible(! show);
+    nextPage.setVisible(! show);
+    pageSizeBox.setVisible(! show);
+    if (show)
+    {
+        updateCloudMatches();
+        requestCloudBuild();
+    }
+    else cloudHoverEnd();
+    resized();
+    persistCloudMode();
+}
+
+void MainComponent::persistCloudMode()
+{
+    appSettings.cloudView = cloudVisible;
+    if (! persistSessionState) return;
+    try { settingsStore.update([this](AppSettings& saved) { saved.cloudView = cloudVisible; }); }
+    catch (const std::exception& e)
+    { status.setText("Cannot save the view mode: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification); }
+}
+
+void MainComponent::requestCloudBuild()
+{
+    if (! cloudVisible || cloudBuilder == nullptr) return;
+    cloudBuildScheduled = true;
+    cloudBuildAtMs = juce::Time::getMillisecondCounter() + 500; // AutoTag and bulk tagging arrive in bursts
+}
+
+void MainComponent::pollCloudBuild()
+{
+    if (cloudBuilder == nullptr || cloudPanel == nullptr) return;
+    if (auto layout = cloudBuilder->poll())
+    {
+        cloudPanel->setLoading(false);
+        if (layout->valid())
+        {
+            cloudPanel->setLayout(std::move(*layout));
+            cloudPanel->setSelectedSample(selectedSampleId);
+            updateCloudMatches();
+        }
+        return;
+    }
+    if (cloudVisible && cloudBuilder->isRunning() && ! cloudPanel->hasLayout())
+        cloudPanel->setLoading(true, "Building the map...");
+    else if (cloudVisible && ! cloudBuilder->isRunning() && ! cloudBuildScheduled && ! cloudPanel->hasLayout())
+        cloudPanel->setLoading(false); // the build ended without a map: show the empty message
+}
+
+void MainComponent::updateCloudMatches()
+{
+    if (cloudPanel == nullptr || ! cloudPanel->hasLayout() || readRepo == nullptr) return;
+    const auto& points = cloudPanel->layout().points;
+    // Hide empty and Show ignored change almost nothing on a map of tagged, analysed files; a
+    // narrowing filter is a query, and only those are worth running on every keystroke.
+    const bool filtered = filter.text.isNotEmpty() || filter.folder.isNotEmpty()
+        || ! filter.includeTags.empty() || ! filter.excludeTags.empty()
+        || filter.starredOnly || filter.hideDuplicates || filter.duplicateHash.isNotEmpty();
+    if (! filtered)
+    {
+        cloudPanel->setFilter({});
+        cloudMatches.clear();
+        countLabel.setText(juce::String((int) points.size()) + " tagged files on the map", juce::dontSendNotification);
+        return;
+    }
+    std::unordered_set<int64_t> ids;
+    for (auto id : readRepo->queryIds(filter)) ids.insert(id);
+    std::vector<bool> matches(points.size(), false);
+    for (size_t i = 0; i < points.size(); ++i) matches[i] = ids.count(points[i].sampleId) > 0;
+    cloudPanel->setFilter(matches);
+    cloudMatches = std::move(matches);
+    const auto total = (int) points.size();
+    int matching = 0;
+    for (bool match : cloudMatches) matching += match ? 1 : 0;
+    countLabel.setText(juce::String(total) + " tagged files on the map  |  " + juce::String(matching) + " matching",
+                       juce::dontSendNotification);
+}
+
+void MainComponent::cloudActivate(int64_t sampleId)
+{
+    if (readRepo == nullptr) return;
+    auto record = readRepo->findById(sampleId);
+    if (! record) return;
+    cloudHoverEnd();
+    selectSample(*record);
+    // The list may be on another page: select the row when it is there, never a different file.
+    library.selectSampleById(sampleId);
+    if (cloudPanel != nullptr)
+    {
+        cloudPanel->setSelectedSample(sampleId);
+        cloudPanel->focusOnSample(sampleId);
+    }
+}
+
+void MainComponent::cloudHover(int64_t sampleId)
+{
+    if (! cloudVisible || readRepo == nullptr || cloudPanel == nullptr) return;
+    cloudHoverSample = sampleId;
+    const auto generation = ++(*cloudHoverGeneration);
+    auto record = readRepo->findById(sampleId);
+    if (! record) return;
+
+    juce::StringArray tagNames;
+    for (const auto& tag : readRepo->tagsForSample(sampleId)) tagNames.add(tag.name);
+    const auto separator = juce::String::fromUTF8("  \xc2\xb7  ");
+    auto caption = record->fileName;
+    if (! tagNames.isEmpty()) caption += separator + tagNames.joinIntoString(", ");
+    caption += separator + juce::String(record->duration, 2) + " s" + separator + record->format;
+    const bool playable = record->version >= 1 && record->error.isEmpty();
+    if (! playable) caption += separator + "no audio position";
+    cloudPanel->setLabel(sampleId, caption);
+
+    const juce::File file(record->filePath);
+    if (! playable || ! file.existsAsFile() || engine.isPlaying())
+    {
+        engine.hover().clear();
+        return;
+    }
+    auto current = cloudHoverGeneration;
+    auto safe = juce::Component::SafePointer<MainComponent>(this);
+    hoverPool->addJob([safe, current, generation, sampleId, file]
+    {
+        if (current->load() != generation) return; // the cursor already moved on
+        auto clip = HoverAudition::load(file, 10.0);
+        if (clip == nullptr) return;
+        juce::MessageManager::callAsync([safe, current, generation, sampleId, clip]
+        {
+            auto* self = safe.getComponent();
+            if (self == nullptr) return;
+            if (current->load() != generation || self->cloudHoverSample != sampleId) return;
+            if (self->engine.isPlaying()) return;
+            self->engine.hover().setAudio(clip);
+            self->engine.hover().play();
+        });
+    });
+}
+
+void MainComponent::cloudHoverEnd()
+{
+    ++(*cloudHoverGeneration);
+    cloudHoverSample = 0;
+    engine.hover().stop();
+}
+
 void MainComponent::persistHideEmpty()
 {
     appSettings.hideEmpty = filter.hideEmpty;
@@ -1693,6 +1874,15 @@ void MainComponent::reloadLibrary()
             juce::String text = juce::String(catalogCount) + (filter.hasTextOrTagFilter() ? " matching" : " samples")
                 + "  |  " + juce::String(shown) + " on page " + juce::String(pageOffset/pageSize+1);
             if (filter.matchAnyTag && ! filter.includeTags.empty()) text += "  |  any tag";
+            if (cloudVisible && cloudPanel != nullptr && cloudPanel->hasLayout())
+            {
+                // In the cloud the list page is not what the user is looking at: report the map.
+                const auto total = (int) cloudPanel->layout().points.size();
+                int matching = 0;
+                for (bool match : cloudMatches) matching += match ? 1 : 0;
+                text = juce::String(total) + " tagged files on the map";
+                if (! cloudMatches.empty()) text += "  |  " + juce::String(matching) + " matching";
+            }
             countLabel.setText(text,juce::dontSendNotification);
             previousPage.setEnabled(pageOffset > 0); nextPage.setEnabled(pageOffset+pageSize < catalogCount);
         }
@@ -1707,6 +1897,19 @@ void MainComponent::reloadLibrary()
         }
         else selectionStatus.setText("No sample selected",juce::dontSendNotification);
         (void) shown;
+        if (cloudVisible)
+        {
+            updateCloudMatches();
+            if (cloudPanel != nullptr && cloudPanel->hasLayout())
+            {
+                const auto total = (int) cloudPanel->layout().points.size();
+                int matching = 0;
+                for (bool match : cloudMatches) matching += match ? 1 : 0;
+                auto text = juce::String(total) + " tagged files on the map";
+                if (! cloudMatches.empty()) text += "  |  " + juce::String(matching) + " matching";
+                countLabel.setText(text, juce::dontSendNotification);
+            }
+        }
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
 }
@@ -2077,6 +2280,11 @@ AnalysisContent MainComponent::analysisFor(const SampleRecord& r) const
 
 void MainComponent::loadSelectedSample(const SampleRecord& r)
 {
+    if (cloudPanel != nullptr && cloudVisible)
+    {
+        cloudPanel->setSelectedSample(r.id);
+        cloudHoverEnd();
+    }
     const int selectedRows = library.getSelectedRowCount();
     if (selectedRows > 1)
     {
@@ -4912,6 +5120,40 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
 }
 void MainComponent::timerCallback()
 {
+    pollCloudBuild();
+    if (cloudVisible && cloudPanel != nullptr && cloudBuilder != nullptr)
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+        if (cloudBuildScheduled && (int32_t) (now - cloudBuildAtMs) >= 0)
+        {
+            cloudBuildScheduled = false;
+            if (! cloudBuilder->isRunning()) cloudBuilder->startCatalog(dbPath);
+        }
+        // Tag edits arrive from menus, AutoTag jobs and background services; the tag table carries
+        // their count and colour, so one cheap poll catches every path without hooking each one.
+        if (! cloudBuilder->isRunning() && ! cloudBuildScheduled && readRepo != nullptr)
+        {
+            auto tags = readRepo->tags();
+            bool changed = tags.size() != cloudTagSnapshot.size();
+            if (! changed)
+                for (size_t i = 0; i < tags.size(); ++i)
+                {
+                    const auto& a = tags[i];
+                    const auto& b = cloudTagSnapshot[i];
+                    if (a.id != b.id || a.colour != b.colour || a.sampleCount != b.sampleCount || a.name != b.name)
+                    {
+                        changed = true;
+                        break;
+                    }
+                }
+            if (changed)
+            {
+                cloudTagSnapshot = std::move(tags);
+                requestCloudBuild();
+            }
+        }
+        if (engine.isPlaying() && engine.hover().isPlaying()) engine.hover().stop();
+    }
     // The catalog's busy state changes while Settings is open; the page must follow it instead
     // of keeping the snapshot taken when the window was created.
     if (settingsPanel != nullptr) settingsPanel->setBusyState(indexer && indexer->progress().running);
@@ -5932,6 +6174,10 @@ void MainComponent::resized()
     const int cardWidth = juce::jmax(1, analysis.getWidth() - 14);
     analysisCard.setBounds(0, 0, cardWidth, analysisCard.preferredHeight(cardWidth));
     auto list = r.reduced(14,14); auto bar = list.removeFromTop(32);
+    listTab.setBounds(bar.removeFromLeft(58).withSizeKeepingCentre(58, studio::chipSmallHeight));
+    bar.removeFromLeft(studio::spacingTight);
+    cloudTab.setBounds(bar.removeFromLeft(66).withSizeKeepingCentre(66, studio::chipSmallHeight));
+    bar.removeFromLeft(studio::spacing);
     pageSizeBox.setBounds(bar.removeFromRight(92).withSizeKeepingCentre(92, studio::controlHeight));
     bar.removeFromRight(studio::spacingTight);
     nextPage.setBounds(bar.removeFromRight(studio::iconButtonSize));
@@ -5970,5 +6216,6 @@ void MainComponent::resized()
     }
     list.removeFromTop(8); library.setBounds(list);
     if (discBrowser != nullptr) discBrowser->setBounds(library.getBounds());
+    if (cloudPanel != nullptr) cloudPanel->setBounds(library.getBounds());
 }
 } // namespace sonicator

@@ -18,6 +18,9 @@ public:
     CloudBuildService(const CloudBuildService&) = delete;
     CloudBuildService& operator=(const CloudBuildService&) = delete;
 
+    // The application entry point: the worker opens its own catalog connection, loads the tagged
+    // files and builds, so neither the batch read nor the layout ever runs on the message thread.
+    void startCatalog(const juce::File& databasePath);
     // Replaces any running build. `input` is moved in; the caller keeps nothing.
     void start(CloudInput input);
     void cancel();

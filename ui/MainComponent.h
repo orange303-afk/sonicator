@@ -7,6 +7,8 @@
 #include "ui/library/FolderTree.h"
 #include "ui/library/FolderIndexRunner.h"
 #include "ui/library/TagStrip.h"
+#include "ui/cloud/CloudView.h"
+#include "core/cloud/CloudBuildService.h"
 #include "ui/disc/DiscBrowserPanel.h"
 #include "ui/preview/PreviewPanel.h"
 #include "core/indexing/IndexingService.h"
@@ -82,6 +84,9 @@ class MainComponent final : public juce::Component,
 {
 public:
     static juce::File defaultDatabaseFile();
+    // List or cloud. The standalone app persists the choice; the plug-in keeps it per session.
+    void showCloudView(bool show);
+    bool cloudViewActive() const { return cloudVisible; }
     // The settings file this window reads and writes. Exposed so tests can prove they never
     // touch the owner's live preferences.
     juce::File settingsFile() const;
@@ -195,6 +200,18 @@ private:
     KeyBpmBlock keyBpm;
     ActivityDot activityDot;
     TagStrip selectedTags;
+    // Cloud (tag map) view: one component, one batch query, one background build.
+    studio::Chip listTab { "List", true }, cloudTab { "Cloud", true };
+    std::unique_ptr<cloud::CloudView> cloudPanel;
+    std::unique_ptr<cloud::CloudBuildService> cloudBuilder;
+    std::unique_ptr<juce::ThreadPool> hoverPool;
+    bool cloudVisible = false;
+    bool cloudBuildScheduled = false;
+    juce::uint32 cloudBuildAtMs = 0;
+    std::vector<Tag> cloudTagSnapshot;
+    std::vector<bool> cloudMatches;
+    std::shared_ptr<std::atomic<uint64_t>> cloudHoverGeneration = std::make_shared<std::atomic<uint64_t>>(0);
+    int64_t cloudHoverSample = 0;
     juce::Viewport analysisViewport;
     juce::Label stageLabel;
     std::unique_ptr<Database> readDb, writeDb;
@@ -307,6 +324,14 @@ private:
     void scanRoots(bool force, bool newOnly = false);
     void reloadLibrary();
     void updateTagControls();
+    void setCloudMode(bool show);
+    void requestCloudBuild();
+    void pollCloudBuild();
+    void updateCloudMatches();
+    void cloudActivate(int64_t sampleId);
+    void cloudHover(int64_t sampleId);
+    void cloudHoverEnd();
+    void persistCloudMode();
     void selectSample(const SampleRecord&);
     // The Analysis card content for one record; the only place its values are formatted.
     AnalysisContent analysisFor(const SampleRecord&) const;
