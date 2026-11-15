@@ -21,6 +21,9 @@ private:
     PluginProcessor& processor;
     std::unique_ptr<sonicator::MainComponent> main;
     juce::Label unavailable;
+    // The host may restore project state while this window is open; the older selection must not
+    // be written back over it when the window closes.
+    int stateGenerationAtOpen = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginEditor)
 };

@@ -9,6 +9,7 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
     : juce::AudioProcessorEditor(owner), processor(owner)
 {
     const auto saved = processor.pluginState();
+    stateGenerationAtOpen = processor.stateGeneration();
     const auto database = processor.databaseFile();
     const auto settingsFile = processor.settingsFile();
 
@@ -57,9 +58,13 @@ PluginEditor::~PluginEditor()
 {
     if (main != nullptr)
     {
-        // The project keeps the final selection even when the host never asked for state again.
-        processor.updateSession(main->selectedFolderPath(), main->selectedSamplePath());
-        processor.updateWindowSize(getWidth(), getHeight());
+        // The project keeps the final selection even when the host never asked for state again,
+        // unless the host restored a newer state while this window was open.
+        if (processor.stateGeneration() == stateGenerationAtOpen)
+        {
+            processor.updateSession(main->selectedFolderPath(), main->selectedSamplePath());
+            processor.updateWindowSize(getWidth(), getHeight());
+        }
         main.reset();
     }
 }

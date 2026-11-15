@@ -44,6 +44,13 @@ void PluginProcessor::setPluginState(const PluginState& next)
 {
     const juce::ScopedLock lock(stateLock);
     state = next;
+    ++generation;
+}
+
+int PluginProcessor::stateGeneration() const
+{
+    const juce::ScopedLock lock(stateLock);
+    return generation;
 }
 
 void PluginProcessor::updateSession(const juce::String& folder, const juce::String& sample)

@@ -23,6 +23,9 @@ public:
     // A copy, so a host callback never reads a half-written state.
     PluginState pluginState() const;
     void setPluginState(const PluginState&);
+    // Increments whenever the host replaces the project state. An open editor uses it to avoid
+    // writing its older selection back over a state the host just restored.
+    int stateGeneration() const;
     void updateSession(const juce::String& folder, const juce::String& sample);
     void updateWindowSize(int width, int height);
 
@@ -57,6 +60,7 @@ private:
     juce::File database, settings;
     mutable juce::CriticalSection stateLock;
     PluginState state;
+    int generation = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginProcessor)
 };

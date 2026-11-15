@@ -1134,7 +1134,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     sendLookAndFeelChange();
     addKeyListener(&enterKeyListener);
     startTimerHz(10);
-    if (writeRepo != nullptr)
+    if (writeRepo != nullptr && ! embeddedUi)
         featureV2Worker = std::make_unique<std::thread>([this, repo = writeRepo.get()]
         {
             backfillFeatureV2(*repo, [this] { return cancelFeatureV2.load(); });
@@ -1308,6 +1308,9 @@ void MainComponent::ensureSelectedFolderVisible()
     filter.folder.clear();
     folders.clearSelection();
     appSettings.lastFolder.clear();
+    // The embedded window's selection belongs to the DAW project; the application's own last
+    // folder in the shared settings file must survive.
+    if (embeddedUi) return;
     try { settingsStore.update([](AppSettings& saved) { saved.lastFolder.clear(); }); } catch (...) {}
 }
 void MainComponent::setTagFilters(std::vector<int64_t> include, std::vector<int64_t> exclude, bool matchAny)
@@ -4395,19 +4398,28 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     menu.addSubMenu("Genre", genreMenu);
 
     menu.addItem(9001, allStarred ? "Unstar" : "Star", true, false, starMenuImage());
-    const bool smartAvailable = smart != nullptr && ! (indexer && indexer->progress().running);
-    menu.addItem(9005, selection.size() > 1 ? "Analyze selected (" + juce::String(selection.size()) + ")"
-                                            : juce::String("Analyze selected"),
-                 smartAvailable);
-    const bool autoTagIdle = autoTag != nullptr && ! autoTag->progress().running
-        && ! (indexer && indexer->progress().running)
-        && ! (smart && smart->progress().running)
-        && (tagging == nullptr || ! tagging->progress().running);
-    menu.addItem(9006, "AutoTag selected...", autoTagIdle);
-    const bool resetIdle = ! ids.empty() && autoTagDialog == nullptr
-        && (tagging == nullptr || ! tagging->progress().running)
-        && (autoTag == nullptr || ! autoTag->progress().running);
-    menu.addItem(9007, "Reset tags...", resetIdle);
+    // Analysis and AutoTag decode audio and write the catalog in batches; a plugin leaves both to
+    // the application, like scanning and file processing.
+    if (embeddedUi)
+    {
+        menu.addSectionHeader("Analysis and AutoTag run in the SONICATOR app");
+    }
+    else
+    {
+        const bool smartAvailable = smart != nullptr && ! (indexer && indexer->progress().running);
+        menu.addItem(9005, selection.size() > 1 ? "Analyze selected (" + juce::String(selection.size()) + ")"
+                                                : juce::String("Analyze selected"),
+                     smartAvailable);
+        const bool autoTagIdle = autoTag != nullptr && ! autoTag->progress().running
+            && ! (indexer && indexer->progress().running)
+            && ! (smart && smart->progress().running)
+            && (tagging == nullptr || ! tagging->progress().running);
+        menu.addItem(9006, "AutoTag selected...", autoTagIdle);
+        const bool resetIdle = ! ids.empty() && autoTagDialog == nullptr
+            && (tagging == nullptr || ! tagging->progress().running)
+            && (autoTag == nullptr || ! autoTag->progress().running);
+        menu.addItem(9007, "Reset tags...", resetIdle);
+    }
 #if JUCE_MAC
     const juce::String openLabel = "Open in Finder";
 #elif JUCE_WINDOWS
@@ -4430,6 +4442,10 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
           standardTypes, normalizeRecords, genreNames, catalogPath = dbPath](int result)
         {
             if (safe == nullptr || result == 0 || safe->dbPath != catalogPath) return;
+            // Defence in depth: the plugin hides these items, and no path may start them either.
+            if (safe->embeddedUi && (result == 9005 || result == 9006 || result == 9007
+                                     || result == 9008 || result == 9010 || result == 9025))
+                return;
             if ((safe->isSplitRunning() || safe->isExtractRunning())
                 && result != 9000 && result != 9002 && result != 9004)
             {

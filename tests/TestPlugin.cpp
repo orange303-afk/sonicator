@@ -59,6 +59,7 @@ TEST_CASE("Plugin state survives serialisation and clamps the window", "[plugin]
 #include "core/settings/AppSettings.h"
 #include "TestHelpers.h"
 #include <memory>
+#include <sqlite3.h>
 
 using namespace sonicator;
 
@@ -279,4 +280,150 @@ TEST_CASE("Embedded window disables scanning and file processing with an explana
     const auto folderBatch = app.commandRegistry().state("folders.batchProcess");
     CHECK_FALSE(folderBatch.canRun());
     CHECK(folderBatch.reason.contains("SONICATOR app"));
+}
+
+TEST_CASE("Host state restored while the editor is open survives closing the window",
+          "[plugin][ui][state]")
+{
+    TestDirectory t;
+    const auto kick = t.wave("lib/Drums/kick.wav");
+    const auto bass = t.wave("lib/Bass/bass.wav");
+    const auto lib = t.dir.getChildFile("lib");
+    const auto dbPath = t.dir.getChildFile("restore.sqlite");
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        repo.createTables();
+        for (const auto& file : { kick, bass })
+        {
+            auto record = BasicAnalyzer().analyzeAndHash(file);
+            REQUIRE(record.error.isEmpty());
+            repo.upsert(record);
+        }
+        repo.addRoot(lib.getFullPathName());
+    }
+    plugin::PluginProcessor processor(dbPath, t.dir.getChildFile("settings.json"));
+    plugin::PluginState opened;
+    opened.lastFolder = lib.getChildFile("Drums").getFullPathName();
+    opened.lastSamplePath = kick.getFullPathName();
+    opened.windowWidth = 1000;
+    opened.windowHeight = 700;
+    processor.setPluginState(opened);
+
+    auto editor = std::unique_ptr<juce::AudioProcessorEditor>(processor.createEditor());
+    REQUIRE(editor != nullptr);
+    auto* main = dynamic_cast<MainComponent*>(editor->findChildWithID("pluginMain"));
+    REQUIRE(main != nullptr);
+    REQUIRE(main->selectedSamplePath() == kick.getFullPathName());
+
+    // The host loads another project state while this window stays open.
+    plugin::PluginState restored;
+    restored.lastFolder = lib.getChildFile("Bass").getFullPathName();
+    restored.lastSamplePath = bass.getFullPathName();
+    restored.windowWidth = 1200;
+    restored.windowHeight = 760;
+    juce::MemoryBlock block;
+    {
+        const auto temporary = restored.toMemoryBlock();
+        block = temporary;
+    }
+    processor.setStateInformation(block.getData(), (int) block.getSize());
+    editor.reset();
+
+    const auto finalState = processor.pluginState();
+    CHECK(finalState.lastFolder == restored.lastFolder);
+    CHECK(finalState.lastSamplePath == restored.lastSamplePath);
+    CHECK(finalState.windowWidth == 1200);
+    CHECK(finalState.windowHeight == 760);
+}
+
+TEST_CASE("Embedded window never clears the application session when it hides an ignored folder",
+          "[plugin][session][gates]")
+{
+    TestDirectory t;
+    const auto kick = t.wave("lib/Drums/kick.wav");
+    const auto bass = t.wave("lib/Bass/bass.wav");
+    const auto lib = t.dir.getChildFile("lib");
+    const auto drums = lib.getChildFile("Drums");
+    const auto dbPath = t.dir.getChildFile("ignored.sqlite");
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        repo.createTables();
+        for (const auto& file : { kick, bass })
+        {
+            auto record = BasicAnalyzer().analyzeAndHash(file);
+            REQUIRE(record.error.isEmpty());
+            repo.upsert(record);
+        }
+        repo.addRoot(lib.getFullPathName());
+        repo.ignorePath(drums.getFullPathName(), true);
+    }
+    const auto settingsFile = t.dir.getChildFile("settings.json");
+    AppSettings application;
+    application.lastFolder = lib.getChildFile("Bass").getFullPathName();
+    application.lastSamplePath = bass.getFullPathName();
+    SettingsStore(settingsFile).save(application);
+    const auto initial = SettingsStore(settingsFile).load();
+
+    AudioEngine engine(false);
+    {
+        EmbeddedSession session;
+        session.lastFolder = drums.getFullPathName();
+        MainComponent app(dbPath, false, initial, settingsFile, &engine, true, std::move(session));
+        CHECK(app.selectedFolderPath().isEmpty());
+    }
+    const auto unchanged = SettingsStore(settingsFile).load();
+    CHECK(unchanged.lastFolder == application.lastFolder);
+    CHECK(unchanged.lastSamplePath == application.lastSamplePath);
+}
+
+TEST_CASE("Embedded window does not run the feature backfill", "[plugin][session][gates]")
+{
+    TestDirectory t;
+    const auto file = t.wave("lib/Drums/kick.wav");
+    const auto lib = t.dir.getChildFile("lib");
+    const auto dbPath = t.dir.getChildFile("backfill.sqlite");
+    int64_t sampleId = 0;
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        repo.createTables();
+        auto record = BasicAnalyzer().analyzeAndHash(file);
+        REQUIRE(record.error.isEmpty());
+        sampleId = repo.upsert(record);
+        repo.addRoot(lib.getFullPathName());
+    }
+    {
+        sqlite3* raw = nullptr;
+        REQUIRE(sqlite3_open(dbPath.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+        const auto sql = "INSERT INTO ml_feedback_samples"
+                         " (sample_id, file_hash, target_type, tags, features, updated_at, origin)"
+                         " VALUES (" + juce::String(sampleId) + ", 'hash', 'Kick', '', X'00', 0, 'user')";
+        REQUIRE(sqlite3_exec(raw, sql.toRawUTF8(), nullptr, nullptr, nullptr) == SQLITE_OK);
+        sqlite3_close(raw);
+    }
+    AudioEngine engine(false);
+    {
+        MainComponent app(dbPath, false, {}, t.dir.getChildFile("settings.json"), &engine, true);
+        app.setSize(1180, 720);
+    }
+    Database db(dbPath);
+    SampleRepository repo(db);
+    const auto rows = repo.allFeedback();
+    REQUIRE(rows.size() == 1);
+    // The legacy row stays legacy: the application owns the catalog-wide backfill.
+    CHECK(rows.front().featureSchema < 2);
+
+    // Control: an ordinary application window does run the same backfill on the same catalog.
+    {
+        MainComponent application(dbPath, false, {}, t.dir.getChildFile("app-settings.json"),
+                                  &engine, false);
+        application.setSize(1180, 720);
+    }
+    Database appDb(dbPath);
+    SampleRepository appRepo(appDb);
+    const auto backfilled = appRepo.allFeedback();
+    REQUIRE(backfilled.size() == 1);
+    CHECK(backfilled.front().featureSchema == 2);
 }
