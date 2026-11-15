@@ -172,6 +172,8 @@ AppSettings SettingsStore::load() const
         settings.favoritesPanelHeight = favoritesHeight;
     applyLayoutPreferences(settings.standaloneLayout, object->getProperty("layoutStandalone"));
     applyLayoutPreferences(settings.pluginLayout, object->getProperty("layoutPlugin"));
+    settings.pluginWindowWidth = juce::jmax(0, (int) object->getProperty("pluginWindowWidth"));
+    settings.pluginWindowHeight = juce::jmax(0, (int) object->getProperty("pluginWindowHeight"));
     settings.shortcuts = shortcutPreferencesFromVar(object->getProperty("shortcuts"));
     const auto lastSection = object->getProperty("settingsSection").toString().trim();
     if (lastSection.isNotEmpty() && lastSection.length() <= 32)
@@ -239,6 +241,8 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("favoritesPanelHeight", settings.favoritesPanelHeight);
     object->setProperty("layoutStandalone", layoutPreferencesToVar(settings.standaloneLayout));
     object->setProperty("layoutPlugin", layoutPreferencesToVar(settings.pluginLayout));
+    object->setProperty("pluginWindowWidth", settings.pluginWindowWidth);
+    object->setProperty("pluginWindowHeight", settings.pluginWindowHeight);
     object->setProperty("shortcuts", shortcutPreferencesToVar(settings.shortcuts));
     object->setProperty("settingsSection", settings.lastSettingsSection);
     object->setProperty("lastFolder", settings.lastFolder);

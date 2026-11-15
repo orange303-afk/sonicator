@@ -9,6 +9,13 @@ namespace sonicator::plugin
 PluginEditor::PluginEditor(PluginProcessor& owner)
     : juce::AudioProcessorEditor(owner), processor(owner)
 {
+    // Read at first editor creation rather than processor construction: a host may construct
+    // several processors before showing any of them, and the last user resize should still win.
+    AppSettings initial = SettingsStore(processor.settingsFile()).load();
+    processor.initialiseWindowSize(initial.pluginWindowWidth > 0 && initial.pluginWindowHeight > 0
+                                      ? initial.pluginWindowWidth : PluginState::defaultWidth,
+                                  initial.pluginWindowWidth > 0 && initial.pluginWindowHeight > 0
+                                      ? initial.pluginWindowHeight : PluginState::defaultHeight);
     const auto saved = processor.pluginState();
     stateGenerationAtOpen = processor.stateGeneration();
     const auto database = processor.databaseFile();
@@ -21,7 +28,6 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
     {
         // The plugin follows the application's theme and editing preferences but never its
         // session: the last folder and sample belong to the DAW project.
-        AppSettings initial = SettingsStore(settingsFile).load();
         initial.midiPreview = true; // a DAW keyboard plays the selection without a toggle
         initial.lastFolder.clear();
         initial.lastSamplePath.clear();
@@ -64,6 +70,9 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
                                                      PluginState::maximumWidth, saved.windowWidth)),
             juce::roundToInt(editorScale * juce::jlimit(PluginState::minimumHeight,
                                                      PluginState::maximumHeight, saved.windowHeight)));
+    rememberedWidth = juce::roundToInt(getWidth() / editorScale);
+    rememberedHeight = juce::roundToInt(getHeight() / editorScale);
+    initialising = false;
     // The host can load another project into this running instance. Polling the processor's
     // generation is how the window learns about it: the message thread is the only one allowed to
     // touch these components, and the processor is called from the host's thread.
@@ -73,6 +82,7 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
 PluginEditor::~PluginEditor()
 {
     stopTimer();
+    if (processor.stateGeneration() == stateGenerationAtOpen) persistWindowSize();
     if (main != nullptr)
     {
         // The project keeps the final selection even when the host never asked for state again,
@@ -101,7 +111,16 @@ void PluginEditor::showCatalogProblem(const juce::String& message, const juce::S
 void PluginEditor::timerCallback()
 {
     const int current = processor.stateGeneration();
-    if (current == stateGenerationAtOpen) return;
+    if (current == stateGenerationAtOpen)
+    {
+        if (windowSizeDirty && juce::Time::getMillisecondCounter() - lastWindowResize >= 250)
+            persistWindowSize();
+        return;
+    }
+    // Restoring a saved project is not a user resize and must not replace the default size
+    // for the next fresh instance (nor publish a resize that raced the restored state).
+    const juce::ScopedValueSetter<bool> restoring(restoringProjectSize, true);
+    windowSizeDirty = false;
     stateGenerationAtOpen = current;
     const auto saved = processor.pluginState();
     if (main != nullptr)
@@ -113,6 +132,30 @@ void PluginEditor::timerCallback()
     const int scaledWidth = juce::roundToInt(width * editorScale);
     const int scaledHeight = juce::roundToInt(height * editorScale);
     if (scaledWidth != getWidth() || scaledHeight != getHeight()) setSize(scaledWidth, scaledHeight);
+    rememberedWidth = width;
+    rememberedHeight = height;
+}
+
+void PluginEditor::persistWindowSize()
+{
+    if (! windowSizeDirty || main == nullptr) return;
+    const int width = juce::roundToInt(getWidth() / editorScale);
+    const int height = juce::roundToInt(getHeight() / editorScale);
+    try
+    {
+        SettingsStore(processor.settingsFile()).update([width, height](AppSettings& settings)
+        {
+            settings.pluginWindowWidth = width;
+            settings.pluginWindowHeight = height;
+        });
+        rememberedWidth = width;
+        rememberedHeight = height;
+        windowSizeDirty = false;
+    }
+    catch (const std::exception& e)
+    {
+        juce::Logger::writeToLog("Plugin window size was not saved: " + juce::String::fromUTF8(e.what()));
+    }
 }
 
 void PluginEditor::applyInterfaceScale(float scale)
@@ -145,6 +188,13 @@ void PluginEditor::resized()
                              juce::roundToInt(bounds.getHeight() / scale));
         processor.updateWindowSize(juce::roundToInt(getWidth() / scale),
                                    juce::roundToInt(getHeight() / scale));
+        if (! initialising && ! restoringProjectSize
+            && processor.stateGeneration() == stateGenerationAtOpen)
+        {
+            windowSizeDirty = juce::roundToInt(getWidth() / scale) != rememberedWidth
+                || juce::roundToInt(getHeight() / scale) != rememberedHeight;
+            lastWindowResize = juce::Time::getMillisecondCounter();
+        }
     }
     else
     {

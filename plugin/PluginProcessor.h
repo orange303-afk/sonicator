@@ -28,6 +28,8 @@ public:
     int stateGeneration() const;
     void updateSession(const juce::String& folder, const juce::String& sample);
     void updateWindowSize(int width, int height);
+    // Seed a fresh editor from shared preferences, but never replace its own/host-restored size.
+    void initialiseWindowSize(int width, int height);
 
     // The engine lives in the processor so preview audio and host MIDI survive editor closes.
     sonicator::AudioEngine& engine() { return hostEngine; }
@@ -61,6 +63,7 @@ private:
     mutable juce::CriticalSection stateLock;
     PluginState state;
     int generation = 0;
+    bool windowSizeKnown = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginProcessor)
 };

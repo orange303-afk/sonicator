@@ -196,6 +196,70 @@ TEST_CASE("Plugin scale and panel sizes survive editor reopen and a new instance
     checkRestored(*editor);
 }
 
+TEST_CASE("A fresh plugin inherits the latest window and panels without project state", "[plugin][new-instance-layout]")
+{
+    TestDirectory t;
+    const auto catalog = t.dir.getChildFile("fresh-layout.sqlite");
+    { Database db(catalog); SampleRepository repo(db); repo.createTables(); }
+    const auto settingsFile = t.dir.getChildFile("settings.json");
+    AppSettings preferences;
+    preferences.scalePercent = 125;
+    preferences.windowWidth = 1900; // standalone geometry must remain independent
+    preferences.windowHeight = 1100;
+    SettingsStore(settingsFile).save(preferences);
+    plugin::PluginProcessor first(catalog, settingsFile);
+    // Some hosts construct the processor long before opening its editor.
+    plugin::PluginProcessor waiting(catalog, settingsFile);
+    std::unique_ptr<juce::AudioProcessorEditor> editor(first.createEditor());
+    editor->setSize(2000, 1250); // 1600 x 1000 logical pixels
+    auto* main = dynamic_cast<MainComponent*>(editor->findChildWithID("pluginMain"));
+    REQUIRE(main != nullptr);
+    for (auto change : std::vector<std::pair<juce::String, int>> {
+             { "foldersDivider", 70 }, { "analysisDivider", -40 }, { "previewDivider", -60 } })
+    {
+        auto* divider = dynamic_cast<PanelSplitter*>(main->findChildWithID(change.first));
+        REQUIRE(divider != nullptr);
+        divider->onDragBegin(divider->getPreferred());
+        divider->onDrag(change.second);
+        divider->onCommit();
+    }
+    const auto layout = main->currentLayout();
+    // Let the resize finish while the first editor is still open, then insert a fresh instance.
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(500);
+    auto check = [&](juce::AudioProcessorEditor& other)
+    {
+        CHECK(other.getWidth() == 2000);
+        CHECK(other.getHeight() == 1250);
+        auto* browser = dynamic_cast<MainComponent*>(other.findChildWithID("pluginMain"));
+        REQUIRE(browser != nullptr);
+        CHECK(browser->currentLayout().folders == layout.folders);
+        CHECK(browser->currentLayout().analysis == layout.analysis);
+        CHECK(browser->currentLayout().preview == layout.preview);
+        CHECK(browser->selectedSamplePath().isEmpty());
+    };
+    { std::unique_ptr<juce::AudioProcessorEditor> other(waiting.createEditor()); check(*other); }
+    editor.reset();
+    plugin::PluginProcessor fresh(catalog, settingsFile);
+    juce::MemoryBlock initialState;
+    fresh.getStateInformation(initialState); // hosts may capture the initial state before any UI
+    const auto captured = plugin::PluginState::fromMemoryBlock(initialState.getData(), initialState.getSize());
+    CHECK(captured.windowWidth == 1600);
+    CHECK(captured.windowHeight == 1000);
+    { std::unique_ptr<juce::AudioProcessorEditor> other(fresh.createEditor()); check(*other); }
+    CHECK(SettingsStore(settingsFile).load().windowWidth == 1900);
+    CHECK(SettingsStore(settingsFile).load().windowHeight == 1100);
+
+    // A saved project's own geometry still wins over the global new-instance default.
+    plugin::PluginProcessor restored(catalog, settingsFile);
+    plugin::PluginState project;
+    project.windowWidth = 1000;
+    project.windowHeight = 700;
+    restored.setPluginState(project);
+    std::unique_ptr<juce::AudioProcessorEditor> restoredEditor(restored.createEditor());
+    CHECK(restoredEditor->getWidth() == 1250);
+    CHECK(restoredEditor->getHeight() == 875);
+}
+
 #include "plugin/PluginProcessor.h"
 #include "plugin/PluginEditor.h"
 #include "ui/MainComponent.h"
@@ -997,4 +1061,33 @@ TEST_CASE("Application and plug-in keep one catalog open at the same time", "[pl
         CHECK(tags.front().name == "Parallel");
     }
     CHECK(processor.pluginState().lastSamplePath == kick.getFullPathName());
+}
+
+TEST_CASE("Immediate close remembers a resize but closing an unchanged old editor does not replace it",
+          "[plugin][new-instance-layout]")
+{
+    TestDirectory t;
+    const auto catalog = makeCatalog(t, "last-size.sqlite", {});
+    const auto settings = t.dir.getChildFile("settings.json");
+    plugin::PluginProcessor old(catalog, settings), edited(catalog, settings);
+    std::unique_ptr<juce::AudioProcessorEditor> oldEditor(old.createEditor());
+    std::unique_ptr<juce::AudioProcessorEditor> editedEditor(edited.createEditor());
+    editedEditor->setSize(1600, 1000);
+    editedEditor.reset(); // no debounce/message loop: close must flush the last resize
+    oldEditor.reset();    // its stale default size must not win simply because it closed last
+    plugin::PluginProcessor fresh(catalog, settings);
+    std::unique_ptr<juce::AudioProcessorEditor> freshEditor(fresh.createEditor());
+    CHECK(freshEditor->getWidth() == 1600);
+    CHECK(freshEditor->getHeight() == 1000);
+
+    plugin::PluginState restored;
+    restored.windowWidth = 1100;
+    restored.windowHeight = 680;
+    fresh.setPluginState(restored);
+    REQUIRE(pumpUntil([&] { return freshEditor->getWidth() == 1100; }));
+    freshEditor.reset(); // a host restore is not a user resize or a new global default
+    plugin::PluginProcessor next(catalog, settings);
+    std::unique_ptr<juce::AudioProcessorEditor> nextEditor(next.createEditor());
+    CHECK(nextEditor->getWidth() == 1600);
+    CHECK(nextEditor->getHeight() == 1000);
 }

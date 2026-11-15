@@ -131,6 +131,16 @@ from settings. The plugin reads Favorites height from its own layout, not the st
 legacy height field. `tests/TestPlugin.cpp` (`[layout-persistence]`) changes scale and all four
 dividers, then verifies the actual geometry after editor recreation and new-instance state restore.
 
+A **new instance without project state** starts at the last user-sized editor dimensions, read
+from `pluginWindowWidth` / `pluginWindowHeight` in the shared settings (logical pixels). Those
+dimensions are separate from the standalone app's bounds. The editor remembers them after a
+250 ms resize pause, or immediately on close. Panels still come from `pluginLayout`, so the new
+window has the same available area and layout rather than clamping them into the default window.
+Existing project state takes precedence over these defaults. Opening/restoring a project, or
+closing an unchanged older editor, does not replace the last user-sized global default.
+Tests tagged `[new-instance-layout]` cover fresh instances without any state round-trip,
+processors constructed before the resize, closing before the debounce, and host state priority.
+
 Settings has a Close button in both standalone and embedded mode. Support links are stacked.
 The plugin's library context menu labels the unavailable file-processing group **Processing**.
 With Loop enabled, dragging a selection outside the editor displays “Отключите луп”; live movement

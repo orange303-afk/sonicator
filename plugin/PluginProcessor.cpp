@@ -27,6 +27,16 @@ PluginProcessor::PluginProcessor(juce::File databaseFile, juce::File settingsFil
                                                         true)),
       database(std::move(databaseFile)), settings(std::move(settingsFile))
 {
+    // Hosts may capture the factory state before creating an editor. Give that state the last
+    // user-sized window too, rather than recording the hard-coded fallback in a new project.
+    const auto initial = SettingsStore(settings).load();
+    if (initial.pluginWindowWidth > 0 && initial.pluginWindowHeight > 0)
+    {
+        state.windowWidth = juce::jlimit(PluginState::minimumWidth, PluginState::maximumWidth,
+                                        initial.pluginWindowWidth);
+        state.windowHeight = juce::jlimit(PluginState::minimumHeight, PluginState::maximumHeight,
+                                         initial.pluginWindowHeight);
+    }
     // Instrument layout: no audio inputs, one stereo output, MIDI input announced by the wrapper.
     setPlayConfigDetails(0, 2, 44100.0, 512);
 }
@@ -44,6 +54,7 @@ void PluginProcessor::setPluginState(const PluginState& next)
 {
     const juce::ScopedLock lock(stateLock);
     state = next;
+    windowSizeKnown = true;
     ++generation;
 }
 
@@ -65,6 +76,16 @@ void PluginProcessor::updateWindowSize(int width, int height)
     const juce::ScopedLock lock(stateLock);
     state.windowWidth = juce::jlimit(PluginState::minimumWidth, PluginState::maximumWidth, width);
     state.windowHeight = juce::jlimit(PluginState::minimumHeight, PluginState::maximumHeight, height);
+    windowSizeKnown = true;
+}
+
+void PluginProcessor::initialiseWindowSize(int width, int height)
+{
+    const juce::ScopedLock lock(stateLock);
+    if (windowSizeKnown) return;
+    state.windowWidth = juce::jlimit(PluginState::minimumWidth, PluginState::maximumWidth, width);
+    state.windowHeight = juce::jlimit(PluginState::minimumHeight, PluginState::maximumHeight, height);
+    windowSizeKnown = true;
 }
 
 void PluginProcessor::prepareToPlay(double sampleRate, int maximumExpectedSamplesPerBlock)

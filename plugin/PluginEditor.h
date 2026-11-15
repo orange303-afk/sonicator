@@ -27,6 +27,10 @@ private:
     int stateGenerationAtOpen = 0;
     float editorScale = 1.0f;
     void applyInterfaceScale(float);
+    bool initialising = true, restoringProjectSize = false, windowSizeDirty = false;
+    int rememberedWidth = 0, rememberedHeight = 0;
+    juce::uint32 lastWindowResize = 0;
+    void persistWindowSize();
 
     // Replaces the browser with an explanation when the shared catalog cannot be opened.
     void showCatalogProblem(const juce::String& message, const juce::String& componentId);

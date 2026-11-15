@@ -34,6 +34,9 @@ struct AppSettings
     int favoritesPanelHeight = 200;    // user-dragged divider position
     PanelLayoutPreferences standaloneLayout;
     PanelLayoutPreferences pluginLayout;
+    // Last user-sized plugin editor, in logical pixels; independent of standalone bounds.
+    // Zero means no remembered size yet. Project state takes precedence for restored instances.
+    int pluginWindowWidth = 0, pluginWindowHeight = 0;
     ShortcutPreferences shortcuts;
     juce::String lastSettingsSection = "general";
     juce::String lastFolder;           // restored on the next launch when still in the catalog
