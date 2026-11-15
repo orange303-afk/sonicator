@@ -464,3 +464,24 @@ same resolver rank as `global_adaptive` and is still only a fallback when no oth
 exists. The About panel shows the model date, label count and the dataset attribution line.
 Contribution payloads now carry `featureSchema` per record and the intake, export and schema-1
 training reader accept both lengths; the shipped prototype file stays schema 1.
+
+
+## Batch processing
+
+`core/batch` is a streaming, copy-only pipeline. `prepareBatch` freezes the request, resolves the
+catalog snapshot (rows or a recursive physical folder), expands stereo pairs, probes each file with
+the shared reader, resolves output capabilities and reserves deterministic output paths. The
+resulting `PreparedBatch` has no UI pointers and no open writer.
+
+`PreparedAudio` turns the source into a replayable stage chain. Global parameters (DC mean, trim
+bounds, normalize peak) are measured on the already prepared stream, so a later step sees the real
+intermediate result. `ConvertedStream` applies channel mapping and libsamplerate
+`SRC_SINC_BEST_QUALITY` with an exact `Nout` contract. `Quantizer` produces left-aligned int32 words
+for integer writers and owns the only TPDF dither pass. `encodeToTemporary` writes, closes and
+reopens the file; `validateEncodedFile` checks the container facts and decodes every frame.
+`publishBatchFile` commits with an atomic no-clobber link (Rename) or a verified atomic replace.
+
+`BatchService` runs one job on one worker and exposes a polled `Progress`/`Report`; the dialog never
+writes audio and the preview service owns no audio device. All new tests are tagged `[batch]` plus a
+narrow tag, use `TestDirectory` for settings and scratch audio, and never touch the live catalog or
+settings file.

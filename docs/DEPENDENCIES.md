@@ -27,6 +27,11 @@ option requires for a combined work.
   SQLite dependency.
   - https://sqlite.org/copyright.html
   - https://sqlite.org/2024/sqlite-amalgamation-3470200.zip
+- libsamplerate **0.2.2**, **BSD-2-Clause**, fetched as a pinned archive
+  (`SHA256=16e881487f184250deb4fcb60432d7556ab12cb58caea71ef23960aec6c0405a`) and linked
+  statically. It provides the band-limited conversion used by Batch Processing. Examples, tests and
+  install rules are off, so its test tree never joins Sonicator's ctest.
+  - https://github.com/libsndfile/libsamplerate/blob/0.2.2/COPYING
 - Catch2 **3.7.1**, Boost Software License 1.0, test-only, fetched at configure time.
   - https://github.com/catchorg/Catch2/blob/v3.7.1/LICENSE.txt
 - libxmp **4.6.2** (`libxmp-4.6.2` tag), **LGPL-2.1-or-later**, fetched at configure time and linked
