@@ -15,6 +15,18 @@ Always consult `~/Documents/orange303/Sonicator Features.md` when:
 - After modifying code, run `graphify update .` to keep the graph current.
 - Architecture details are documented in `docs/ARCHITECTURE.md`.
 
+## File Safety: exported audio is project media
+`~/Library/Sonicator/exports/` — including `exports/drag/` — holds audio that DAW projects may
+reference: selection exports and the WAVs materialised for drag-and-drop (EMU `.ebl`, REX2, REX
+selections). These files are **not** test leftovers.
+
+**Rule:**
+- Never delete, move or "clean up" the exports folder or the drag cache without the owner's
+  explicit request.
+- Before removing any exported audio, check the DAW projects (Cubase `.cpr`, REAPER `.rpp`,
+  Live `.als`, Bitwig `.bwproject`) for references to it.
+- A cleanup of temporary files must name its targets explicitly, not a whole directory.
+
 ## Feature Specifications
 - Batch Processing v1 and audio converter: implemented; see `docs/BATCH_PROCESSING.md`, acceptance `docs/BATCH_PROCESSING_ACCEPTANCE.md`, spec `docs/superpowers/specs/2026-11-15-batch-processing-tz.md`. The broader converter design `docs/superpowers/specs/2026-11-14-batch-audio-converter-design.md` covers later stages.
 - User plugin system plan and requirements: `docs/superpowers/specs/2026-11-14-user-plugins-design.md` (design only; not implemented).
@@ -23,3 +35,4 @@ Always consult `~/Documents/orange303/Sonicator Features.md` when:
 - Settings navigation: implemented in `stage-settings-hotkeys-layout`; see `docs/SETTINGS_HOTKEYS_LAYOUT_ACCEPTANCE.md`, spec `docs/superpowers/specs/2026-11-14-settings-navigation-design.md`.
 - Workspace Studio styling (header, toolbar, table, Analysis, Preview, dialogs): implemented in `stage-workspace-studio`; see `docs/WORKSPACE_STUDIO_ACCEPTANCE.md`, spec `docs/superpowers/specs/2026-11-14-workspace-studio-design.md`, plan `docs/superpowers/plans/2026-11-14-workspace-studio.md`.
 - DAW plugin P1: `SONICATOR` VST3/AU browser on the shared catalog with project state and disabled heavy jobs; see `docs/PLUGIN.md`, plan `docs/superpowers/plans/2026-11-15-plugin-product-p1.md`. Match BPM / Match Scale are P2.
+- Catalog safety and plugin state: the plugin never migrates the shared catalog (schema 19 in `core/database/CatalogSchema.h`, read-only check in `core/database/CatalogCompatibility.h`); embedded dialogs and state restore while the editor is open live in `ui/shell/ThemedDialogs.h` and `plugin/PluginEditor.cpp`; see `docs/PLUGIN.md`, plan `docs/superpowers/plans/2026-11-15-plugin-safety-and-beta.md`.

@@ -27,6 +27,7 @@
 #include "ui/commands/CommandRouter.h"
 #include "ui/shell/PanelLayout.h"
 #include "ui/shell/PanelSplitter.h"
+#include "ui/shell/ThemedDialogs.h"
 #include "ui/settings/SettingsSection.h"
 #include <mutex>
 #include <future>
@@ -74,6 +75,7 @@ private:
     int dragStartHeight = 0;
 };
 class MainComponent final : public juce::Component,
+                            public dialogs::EmbeddedDialogHost,
                             public juce::FileDragAndDropTarget,
                             private juce::Timer,
                             private juce::DarkModeSettingListener
@@ -130,6 +132,13 @@ public:
     // Current selection, so an embedded editor can store it in the DAW project on close.
     juce::String selectedFolderPath() const { return selectedFolder; }
     juce::String selectedSamplePath() const { return sessionSamplePath; }
+    // Applies a project's stored folder and sample to this open window, the way construction
+    // applies them to a new one. Used when a host loads another project into a running instance.
+    void applySessionSelection(const juce::String& folder, const juce::String& sample);
+    // False when the catalog could not be opened (missing, not a catalog, or another build's
+    // schema). The plugin then shows `catalogError()` and leaves the project state untouched.
+    bool catalogIsOpen() const { return readRepo != nullptr; }
+    juce::String catalogError() const { return catalogOpenError; }
     // Rebuilds the library and favorites trees off the message thread and installs the result.
     void requestFolderTreeRefresh();
     void applyFolderIndex(FolderIndex);
@@ -139,6 +148,9 @@ public:
     void resetLayout();
     // Restores one panel to its default and keeps the other sizes.
     void resetPanelSize(const juce::String& panelId);
+    // EmbeddedDialogHost: an embedded window draws dialogs inside itself, so no host-owned
+    // top-level window can drift behind the DAW or close on the first click.
+    bool showEmbeddedDialog(std::unique_ptr<juce::Component> content) override;
 private:
     SonicatorLookAndFeel look;
     juce::Image logoWordmark;
@@ -150,6 +162,8 @@ private:
     AudioEngine& engine;
     bool embeddedUi = false;
     EmbeddedSession embeddedSession;
+    // Why the catalog is not open, when it is not. Shown by the plugin instead of an empty browser.
+    juce::String catalogOpenError;
     PreviewPanel preview;
     FileListPanel library;
     FolderTree folders;
@@ -242,6 +256,10 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     juce::Component::SafePointer<juce::DialogWindow> audioDialog, settingsDialog, relocateDialog, autoTagDialog;
     juce::Component::SafePointer<juce::Component> embeddedSettingsHost;
+    // A dialog opened from an embedded window; it replaces the settings overlay's role for
+    // prompts and confirmations, and only one is shown at a time.
+    juce::Component::SafePointer<juce::Component> embeddedDialogHost;
+    void closeEmbeddedDialog();
     juce::Component::SafePointer<SettingsPanel> embeddedSettingsPanel;
     juce::Component::SafePointer<SettingsPanel> settingsPanel;
     std::unique_ptr<DiscBrowserPanel> discBrowser;
@@ -258,6 +276,9 @@ private:
     uint32_t lastRefreshMs = 0, lastSearchChange = 0, lastSessionSaveMs = 0;
     juce::String sessionSamplePath;
     bool sessionDirty = false, restoringSession = false, persistSessionState = false;
+    // Set at the end of construction: the first load is not a user edit, and a callback
+    // then would store an empty selection in the project before the restore has run.
+    bool sessionLive = false;
     juce::String pendingSearch;
     juce::Rectangle<int> sidebarBounds, analysisBounds, headerBounds, filterSeparatorBounds;
     // Effective split of the panel row and the preview band, rebuilt on every resize.

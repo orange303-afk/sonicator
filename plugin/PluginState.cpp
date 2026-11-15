@@ -1,5 +1,4 @@
 #include "plugin/PluginState.h"
-#include <limits>
 
 namespace sonicator::plugin
 {
@@ -40,7 +39,7 @@ juce::MemoryBlock PluginState::toMemoryBlock() const
 PluginState PluginState::fromMemoryBlock(const void* data, size_t sizeInBytes)
 {
     if (data == nullptr || sizeInBytes == 0) return {};
-    if (sizeInBytes > (size_t) std::numeric_limits<int>::max()) return {};
+    if (sizeInBytes > maximumStateBytes) return {};
     const auto text = juce::String::fromUTF8(static_cast<const char*>(data), (int) sizeInBytes);
     const auto xml = juce::XmlDocument::parse(text);
     if (xml == nullptr || xml->getTagName() != rootTag) return {};

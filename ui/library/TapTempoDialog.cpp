@@ -37,6 +37,7 @@ TapTempoDialog::TapTempoDialog(juce::String titleText)
     };
     applyButton.onClick = [this] { apply(); };
     cancelButton.onClick = [this] { cancel(); };
+    setComponentID("tapTempoDialog");
     setWantsKeyboardFocus(true);
     setSize(340, 260);
     updateLabels();
@@ -113,6 +114,8 @@ void TapTempoDialog::closeDialog()
 {
     if (auto* window = findParentComponentOfClass<juce::DialogWindow>())
         window->exitModalState(0);
+    // Inside a DAW editor the dialog is a plain child of the plugin window: the host removes it.
+    else requestClose();
 }
 
 void TapTempoDialog::paint(juce::Graphics& g)
@@ -143,6 +146,14 @@ void TapTempoDialog::parentHierarchyChanged()
 {
     // The modal window itself takes focus, and its default keyPressed does not reach the content.
     // Listening on the top-level component makes Space/Return/Esc work regardless of who holds it.
+    // An embedded dialog has no window of its own, and the top-level component there belongs to
+    // the host, so it keeps its keys and this one relies on ordinary focus.
+    if (findParentComponentOfClass<juce::DialogWindow>() == nullptr)
+    {
+        if (keyTarget != nullptr) { keyTarget->removeKeyListener(this); keyTarget = nullptr; }
+        if (isShowing()) grabKeyboardFocus();
+        return;
+    }
     if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
     {
         if (keyTarget != top)
@@ -174,6 +185,19 @@ void TapTempoDialog::launch(juce::Component* owner, juce::String titleText,
     dialog->onStopLoop = std::move(stopLoop);
     dialog->onApply = std::move(apply);
     dialog->setLoopAvailable(static_cast<bool>(dialog->onStartLoop) || static_cast<bool>(dialog->onStopLoop));
+    if (owner != nullptr)
+        if (auto* host = dialogs::embeddedHostFor(*owner))
+        {
+            juce::Component::SafePointer<TapTempoDialog> safe(dialog.get());
+            if (host->showEmbeddedDialog(std::move(dialog)))
+            {
+                juce::MessageManager::callAsync([safe]
+                {
+                    if (safe != nullptr) safe->grabKeyboardFocus();
+                });
+                return;
+            }
+        }
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned(dialog.release());
     options.dialogTitle = "Tap BPM";

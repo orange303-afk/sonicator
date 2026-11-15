@@ -14,6 +14,9 @@ struct PluginState
     static constexpr int minimumHeight = 580;
     static constexpr int maximumWidth = 3840;
     static constexpr int maximumHeight = 2160;
+    // A host hands over whatever the project file contains. A real block is a few hundred bytes,
+    // so anything larger than this is foreign data and is ignored instead of being parsed.
+    static constexpr size_t maximumStateBytes = 64 * 1024;
 
     int version = currentVersion;
     juce::String lastFolder;

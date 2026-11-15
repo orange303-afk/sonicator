@@ -818,6 +818,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             return;
         }
         if (discBrowser) { discBrowser->closeImage(); discBrowser->setVisible(false); }
+        // The folder tree re-selects the restored folder on its own after a background index
+        // arrives. That is not a folder change and must not drop the project's sample.
+        if (path == selectedFolder) return;
         selectedFolder = std::move(path); pageOffset = 0;
         sessionSamplePath.clear(); markSessionStateDirty();
         reloadLibrary();
@@ -846,6 +849,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         if (path.isEmpty()) return;
         if (discBrowser) { discBrowser->closeImage(); discBrowser->setVisible(false); }
         folders.clearSelection();
+        // As above: a programmatic re-selection of the folder already shown keeps the sample.
+        if (path == selectedFolder) return;
         selectedFolder = std::move(path); pageOffset = 0;
         sessionSamplePath.clear(); markSessionStateDirty();
         reloadLibrary();
@@ -1017,10 +1022,19 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     try
     {
         writeDb = std::make_unique<Database>(dbPath); writeRepo = std::make_unique<SampleRepository>(*writeDb);
-        writeRepo->createTables();
-        // Formats this build no longer indexes leave the catalog; the files stay on disk.
-        if (purgeUnsupportedRows(*writeRepo) > 0)
-            writeRepo->refreshDuplicates();
+        // Only the application owns the catalog's schema. A plug-in checks the version and
+        // refuses to touch a catalog written by another build, so opening it in a DAW can never
+        // make the library unreadable to the application.
+        if (embeddedUi)
+            writeRepo->requireCompatibleSchema();
+        else
+            writeRepo->createTables();
+        if (! embeddedUi)
+        {
+            // Formats this build no longer indexes leave the catalog; the files stay on disk.
+            if (purgeUnsupportedRows(*writeRepo) > 0)
+                writeRepo->refreshDuplicates();
+        }
         readDb = std::make_unique<Database>(dbPath); readRepo = std::make_unique<SampleRepository>(*readDb);
         AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
         loadShippedGlobalPrototypes();
@@ -1056,58 +1070,23 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         splitter = std::make_unique<SplitService>();
         extractor = std::make_unique<ExtractService>();
         normalizer = std::make_unique<NormalizeService>();
-        restoringSession = true;
+        refreshFavorites();   // the favorites panel follows its visibility at once; its content
+                              // arrives with the background build
         // A plugin restores its own project, never the application's last session.
         const auto initialFolder = embeddedUi ? embeddedSession.lastFolder : appSettings.lastFolder;
         const auto initialSample = embeddedUi ? embeddedSession.lastSamplePath
                                               : appSettings.lastSamplePath;
-        if (! initialFolder.isEmpty()
-            && juce::File(initialFolder).isDirectory()
-            && readRepo->countInFolder(initialFolder) > 0)
-            selectedFolder = initialFolder;
-        pendingTreeSelection = selectedFolder;
-        requestFolderTreeRefresh();
-        refreshFavorites();   // the favorites panel follows its visibility at once; its content
-                              // arrives with the background build
-        reloadLibrary();
-        if (! initialSample.isEmpty())
-        {
-            if (const auto record = readRepo->findByPath(initialSample))
-            {
-                const bool inScope = selectedFolder.isEmpty()
-                    || juce::File(record->filePath).isAChildOf(juce::File(selectedFolder));
-                if (inScope && library.selectSampleById(record->id))
-                {
-                    selectedSampleId = record->id;
-                    sessionSamplePath = record->filePath;
-                    updateSelectionStatus(*record);
-                    updateSelectedTags();
-                    // The restored sample is shown by the preview below; the card must match it.
-                    refreshAnalysis(analysisFor(*record));
-                    if (record->isDiscEntry())
-                    {
-                        preview.clearDiscSource();
-                        status.setText("Inside " + juce::File(record->containerPath).getFileName()
-                            + "  ·  " + record->discPath + ". Press Enter to open the image.",
-                            juce::dontSendNotification);
-                    }
-                    else if (isDiscImageFormat(record->format))
-                    {
-                        preview.clearDiscSource();
-                        status.setText("Double-click the image or press Enter to browse its contents",
-                                      juce::dontSendNotification);
-                    }
-                    else preview.loadFile(juce::File(record->filePath), false);
-                }
-            }
-        }
-        restoringSession = false;
+        applySessionSelection(initialFolder, initialSample);
         sessionDirty = false;
         status.setText(catalogCount > 0
             ? juce::String(catalogCount) + " samples loaded"
             : "Ready. Add a folder to begin.",juce::dontSendNotification);
     }
-    catch (const std::exception& e) { status.setText("Database error: " + juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
+    catch (const std::exception& e)
+    {
+        catalogOpenError = juce::String::fromUTF8(e.what());
+        status.setText("Database error: " + catalogOpenError, juce::dontSendNotification);
+    }
     const auto missing = missingRoots();
     if (! missing.isEmpty())
     {
@@ -1155,6 +1134,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             });
         }
     }
+    // From here on every selection change is the user's, and may be stored in the project.
+    sessionLive = true;
 }
 MainComponent::~MainComponent()
 {
@@ -1168,6 +1149,7 @@ MainComponent::~MainComponent()
     if (folderGenreWork.valid()) folderGenreWork.wait();
     embeddedSettingsPanel = nullptr;
     embeddedSettingsHost.deleteAndZero();
+    embeddedDialogHost.deleteAndZero();
     settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
     if (splitDialog != nullptr)
     {
@@ -2476,7 +2458,7 @@ void MainComponent::showEditTagsMenu()
 }
 void MainComponent::markSessionStateDirty()
 {
-    if (restoringSession) return;
+    if (restoringSession || ! sessionLive) return;
     sessionDirty = true;
     // The plugin stores the same two values in the DAW project instead of settings.json.
     if (embeddedSession.onChanged != nullptr)
@@ -2485,6 +2467,48 @@ void MainComponent::markSessionStateDirty()
 void MainComponent::flushSessionState()
 {
     saveSessionState();
+}
+void MainComponent::applySessionSelection(const juce::String& folder, const juce::String& sample)
+{
+    if (readRepo == nullptr) return;
+    // Restoring a project is not a user edit: no selection callback and no dirty session while it
+    // runs, exactly as when the window opens with the same values.
+    const juce::ScopedValueSetter<bool> restoring(restoringSession, true);
+    selectedFolder.clear();
+    if (folder.isNotEmpty()
+        && juce::File(folder).isDirectory()
+        && readRepo->countInFolder(folder) > 0)
+        selectedFolder = folder;
+    pendingTreeSelection = selectedFolder;
+    requestFolderTreeRefresh();
+    reloadLibrary();
+    if (sample.isEmpty()) return;
+    const auto record = readRepo->findByPath(sample);
+    if (! record.has_value()) return;
+    const bool inScope = selectedFolder.isEmpty()
+        || juce::File(record->filePath).isAChildOf(juce::File(selectedFolder));
+    if (! inScope || ! library.selectSampleById(record->id)) return;
+    selectedSampleId = record->id;
+    sessionSamplePath = record->filePath;
+    updateSelectionStatus(*record);
+    updateSelectedTags();
+    // The restored sample is shown by the preview; the analysis card must match it.
+    refreshAnalysis(analysisFor(*record));
+    if (record->isDiscEntry())
+    {
+        preview.clearDiscSource();
+        status.setText("Inside " + juce::File(record->containerPath).getFileName()
+            + "  ·  " + record->discPath + ". Press Enter to open the image.",
+            juce::dontSendNotification);
+    }
+    else if (isDiscImageFormat(record->format))
+    {
+        preview.clearDiscSource();
+        status.setText("Double-click the image or press Enter to browse its contents",
+                      juce::dontSendNotification);
+    }
+    // Restored projects never start playback: a host opening a session must stay silent.
+    else preview.loadFile(juce::File(record->filePath), false);
 }
 void MainComponent::saveSessionState()
 {
@@ -5495,6 +5519,40 @@ void MainComponent::closeEmbeddedSettings()
         if (safeHost != nullptr) delete safeHost.getComponent();
     });
 }
+bool MainComponent::showEmbeddedDialog(std::unique_ptr<juce::Component> content)
+{
+    if (! embeddedUi || content == nullptr) return false;
+    // One dialog at a time: a second prompt replaces the first instead of stacking on top of it.
+    if (embeddedDialogHost != nullptr) closeEmbeddedDialog();
+    if (auto* dialog = dynamic_cast<dialogs::EmbeddedDialogContent*>(content.get()))
+        dialog->onClose = [safe = juce::Component::SafePointer<MainComponent>(this)]
+        {
+            if (safe != nullptr) safe->closeEmbeddedDialog();
+        };
+    content->setLookAndFeel(&look);
+    auto overlay = std::make_unique<EmbeddedDialogOverlay>(std::move(content));
+    overlay->setComponentID("embeddedDialog");
+    overlay->onDismiss = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr) safe->closeEmbeddedDialog();
+    };
+    addAndMakeVisible(*overlay);
+    overlay->setBounds(getLocalBounds());
+    embeddedDialogHost = overlay.get();
+    overlay.release()->toFront(true);
+    return true;
+}
+void MainComponent::closeEmbeddedDialog()
+{
+    auto* host = embeddedDialogHost.getComponent();
+    embeddedDialogHost = nullptr;
+    if (host == nullptr) return;
+    juce::Component::SafePointer<juce::Component> safeHost(host);
+    juce::MessageManager::callAsync([safeHost]() mutable
+    {
+        if (safeHost != nullptr) delete safeHost.getComponent();
+    });
+}
 void MainComponent::wireCommandSettings(SettingsPanel& panel)
 {
     panel.setCommandRegistry(&commands);
@@ -5792,6 +5850,8 @@ void MainComponent::resized()
 {
     if (embeddedSettingsHost != nullptr)
         embeddedSettingsHost->setBounds(getLocalBounds());
+    if (embeddedDialogHost != nullptr)
+        embeddedDialogHost->setBounds(getLocalBounds());
     auto r = getLocalBounds(); headerBounds = r.removeFromTop(studio::headerHeight);
     auto header = headerBounds.reduced(studio::spacingWide, 14);
     auto branding = header.removeFromLeft(studio::brandingWidth);

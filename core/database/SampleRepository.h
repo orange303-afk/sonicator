@@ -70,6 +70,12 @@ class SampleRepository
 public:
     explicit SampleRepository(Database& d) : db(d) {}
     void createTables();
+    // Refuses a catalog that this build must not touch, without creating, migrating or writing
+    // anything. The DAW plug-in calls this instead of createTables(): only the application may
+    // migrate the shared catalog, so a plug-in can never make the library unreadable to it.
+    void requireCompatibleSchema();
+    // The schema version stored in the open catalog (0 for an empty or unknown file).
+    int schemaVersionOnDisk();
     int64_t upsert(const SampleRecord&);
     std::optional<SampleRecord> findByPath(const juce::String&) const;
     std::vector<SampleRecord> page(int limit = 10000, int offset = 0) const;

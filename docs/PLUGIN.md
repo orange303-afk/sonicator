@@ -60,6 +60,26 @@ tags, stars, genre, BPM, favorites and theme changed in the plugin are visible i
 the other way round. SQLite runs in WAL mode with a 5 s busy timeout, so short writes from both
 processes coexist.
 
+### The application owns the schema
+
+The catalog is one file with one schema version (`core/database/CatalogSchema.h`). Only the
+application migrates it, because only the application ships every writer that knows the new layout.
+The plugin reads the version through a read-only connection (`inspectCatalog`) and opens the
+catalog without any DDL (`SampleRepository::requireCompatibleSchema()`): no `CREATE`, no
+`ALTER`, no `PRAGMA user_version`, no backup file. Consequences:
+
+| Situation | What the plugin does |
+|---|---|
+| Same schema | Opens the browser as usual. |
+| Older schema (old application, new plugin) | Shows "This library belongs to an older SONICATOR…" and does not touch the file. |
+| Newer schema (new application, old plugin) | Shows "This library was updated by a newer SONICATOR…" and does not touch the file. |
+| Missing file | Shows how to create the library in the application. |
+| A file that is not a catalog, or an unreadable one | Says so and leaves the file alone. |
+
+A window that cannot open the catalog never writes the project state: the saved folder and sample
+survive a closed or failed editor. `tests/TestPlugin.cpp` covers an older catalog, a newer one, two
+editors and the application at once, and the absence of migration or backup files.
+
 The plugin is deliberately a browser. These stay in the application, where the user starts them:
 
 - adding a root folder, **Rescan**, **New files**, **Reanalyze all**, **Smart metadata**, AutoTag;
@@ -79,8 +99,23 @@ without starting playback. The catalog path is never stored; it is shared with t
 Panel sizes stay in `pluginLayout` in the shared settings, so they are the same in every project.
 
 Unknown, truncated or foreign state blocks are ignored and fall back to defaults instead of failing
-in the host. `pluginLayout`, theme and other preferences are read from the shared settings file; the
-plugin never reads or writes the application's `lastFolder` / `lastSamplePath`.
+in the host; a block larger than 64 KB is treated as foreign data and never parsed.
+`pluginLayout`, theme and other preferences are read from the shared settings file; the plugin never
+reads or writes the application's `lastFolder` / `lastSamplePath`.
+
+A host can load another project into a running instance (`setStateInformation` while the editor is
+open). The editor polls `PluginProcessor::stateGeneration()` and applies the restored folder, sample
+and window size to the visible window, so what the user sees matches the project without closing it.
+The first load of a window is not a user edit: it never writes an empty selection into the project.
+
+## Dialogs
+
+Confirmation and prompt dialogs are drawn inside the editor, not as top-level windows: hosts do not
+reliably keep a plugin's modal window above their own, and a modal window that dismisses on "input
+outside" closes on the first click inside the DAW. `MainComponent` implements
+`dialogs::EmbeddedDialogHost`; BPM (set and tap), tag and genre prompts, and the preview's
+confirmations all use it. `TapTempoDialog` keeps its own window only outside the plugin. The
+Settings panel was already embedded this way.
 
 ## Limits
 
@@ -93,11 +128,15 @@ plugin never reads or writes the application's `lastFolder` / `lastSamplePath`.
 
 `tests/TestPlugin.cpp` runs in the ordinary test binary:
 
-- state round-trip, clamping, future versions and garbage input;
+- state round-trip, clamping, future versions, garbage input and the 64 KB limit;
 - processor stores project state, opens no device until host mode, renders silence;
-- two instances keep independent state;
+- two instances keep independent state; two editors open at once keep their own project;
 - editor opens repeatedly with a missing catalog and with a real one;
+- an older and a newer catalog are refused without migration, and without a backup file;
+- the application and the plugin keep one catalog open at the same time;
 - restoring a project selection does not autoplay and does not write the application's session;
+- a state restored while the editor is open updates the visible selection and window size;
+- an embedded BPM/tag/genre prompt and tap tempo are drawn inside the editor;
 - scanning and file processing are disabled in the embedded window with an explanation.
 
 ## Manual host acceptance

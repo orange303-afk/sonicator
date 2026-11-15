@@ -1,4 +1,6 @@
 #include "SampleRepository.h"
+#include "CatalogCompatibility.h"
+#include "CatalogSchema.h"
 #include "SearchSyntax.h"
 #include "core/audio/StereoPair.h"
 #include "core/smart/KeyNames.h"
@@ -12,7 +14,7 @@
 namespace sonicator {
 namespace {
 constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
-constexpr int schemaVersion = 19;
+constexpr int schemaVersion = catalogSchemaVersion;
 // Tag history started at schema 15 and must not follow later database bumps.
 constexpr int tagHistorySchemaVersion = 15;
 SampleRecord read(const detail::Statement& s)
@@ -565,12 +567,26 @@ void SampleRepository::removeByPaths(const juce::StringArray& paths)
         throw;
     }
 }
+int SampleRepository::schemaVersionOnDisk()
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement version(db.handle, "PRAGMA user_version");
+    return version.step() ? (int) version.integer(0) : 0;
+}
+void SampleRepository::requireCompatibleSchema()
+{
+    const int current = schemaVersionOnDisk();
+    if (current == schemaVersion) return;
+    if (current > schemaVersion)
+        throw std::runtime_error(catalogNewerThanBuildMessage().toStdString());
+    throw std::runtime_error(catalogOlderThanBuildMessage().toStdString());
+}
 void SampleRepository::createTables()
 {
     std::lock_guard lock(db.mutex);
     detail::Statement version(db.handle, "PRAGMA user_version");
     const int current = version.step() ? (int) version.integer(0) : 0;
-    if (current > schemaVersion) throw std::runtime_error("Database schema is newer than this application");
+    if (current > schemaVersion) throw std::runtime_error(catalogNewerThanBuildMessage().toStdString());
     detail::Statement tables(db.handle, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('samples','roots')");
     const int existingTables = tables.step() ? (int) tables.integer(0) : 0;
     const bool upgrading = current < schemaVersion && (current >= 1 || existingTables > 0);

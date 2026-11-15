@@ -77,10 +77,12 @@ Rules the decoder follows, all verified against the real banks below:
 - Catalog rows use the sample name from the header (`org nod C +36`), not the bank's sequence name
   (`Orbit 8080SL289.ebl`); an empty header keeps the file name. Search matches the header name.
 - Dragging an `.ebl` row to a DAW (or Finder) materialises a 16-bit WAV in
-  `~/Library/Application Support/Sonicator/exports/drag`: PCM, rate and channels are unchanged, and
-  a loop is written to `smpl`. A failed conversion is reported in the status line and does not drop
-  the rest of the selection.
-- The source `.ebl` stays untouched; the drag cache is regenerated when the source changes.
+  `~/Library/Sonicator/exports/drag` (`AudioExporter::defaultExportFolder()`, the same folder as
+  selection exports): PCM, rate and channels are unchanged, and a loop is written to `smpl`. A
+  failed conversion is reported in the status line and does not drop the rest of the selection.
+- The source `.ebl` stays untouched; the drag cache is regenerated when the source changes. The
+  file name carries a hash of the source path, so dragging the same sample twice reuses one file
+  and a DAW project that referenced it keeps working after the app re-renders it.
 
 ## Verified against the owner's banks
 

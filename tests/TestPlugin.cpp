@@ -53,6 +53,8 @@ TEST_CASE("Plugin state survives serialisation and clamps the window", "[plugin]
 #include "plugin/PluginProcessor.h"
 #include "plugin/PluginEditor.h"
 #include "ui/MainComponent.h"
+#include "ui/library/TapTempoDialog.h"
+#include "core/database/CatalogCompatibility.h"
 #include "core/database/Database.h"
 #include "core/database/SampleRepository.h"
 #include "core/dsp/BasicAnalyzer.h"
@@ -426,4 +428,403 @@ TEST_CASE("Embedded window does not run the feature backfill", "[plugin][session
     const auto backfilled = appRepo.allFeedback();
     REQUIRE(backfilled.size() == 1);
     CHECK(backfilled.front().featureSchema == 2);
+}
+
+namespace
+{
+// Writes a schema version into a catalog the way another SONICATOR build would have left it.
+void setCatalogVersion(const juce::File& path, int version)
+{
+    sqlite3* raw = nullptr;
+    REQUIRE(sqlite3_open(path.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
+    const auto sql = "PRAGMA user_version=" + juce::String(version) + ";";
+    REQUIRE(sqlite3_exec(raw, sql.toRawUTF8(), nullptr, nullptr, nullptr) == SQLITE_OK);
+    sqlite3_close(raw);
+}
+int catalogVersion(const juce::File& path)
+{
+    sqlite3* raw = nullptr;
+    REQUIRE(sqlite3_open_v2(path.getFullPathName().toRawUTF8(), &raw, SQLITE_OPEN_READONLY,
+                            nullptr) == SQLITE_OK);
+    sqlite3_stmt* statement = nullptr;
+    int version = -1;
+    if (sqlite3_prepare_v2(raw, "PRAGMA user_version", -1, &statement, nullptr) == SQLITE_OK
+        && sqlite3_step(statement) == SQLITE_ROW)
+        version = sqlite3_column_int(statement, 0);
+    if (statement != nullptr) sqlite3_finalize(statement);
+    sqlite3_close(raw);
+    return version;
+}
+// Builds a small catalog with a folder and one sample in it.
+juce::File makeCatalog(TestDirectory& t, const juce::String& name, const juce::File& sample)
+{
+    const auto dbPath = t.dir.getChildFile(name);
+    Database db(dbPath);
+    SampleRepository repo(db);
+    repo.createTables();
+    if (sample != juce::File())
+    {
+        auto record = BasicAnalyzer().analyzeAndHash(sample);
+        REQUIRE(record.error.isEmpty());
+        repo.upsert(record);
+        repo.addRoot(t.dir.getChildFile("lib").getFullPathName());
+    }
+    return dbPath;
+}
+} // namespace
+
+TEST_CASE("Catalog compatibility is read-only and names what to update", "[plugin][catalog]")
+{
+    TestDirectory t;
+    const auto file = t.wave("lib/Drums/kick.wav");
+    const auto dbPath = makeCatalog(t, "catalog.sqlite", file);
+
+    const auto ready = inspectCatalog(dbPath);
+    CHECK(ready.state == CatalogCompatibility::State::ready);
+    CHECK(ready.readable());
+    CHECK(ready.version == catalogSchemaVersion);
+    CHECK(ready.message.isEmpty());
+
+    // Another build wrote this catalog: the check says which one and does not touch the file.
+    setCatalogVersion(dbPath, catalogSchemaVersion - 1);
+    const auto older = inspectCatalog(dbPath);
+    CHECK(older.state == CatalogCompatibility::State::older);
+    CHECK_FALSE(older.readable());
+    CHECK(older.message.contains("old"));
+
+    setCatalogVersion(dbPath, catalogSchemaVersion + 1);
+    const auto newer = inspectCatalog(dbPath);
+    CHECK(newer.state == CatalogCompatibility::State::newer);
+    CHECK(newer.message.contains("newer"));
+    CHECK(catalogVersion(dbPath) == catalogSchemaVersion + 1);
+
+    CHECK(inspectCatalog(t.dir.getChildFile("absent.sqlite")).state
+          == CatalogCompatibility::State::missing);
+    const auto text = t.dir.getChildFile("notes.txt");
+    text.replaceWithText("this is not a database");
+    CHECK(inspectCatalog(text).state == CatalogCompatibility::State::notCatalog);
+}
+
+TEST_CASE("Plugin never migrates a catalog from another build", "[plugin][catalog][ui]")
+{
+    TestDirectory t;
+    const auto kick = t.wave("lib/Drums/kick.wav");
+    const auto bass = t.wave("lib/Bass/bass.wav");
+    const auto dbPath = makeCatalog(t, "shared.sqlite", kick);
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        auto record = BasicAnalyzer().analyzeAndHash(bass);
+        REQUIRE(record.error.isEmpty());
+        repo.upsert(record);
+    }
+    // The application is still an older build that writes this catalog.
+    setCatalogVersion(dbPath, catalogSchemaVersion - 1);
+
+    plugin::PluginProcessor processor(dbPath, t.dir.getChildFile("settings.json"));
+    plugin::PluginState state;
+    state.lastFolder = t.dir.getChildFile("lib/Drums").getFullPathName();
+    state.lastSamplePath = kick.getFullPathName();
+    state.windowWidth = 1040;
+    state.windowHeight = 660;
+    processor.setPluginState(state);
+
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+        REQUIRE(editor != nullptr);
+        // No browser: the catalog is another build's and this one must not upgrade it.
+        CHECK(editor->findChildWithID("pluginMain") == nullptr);
+        auto* blocked = editor->findChildWithID("pluginCatalogBlocked");
+        auto* label = dynamic_cast<juce::Label*>(blocked);
+        REQUIRE(label != nullptr);
+        CHECK(label->getText().contains("older SONICATOR"));
+        CHECK(label->getText().contains(dbPath.getFullPathName()));
+        // The window size still comes from the project, so reopening looks the same.
+        CHECK(editor->getWidth() == 1040);
+        CHECK(editor->getHeight() == 660);
+    }
+
+    // Nothing was migrated and the project's selection survived a window that could not open.
+    CHECK(catalogVersion(dbPath) == catalogSchemaVersion - 1);
+    CHECK(processor.pluginState().lastSamplePath == kick.getFullPathName());
+    CHECK(processor.pluginState().lastFolder == state.lastFolder);
+
+    // No upgrade means no backup either: opening a plug-in leaves no files behind.
+    for (const auto& entry : t.dir.findChildFiles(juce::File::findFiles, false))
+        CHECK_FALSE(entry.getFileName().contains(".backup-"));
+
+    // The same catalog after the application updated it opens normally, without a backup.
+    setCatalogVersion(dbPath, catalogSchemaVersion);
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+        REQUIRE(editor != nullptr);
+        CHECK(editor->findChildWithID("pluginMain") != nullptr);
+    }
+    for (const auto& entry : t.dir.findChildFiles(juce::File::findFiles, false))
+        CHECK_FALSE(entry.getFileName().contains(".backup-"));
+}
+
+TEST_CASE("Plugin says so when the catalog was written by a newer build", "[plugin][catalog][ui]")
+{
+    TestDirectory t;
+    const auto dbPath = makeCatalog(t, "future.sqlite", t.wave("lib/kick.wav"));
+    setCatalogVersion(dbPath, catalogSchemaVersion + 1);
+
+    plugin::PluginProcessor processor(dbPath, t.dir.getChildFile("settings.json"));
+    std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+    REQUIRE(editor != nullptr);
+    auto* blocked = dynamic_cast<juce::Label*>(editor->findChildWithID("pluginCatalogBlocked"));
+    REQUIRE(blocked != nullptr);
+    CHECK(blocked->getText().contains("Update SONICATOR"));
+    CHECK(catalogVersion(dbPath) == catalogSchemaVersion + 1);
+}
+
+TEST_CASE("Oversized state blocks are ignored instead of parsed", "[plugin][state]")
+{
+    juce::MemoryBlock huge;
+    huge.ensureSize(plugin::PluginState::maximumStateBytes + 1);
+    huge.fillWith(0x20);
+    const auto ignored = plugin::PluginState::fromMemoryBlock(huge.getData(), huge.getSize());
+    CHECK(ignored.windowWidth == plugin::PluginState::defaultWidth);
+    CHECK(ignored.lastSamplePath.isEmpty());
+
+    // A real block stays well under the limit.
+    plugin::PluginState state;
+    state.lastSamplePath = "/lib/a.wav";
+    const auto block = state.toMemoryBlock();
+    CHECK(block.getSize() <= plugin::PluginState::maximumStateBytes);
+    CHECK(plugin::PluginState::fromMemoryBlock(block.getData(), block.getSize())
+              .lastSamplePath == state.lastSamplePath);
+}
+
+TEST_CASE("Host state restored while the editor is open updates the window", "[plugin][ui][state]")
+{
+    TestDirectory t;
+    const auto kick = t.wave("lib/Drums/kick.wav");
+    const auto bass = t.wave("lib/Bass/bass.wav");
+    const auto dbPath = makeCatalog(t, "restore-open.sqlite", kick);
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        auto record = BasicAnalyzer().analyzeAndHash(bass);
+        REQUIRE(record.error.isEmpty());
+        repo.upsert(record);
+    }
+    plugin::PluginProcessor processor(dbPath, t.dir.getChildFile("settings.json"));
+    plugin::PluginState opened;
+    opened.lastFolder = t.dir.getChildFile("lib/Drums").getFullPathName();
+    opened.lastSamplePath = kick.getFullPathName();
+    opened.windowWidth = 980;
+    opened.windowHeight = 640;
+    processor.setPluginState(opened);
+
+    auto editor = std::unique_ptr<juce::AudioProcessorEditor>(processor.createEditor());
+    REQUIRE(editor != nullptr);
+    auto* main = dynamic_cast<MainComponent*>(editor->findChildWithID("pluginMain"));
+    REQUIRE(main != nullptr);
+    REQUIRE(main->selectedSamplePath() == kick.getFullPathName());
+
+    // The host loads another project's state into this running instance.
+    plugin::PluginState restored;
+    restored.lastFolder = t.dir.getChildFile("lib/Bass").getFullPathName();
+    restored.lastSamplePath = bass.getFullPathName();
+    restored.windowWidth = 1240;
+    restored.windowHeight = 780;
+    const auto block = restored.toMemoryBlock();
+    processor.setStateInformation(block.getData(), (int) block.getSize());
+
+    // The editor polls the processor on the message thread; the window must follow the state.
+    REQUIRE(pumpUntil([&] { return main->selectedSamplePath() == bass.getFullPathName(); }));
+    CHECK(main->selectedFolderPath() == t.dir.getChildFile("lib/Bass").getFullPathName());
+    CHECK(editor->getWidth() == 1240);
+    CHECK(editor->getHeight() == 780);
+    CHECK_FALSE(processor.engine().isPlaying());
+
+    editor.reset();
+    CHECK(processor.pluginState().lastSamplePath == bass.getFullPathName());
+    CHECK(processor.pluginState().windowWidth == 1240);
+}
+
+TEST_CASE("Reopening a real catalog restores the project selection every time", "[plugin][ui]")
+{
+    TestDirectory t;
+    const auto kick = t.wave("lib/Drums/kick.wav");
+    const auto snare = t.wave("lib/Drums/snare.wav");
+    const auto dbPath = makeCatalog(t, "reopen.sqlite", kick);
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        auto record = BasicAnalyzer().analyzeAndHash(snare);
+        REQUIRE(record.error.isEmpty());
+        repo.upsert(record);
+    }
+    plugin::PluginProcessor processor(dbPath, t.dir.getChildFile("settings.json"));
+    plugin::PluginState state;
+    state.lastFolder = t.dir.getChildFile("lib/Drums").getFullPathName();
+    state.lastSamplePath = snare.getFullPathName();
+    processor.setPluginState(state);
+
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+        REQUIRE(editor != nullptr);
+        auto* main = dynamic_cast<MainComponent*>(editor->findChildWithID("pluginMain"));
+        REQUIRE(main != nullptr);
+        CHECK(main->selectedSamplePath() == snare.getFullPathName());
+        CHECK(processor.pluginState().lastSamplePath == snare.getFullPathName());
+    }
+}
+
+TEST_CASE("Two editors open at once keep their own project state", "[plugin][ui][state]")
+{
+    TestDirectory t;
+    const auto kick = t.wave("lib/Drums/kick.wav");
+    const auto bass = t.wave("lib/Bass/bass.wav");
+    const auto dbPath = makeCatalog(t, "twice.sqlite", kick);
+    {
+        Database db(dbPath);
+        SampleRepository repo(db);
+        auto record = BasicAnalyzer().analyzeAndHash(bass);
+        REQUIRE(record.error.isEmpty());
+        repo.upsert(record);
+    }
+    const auto settingsFile = t.dir.getChildFile("settings.json");
+
+    plugin::PluginProcessor first(dbPath, settingsFile);
+    plugin::PluginProcessor second(dbPath, settingsFile);
+    plugin::PluginState firstState, secondState;
+    firstState.lastSamplePath = kick.getFullPathName();
+    firstState.lastFolder = t.dir.getChildFile("lib/Drums").getFullPathName();
+    secondState.lastSamplePath = bass.getFullPathName();
+    secondState.lastFolder = t.dir.getChildFile("lib/Bass").getFullPathName();
+    first.setPluginState(firstState);
+    second.setPluginState(secondState);
+
+    auto firstEditor = std::unique_ptr<juce::AudioProcessorEditor>(first.createEditor());
+    auto secondEditor = std::unique_ptr<juce::AudioProcessorEditor>(second.createEditor());
+    REQUIRE(firstEditor != nullptr);
+    REQUIRE(secondEditor != nullptr);
+    auto* firstMain = dynamic_cast<MainComponent*>(firstEditor->findChildWithID("pluginMain"));
+    auto* secondMain = dynamic_cast<MainComponent*>(secondEditor->findChildWithID("pluginMain"));
+    REQUIRE(firstMain != nullptr);
+    REQUIRE(secondMain != nullptr);
+    CHECK(firstMain->selectedSamplePath() == kick.getFullPathName());
+    CHECK(secondMain->selectedSamplePath() == bass.getFullPathName());
+
+    // Closing one window leaves the other project alone.
+    firstEditor.reset();
+    CHECK(first.pluginState().lastSamplePath == kick.getFullPathName());
+    CHECK(second.pluginState().lastSamplePath == bass.getFullPathName());
+    secondEditor.reset();
+    CHECK(second.pluginState().lastSamplePath == bass.getFullPathName());
+}
+
+TEST_CASE("Embedded prompts and tap tempo are drawn inside the editor", "[plugin][ui][dialogs]")
+{
+    TestDirectory t;
+    const auto kick = t.wave("lib/Drums/kick.wav");
+    const auto dbPath = makeCatalog(t, "dialogs.sqlite", kick);
+    AudioEngine engine(false);
+    MainComponent app(dbPath, false, {}, t.dir.getChildFile("settings.json"), &engine, true);
+    app.setSize(1180, 720);
+
+    // BPM, tag and genre prompts share this path: no top-level window, a panel inside the editor.
+    juce::String accepted;
+    dialogs::showPrompt(app, "Set BPM", "Tempo (20 to 300)", "120",
+                        [&accepted](const juce::String& text) { accepted = text; });
+    auto* overlay = findDescendantWithID(app, "embeddedDialog");
+    REQUIRE(overlay != nullptr);
+    auto* field = dynamic_cast<juce::TextEditor*>(findDescendantWithID(app, "embeddedDialogField"));
+    REQUIRE(field != nullptr);
+    CHECK(field->getText() == "120");
+    field->setText("128", juce::dontSendNotification);
+    auto* ok = dynamic_cast<juce::TextButton*>(findDescendantWithID(app, "embeddedDialogButton0"));
+    REQUIRE(ok != nullptr);
+    CHECK(ok->getButtonText() == "OK");
+    ok->triggerClick();
+    REQUIRE(pumpUntil([&] { return findDescendantWithID(app, "embeddedDialog") == nullptr; }));
+    CHECK(accepted == "128");
+
+    // Cancel reports nothing, and Escape on the overlay works too.
+    bool acceptedAgain = false;
+    dialogs::showPrompt(app, "Custom genre", "Genre name", "Deep House",
+                        [&acceptedAgain](const juce::String&) { acceptedAgain = true; });
+    auto* cancel = dynamic_cast<juce::TextButton*>(findDescendantWithID(app, "embeddedDialogButton1"));
+    REQUIRE(cancel != nullptr);
+    CHECK(cancel->getButtonText() == "Cancel");
+    cancel->triggerClick();
+    REQUIRE(pumpUntil([&] { return findDescendantWithID(app, "embeddedDialog") == nullptr; }));
+    CHECK_FALSE(acceptedAgain);
+
+    // Tap tempo uses the same host instead of a DialogWindow the host could lose.
+    double tapped = 0.0;
+    TapTempoDialog::launch(&app, "kick", {}, {}, [&tapped](double bpm) { tapped = bpm; });
+    auto* tempoOverlay = findDescendantWithID(app, "embeddedDialog");
+    REQUIRE(tempoOverlay != nullptr);
+    auto* tempo = findDescendantWithID(app, "tapTempoDialog");
+    REQUIRE(tempo != nullptr);
+    CHECK(tempo->getParentComponent() == tempoOverlay);
+    juce::ignoreUnused(tapped);
+}
+
+TEST_CASE("Application and plug-in keep one catalog open at the same time", "[plugin][catalog][ui]")
+{
+    TestDirectory t;
+    const auto kick = t.wave("Drums/kick.wav");
+    const auto bass = t.wave("Bass/bass.wav");
+    const auto catalog = t.dir.getChildFile("shared.sqlite");
+    {
+        Database db(catalog);
+        SampleRepository repo(db);
+        repo.createTables();
+        for (const auto& file : { kick, bass })
+        {
+            auto record = BasicAnalyzer().analyzeAndHash(file);
+            REQUIRE(record.error.isEmpty());
+            repo.upsert(record);
+        }
+        repo.addRoot(t.dir.getFullPathName());
+    }
+
+    // The application window and the plug-in editor run against the same file, which is the
+    // ordinary case when a DAW project is open beside the application.
+    AudioEngine engine(false);
+    MainComponent application(catalog, false, {}, t.dir.getChildFile("app-settings.json"),
+                              &engine, false);
+    plugin::PluginProcessor processor(catalog, t.dir.getChildFile("plugin-settings.json"));
+    plugin::PluginState state;
+    state.lastSamplePath = kick.getFullPathName();
+    processor.setPluginState(state);
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+        REQUIRE(editor != nullptr);
+        auto* main = dynamic_cast<MainComponent*>(editor->findChildWithID("pluginMain"));
+        REQUIRE(main != nullptr);
+        CHECK(main->selectedSamplePath() == kick.getFullPathName());
+        CHECK(application.selectedSamplePath() != kick.getFullPathName());
+
+        // Opening the plug-in neither migrated the catalog nor left a backup behind.
+        CHECK(catalogVersion(catalog) == catalogSchemaVersion);
+        for (const auto& entry : t.dir.findChildFiles(juce::File::findFiles, false))
+            CHECK_FALSE(entry.getFileName().contains(".backup-"));
+    }
+    // A write from another connection is visible to both windows' repositories.
+    {
+        Database db(catalog);
+        SampleRepository repo(db);
+        const auto record = repo.findByPath(kick.getFullPathName());
+        REQUIRE(record.has_value());
+        const auto tag = repo.createTag("Parallel", 0xff4fb8c8);
+        repo.setSampleTag(record->id, tag, true);
+    }
+    {
+        Database db(catalog);
+        SampleRepository repo(db);
+        const auto record = repo.findByPath(kick.getFullPathName());
+        REQUIRE(record.has_value());
+        const auto tags = repo.tagsForSample(record->id);
+        REQUIRE(tags.size() == 1);
+        CHECK(tags.front().name == "Parallel");
+    }
+    CHECK(processor.pluginState().lastSamplePath == kick.getFullPathName());
 }

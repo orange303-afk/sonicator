@@ -107,21 +107,52 @@ jobs:
             -DBUILD_TESTING=OFF \
             -DSONICATOR_BUILD_PLUGIN=ON
 
-      - name: Build VST3 and AU
-        run: cmake --build build --target SonicatorPlugin_VST3 SonicatorPlugin_AU -j 6
+      # The smoke target uses the same processor and editor without a DAW host, so a build that
+      # cannot open its window fails here and not in the owner's session.
+      - name: Build VST3, AU and the smoke target
+        run: |
+          cmake --build build --target SonicatorPlugin_VST3 SonicatorPlugin_AU \
+            SonicatorPluginSmoke -j 6
 
-      - name: Verify bundles and AU validation
+      - name: Verify bundles, runtime and identifiers
         run: |
           set -e
           VST3=build/plugin/SonicatorPlugin_artefacts/Release/VST3/SONICATOR.vst3
           AU=build/plugin/SonicatorPlugin_artefacts/Release/AU/SONICATOR.component
-          lipo -archs "$VST3/Contents/MacOS/SONICATOR" | grep -q arm64
-          lipo -archs "$VST3/Contents/MacOS/SONICATOR" | grep -q x86_64
+          # Both formats, both architectures, and the same for the embedded runtime: a plugin that
+          # only runs on the machine that built it is not a deliverable.
+          for binary in "$VST3/Contents/MacOS/SONICATOR" "$AU/Contents/MacOS/SONICATOR" \
+                        "$VST3/Contents/Frameworks/libonnxruntime.dylib" \
+                        "$AU/Contents/Frameworks/libonnxruntime.dylib"; do
+            test -f "$binary"
+            lipo -archs "$binary" | grep -q arm64
+            lipo -archs "$binary" | grep -q x86_64
+          done
+          # The runtime is found relative to the bundle, and nothing points into the build tree.
+          for binary in "$VST3/Contents/MacOS/SONICATOR" "$AU/Contents/MacOS/SONICATOR"; do
+            otool -L "$binary" | grep -q "@rpath/libonnxruntime.dylib"
+            if otool -L "$binary" | grep -E "$PWD|/Users/runner|/Users/admin|Library/Caches"; then
+              echo "::error::$binary links against a build-tree path"
+              exit 1
+            fi
+          done
+          # Manifest and AU properties name the product, its vendor and its codes.
+          test -f "$VST3/Contents/Resources/moduleinfo.json"
+          grep -q '"Name": "SONICATOR"' "$VST3/Contents/Resources/moduleinfo.json"
+          grep -q 'ABCDEF019182FAEB4F726E67536E6372' "$VST3/Contents/Resources/moduleinfo.json"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$AU/Contents/Info.plist")" = "com.sonicator.plugin"
+          AU_INFO="$(/usr/libexec/PlistBuddy -c 'Print :AudioComponents:0' "$AU/Contents/Info.plist")"
+          echo "$AU_INFO" | grep -q 'type = aumu'
+          echo "$AU_INFO" | grep -q 'subtype = Sncr'
+          echo "$AU_INFO" | grep -q 'manufacturer = Orng'
           codesign --verify --deep --strict "$VST3"
           codesign --verify --deep --strict "$AU"
-          test -f "$VST3/Contents/Resources/moduleinfo.json"
-          otool -L "$VST3/Contents/MacOS/SONICATOR" | grep -q "@rpath/libonnxruntime.dylib"
-          test -f "$VST3/Contents/Frameworks/libonnxruntime.dylib"
+          lipo -archs "build/plugin/SonicatorPluginSmoke_artefacts/Release/SONICATOR Plugin Smoke.app/Contents/MacOS/SONICATOR Plugin Smoke" | grep -q arm64
+
+      - name: AU validation
+        run: |
+          set -e
+          AU=build/plugin/SonicatorPlugin_artefacts/Release/AU/SONICATOR.component
           mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
           rm -rf "$HOME/Library/Audio/Plug-Ins/Components/SONICATOR.component"
           cp -R "$AU" "$HOME/Library/Audio/Plug-Ins/Components/"
