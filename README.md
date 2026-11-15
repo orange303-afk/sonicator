@@ -205,7 +205,7 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.
 - Windows, Intel macOS, physical listening/latency and release packaging still need platform/user verification. External file drag (library rows and selection WAVs) is verified on macOS only; Windows uses the same JUCE file-URL path and must be checked separately.
-- The VST3/AU target builds and loads in Cubase; the other hosts in its acceptance checklist, the shared catalog with the application, and Match BPM / Match Scale are not done. See `docs/plans/2026-11-11-vst3-au-plugin-spike.md`.
+- The VST3/AU plugin `SONICATOR` shares the application's live catalog and settings, keeps its selection and window size in the DAW project, and disables scanning and file processing inside the plugin. Host acceptance in Live 12, REAPER, Cubase 15 and Bitwig is still manual, and Match BPM / Match Scale are P2. See `docs/PLUGIN.md`.
 
 ## License
 

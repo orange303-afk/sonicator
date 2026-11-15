@@ -350,16 +350,23 @@ The smart DSP stage decodes a bounded prefix once (`core/dsp/AnalysisAudio`) and
 ## Plugin (VST3 and AU)
 
 `plugin/` builds a VST3 and an AudioUnit around the same `MainComponent`. It compiles only with
-`-DSONICATOR_BUILD_PLUGIN_SPIKE=ON`; without the option the targets and the application build are
-unchanged. The processor opens no device: `processBlock` renders through the `AudioEngine` host mode
+`-DSONICATOR_BUILD_PLUGIN=ON`; without the option the targets and the application build are
+unchanged. The product is `SONICATOR` (`Orng` / `Sncr`, `com.sonicator.plugin`), and the plugin works
+on the application's live catalog and settings instead of a copy: it is a browser for that library,
+while scanning, smart analysis, Split, Extract, Normalize, Batch, catalog switching and Audio/MIDI
+Settings stay in the application. See `docs/PLUGIN.md`.
+
+The processor opens no device: `processBlock` renders through the `AudioEngine` host mode
 (`startHostAudio`, `processHostBlock`, `stopHostAudio`), which takes sample rate and block size from the
 host, routes host MIDI into the same `MidiEventQueue` the application uses, and renders under the audio
-callback lock. `MainComponent` accepts an external `AudioEngine*` and an `embeddedUi` flag; in a plugin
-the settings, tag, split, extract and relocation dialogs are drawn inside the editor, because hosts close
-or steal focus from separate `DialogWindow`s. The editor owns the `MainComponent` and creates it only
-when the catalog file exists. `Desktop::setGlobalScaleFactor` is not applied in a plugin, since it is
-process-wide. Product and manufacturer identifiers, plugin codes and the data directory are temporary
-spike values; see `docs/plans/2026-11-11-vst3-au-plugin-spike.md`.
+callback lock. `MainComponent` accepts an external `AudioEngine*`, an `embeddedUi` flag and an
+`EmbeddedSession` (last folder/sample plus a change callback); in a plugin the settings, tag, split,
+extract and relocation dialogs are drawn inside the editor, because hosts close or steal focus from
+separate `DialogWindow`s, and the session callback writes the DAW project state instead of
+`settings.json`. The editor owns the `MainComponent` and creates it only when the catalog file exists.
+`Desktop::setGlobalScaleFactor` is not applied in a plugin, since it is process-wide. Project state is
+a versioned XML block (`PluginState`): last folder, selected sample, editor size; restore never
+autoplays. Match BPM / Match Scale are P2.
 
 ## Tags, AutoTag and sample types
 

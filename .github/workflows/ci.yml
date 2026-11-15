@@ -76,6 +76,58 @@ jobs:
             build/Testing/Temporary/LastTestsFailed.log
           if-no-files-found: ignore
 
+  # The plugin is a separate artifact from the application: it is built universal in Release, both
+  # wrappers are checked for their embedded runtime and signature, and the AU must pass auval.
+  macos-plugin:
+    name: macOS plugin (universal)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          cmake --version
+          ninja --version || brew install ninja
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-plugin-deps-${{ hashFiles('CMakeLists.txt', 'plugin/CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: |
+            ${{ runner.os }}-plugin-deps-
+            ${{ runner.os }}-deps-
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DBUILD_TESTING=OFF \
+            -DSONICATOR_BUILD_PLUGIN=ON
+
+      - name: Build VST3 and AU
+        run: cmake --build build --target SonicatorPlugin_VST3 SonicatorPlugin_AU -j 6
+
+      - name: Verify bundles and AU validation
+        run: |
+          set -e
+          VST3=build/plugin/SonicatorPlugin_artefacts/Release/VST3/SONICATOR.vst3
+          AU=build/plugin/SonicatorPlugin_artefacts/Release/AU/SONICATOR.component
+          lipo -archs "$VST3/Contents/MacOS/SONICATOR" | grep -q arm64
+          lipo -archs "$VST3/Contents/MacOS/SONICATOR" | grep -q x86_64
+          codesign --verify --deep --strict "$VST3"
+          codesign --verify --deep --strict "$AU"
+          test -f "$VST3/Contents/Resources/moduleinfo.json"
+          otool -L "$VST3/Contents/MacOS/SONICATOR" | grep -q "@rpath/libonnxruntime.dylib"
+          test -f "$VST3/Contents/Frameworks/libonnxruntime.dylib"
+          mkdir -p "$HOME/Library/Audio/Plug-Ins/Components"
+          rm -rf "$HOME/Library/Audio/Plug-Ins/Components/SONICATOR.component"
+          cp -R "$AU" "$HOME/Library/Audio/Plug-Ins/Components/"
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -v aumu Sncr Orng
+
   # Windows has never been built. This job is informational: it must not fail the run while the port
   # is being established. The state it reaches is recorded in docs/WINDOWS_PORT.md.
   windows:
