@@ -5540,6 +5540,14 @@ bool MainComponent::showEmbeddedDialog(std::unique_ptr<juce::Component> content)
     overlay->setBounds(getLocalBounds());
     embeddedDialogHost = overlay.get();
     overlay.release()->toFront(true);
+    // An alert has no field of its own, so the overlay takes the keys: Escape dismisses it. A
+    // prompt keeps the focus its text field already took.
+    if (embeddedDialogHost != nullptr && embeddedDialogHost->isShowing())
+    {
+        auto* focused = juce::Component::getCurrentlyFocusedComponent();
+        if (focused == nullptr || ! embeddedDialogHost->isParentOf(focused))
+            embeddedDialogHost->grabKeyboardFocus();
+    }
     return true;
 }
 void MainComponent::closeEmbeddedDialog()
