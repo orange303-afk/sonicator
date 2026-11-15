@@ -14,12 +14,12 @@ When an item is finished, record the commit or document here and append `✅` to
 | 2 | **Report** in Settings: bug, feature request, or format/bank support with a sample file | Done: **Settings → REPORT** has three buttons that open the matching prefilled issue; a sample file is attached by the user in GitHub. `docs/DIAGNOSTICS.md` |
 | 3 | Integration with Sample Dicer, Loop Dicer, Drum Dicer (engine selection, Send to …) | Not started |
 | 4 | Tag-cloud tab: every file a point coloured by its tag, audition on hover, click-free stop | Not started |
-| 5 | Key and BPM passed to the DAW on drag | Not started |
+| 5 | Key and BPM passed to the DAW on drag | Done: BPM/root metadata in WAV copies and ACID/smpl chunks, manual BPM and Tap BPM (`c7ce5fc`, `16ce20d`). `docs/superpowers/specs/2026-11-14-bpm-and-daw-metadata-design.md` |
 | 6 | Plugin system for new formats and network services | Not started |
 | 7 | AI agents for library organisation | Not started |
 | 8 | DAW panel integration (a tab like Splice in Studio One) | Research not started |
 | 9 | VST3 and AU with full drag-and-drop, Match BPM, Match Scale | Partly: VST3/AU build, host audio and MIDI, embedded dialogs; Cubase accepted. Other hosts, shared catalog, Match BPM/Scale open. `docs/plans/2026-11-11-vst3-au-plugin-spike.md` |
-| 10 | Multi-format converter with settings | Not started; only selection export to WAV exists |
+| 10 | Multi-format converter with settings | Done for the planned v1/v1.1 scope: WAV/AIFF/FLAC/MP3 (CBR+VBR, ID3) and OGG (comments), six operations, presets, preview, atomic publication, reports. `docs/BATCH_PROCESSING.md` |
 | 11 | Smart AI content-type detection | Stage 1: hybrid metadata + acoustic rules + adaptive prototypes. `docs/SMART_ANALYSIS.md` |
 | 12 | Training on user libraries, opt-in at first run and in Settings | Done: collection with consent, preview and deletion; `origin` keeps machine guesses out; deterministic global prototypes ship in the build; leave-one-install-out evaluation and a tag-candidate report. Dataset stays private in R2. Prototypes are weighted k-means centres since 2026-11-12 (one install carries the same total weight as another), and the shipped file is measured by cross-validation: 57.1% before, 65.7% after on the export of 2026-11-11. `docs/ARCHITECTURE.md`, `docs/superpowers/specs/2026-11-11-training-and-tag-promotion-design.md`, `services/training/README.md` |
 | 13 | Collect custom tags and sample types into later builds as built-in | Report exists (`docs/tag-candidates.md`); no promotion yet because the bucket has no records. Learned standard tags now reach AutoTag as reviewed proposals; promotion stays manual and is recorded in `docs/TAG_PROMOTION.md` |
