@@ -60,3 +60,8 @@ Dicer, новые форматы, AI-агенты и Windows сегодня не
 - [x] Комплект собран из одного коммита, с версией и известными ограничениями:
       `~/Library/Caches/sonicator-build/beta-2026-11-15` (`be5962e`, README, SHA256SUMS).
 - [x] Developer ID: 0 действующих сертификатов — подпись ad-hoc, notarization не выполняется.
+
+## 7. P2: требования к Match BPM / Match Scale
+
+- [x] Требования записаны без DSP: `docs/superpowers/specs/2026-11-15-match-bpm-scale-requirements.md`.
+- Открытые вопросы владельцу (тональность вручную, preview, старые экспорты) — в том же файле.
