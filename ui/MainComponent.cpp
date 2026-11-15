@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "core/export/ExternalFileDrag.h"
 #include <unordered_set>
 #include "core/dsp/FeatureExtractorV2.h"
 #include "core/ml/FeatureV2Backfill.h"
@@ -693,6 +694,22 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     cloudPanel->onActivate = [this](int64_t id) { cloudActivate(id); };
     cloudPanel->onHover = [this](int64_t id) { cloudHover(id); };
     cloudPanel->onHoverEnd = [this] { cloudHoverEnd(); };
+    cloudPanel->onDragOut = [this](int64_t sampleId, juce::Component* source)
+    {
+        if (readRepo == nullptr) return false;
+        auto record = readRepo->findById(sampleId);
+        if (! record) return false;
+        juce::StringArray files;
+        files.add(record->filePath);
+        return ExternalFileDrag::start(files, source);
+    };
+    cloudPanel->onContextMenu = [this](int64_t sampleId, juce::Point<int> screenPosition)
+    {
+        if (readRepo == nullptr) return;
+        auto record = readRepo->findById(sampleId);
+        if (! record) return;
+        showSampleContextMenu({ *record }, *record, screenPosition);
+    };
     cloudBuilder = std::make_unique<cloud::CloudBuildService>();
     hoverPool = std::make_unique<juce::ThreadPool>(1); // one decode at a time; stale ones are skipped
     cloudTagSnapshot = readRepo != nullptr ? readRepo->tags() : std::vector<Tag> {};

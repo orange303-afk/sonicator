@@ -1,5 +1,6 @@
 #include "CloudView.h"
 #include "ui/shell/Theme.h"
+#include "core/export/ExternalFileDrag.h"
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -568,7 +569,17 @@ void CloudView::mouseExit(const juce::MouseEvent&)
 
 void CloudView::mouseDown(const juce::MouseEvent& event)
 {
+    if (event.mods.isPopupMenu())
+    {
+        const auto found = pointAtScreen(event.getPosition());
+        if (found != CloudIndex::none && isPointVisible(found) && onContextMenu)
+            onContextMenu(current.points[found].sampleId, event.getScreenPosition());
+        return;
+    }
     dragging = false;
+    draggedOut = false;
+    pressedPoint = pointAtScreen(event.getPosition());
+    if (pressedPoint != CloudIndex::none && ! isPointVisible(pressedPoint)) pressedPoint = CloudIndex::none;
     dragStart = event.position;
     dragOrigin = viewPan;
     grabKeyboardFocus();
@@ -577,6 +588,17 @@ void CloudView::mouseDown(const juce::MouseEvent& event)
 void CloudView::mouseDrag(const juce::MouseEvent& event)
 {
     if (! current.valid()) return;
+    if (! dragging && ! draggedOut && pressedPoint != CloudIndex::none
+        && ExternalFileDrag::exceedsThreshold((int) (event.position.x - dragStart.x),
+                                              (int) (event.position.y - dragStart.y)))
+    {
+        // A press on a point drags the file; a press on the background drags the map.
+        const auto id = current.points[pressedPoint].sampleId;
+        pressedPoint = CloudIndex::none;
+        setHovered(CloudIndex::none);
+        if (onDragOut) draggedOut = onDragOut(id, this);
+        if (draggedOut) return;
+    }
     if (! dragging && event.position.getDistanceFrom(dragStart) < 3.0f) return;
     if (! dragging)
     {
@@ -598,6 +620,8 @@ void CloudView::activate(size_t found)
 
 void CloudView::mouseUp(const juce::MouseEvent& event)
 {
+    if (draggedOut) { draggedOut = false; dragging = false; pressedPoint = CloudIndex::none; return; }
+    pressedPoint = CloudIndex::none;
     if (dragging) { dragging = false; return; }
     activate(pointAtScreen(event.getPosition()));
 }

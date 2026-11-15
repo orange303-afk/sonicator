@@ -49,6 +49,11 @@ public:
     std::function<void(int64_t)> onActivate;
     std::function<void(int64_t)> onHover;
     std::function<void()> onHoverEnd;
+    // Dragging a point out is the same non-destructive file drag as a library row: the OS gets a
+    // copy request, never a move, and the EBL cache is reused.
+    std::function<bool(int64_t, juce::Component*)> onDragOut;
+    // The row menu, anchored at the point: same commands as the list.
+    std::function<void(int64_t, juce::Point<int>)> onContextMenu;
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -122,6 +127,8 @@ private:
     std::vector<Camera> history;
 
     size_t hovered = CloudIndex::none;
+    size_t pressedPoint = CloudIndex::none;
+    bool draggedOut = false;
     int64_t selectedSample = 0;
     float glow = 0.0f;
     bool hoverAudio = true;
