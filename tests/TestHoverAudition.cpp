@@ -59,6 +59,22 @@ TEST_CASE("Hover audition fades out without a click and then falls silent", "[cl
     REQUIRE_FALSE(hover.isPlaying());
 }
 
+TEST_CASE("Replaying the same clip ramps in again", "[cloud][hover]")
+{
+    HoverAudition hover;
+    hover.prepare(44100.0);
+    hover.setAudio(constantClip(0.5f, 3000));
+    hover.play();
+    juce::AudioBuffer<float> out(1, 4000);
+    out.clear();
+    hover.render(out, 0, 4000); // runs to the end of the clip
+    REQUIRE_FALSE(hover.isPlaying());
+    hover.play();
+    out.clear();
+    hover.render(out, 0, 32);
+    REQUIRE(std::abs(out.getSample(0, 0)) < 0.01f);
+}
+
 TEST_CASE("Swapping clips while playing starts from silence", "[cloud][hover]")
 {
     HoverAudition hover;

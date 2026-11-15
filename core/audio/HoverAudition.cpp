@@ -31,6 +31,9 @@ void HoverAudition::prepare(double rate)
 void HoverAudition::play()
 {
     if (! hasAudio()) return;
+    // A clip that ended leaves its gain at 1; restarting from silence is what keeps the replay of
+    // the same point as click-free as the first play.
+    if (! playing.load(std::memory_order_relaxed)) gain = 0.0f;
     positionFrames = 0;
     fadingOut = false;
     playing = true;

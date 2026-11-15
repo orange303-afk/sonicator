@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include "ui/MainComponent.h"
+#include "ui/preview/PreviewPanel.h"
 #include "ui/cloud/CloudView.h"
 #include "core/database/SampleRepository.h"
 #include "core/audio/AudioEngine.h"
@@ -181,25 +182,35 @@ TEST_CASE("Painting 35k points stays inside a frame budget", "[cloud][view][perf
     view.setSize(1200, 800);
     view.setLayout(layout);
     for (int i = 0; i < 120; ++i) view.onFrameForTest();
+    juce::Thread::sleep(140); // labels return once the camera has settled
     juce::Image image(juce::Image::RGB, 1200, 800, true);
     juce::Graphics g(image);
-    const auto wallStart = juce::Time::getMillisecondCounterHiRes();
-    const auto cpuStart = std::clock();
-    view.paint(g);
-    const auto elapsed = juce::Time::getMillisecondCounterHiRes() - wallStart;
-    // CPU time, not wall time: a parallel build or CI neighbour must not turn a 17 ms frame into
-    // a red test, while a real regression (one fill per point again) still shows up.
-    const auto cpuMs = 1000.0 * (double) (std::clock() - cpuStart) / (double) CLOCKS_PER_SEC;
-    std::printf("35k paint: %.2f ms wall, %.2f ms cpu\n", elapsed, cpuMs);
-    // Debug build, software renderer, one blit of each layer plus the labels. Release is far
-    // below a 60 Hz frame; the number is printed above for the acceptance record.
-    REQUIRE(cpuMs < 30.0);
+    // Five paints: the first one composes the settled frame, the rest are the cached blit the map
+    // shows while the user hovers. Report both, assert on the composed frame.
+    std::vector<double> cpu;
+    std::vector<double> wall;
+    for (int pass = 0; pass < 5; ++pass)
+    {
+        const auto wallStart = juce::Time::getMillisecondCounterHiRes();
+        const auto cpuStart = std::clock();
+        view.paint(g);
+        wall.push_back(juce::Time::getMillisecondCounterHiRes() - wallStart);
+        cpu.push_back(1000.0 * (double) (std::clock() - cpuStart) / (double) CLOCKS_PER_SEC);
+    }
+    std::printf("35k paint: first %.2f ms cpu, cached %.2f ms cpu (wall %.2f / %.2f)\n",
+                cpu.front(), cpu.back(), wall.front(), wall.back());
+    // CPU time, not wall time: a parallel build or CI neighbour must not turn a fast frame into a
+    // red test, while a real regression (one fill per point again) still shows up.
+    REQUIRE(cpu.front() < 45.0);   // Debug settle frame: layers composed, labels shaped once
+    REQUIRE(cpu.back() < 10.0);    // cached frame: what a hover repaint actually costs
 }
 
 TEST_CASE("The map builds from a real catalog inside the window", "[ui][cloud]")
 {
     TestDirectory t;
     const auto dbPath = t.dir.getChildFile("cloud-ui.sqlite");
+    std::vector<juce::File> files;
+    std::vector<int64_t> ids;
     {
         Database db(dbPath);
         SampleRepository repo(db);
@@ -208,13 +219,15 @@ TEST_CASE("The map builds from a real catalog inside the window", "[ui][cloud]")
         const auto pad = repo.createTag("Pad", 0xffa96ae0);
         for (int i = 0; i < 6; ++i)
         {
+            const auto file = t.wave("s" + juce::String(i) + ".wav", 220.0 + 40.0 * i);
+            files.push_back(file);
             SampleRecord r;
-            r.filePath = t.dir.getChildFile("s" + juce::String(i) + ".wav").getFullPathName();
-            r.fileName = "s" + juce::String(i) + ".wav";
+            r.filePath = file.getFullPathName();
+            r.fileName = file.getFileName();
             r.fileHash = "h" + juce::String(i);
             r.format = "WAV";
             r.version = 1;
-            r.duration = 0.2 + 0.1 * i;
+            r.duration = 1.0;
             r.sampleRate = 44100;
             r.numChannels = 1;
             r.rmsLevel = 0.1 + 0.01 * i;
@@ -224,6 +237,7 @@ TEST_CASE("The map builds from a real catalog inside the window", "[ui][cloud]")
             r.spectralFlatness = 0.1;
             r.dateAnalyzed = 1000;
             const auto id = repo.upsert(r);
+            ids.push_back(id);
             repo.setSampleTag(id, i % 2 == 0 ? kick : pad, true);
         }
     }
@@ -238,6 +252,30 @@ TEST_CASE("The map builds from a real catalog inside the window", "[ui][cloud]")
     REQUIRE(pumpUntil([panel] { return panel->hasLayout(); }, 15000));
     REQUIRE(panel->layout().points.size() == 6);
     REQUIRE(panel->layout().islands.size() == 2);
+
+    // A click on a point must open the sample exactly like a row: the waveform panel loads that
+    // file, not a placeholder and not another sample.
+    auto* preview = dynamic_cast<PreviewPanel*>(app.findChildWithID("preview"));
+    REQUIRE(preview != nullptr);
+    size_t index = 0;
+    for (size_t i = 0; i < panel->layout().points.size(); ++i)
+        if (panel->layout().points[i].sampleId == ids[3]) index = i;
+    panel->activatePointForTest(index);
+    REQUIRE(preview->loadedFilePath() == files[3]);
+
     app.showCloudView(false);
     REQUIRE_FALSE(panel->isVisible());
+}
+
+TEST_CASE("The view mode survives a settings round-trip", "[cloud][settings]")
+{
+    TestDirectory t;
+    SettingsStore store(t.dir.getChildFile("settings.json"));
+    auto settings = store.load();
+    REQUIRE_FALSE(settings.cloudView);
+    settings.cloudView = true;
+    store.save(settings);
+    REQUIRE(store.load().cloudView);
+    store.update([](AppSettings& saved) { saved.cloudView = false; });
+    REQUIRE_FALSE(store.load().cloudView);
 }

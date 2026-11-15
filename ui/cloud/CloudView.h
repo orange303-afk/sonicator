@@ -52,6 +52,7 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    void lookAndFeelChanged() override;
     void mouseMove(const juce::MouseEvent&) override;
     void mouseExit(const juce::MouseEvent&) override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -79,6 +80,8 @@ private:
     void rebuildLayers();
     void drawLayer(juce::Graphics&, const juce::Image&) const;
     void drawPointsLive(juce::Graphics&, const std::vector<size_t>& visible, bool matching) const;
+    void paintStatic(juce::Graphics&);
+    void paintDynamic(juce::Graphics&);
     void setHovered(size_t index);
     juce::Rectangle<float> worldViewport() const;
     void drawPoint(juce::Graphics&, size_t index, juce::Point<float> position, float alpha);
@@ -93,11 +96,22 @@ private:
     std::vector<size_t> visibleScratch;
     // Static layers in world space: the map is redrawn only when it changes, so panning and
     // zooming blit an image instead of re-rasterising 35k points and 46 tinted discs per frame.
-    juce::Image islandLayer, pointLayer;
+    juce::Image islandLayer, pointLayer, overviewLayer;
+    // The composed frame for the current camera. Hover and selection repaint against it instead of
+    // re-blitting the whole map, and the labels hide while the camera moves.
+    juce::Image frameCache;
+    Camera frameCamera;
+    bool frameValid = false;
+    juce::uint32 lastMotionMs = 0;
+    void ensureFrameCache();
+    bool frameIsCurrent() const;
     // Label text and measured width are fixed for a layout; measuring them every frame costs more
     // than drawing the map.
     std::vector<juce::String> islandLabels;
     std::vector<int> islandLabelWidths;
+    // Labels are shaped once per layout and blitted afterwards: 46 shaped texts per frame cost
+    // more than the whole map.
+    std::vector<juce::Image> islandLabelImages;
     float layerScale = 1.0f;
 
     int lastWidth = 0, lastHeight = 0;

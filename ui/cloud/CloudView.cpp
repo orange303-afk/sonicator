@@ -40,6 +40,7 @@ void CloudView::setLayout(CloudLayout layout)
     rebuildColours();
     rebuildLayers();
     hovered = CloudIndex::none;
+    frameValid = false;
     if (! sameFingerprint)
     {
         history.clear();
@@ -54,6 +55,7 @@ void CloudView::setLayout(CloudLayout layout)
 void CloudView::setFilter(std::vector<bool> newMatches)
 {
     matches = std::move(newMatches);
+    frameValid = false;
     repaint();
 }
 
@@ -121,10 +123,19 @@ void CloudView::fitAll()
     animateTo(cameraForFit());
 }
 
+void CloudView::lookAndFeelChanged()
+{
+    // Tag label colours follow the theme; the shaped labels carry the old colour, so rebuild.
+    rebuildLayers();
+    frameValid = false;
+    repaint();
+}
+
 void CloudView::resized()
 {
     backButton.setBounds(getWidth() - 190, 10, 80, 26);
     fitButton.setBounds(getWidth() - 102, 10, 92, 26);
+    frameValid = false;
     if (! current.valid()) return;
     if (lastWidth == 0 || lastHeight == 0)
     {
@@ -152,6 +163,7 @@ void CloudView::applyCamera(const Camera& camera)
 void CloudView::animateTo(Camera camera)
 {
     camera.scale = juce::jlimit(minScale, maxScale, camera.scale);
+    lastMotionMs = juce::Time::getMillisecondCounter();
     target = camera;
     animating = true;
     startTimerHz(60);
@@ -227,8 +239,9 @@ void CloudView::rebuildLayers()
 {
     islandLayer = {};
     pointLayer = {};
+    overviewLayer = {};
     if (! current.valid() || current.bounds.isEmpty()) return;
-    constexpr float maxPixels = 1400.0f;
+    constexpr float maxPixels = 1024.0f;
     layerScale = juce::jlimit(0.05f, 2.0f,
                               juce::jmin(maxPixels / current.bounds.getWidth(), maxPixels / current.bounds.getHeight()));
     const auto width = juce::jmax(1, (int) std::ceil(current.bounds.getWidth() * layerScale));
@@ -240,13 +253,24 @@ void CloudView::rebuildLayers()
 
     islandLabels.clear();
     islandLabelWidths.clear();
+    islandLabelImages.clear();
     islandLabels.reserve(current.islands.size());
     islandLabelWidths.reserve(current.islands.size());
+    islandLabelImages.reserve(current.islands.size());
     for (const auto& island : current.islands)
     {
         const auto text = island.name + " (" + juce::String(island.count) + ")";
+        const auto width = juce::GlyphArrangement::getStringWidthInt(studio::captionFont(), text) + 8;
         islandLabels.push_back(text);
-        islandLabelWidths.push_back(juce::GlyphArrangement::getStringWidthInt(studio::captionFont(), text) + 8);
+        islandLabelWidths.push_back(width);
+        constexpr int scale = 2; // shaped at 2x so the label stays crisp on a Retina display
+        juce::Image label(juce::Image::ARGB, width * scale, 14 * scale, true);
+        juce::Graphics g(label);
+        g.addTransform(juce::AffineTransform::scale((float) scale));
+        g.setColour(theme::tagText(juce::Colour(island.colour)));
+        g.setFont(studio::captionFont());
+        g.drawText(text, 0, 0, width, 14, juce::Justification::centred);
+        islandLabelImages.push_back(std::move(label));
     }
 
     islandLayer = juce::Image(juce::Image::ARGB, width, height, true);
@@ -282,6 +306,31 @@ void CloudView::rebuildLayers()
             g.fillPath(path);
         }
     }
+    // One layer for the zoomed-out case: the whole map is a single scaled blit per frame instead
+    // of two, which is the difference between a squeezed and a comfortable 60 Hz frame.
+    // Opaque, with the panel colour underneath: composing two translucent layers into a
+    // transparent image would attenuate the island tint twice when the result is blitted.
+    overviewLayer = juce::Image(juce::Image::RGB, width, height, true);
+    {
+        juce::Graphics g(overviewLayer);
+        g.fillAll(theme::background);
+        g.drawImageAt(islandLayer, 0, 0);
+        g.drawImageAt(pointLayer, 0, 0);
+    }
+}
+
+void CloudView::ensureFrameCache()
+{
+    if (frameCache.isValid() && frameCache.getWidth() == getWidth() && frameCache.getHeight() == getHeight()) return;
+    // Opaque: the frame is always fully covered by the background fill, and blending into an
+    // alpha buffer makes every later draw in the composition read-modify-write.
+    frameCache = juce::Image(juce::Image::RGB, juce::jmax(1, getWidth()), juce::jmax(1, getHeight()), true);
+    frameValid = false;
+}
+
+bool CloudView::frameIsCurrent() const
+{
+    return frameValid && frameCamera == Camera { viewScale, viewPan };
 }
 
 void CloudView::drawLayer(juce::Graphics& g, const juce::Image& layer) const
@@ -347,7 +396,8 @@ void CloudView::timerCallback()
     }
     else glow = wantedGlow;
     if (needsRepaint) repaint();
-    if (! animating && glow == wantedGlow) stopTimer();
+    if (! animating && glow == wantedGlow
+        && juce::Time::getMillisecondCounter() - lastMotionMs > 150) stopTimer();
 }
 
 void CloudView::setHovered(size_t newHovered)
@@ -391,10 +441,46 @@ void CloudView::paint(juce::Graphics& g)
                    0, 0, getWidth(), getHeight(), juce::Justification::centred);
         return;
     }
+    ensureFrameCache();
+    if (! frameIsCurrent())
+    {
+        frameCache.clear(frameCache.getBounds(), theme::background);
+        juce::Graphics frame(frameCache);
+        paintStatic(frame);
+        frameCamera = Camera { viewScale, viewPan };
+        frameValid = true;
+    }
+    g.drawImageAt(frameCache, 0, 0);
+    paintDynamic(g);
+}
 
+void CloudView::paintStatic(juce::Graphics& g)
+{
     // Islands and points are static world-space layers; the camera only changes how they are
-    // blitted. Labels are drawn live so they stay crisp and keep their size at every zoom.
-    drawLayer(g, islandLayer);
+    // blitted. The map goes down first, the labels last so they are never covered.
+    const auto visible = index.within(worldViewport().expanded(4.0f / (float) viewScale));
+
+    const bool filtered = ! matches.empty();
+    if (filtered)
+    {
+        // The whole map stays as context; only the matching files are drawn at full strength.
+        drawLayer(g, islandLayer);
+        g.setOpacity(0.12f);
+        drawLayer(g, pointLayer);
+        g.setOpacity(1.0f);
+        drawPointsLive(g, visible, true);
+    }
+    else if (visible.size() > 8000)
+    {
+        // Zoomed out, the composed layer is one blit; zoomed in, only a small part is on screen
+        // and the points are drawn live and crisp.
+        drawLayer(g, overviewLayer);
+    }
+    else
+    {
+        drawLayer(g, islandLayer);
+        drawPointsLive(g, visible, true);
+    }
     // Labels are placed largest island first and skipped when they would collide: a crowded middle
     // then shows the big regions rather than a pile of unreadable text. Zooming in brings the rest.
     std::vector<size_t> labelOrder(current.islands.size());
@@ -404,8 +490,11 @@ void CloudView::paint(juce::Graphics& g)
         return current.islands[a].radius > current.islands[b].radius;
     });
     std::vector<juce::Rectangle<int>> placed;
+    const auto settled = juce::Time::getMillisecondCounter() - lastMotionMs > 120;
+    g.setFont(studio::captionFont());
     for (auto islandIndex : labelOrder)
     {
+        if (! settled) break; // moving the camera does not need text; it returns on the next rest
         const auto& island = current.islands[islandIndex];
         const auto centre = worldToScreen(island.x, island.y);
         const auto radius = island.radius * (float) viewScale;
@@ -420,32 +509,14 @@ void CloudView::paint(juce::Graphics& g)
             if (other.intersects(box)) { collides = true; break; }
         if (collides) continue;
         placed.push_back(box);
-        g.setColour(theme::tagText(juce::Colour(island.colour)));
-        g.setFont(studio::captionFont());
-        g.drawText(islandLabels[islandIndex], box, juce::Justification::centred);
+        g.drawImageTransformed(islandLabelImages[islandIndex],
+                               juce::AffineTransform::scale(0.5f).translated((float) box.getX(), (float) box.getY()));
     }
 
-    const auto visible = index.within(worldViewport().expanded(4.0f / (float) viewScale));
-    const bool filtered = ! matches.empty();
-    if (filtered)
-    {
-        // The whole map stays as context; only the matching files are drawn at full strength.
-        g.setOpacity(0.12f);
-        drawLayer(g, pointLayer);
-        g.setOpacity(1.0f);
-        drawPointsLive(g, visible, true);
-    }
-    else if (visible.size() > 8000)
-    {
-        // Zoomed out, the cached layer is one blit; zoomed in, only a small part is on screen and
-        // the points are drawn live and crisp.
-        drawLayer(g, pointLayer);
-    }
-    else
-    {
-        drawPointsLive(g, visible, true);
-    }
+}
 
+void CloudView::paintDynamic(juce::Graphics& g)
+{
     if (selectedSample != 0)
         for (const auto& point : current.points)
             if (point.sampleId == selectedSample)
@@ -514,6 +585,7 @@ void CloudView::mouseDrag(const juce::MouseEvent& event)
         setHovered(CloudIndex::none);
     }
     viewPan = dragOrigin + juce::Point<double>(event.position.x - dragStart.x, event.position.y - dragStart.y);
+    lastMotionMs = juce::Time::getMillisecondCounter();
     repaint();
 }
 

@@ -1157,6 +1157,7 @@ MainComponent::~MainComponent()
     removeKeyListener(&enterKeyListener);
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
     stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
+    engine.hover().stop(); // the plug-in's engine outlives this editor: never leave it sounding
     if (folderGenreWork.valid()) folderGenreWork.wait();
     if (cloudBuilder) cloudBuilder.reset(); // joins the layout worker
     if (hoverPool) { hoverPool->removeAllJobs(true, -1); hoverPool.reset(); }

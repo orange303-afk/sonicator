@@ -29,6 +29,7 @@ TEST_CASE("Render the live catalog map to a PNG", "[.][cloud][screenshot]")
     view.setLayout(std::move(layout));
     view.fitAll();
     for (int i = 0; i < 200; ++i) view.onFrameForTest();
+    juce::Thread::sleep(140);
     auto image = view.createComponentSnapshot(view.getLocalBounds(), false, 1.0f);
     const auto out = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cloud-view.png");
     out.deleteFile();
@@ -36,6 +37,17 @@ TEST_CASE("Render the live catalog map to a PNG", "[.][cloud][screenshot]")
     juce::PNGImageFormat().writeImageToStream(image, *stream);
     stream->flush();
     std::printf("wrote %s\n", out.getFullPathName().toRawUTF8());
+
+    view.zoomBy(3.0f, { 700.0f, 450.0f });
+    for (int i = 0; i < 200; ++i) view.onFrameForTest();
+    juce::Thread::sleep(140);
+    auto zoomed = view.createComponentSnapshot(view.getLocalBounds(), false, 1.0f);
+    const auto zoomOut = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cloud-view-zoom.png");
+    zoomOut.deleteFile();
+    auto zoomStream = zoomOut.createOutputStream();
+    juce::PNGImageFormat().writeImageToStream(zoomed, *zoomStream);
+    zoomStream->flush();
+    std::printf("wrote %s\n", zoomOut.getFullPathName().toRawUTF8());
 }
 
 TEST_CASE("Screenshot the whole window in cloud mode", "[.][cloud][screenshot][window]")
@@ -55,6 +67,7 @@ TEST_CASE("Screenshot the whole window in cloud mode", "[.][cloud][screenshot][w
     REQUIRE(lightPanel != nullptr);
     REQUIRE(pumpUntil([lightPanel] { return lightPanel->hasLayout(); }, 60000));
     for (int i = 0; i < 240; ++i) lightPanel->onFrameForTest();
+    juce::Thread::sleep(140);
     {
         auto lightImage = light.createComponentSnapshot(light.getLocalBounds(), false, 1.25f);
         const auto lightOut = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cloud-window-light-125.png");
@@ -71,6 +84,7 @@ TEST_CASE("Screenshot the whole window in cloud mode", "[.][cloud][screenshot][w
     REQUIRE(panel != nullptr);
     REQUIRE(pumpUntil([panel] { return panel->hasLayout(); }, 60000));
     for (int i = 0; i < 240; ++i) panel->onFrameForTest();
+    juce::Thread::sleep(140);
     auto image = app.createComponentSnapshot(app.getLocalBounds(), false, 1.0f);
     const auto out = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("cloud-window.png");
     out.deleteFile();
