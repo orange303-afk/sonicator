@@ -50,9 +50,16 @@ Dicer, новые форматы, AI-агенты и Windows сегодня не
 
 - [x] CI проверяет обе архитектуры, `libonnxruntime` в обоих форматах, manifest.
 - [x] CI собирает `SonicatorPluginSmoke` и проверяет отсутствие путей дерева сборки.
-- [x] Локально пройдены: полный `ctest` (1176 случаев, Debug и Release), `codesign --verify --deep --strict`
-      для `.app`, `.vst3`, `.component`, `auval -v aumu Sncr Orng`, запуск smoke-цели
-      на живом каталоге (схема 19 до и после, без новой резервной копии).
+- [x] CI на `2e91da6`: macOS Debug, macOS Release и macOS plugin (universal) зелёные;
+      Windows падает по-прежнему информационно (порт не начат).
+- [x] Локально пройдены: полный `ctest` (1176 случаев, Debug и Release),
+      `codesign --verify --deep --strict` для `.app`, `.vst3`, `.component`,
+      `auval -v aumu Sncr Orng`, запуск smoke-цели на живом каталоге (схема 19 до и после,
+      без новой резервной копии).
+- [x] Резервная копия каталога перед приёмкой:
+      `~/Library/Sonicator/backups/sonicator-2026-11-15-beta.sqlite` (схема 19, integrity ok)
+      и `settings-2026-11-15-beta.json`.
+- [x] Плагины этой сборки установлены в `~/Library/Audio/Plug-Ins/{VST3,Components}`.
 
 ## 6. macOS-бета
 
