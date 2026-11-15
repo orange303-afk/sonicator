@@ -25,6 +25,9 @@ void appendStep(juce::String& out, const ProcessStep& step, int index)
         out << "fadein:" << db(p->ms) << ":" << curveName(p->cosine);
     else if (auto* p = std::get_if<FadeOut>(&step.parameters))
         out << "fadeout:" << db(p->ms) << ":" << curveName(p->cosine);
+    else if (auto* p = std::get_if<SplitSilence>(&step.parameters))
+        out << "split:" << db(p->thresholdDb) << ":" << db(p->minSilenceMs) << ":"
+            << db(p->minPartMs);
     out << "\n";
 }
 
@@ -161,6 +164,7 @@ juce::String stepTypeName(const StepParameters& parameters)
     if (std::holds_alternative<Gain>(parameters)) return "Gain";
     if (std::holds_alternative<FadeIn>(parameters)) return "Fade in";
     if (std::holds_alternative<FadeOut>(parameters)) return "Fade out";
+    if (std::holds_alternative<SplitSilence>(parameters)) return "Split by silence";
     return "Step";
 }
 
@@ -300,9 +304,21 @@ std::vector<Issue> validateRecipe(const Recipe& recipe)
         {
             if (! inRange(p->ms, 0.0, 10000.0)) problem = "fade length must be 0..10000 ms";
         }
+        else if (auto* p = std::get_if<SplitSilence>(&parameters))
+        {
+            if (! inRange(p->thresholdDb, -120.0, -6.0)) problem = "split threshold must be -120..-6 dBFS";
+            else if (! inRange(p->minSilenceMs, 10.0, 10000.0)) problem = "minimum silence must be 10..10000 ms";
+            else if (! inRange(p->minPartMs, 10.0, 10000.0)) problem = "minimum part must be 10..10000 ms";
+        }
         if (problem.isNotEmpty())
             issues.push_back({ ErrorCode::invalid_recipe, prefix + problem, false, {} });
     }
+    int splitCount = 0;
+    for (const auto& step : recipe.steps)
+        if (step.enabled && std::holds_alternative<SplitSilence>(step.parameters)) ++splitCount;
+    if (splitCount > 1)
+        issues.push_back({ ErrorCode::invalid_recipe,
+                           "At most one Split by silence step is allowed", false, {} });
     const bool rateKnown = recipe.sampleRate == 0 || recipe.sampleRate == 44100
         || recipe.sampleRate == 48000 || recipe.sampleRate == 88200
         || recipe.sampleRate == 96000 || recipe.sampleRate == 192000;

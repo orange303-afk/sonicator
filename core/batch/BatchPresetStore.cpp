@@ -43,6 +43,13 @@ juce::var stepToVar(const ProcessStep& step)
         parameters->setProperty("ms", fade->ms);
         parameters->setProperty("cosine", fade->cosine);
     }
+    else if (auto* split = std::get_if<SplitSilence>(&step.parameters))
+    {
+        parameters->setProperty("type", "splitSilence");
+        parameters->setProperty("thresholdDb", split->thresholdDb);
+        parameters->setProperty("minSilenceMs", split->minSilenceMs);
+        parameters->setProperty("minPartMs", split->minPartMs);
+    }
     object->setProperty("parameters", juce::var(parameters.release()));
     return juce::var(object.release());
 }
@@ -72,6 +79,14 @@ bool stepFromVar(const juce::var& value, ProcessStep& step, juce::String& error)
         Gain gain;
         gain.gainDb = (double) parameters.getProperty("gainDb", 0.0);
         step.parameters = gain;
+    }
+    else if (type == "splitSilence")
+    {
+        SplitSilence split;
+        split.thresholdDb = (double) parameters.getProperty("thresholdDb", -60.0);
+        split.minSilenceMs = (double) parameters.getProperty("minSilenceMs", 250.0);
+        split.minPartMs = (double) parameters.getProperty("minPartMs", 100.0);
+        step.parameters = split;
     }
     else if (type == "fadeIn" || type == "fadeOut")
     {

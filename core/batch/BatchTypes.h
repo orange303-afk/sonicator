@@ -57,7 +57,17 @@ struct FadeOut
     bool cosine = false;
     bool operator==(const FadeOut&) const = default;
 };
-using StepParameters = std::variant<RemoveDc, TrimSilence, Normalize, Gain, FadeIn, FadeOut>;
+// Cardinality-changing step: silence detection splits the current intermediate stream. Steps
+// before it run on the whole stream, steps after it run on every part.
+struct SplitSilence
+{
+    double thresholdDb = -60.0;
+    double minSilenceMs = 250.0;
+    double minPartMs = 100.0;
+    bool operator==(const SplitSilence&) const = default;
+};
+using StepParameters = std::variant<RemoveDc, TrimSilence, Normalize, Gain, FadeIn, FadeOut,
+                                    SplitSilence>;
 
 struct ProcessStep
 {
@@ -259,6 +269,8 @@ struct OutputResult
     juce::String message;
     std::vector<Issue> warnings;
     std::vector<StepOutcome> steps;
+    int partIndex = 0; // 1-based when Split produced more than one part, 0 otherwise
+    int partCount = 0;
     int64_t startedMs = 0;
     int64_t finishedMs = 0;
 };

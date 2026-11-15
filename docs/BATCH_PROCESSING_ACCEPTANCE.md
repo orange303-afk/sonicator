@@ -76,6 +76,9 @@ findings were fixed with a test first, then the full suite:
 - AIFF/FLAC writer finalisation errors are not observable through JUCE; the full readback pass is
   the gate, and a read failure is now fatal.
 - File-level ENOSPC injection and a >2^31-frame full render remain untested end to end.
+- Split v2 is covered by `[batch-split]`: detection on the prepared pre-split stream, min
+  silence/min part, all-silent fallback, per-part Normalize statistics, numbered part files,
+  per-part failure isolation and the Split+Replace refusal.
 - MP3 CBR/VBR, ID3v2 text tags (Cyrillic UTF-16) and OGG Vorbis with comments are covered by
   "MP3 output is a readable lossy copy..." (decode, rate/channels, codec tolerance, clipping,
   source unchanged, raw ID3 frames, Vorbis comment bytes). Split and original overwrite remain out.

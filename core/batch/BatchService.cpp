@@ -1,8 +1,10 @@
+#include <optional>
 #include "BatchService.h"
 #include "BatchEncoder.h"
 #include "BatchPaths.h"
 #include "BatchPipeline.h"
 #include "BatchPublisher.h"
+#include "BatchSplit.h"
 #include <algorithm>
 
 namespace sonicator::batch
@@ -178,28 +180,138 @@ void BatchService::run()
             }
             else
             {
+                const auto phase = [this](const juce::String& name)
                 {
                     std::lock_guard lock(stateMutex);
-                    state.phase = "Preparing";
-                }
-                auto preparedAudio = prepareAudio(source, batch.request.recipe, checkCancel);
-                if (! preparedAudio.ok)
+                    state.phase = name;
+                };
+                struct Work { FrameRange range; juce::File target; int partIndex = 0; int partCount = 0; };
+                std::vector<Work> work;
+                std::optional<OutputResult> fatal;
+                int partCount = 0;
+                if (const auto* split = recipeSplit(batch.request.recipe))
                 {
-                    result.state = checkCancel() ? OutputState::cancelled : OutputState::failed;
-                    result.code = preparedAudio.code;
-                    result.message = preparedAudio.error;
+                    {
+                        std::lock_guard lock(stateMutex);
+                        state.phase = "Analyzing";
+                    }
+                    auto detectionAudio = prepareAudio(source, batch.request.recipe, checkCancel, {}, true);
+                    if (! detectionAudio.ok)
+                    {
+                        result.state = checkCancel() ? OutputState::cancelled : OutputState::failed;
+                        result.code = detectionAudio.code;
+                        result.message = detectionAudio.error;
+                        fatal = result;
+                    }
+                    else
+                    {
+                        const auto detection = detectBatchParts(*detectionAudio.audio, *split, checkCancel);
+                        if (checkCancel())
+                        {
+                            result.state = OutputState::cancelled;
+                            result.code = ErrorCode::cancelled;
+                            result.message = "Cancelled during split analysis";
+                        }
+                        else if (detection.parts.size() <= 1)
+                        {
+                            work.push_back({ FrameRange {}, plan.target, 0, 0 });
+                        }
+                        else
+                        {
+                            partCount = (int) detection.parts.size();
+                            for (size_t part = 0; part < detection.parts.size(); ++part)
+                            {
+                                const auto target = partTarget(plan.target,
+                                    source.path.getFileNameWithoutExtension(), (int) part + 1,
+                                    partCount);
+                                if (! checkCancel() && batch.request.conflicts == ConflictPolicy::skip
+                                    && target.exists())
+                                {
+                                    OutputResult skipped = result;
+                                    skipped.partIndex = (int) part + 1;
+                                    skipped.partCount = partCount;
+                                    skipped.target = target;
+                                    skipped.state = OutputState::skipped;
+                                    skipped.code = ErrorCode::conflict_skipped;
+                                    skipped.message = "The output already exists and Skip was chosen";
+                                    skipped.startedMs = skipped.finishedMs = juce::Time::currentTimeMillis();
+                                    local.outputs.push_back(std::move(skipped));
+                                    ++local.skipped;
+                                    if (plan.sourceIndex < local.sources.size())
+                                        ++local.sources[plan.sourceIndex].skipped;
+                                    continue;
+                                }
+                                work.push_back({ FrameRange { true, detection.parts[part].begin,
+                                                              detection.parts[part].end },
+                                                 target, (int) part + 1, partCount });
+                            }
+                        }
+                    }
                 }
                 else
                 {
-                    const auto phase = [this](const juce::String& name)
+                    work.push_back({ FrameRange {}, plan.target, 0, 0 });
+                }
+                auto account = [&](const OutputResult& partResult)
+                {
+                    if (plan.sourceIndex < local.sources.size())
                     {
-                        std::lock_guard lock(stateMutex);
-                        state.phase = name;
-                    };
-                    result = renderAndPublish(std::move(preparedAudio.audio), plan, source,
-                                              batch.request.recipe, batch.request.conflicts,
-                                              protection, checkCancel, phase);
-                    result.outputIndex = index;
+                        auto& summary = local.sources[plan.sourceIndex];
+                        switch (partResult.state)
+                        {
+                            case OutputState::completed: ++summary.completed; ++local.completed; break;
+                            case OutputState::skipped: ++summary.skipped; ++local.skipped; break;
+                            case OutputState::failed: ++summary.failed; ++local.failed; break;
+                            case OutputState::cancelled: ++summary.cancelled; ++local.cancelled; break;
+                        }
+                    }
+                };
+                if (fatal.has_value())
+                {
+                    account(*fatal);
+                    local.outputs.push_back(std::move(*fatal));
+                }
+                for (auto& item : work)
+                {
+                    OutputResult partResult = result;
+                    partResult.target = item.target != juce::File() ? item.target : plan.target;
+                    partResult.partIndex = item.partIndex;
+                    partResult.partCount = item.partCount;
+                    partResult.startedMs = juce::Time::currentTimeMillis();
+                    if (checkCancel())
+                    {
+                        partResult.state = OutputState::cancelled;
+                        partResult.code = ErrorCode::cancelled;
+                        partResult.message = "Not started: the job was cancelled";
+                    }
+                    else
+                    {
+                        auto preparedAudio = prepareAudio(source, batch.request.recipe, checkCancel,
+                                                          item.range);
+                        if (! preparedAudio.ok)
+                        {
+                            partResult.state = checkCancel() ? OutputState::cancelled
+                                                             : OutputState::failed;
+                            partResult.code = preparedAudio.code;
+                            partResult.message = preparedAudio.error;
+                        }
+                        else
+                        {
+                            auto partPlan = plan;
+                            partPlan.target = partResult.target;
+                            partResult = renderAndPublish(std::move(preparedAudio.audio), partPlan,
+                                                          source, batch.request.recipe,
+                                                          batch.request.conflicts, protection,
+                                                          checkCancel, phase);
+                            partResult.outputIndex = index;
+                            partResult.partIndex = item.partIndex;
+                            partResult.partCount = item.partCount;
+                        }
+                    }
+                    partResult.finishedMs = juce::Time::currentTimeMillis();
+                    account(partResult);
+                    local.outputs.push_back(std::move(partResult));
+                    if (checkCancel()) local.abandoned = true;
                 }
             }
             result.finishedMs = juce::Time::currentTimeMillis();
@@ -209,18 +321,6 @@ void BatchService::run()
                 state.outputsDone = done;
                 state.fraction = (double) done / (double) std::max<size_t>(1, batch.outputs.size());
             }
-            if (plan.sourceIndex < local.sources.size())
-            {
-                auto& summary = local.sources[plan.sourceIndex];
-                switch (result.state)
-                {
-                    case OutputState::completed: ++summary.completed; ++local.completed; break;
-                    case OutputState::skipped: ++summary.skipped; ++local.skipped; break;
-                    case OutputState::failed: ++summary.failed; ++local.failed; break;
-                    case OutputState::cancelled: ++summary.cancelled; ++local.cancelled; break;
-                }
-            }
-            local.outputs.push_back(std::move(result));
             if (checkCancel()) local.abandoned = true;
         }
     }

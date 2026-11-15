@@ -46,6 +46,16 @@ juce::String rootGroupPrefix(const juce::String& root)
     return name + "-" + hash;
 }
 
+juce::File partTarget(const juce::File& planTarget, const juce::String& sourceStem, int index,
+                      int count)
+{
+    int digits = 3;
+    for (int value = std::max(1, count); value >= 1000; value /= 10) ++digits;
+    auto number = juce::String(std::max(1, index)).paddedLeft('0', digits);
+    return planTarget.getSiblingFile(sourceStem + " part " + number
+                                     + planTarget.getFileExtension());
+}
+
 bool hasSymlinkComponent(const juce::File& file)
 {
     auto current = nearestExistingAncestor(file);

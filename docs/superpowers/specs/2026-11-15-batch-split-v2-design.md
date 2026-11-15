@@ -1,6 +1,6 @@
 # Batch v2 — Split as a cardinality-changing step
 
-Date: 2026-11-15. Status: design for approval. Direction chosen by the owner:
+Date: 2026-11-15. Status: implemented in `core/batch/BatchSplit.*`, pipeline `range` stage and the split-aware service; see `docs/BATCH_PROCESSING.md`. Direction chosen by the owner:
 "Batch v2: Split-шаг + полировка".
 
 ## Intent

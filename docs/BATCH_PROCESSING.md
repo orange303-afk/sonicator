@@ -24,6 +24,7 @@ virtual, container and unsaved-editor sources are listed as skipped with a reaso
 
 An empty chain is a plain conversion. Up to 16 steps run in order; steps can be disabled,
 duplicated and reordered. All work happens on the current intermediate result at the source rate.
+Split is the only cardinality-changing step; it may appear once and anywhere in the chain.
 
 | Step | Range | Behaviour |
 |---|---|---|
@@ -32,6 +33,7 @@ duplicated and reordered. All work happens on the current intermediate result at
 | Normalize | -24..0 dBFS | One sample-peak coefficient for all channels; peaks at or below 1e-6 are unchanged. Not LUFS and not true peak. |
 | Gain | -60..+24 dB | One coefficient for all channels; 0 dB is an exact bypass. |
 | Fade in / out | 0..10000 ms, Linear or Cosine | Applied to the current boundaries; `M < 2` is a no-op. The final frame of a fade out is zero. |
+| Split by silence | -120..-6 dBFS, 10..10000 ms silence/part | One Split per recipe. Steps before it run on the whole stream, steps after it run on every part. Fewer than two parts leaves the stream whole. |
 
 `Sample cleanup` is a built-in preset: DC -> Trim (-60 dB, 5 ms) -> Normalize (-0.1 dB) ->
 Fade out (2 ms, Linear). `No processing` is the empty chain. Built-in presets are immutable.
@@ -60,7 +62,10 @@ explicit 16/24-bit choice instead of silently rounding. WAV/AIFF payloads at or 
 container limit are refused before writing.
 
 Names default to `<stem> processed.<ext>` next to each original, or in the chosen folder while
-preserving the path below the selected folder (row selections use their registered root). A batch from several registered roots gets a stable
+preserving the path below the selected folder (row selections use their registered root). A source
+that Split turns into two or more parts uses `<stem> part 001.<ext>`, `part 002`, ...; one part
+keeps the ordinary name. Replace is unavailable with Split because the part count is unknown before
+analysis; Rename and Skip apply per part. A batch from several registered roots gets a stable
 `<root-name>-<hash8>` group. Existing outputs are renamed (`processed 2`, `processed 3`, ...),
 skipped, or replaced only after a confirmation that names the exact count and only if the old file
 is unchanged.
@@ -90,7 +95,7 @@ No policy can replace an input, a hard-link alias or a symbolic-link target.
 
 Preview measures the global chain parameters on the whole selected source in a worker, then writes
 a dry and a processed WAV float (at most 10 seconds each; deleted when the preview stops or the
-dialog closes) starting at the first frame that survives
+dialog closes). With Split it previews the first detected part after the post-split steps starting at the first frame that survives
 Trim. Playback uses the existing AudioEngine; no second audio device is created. The processed
 preview skips integer dither and codec round-trip, and says so. After the preview, the previously
 loaded source is restored without autoplay.
@@ -109,8 +114,9 @@ structured error code. It exports as JSON or text. A diagnostic JSON copy is kep
 
 ## Limits of v1
 
-- No Split, no original overwrite, no nested container/instrument processing, no LUFS/true peak,
-  limiter, time stretch, pitch shift or VST processing.
+- No original overwrite, no nested container/instrument processing, no LUFS/true peak, limiter,
+  time stretch, pitch shift or VST processing. Split v2 has no part-level presets, padding or
+  nested splits.
 - Lossy output was added after v1: MP3 CBR/VBR with text ID3 and OGG Vorbis with comments. Cover
   art, catalog-only fields (manual Genre/BPM/Key) and gapless-specific VBR tuning are out.
 - One batch job and one preview at a time. Other writers and catalog switches are blocked while it

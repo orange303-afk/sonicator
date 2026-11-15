@@ -1,5 +1,6 @@
 #include "BatchPipeline.h"
 #include "core/audio/SonicatorFormats.h"
+#include "BatchSplit.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -284,7 +285,8 @@ ReadResult PreparedAudio::peak(float& value)
     return { ReadState::ok, 0, ErrorCode::none, {} };
 }
 
-PrepareAudioResult prepareAudio(const SourceSnapshot& source, const Recipe& recipe, CancelCheck cancel)
+PrepareAudioResult prepareAudio(const SourceSnapshot& source, const Recipe& recipe, CancelCheck cancel,
+                                FrameRange range, bool stopAtSplit)
 {
     PrepareAudioResult result;
     auto fail = [&result](ErrorCode code, juce::String message)
@@ -317,8 +319,29 @@ PrepareAudioResult prepareAudio(const SourceSnapshot& source, const Recipe& reci
                                                std::move(steps));
     };
 
+    const int splitIndex = recipeSplitIndex(recipe);
     for (size_t index = 0; index < recipe.steps.size(); ++index)
     {
+        if ((int) index == splitIndex)
+        {
+            StepOutcome splitOutcome;
+            splitOutcome.stepIndex = (int) index;
+            splitOutcome.type = "Split by silence";
+            splitOutcome.changed = true;
+            splitOutcome.detail = "Split boundary";
+            outcomes.push_back(splitOutcome);
+            if (range.active)
+            {
+                StageSpec spec;
+                spec.kind = StageSpec::Kind::trim;
+                spec.trimBegin = range.begin;
+                spec.trimEnd = range.end;
+                specs.push_back(spec);
+                currentLength = std::max<int64_t>(0, range.end - range.begin);
+            }
+            if (stopAtSplit) break;
+            continue;
+        }
         const auto& step = recipe.steps[index];
         StepOutcome outcome;
         outcome.stepIndex = (int) index;

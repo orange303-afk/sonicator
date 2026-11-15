@@ -473,7 +473,9 @@ catalog snapshot (rows or a recursive physical folder), expands stereo pairs, pr
 the shared reader, resolves output capabilities and reserves deterministic output paths. The
 resulting `PreparedBatch` has no UI pointers and no open writer.
 
-`PreparedAudio` turns the source into a replayable stage chain. Global parameters (DC mean, trim
+Split is a cardinality-changing step: `BatchSplit` scans the already prepared pre-split stream for
+silence ranges, and each range becomes a `range` stage whose post-split steps are analysed on that
+part alone. Part paths are numbered and published through the same atomic publisher. Global parameters (DC mean, trim
 bounds, normalize peak) are measured on the already prepared stream, so a later step sees the real
 intermediate result. `ConvertedStream` applies channel mapping and libsamplerate
 `SRC_SINC_BEST_QUALITY` with an exact `Nout` contract. `Quantizer` produces left-aligned int32 words

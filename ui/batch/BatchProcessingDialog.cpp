@@ -1,6 +1,7 @@
 #include "BatchProcessingDialog.h"
 #include "core/batch/BatchService.h"
 #include "core/settings/AppSettings.h"
+#include "core/batch/BatchSplit.h"
 #include "ui/shell/Theme.h"
 #include "ui/shell/AppFonts.h"
 #include <algorithm>
@@ -21,6 +22,9 @@ juce::String defaultParameters(const StepParameters& parameters)
         return juce::String(fade->ms, 1) + ", " + (fade->cosine ? "1" : "0");
     if (auto* fade = std::get_if<FadeOut>(&parameters))
         return juce::String(fade->ms, 1) + ", " + (fade->cosine ? "1" : "0");
+    if (auto* split = std::get_if<SplitSilence>(&parameters))
+        return juce::String(split->thresholdDb, 1) + ", " + juce::String(split->minSilenceMs, 0)
+            + ", " + juce::String(split->minPartMs, 0);
     return {};
 }
 
@@ -39,6 +43,7 @@ StepParameters parseParameters(int type, const juce::String& text)
         case 4: return Gain { at(0, 0.0) };
         case 5: return FadeIn { at(0, 5.0), at(1, 0.0) != 0.0 };
         case 6: return FadeOut { at(0, 5.0), at(1, 0.0) != 0.0 };
+        case 7: return SplitSilence { at(0, -60.0), at(1, 250.0), at(2, 100.0) };
         default: return RemoveDc {};
     }
 }
@@ -50,6 +55,7 @@ int typeOf(const StepParameters& parameters)
     if (std::holds_alternative<Normalize>(parameters)) return 3;
     if (std::holds_alternative<Gain>(parameters)) return 4;
     if (std::holds_alternative<FadeIn>(parameters)) return 5;
+    if (std::holds_alternative<SplitSilence>(parameters)) return 7;
     return 6;
 }
 
@@ -63,6 +69,7 @@ const char* typeName(int type)
         case 4: return "Gain";
         case 5: return "Fade in";
         case 6: return "Fade out";
+        case 7: return "Split by silence";
         default: return "Step";
     }
 }
@@ -81,7 +88,7 @@ public:
         enabled.onClick = [this] { if (changed) changed(); };
         addAndMakeVisible(enabled);
         enabled.setComponentID("batchStepEnabled");
-        for (int type = 1; type <= 6; ++type) typeBox.addItem(typeName(type), type);
+        for (int type = 1; type <= 7; ++type) typeBox.addItem(typeName(type), type);
         typeBox.setSelectedId(typeOf(source.parameters), juce::dontSendNotification);
         typeBox.onChange = [this]
         {
@@ -162,7 +169,7 @@ BatchProcessingDialog::BatchProcessingDialog(PreparedBatch prepared, juce::File 
     addStepButton.onClick = [this]
     {
         juce::PopupMenu menu;
-        for (int type = 1; type <= 6; ++type) menu.addItem(type, typeName(type));
+        for (int type = 1; type <= 7; ++type) menu.addItem(type, typeName(type));
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&addStepButton),
                            [safe = juce::Component::SafePointer<BatchProcessingDialog>(this)](int result)
                            {
@@ -732,6 +739,8 @@ juce::String BatchProcessingDialog::validationMessage() const
 {
     if (batch.sources.empty()) return "No eligible source file";
     const auto recipe = currentRecipe();
+    if (recipeHasSplit(recipe) && conflictPolicy() == ConflictPolicy::replaceOutput)
+        return "Replace cannot be used with Split; choose Rename or Skip";
     const auto issues = validateRecipe(recipe);
     for (const auto& issue : issues)
         if (! issue.warning) return issue.message;
@@ -887,7 +896,9 @@ void BatchProcessingDialog::refreshFooter()
     }
     const auto message = validationMessage();
     juce::String text = juce::String((int) batch.sources.size()) + " source(s), "
-        + juce::String((int) expectedOutputs()) + " expected output(s)";
+        + (recipeHasSplit(currentRecipe())
+               ? juce::String("each split part x selected formats")
+               : juce::String((int) expectedOutputs()) + " expected output(s)");
     if (message.isNotEmpty()) text += "  |  " + message;
     else
     {
@@ -928,6 +939,10 @@ void BatchProcessingDialog::updateOutputControls()
     mp3Bitrate.setEnabled(mp3On && ! vbr);
     mp3VbrQuality.setEnabled(mp3On && vbr);
     oggQuality.setEnabled(oggToggle.getToggleState());
+    const bool split = recipeHasSplit(currentRecipe());
+    conflictBox.setItemEnabled(3, ! split);
+    if (split && conflictBox.getSelectedId() == 3)
+        conflictBox.setSelectedId(1, juce::dontSendNotification);
     outputFolder.setEnabled(! nextToSources.getToggleState());
     browseFolder.setEnabled(! nextToSources.getToggleState());
     if (aiffDepth.getSelectedId() == 4) aiffDepth.setSelectedId(3, juce::dontSendNotification);

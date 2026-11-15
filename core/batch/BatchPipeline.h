@@ -81,7 +81,17 @@ struct PrepareAudioResult
     std::vector<Issue> warnings;
 };
 
-PrepareAudioResult prepareAudio(const SourceSnapshot&, const Recipe&, CancelCheck = {});
+struct FrameRange
+{
+    bool active = false;
+    int64_t begin = 0;
+    int64_t end = 0;
+};
+
+// With a Split step, `range` is applied after the steps before it and the steps after it run on the
+// part only. `stopAtSplit` prepares just the pre-split stream, which is what detection scans.
+PrepareAudioResult prepareAudio(const SourceSnapshot&, const Recipe&, CancelCheck = {},
+                                FrameRange range = {}, bool stopAtSplit = false);
 
 // Fade coefficient for frame `n` of a stream of `total` frames. Fade out uses the same curve in
 // reverse, so the final frame is exactly zero.

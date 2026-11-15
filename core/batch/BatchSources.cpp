@@ -1,5 +1,6 @@
 #include "BatchSources.h"
 #include "BatchPaths.h"
+#include "BatchSplit.h"
 #include "core/audio/SonicatorFormats.h"
 #include <algorithm>
 #include <set>
@@ -251,7 +252,7 @@ bool planOutputs(PreflightResult& result, const Request& request, CancelCheck ca
                 continue;
             }
             plan.target = planned.target;
-            plan.skipExisting = planned.skipExisting;
+            plan.skipExisting = recipeHasSplit(request.recipe) ? false : planned.skipExisting;
             plan.replaceExisting = planned.replaceExisting;
             plan.previousFingerprint = planned.previousFingerprint;
             result.batch.outputs.push_back(plan);
@@ -305,6 +306,9 @@ PreflightResult prepareBatch(SampleRepository& repo, const Request& request, Can
         result.issues.push_back(issue);
     }
     if (recipeFatal) return fail(ErrorCode::invalid_recipe, "The processing settings are invalid");
+    if (recipeHasSplit(request.recipe) && request.conflicts == ConflictPolicy::replaceOutput)
+        return fail(ErrorCode::invalid_recipe,
+                    "Replace cannot be used together with Split; use Rename or Skip");
 
     const auto roots = repo.roots();
     struct Candidate { juce::File file; int64_t sampleId; };

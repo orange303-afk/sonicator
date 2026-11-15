@@ -2,6 +2,7 @@
 #include "BatchPipeline.h"
 #include "BatchResampler.h"
 #include "core/audio/SonicatorFormats.h"
+#include "BatchSplit.h"
 
 namespace sonicator::batch
 {
@@ -103,7 +104,25 @@ void BatchPreviewService::run()
     const auto checkCancel = [this] { return cancelled.load(); };
     try
     {
-        auto prepared = prepareAudio(source, recipe, checkCancel);
+        FrameRange part;
+        if (const auto* split = recipeSplit(recipe))
+        {
+            auto detection = prepareAudio(source, recipe, checkCancel, {}, true);
+            if (! detection.ok)
+            {
+                local.code = detection.code;
+                local.error = detection.error;
+            }
+            else
+            {
+                const auto parts = detectBatchParts(*detection.audio, *split, checkCancel);
+                if (parts.parts.size() > 1)
+                    part = { true, parts.parts.front().begin, parts.parts.front().end };
+            }
+        }
+        auto prepared = local.code != ErrorCode::none
+            ? PrepareAudioResult {}
+            : prepareAudio(source, recipe, checkCancel, part);
         if (! prepared.ok)
         {
             local.ok = false;
