@@ -17,6 +17,9 @@
 #include "core/edit/NormalizeService.h"
 #include "core/extract/ExtractCandidates.h"
 #include "core/extract/ExtractService.h"
+#include "core/batch/BatchService.h"
+#include "core/batch/BatchSources.h"
+#include "core/batch/BatchPreviewService.h"
 #include "core/settings/AppSettings.h"
 #include "core/contribute/ContributionUploader.h"
 #include "ui/commands/CommandRegistry.h"
@@ -29,6 +32,7 @@
 #include <future>
 namespace sonicator {
 class SplitDialog;
+namespace batch { class BatchProcessingDialog; }
 class ExtractDialog;
 class SettingsPanel;
 // Blinks red while a background job runs and stays green when the app is idle. It sits left of the
@@ -71,6 +75,8 @@ public:
     // The settings file this window reads and writes. Exposed so tests can prove they never
     // touch the owner's live preferences.
     juce::File settingsFile() const;
+    // Read-only view of the command catalogue. Menus, keys and tests use the same registrations.
+    const CommandRegistry& commandRegistry() const { return commands; }
     // The effective split of the panel row and the preview band in this window.
     const PanelLayoutBounds& currentLayout() const { return layoutBounds; }
     // hostEngine and embeddedUi are used by the DAW plugin: the processor owns the audio engine
@@ -170,6 +176,17 @@ private:
     std::unique_ptr<TaggingService> tagging;
     std::unique_ptr<AutoTagService> autoTag;
     std::unique_ptr<SplitService> splitter;
+    // Batch Processing owner: the dialog configures, the service writes, the preview auditions
+    // through the existing preview panel. The owner holds the service until its thread stops.
+    std::unique_ptr<batch::BatchService> batchService;
+    std::unique_ptr<batch::BatchPreviewService> batchPreview;
+    juce::Component::SafePointer<juce::DialogWindow> batchDialog;
+    juce::Component::SafePointer<batch::BatchProcessingDialog> batchContent;
+    bool batchWasRunning = false;
+    bool batchClosePending = false;
+    bool batchPreviewWasRunning = false;
+    juce::File batchPreviewRestore;
+    bool batchPreviewAuditioned = false;
     std::unique_ptr<ExtractService> extractor;
     std::unique_ptr<NormalizeService> normalizer;
     // Poll on the message thread; join before destroying/replacing the catalog repositories.
@@ -313,6 +330,13 @@ private:
     void startAutoTagFolder(const juce::String& folder);
     void showAutoTagDialog(AutoTagResult result);
     void startSplit(const std::vector<juce::File>& files);
+    void openBatchProcessing(const batch::SourceSelection&);
+    void startBatchProcessing();
+    void startBatchPreview(const batch::SourceSnapshot&, const batch::Recipe&, int generation);
+    void auditionBatchPreview(const juce::File&, bool processed);
+    void stopBatchPreview();
+    void closeBatchDialog();
+    bool isBatchRunning() const { return batchService != nullptr && batchService->isRunning(); }
     void finishSplit();
     // Normalize selected: the menu and ⇧⌘N both land here. Candidates are the ordinary files of
     // the selection that this build can decode and write.

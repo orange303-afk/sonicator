@@ -76,7 +76,9 @@ FetchContent_MakeAvailable(libxmp)
 # libsamplerate provides the band-limited conversion used by Batch Processing. The archive is
 # pinned by SHA256 and built statically; its examples, tests and install rules stay off.
 set(SONICATOR_BUILD_TESTING_SAVED ${BUILD_TESTING})
-set(BUILD_TESTING OFF)
+# The dependency's own test tree must not join Sonicator's ctest: force the cache value off for
+# its configure scope and restore the project's value afterwards.
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(LIBSAMPLERATE_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LIBSAMPLERATE_INSTALL OFF CACHE BOOL "" FORCE)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
@@ -86,7 +88,11 @@ FetchContent_Declare(libsamplerate
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(libsamplerate)
 unset(CMAKE_POLICY_VERSION_MINIMUM)
-set(BUILD_TESTING ${SONICATOR_BUILD_TESTING_SAVED})
+if("${SONICATOR_BUILD_TESTING_SAVED}" STREQUAL "")
+    set(BUILD_TESTING ON CACHE BOOL "" FORCE)
+else()
+    set(BUILD_TESTING ${SONICATOR_BUILD_TESTING_SAVED} CACHE BOOL "" FORCE)
+endif()
 # libxmp enables verbose stderr tracing through -DDEBUG in Debug builds. Keep the library silent:
 # its diagnostics are development noise for an application and would otherwise dominate tests.
 if(NOT MSVC)
@@ -133,7 +139,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/edit/AudioEditWriter.cpp
     core/edit/AudioFileWriter.cpp
     core/edit/NormalizeService.cpp
-    core/batch/BatchTypes.cpp core/batch/BatchSources.cpp core/batch/BatchPaths.cpp core/batch/BatchPipeline.cpp core/batch/BatchResampler.cpp core/batch/BatchQuantizer.cpp core/batch/BatchMetadata.cpp core/batch/BatchPublisher.cpp core/batch/BatchEncoder.cpp core/batch/BatchService.cpp
+    core/batch/BatchTypes.cpp core/batch/BatchSources.cpp core/batch/BatchPaths.cpp core/batch/BatchPipeline.cpp core/batch/BatchResampler.cpp core/batch/BatchQuantizer.cpp core/batch/BatchMetadata.cpp core/batch/BatchPublisher.cpp core/batch/BatchEncoder.cpp core/batch/BatchService.cpp core/batch/BatchPresetStore.cpp core/batch/BatchPreviewService.cpp
     core/indexing/CatalogFileSync.cpp
     core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp
     core/updates/UpdateCheck.cpp
@@ -155,7 +161,7 @@ juce_add_binary_data(SonicatorAssets SOURCES
     resources/fonts/Manrope-Bold.ttf
     resources/ml/global_prototypes.json
     resources/ml/global_model.json)
-add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/shell/AppFonts.cpp ui/shell/WrappedText.cpp ui/analysis/AnalysisCard.cpp ui/analysis/KeyBpmBlock.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/shell/StudioControls.cpp ui/shell/PanelLayout.cpp ui/shell/PanelSplitter.cpp ui/commands/CommandRegistry.cpp ui/commands/ShortcutBindings.cpp ui/commands/CommandRouter.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/shell/DialogSurface.cpp ui/settings/SettingsPanel.cpp ui/settings/HotkeysPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp)
+add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/shell/AppFonts.cpp ui/shell/WrappedText.cpp ui/analysis/AnalysisCard.cpp ui/analysis/KeyBpmBlock.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/shell/StudioControls.cpp ui/shell/PanelLayout.cpp ui/shell/PanelSplitter.cpp ui/commands/CommandRegistry.cpp ui/commands/ShortcutBindings.cpp ui/commands/CommandRouter.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/shell/DialogSurface.cpp ui/settings/SettingsPanel.cpp ui/settings/HotkeysPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp ui/batch/BatchProcessingDialog.cpp)
 if(APPLE)
     target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.mm)
 else()

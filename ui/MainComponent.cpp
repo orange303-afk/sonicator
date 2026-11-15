@@ -5,6 +5,9 @@
 #include "core/reason/ReasonPatch.h"
 #include "ui/tagging/AutoTagDialog.h"
 #include "ui/split/SplitDialog.h"
+#include "ui/batch/BatchProcessingDialog.h"
+#include "core/batch/BatchPresetStore.h"
+#include "core/batch/BatchPublisher.h"
 #include "ui/extract/ExtractDialog.h"
 #include "core/extract/EmbeddedSamples.h"
 #include "core/extract/ExtractFollowUp.h"
@@ -173,6 +176,14 @@ class ExtractDialogWindow final : public juce::DialogWindow
 {
 public:
     ExtractDialogWindow() : juce::DialogWindow("Extract samples", theme::panel, true) {}
+    void closeButtonPressed() override { if (onClose) onClose(); }
+    void inputAttemptWhenModal() override {}
+    std::function<void()> onClose;
+};
+class BatchDialogWindow final : public juce::DialogWindow
+{
+public:
+    BatchDialogWindow() : juce::DialogWindow("Batch Processing", theme::panel, true) {}
     void closeButtonPressed() override { if (onClose) onClose(); }
     void inputAttemptWhenModal() override {}
     std::function<void()> onClose;
@@ -412,6 +423,57 @@ void MainComponent::registerCommands()
         addCommand(std::move(spec), [] { return CommandState::ready(); },
                    [this] { search.grabKeyboardFocus(); });
     }
+    {
+        CommandSpec spec;
+        spec.id = "library.batchProcess";
+        spec.name = "Batch Processing...";
+        spec.description = "Converts and processes a snapshot of the selected files";
+        spec.scope = CommandScope::library;
+        spec.category = "Library";
+        auto state = [this]() -> CommandState
+        {
+            if (library.getSelectedSamples().empty())
+                return CommandState::unavailable("Select one or more files");
+            if (isBatchRunning())
+                return CommandState::unavailable("Batch Processing is running");
+            if (isSplitRunning() || isExtractRunning() || isNormalizeRunning())
+                return CommandState::unavailable("Wait for the running job");
+            return CommandState::ready();
+        };
+        addCommand(std::move(spec), std::move(state), [this]
+        {
+            batch::SourceSelection selection;
+            selection.kind = batch::SourceSelection::Kind::rows;
+            for (const auto& record : library.getSelectedSamples()) selection.rows.push_back(record.id);
+            openBatchProcessing(selection);
+        });
+    }
+    {
+        CommandSpec spec;
+        spec.id = "folders.batchProcess";
+        spec.name = "Batch Processing folder...";
+        spec.description = "Converts and processes every catalogued file below the selected folder";
+        spec.scope = CommandScope::folders;
+        spec.category = "Folders";
+        auto state = [this]() -> CommandState
+        {
+            if (selectedFolder.isEmpty())
+                return CommandState::unavailable("Select a catalogued folder");
+            if (isBatchRunning())
+                return CommandState::unavailable("Batch Processing is running");
+            if (isSplitRunning() || isExtractRunning() || isNormalizeRunning())
+                return CommandState::unavailable("Wait for the running job");
+            return CommandState::ready();
+        };
+        addCommand(std::move(spec), std::move(state), [this]
+        {
+            batch::SourceSelection selection;
+            selection.kind = batch::SourceSelection::Kind::folder;
+            selection.folder = selectedFolder;
+            openBatchProcessing(selection);
+        });
+    }
+
     {
         CommandSpec spec;
         spec.id = "library.addLastTag";
@@ -2712,9 +2774,265 @@ void MainComponent::showAutoTagDialog(AutoTagResult result)
     autoTagDialog = options.launchAsync();
     if (autoTagDialog != nullptr) autoTagDialog->setLookAndFeel(&look);
 }
+
+void MainComponent::openBatchProcessing(const batch::SourceSelection& selection)
+{
+    if (readRepo == nullptr) return;
+    if (isBatchRunning())
+    {
+        status.setText("Batch Processing is already running.", juce::dontSendNotification);
+        return;
+    }
+    if (batchContent != nullptr)
+    {
+        if (batchDialog != nullptr) batchDialog->toFront(true);
+        return;
+    }
+    if (isSplitRunning() || isExtractRunning() || isNormalizeRunning()
+        || (tagging && tagging->progress().running) || (autoTag && autoTag->progress().running)
+        || (indexer && indexer->progress().running) || (smart && smart->progress().running))
+    {
+        status.setText("Wait for the running job to finish before Batch Processing.",
+                       juce::dontSendNotification);
+        return;
+    }
+    batch::Request request;
+    request.sources = selection;
+    batch::PreflightResult prepared;
+    try { prepared = batch::prepareBatch(*readRepo, request, {}); }
+    catch (const std::exception& error)
+    {
+        status.setText("Batch preflight failed: " + juce::String::fromUTF8(error.what()),
+                       juce::dontSendNotification);
+        return;
+    }
+    if (! prepared.ok || prepared.batch.sources.empty())
+    {
+        juce::String message = "No file can be batch processed.";
+        int shown = 0;
+        for (const auto& issue : prepared.issues)
+        {
+            if (issue.warning || shown >= 6) continue;
+            message += "\n\n" + issue.message;
+            if (issue.path.isNotEmpty()) message += "\n" + issue.path;
+            ++shown;
+        }
+        if (shown == 0) message += "\n\n" + juce::String("The selection has no supported audio file.");
+        dialogs::showAlert(*this, "Batch Processing", message, { { "OK", 1 } }, nullptr,
+                           juce::MessageBoxIconType::InfoIcon);
+        return;
+    }
+
+    auto* dialog = new batch::BatchProcessingDialog(prepared.batch,
+                                                    batch::BatchPresetStore::defaultFileFor(settingsStore));
+    dialog->onStart = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr) safe->startBatchProcessing();
+    };
+    dialog->onCancelJob = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr && safe->batchService != nullptr) safe->batchService->cancel();
+    };
+    dialog->onClose = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr) safe->closeBatchDialog();
+    };
+    dialog->onPreparePreview = [safe = juce::Component::SafePointer<MainComponent>(this)](
+        batch::SourceSnapshot snapshot, batch::Recipe recipe, int generation)
+    {
+        if (safe != nullptr) safe->startBatchPreview(snapshot, recipe, generation);
+    };
+    dialog->onPlayPreview = [safe = juce::Component::SafePointer<MainComponent>(this)](
+        juce::File file, bool processed)
+    {
+        if (safe != nullptr) safe->auditionBatchPreview(file, processed);
+    };
+    dialog->onStopPreview = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr) safe->stopBatchPreview();
+    };
+    dialog->onOpenOutputFolder = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe == nullptr) return;
+        if (safe->batchContent != nullptr)
+            for (const auto& output : safe->batchContent->report().outputs)
+                if (output.state == batch::OutputState::completed && output.target.existsAsFile())
+                {
+                    juce::Process::openDocument(output.target.getParentDirectory().getFullPathName(), {});
+                    return;
+                }
+        if (safe->batchService != nullptr)
+            for (const auto& output : safe->batchService->results().outputs)
+                if (output.state == batch::OutputState::completed)
+                {
+                    juce::Process::openDocument(output.target.getParentDirectory().getFullPathName(), {});
+                    return;
+                }
+        safe->status.setText("No output folder yet.", juce::dontSendNotification);
+    };
+    dialog->onExportReport = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe == nullptr || safe->batchContent == nullptr) return;
+        auto* safeDialog = safe->batchContent.getComponent();
+        auto* chooser = new juce::FileChooser("Export batch report",
+            juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                .getChildFile("batch-report.json"), "*.json", true);
+        const auto report = safe->batchContent->report();
+        chooser->launchAsync(juce::FileBrowserComponent::saveMode
+                                 | juce::FileBrowserComponent::canSelectFiles,
+            [chooser, report](const juce::FileChooser& chosen)
+            {
+                const auto file = chosen.getResult();
+                if (file != juce::File())
+                    file.replaceWithText(batch::BatchService::reportToJson(report), false, false, "\n");
+                delete chooser;
+            });
+        juce::ignoreUnused(safeDialog);
+    };
+    dialog->onScanNewFiles = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe == nullptr || safe->indexer == nullptr || safe->batchContent == nullptr) return;
+        if (safe->isBatchRunning() || safe->indexer->progress().running) return;
+        juce::StringArray folders;
+        for (const auto& output : safe->batchContent->report().outputs)
+            if (output.state == batch::OutputState::completed)
+                folders.addIfNotAlreadyThere(output.target.getParentDirectory().getFullPathName());
+        if (! folders.isEmpty() && safe->indexer->startFoldersNewOnly(folders))
+            safe->status.setText("Scanning new batch outputs", juce::dontSendNotification);
+        else
+            safe->status.setText("The new outputs cannot be scanned now.", juce::dontSendNotification);
+    };
+    batchContent = dialog;
+    auto* window = new BatchDialogWindow();
+    window->setContentOwned(dialog, true);
+    window->setLookAndFeel(&look);
+    window->setUsingNativeTitleBar(false);
+    window->setResizable(true, true);
+    window->setSize(dialog->getWidth(), dialog->getHeight());
+    window->centreAroundComponent(this, window->getWidth(), window->getHeight());
+    window->onClose = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr) safe->closeBatchDialog();
+    };
+    batchDialog = window;
+    batchClosePending = false;
+    window->enterModalState(true, nullptr, true);
+}
+
+void MainComponent::startBatchProcessing()
+{
+    if (batchContent == nullptr || readRepo == nullptr || isBatchRunning()) return;
+    if (preview.hasUnsavedEdits())
+    {
+        batchContent->setPreviewStatus("Save or discard the editor changes before starting a batch.");
+        return;
+    }
+    batch::Request request;
+    request.sources = batchContent->selection();
+    request.recipe = batchContent->currentRecipe();
+    request.conflicts = batchContent->conflictPolicy();
+    request.destination = batchContent->destination();
+    request.replacementConfirmed = request.conflicts == batch::ConflictPolicy::replaceOutput;
+    auto prepared = batch::prepareBatch(*readRepo, request, {});
+    if (! prepared.ok)
+    {
+        juce::String message;
+        for (const auto& issue : prepared.issues)
+            if (! issue.warning) message += (message.isEmpty() ? "" : "\n") + issue.message;
+        batchContent->setPreviewStatus(message.isEmpty() ? "The request is not valid" : message);
+        return;
+    }
+    batchService = std::make_unique<batch::BatchService>();
+    const auto reportFolder = settingsStore.file().getParentDirectory().getChildFile("batch-reports");
+    if (! batchService->start(prepared.batch, reportFolder))
+    {
+        batchService.reset();
+        batchContent->setPreviewStatus("The batch job could not start.");
+        return;
+    }
+    batchWasRunning = true;
+    batchContent->setRunning(true);
+    closeSplitDialog();
+    status.setText("Batch Processing started", juce::dontSendNotification);
+}
+
+void MainComponent::startBatchPreview(const batch::SourceSnapshot& snapshot,
+                                      const batch::Recipe& recipe, int generation)
+{
+    if (batchContent == nullptr) return;
+    if (preview.hasUnsavedEdits())
+    {
+        batchContent->setPreviewStatus("Save or discard the editor changes before auditioning.");
+        return;
+    }
+    stopBatchPreview();
+    if (! batchPreviewRestore.existsAsFile() && preview.loadedFilePath().existsAsFile())
+        batchPreviewRestore = preview.loadedFilePath();
+    batchPreview = std::make_unique<batch::BatchPreviewService>();
+    const auto folder = settingsStore.file().getParentDirectory().getChildFile("batch-preview");
+    if (! batchPreview->start(snapshot, recipe, generation, folder))
+    {
+        batchPreview.reset();
+        batchContent->setPreviewStatus("Only one preview can run at a time.");
+        return;
+    }
+    batchPreviewWasRunning = true;
+    batchContent->setPreviewStatus("Analyzing the whole source...");
+}
+
+void MainComponent::auditionBatchPreview(const juce::File& file, bool processed)
+{
+    if (! file.existsAsFile()) return;
+    if (preview.hasUnsavedEdits()) return;
+    preview.loadFile(file, true);
+    batchPreviewAuditioned = true;
+    if (batchContent != nullptr)
+        batchContent->setPreviewStatus(processed ? "Playing processed preview"
+                                                 : "Playing original preview");
+}
+
+void MainComponent::stopBatchPreview()
+{
+    if (batchPreview != nullptr)
+    {
+        batchPreview->cancel();
+        if (batchPreview->waitUntilFinished(2000)) batchPreview.reset();
+    }
+    preview.stopPlayback();
+    if (batchPreviewAuditioned && batchPreviewRestore.existsAsFile())
+    {
+        preview.loadFile(batchPreviewRestore, false);
+        batchPreviewAuditioned = false;
+    }
+}
+
+void MainComponent::closeBatchDialog()
+{
+    if (isBatchRunning())
+    {
+        if (batchService != nullptr) batchService->cancel();
+        batchClosePending = true;
+        return;
+    }
+    stopBatchPreview();
+    if (batchDialog != nullptr)
+    {
+        batchDialog->exitModalState(0);
+        batchDialog = nullptr;
+    }
+    batchContent = nullptr;
+    batchService.reset();
+    batchClosePending = false;
+}
+
 void MainComponent::startSplit(const std::vector<juce::File>& files)
 {
     if (files.empty() || splitter == nullptr) return;
+    if (isBatchRunning())
+    {
+        status.setText("Wait for Batch Processing to finish.", juce::dontSendNotification);
+        return;
+    }
     if (isSplitRunning())
     {
         status.setText("Split is already running.", juce::dontSendNotification);
@@ -3222,6 +3540,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
         && (autoTag == nullptr || ! autoTag->progress().running)
         && ! splitBusy;
     if (isDiscImage) menu.addItem(7012, "Extract samples...", extractIdle);
+    menu.addItem(7013, "Batch Processing...", catalogued > 0 && ! isBatchRunning() && ! splitBusy);
     menu.addItem(7002, "Scan folder", indexer != nullptr && ! indexer->progress().running && ! splitBusy);
     menu.addItem(7003, "Analyze smart metadata (" + juce::String(catalogued) + ")",
                  smart != nullptr && ! smart->progress().running && ! splitBusy
@@ -3266,6 +3585,20 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                 && result != 7011)
             {
                 safe->status.setText("Wait for Split to finish.", juce::dontSendNotification);
+                return;
+            }
+            if (safe->isBatchRunning() && result != 7001 && result != 7006)
+            {
+                safe->status.setText("Wait for Batch Processing to finish.",
+                                     juce::dontSendNotification);
+                return;
+            }
+            if (result == 7013)
+            {
+                batch::SourceSelection batchSelection;
+                batchSelection.kind = batch::SourceSelection::Kind::folder;
+                batchSelection.folder = folderPath;
+                safe->openBatchProcessing(batchSelection);
                 return;
             }
             try
@@ -3509,6 +3842,11 @@ std::vector<SampleRecord> MainComponent::normalizeCandidates(
 void MainComponent::startNormalizeSelected(const std::vector<SampleRecord>& selection)
 {
     if (normalizer == nullptr) return;
+    if (isBatchRunning())
+    {
+        status.setText("Wait for Batch Processing to finish.", juce::dontSendNotification);
+        return;
+    }
     if (isNormalizeRunning())
     {
         status.setText("Normalize is already running.", juce::dontSendNotification);
@@ -3797,6 +4135,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         : juce::String("Extract samples..."), ! extractCandidates.empty());
     menu.addItem(editCommandMenuItem(EditAction::normalizeSelected,
                                      ! normalizeRecords.empty() && ! isNormalizeRunning()));
+    menu.addItem(9025, "Batch Processing...", ! existingFiles.empty() && ! isBatchRunning());
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
                          allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
@@ -3936,6 +4275,14 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
             }
             try
             {
+                if (result == 9025)
+                {
+                    batch::SourceSelection batchSelection;
+                    batchSelection.kind = batch::SourceSelection::Kind::rows;
+                    batchSelection.rows = ids;
+                    safe->openBatchProcessing(batchSelection);
+                    return;
+                }
                 if (result == 25001)
                 {
                     juce::String initial = "120";
@@ -4386,10 +4733,13 @@ void MainComponent::timerCallback()
     const bool extractRunning = ep.running;
     const bool normalizeRunning = np.running;
     const bool genreRunning = folderGenreWork.valid();
+    const bool batchRunning = isBatchRunning();
+    const bool previewRunning = batchPreview != nullptr && batchPreview->isRunning();
     const bool busy = genreRunning || p.running || smartRunning || taggingRunning || autoTagRunning
-        || splitRunning || extractRunning || normalizeRunning;
+        || splitRunning || extractRunning || normalizeRunning || batchRunning || previewRunning;
     activityDot.setActive(busy);
-    pause.setEnabled(! splitRunning && (p.running || smartRunning)); cancel.setEnabled(busy && ! genreRunning);
+    pause.setEnabled(! splitRunning && (p.running || smartRunning));
+    cancel.setEnabled(! batchRunning && busy && ! genreRunning);
     addFolder.setEnabled(! busy); rescan.setEnabled(! busy);
     reanalyze.setEnabled(! busy); newFiles.setEnabled(! busy);
     smartButton.setEnabled(! busy);
@@ -4487,6 +4837,34 @@ void MainComponent::timerCallback()
             + "  errors " + juce::String(s.failed) + "  stale " + juce::String(s.stale)
             + (s.running && s.current.isNotEmpty() ? "  |  " + s.current : juce::String()),juce::dontSendNotification);
         status.setTooltip(status.getText());
+    }
+    if (batchService != nullptr && batchContent != nullptr)
+    {
+        const auto bp = batchService->progress();
+        batchContent->setProgress(bp);
+        if (bp.running)
+            status.setText("Batch Processing  |  " + bp.phase
+                + (bp.current.isNotEmpty() ? "  |  " + bp.current : juce::String())
+                + "  " + juce::String(bp.outputsDone) + "/" + juce::String(bp.outputsTotal),
+                juce::dontSendNotification);
+        if (batchWasRunning && ! bp.running)
+        {
+            const auto report = batchService->results();
+            batchContent->showReport(report);
+            batchWasRunning = false;
+            status.setText("Batch Processing finished: " + juce::String(report.completed)
+                + " completed, " + juce::String(report.failed) + " failed, "
+                + juce::String(report.skipped) + " skipped", juce::dontSendNotification);
+            if (report.completed > 0) requestFolderTreeRefresh();
+        }
+    }
+    if (batchClosePending && ! isBatchRunning()) closeBatchDialog();
+    if (batchPreview != nullptr && batchPreviewWasRunning && ! batchPreview->isRunning())
+    {
+        const auto previewResult = batchPreview->takeResult();
+        if (batchContent != nullptr) batchContent->setPreviewReady(previewResult, false);
+        batchPreviewWasRunning = false;
+        batchPreview.reset();
     }
     if (p.running)
     {
