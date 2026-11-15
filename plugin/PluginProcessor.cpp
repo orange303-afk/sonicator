@@ -88,6 +88,15 @@ void PluginProcessor::initialiseWindowSize(int width, int height)
     windowSizeKnown = true;
 }
 
+void PluginProcessor::setMatchPreferences(const PluginMatchPreferences& preferences)
+{
+    const juce::ScopedLock lock(stateLock);
+    auto next = preferences;
+    next.targetTonic = normaliseTonic(next.targetTonic);
+    next.targetMode = normaliseTargetMode((int) next.targetMode);
+    state.match = next;
+}
+
 void PluginProcessor::prepareToPlay(double sampleRate, int maximumExpectedSamplesPerBlock)
 {
     setRateAndBufferSizeDetails(sampleRate, maximumExpectedSamplesPerBlock);
@@ -96,12 +105,32 @@ void PluginProcessor::prepareToPlay(double sampleRate, int maximumExpectedSample
 
 void PluginProcessor::releaseResources()
 {
+    // Without a host context there is no tempo to claim; the next prepareToPlay/processBlock
+    // publishes a fresh one. A stale snapshot must never reach a drag decision.
+    hostTempoSnapshot.publish(std::nullopt);
     hostEngine.stopHostAudio();
 }
 
 void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
+    // Host tempo is published here and nowhere else: no lock, no allocation, no file access on
+    // the audio thread. A host without a playhead is an explicit "no tempo", not 120 BPM.
+    if (auto* playHead = getPlayHead())
+    {
+        if (const auto position = playHead->getPosition())
+        {
+            if (const auto bpm = position->getBpm())
+                hostTempoSnapshot.publish(*bpm);
+            // A position without a tempo (some hosts while stopped) keeps the last valid value.
+        }
+        // A host that does not report a position at all keeps the last valid value too. This is
+        // not proof the tempo is gone; releaseResources() or an invalid tempo clears it.
+    }
+    else
+    {
+        hostTempoSnapshot.publish(std::nullopt);
+    }
     // Preview audio and host MIDI go through the same path the standalone app feeds from an
     // audio device: the host supplies the sample rate, block size, clock and keyboard.
     hostEngine.processHostBlock(buffer, midiMessages);

@@ -10,6 +10,10 @@ constexpr const char* folderAttribute = "lastFolder";
 constexpr const char* sampleAttribute = "lastSamplePath";
 constexpr const char* widthAttribute = "width";
 constexpr const char* heightAttribute = "height";
+constexpr const char* matchBpmAttribute = "matchBpm";
+constexpr const char* matchScaleAttribute = "matchScale";
+constexpr const char* targetTonicAttribute = "targetTonic";
+constexpr const char* targetModeAttribute = "targetMode";
 
 int clampedWidth(int width)
 {
@@ -29,6 +33,10 @@ juce::MemoryBlock PluginState::toMemoryBlock() const
     xml.setAttribute(sampleAttribute, lastSamplePath);
     xml.setAttribute(widthAttribute, clampedWidth(windowWidth));
     xml.setAttribute(heightAttribute, clampedHeight(windowHeight));
+    xml.setAttribute(matchBpmAttribute, match.matchBpm ? 1 : 0);
+    xml.setAttribute(matchScaleAttribute, match.matchScale ? 1 : 0);
+    xml.setAttribute(targetTonicAttribute, normaliseTonic(match.targetTonic));
+    xml.setAttribute(targetModeAttribute, (int) match.targetMode);
     // UTF-8 keeps non-ASCII library paths exact across hosts that store the block verbatim.
     const auto text = xml.toString();
     juce::MemoryBlock block;
@@ -51,6 +59,12 @@ PluginState PluginState::fromMemoryBlock(const void* data, size_t sizeInBytes)
     state.lastSamplePath = xml->getStringAttribute(sampleAttribute);
     state.windowWidth = clampedWidth(xml->getIntAttribute(widthAttribute, defaultWidth));
     state.windowHeight = clampedHeight(xml->getIntAttribute(heightAttribute, defaultHeight));
+    // A v1 project has no match attributes; defaults keep both off. Malformed values are
+    // clamped to a real tonic and mode instead of being trusted.
+    state.match.matchBpm = xml->getIntAttribute(matchBpmAttribute, 0) != 0;
+    state.match.matchScale = xml->getIntAttribute(matchScaleAttribute, 0) != 0;
+    state.match.targetTonic = normaliseTonic(xml->getIntAttribute(targetTonicAttribute, 0));
+    state.match.targetMode = normaliseTargetMode(xml->getIntAttribute(targetModeAttribute, 1));
     return state;
 }
 } // namespace sonicator::plugin
