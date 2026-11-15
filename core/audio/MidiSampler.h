@@ -3,6 +3,7 @@
 #include "core/sf2/Sf2KitSampler.h"
 #include "core/rex/Rex2SlicePlayer.h"
 #include "SampleAudition.h"
+#include "HoverAudition.h"
 #include "SampleVoicePlayer.h"
 #include "core/sampler/ExternalKitSampler.h"
 #include "core/tracker/TrackerSongRenderer.h"
@@ -83,8 +84,9 @@ class PreviewOutput final : public juce::AudioSource
 public:
     PreviewOutput(juce::AudioTransportSource& t,MidiSampler& s,Sf2KitSampler& f,Rex2SlicePlayer& r,
                   SampleAudition& a,ExternalKitSampler& e,TrackerSongRenderer& ts,
-                  SampleVoicePlayer& sv)
-        : transport(t),sampler(s),sf2(f),rex(r),audition(a),external(e),tracker(ts),sampleVoices(sv) {}
+                  SampleVoicePlayer& sv,HoverAudition* h = nullptr)
+        : transport(t),sampler(s),sf2(f),rex(r),audition(a),external(e),tracker(ts),sampleVoices(sv),
+          hover(h) {}
     void prepareToPlay(int,double) override;
     void releaseResources() override { transport.releaseResources(); }
     void getNextAudioBlock(const juce::AudioSourceChannelInfo&) override;
@@ -107,6 +109,7 @@ private:
     ExternalKitSampler& external;
     TrackerSongRenderer& tracker;
     SampleVoicePlayer& sampleVoices;
+    HoverAudition* hover;
     juce::MidiBuffer messages;
     juce::AudioBuffer<float> midiBuffer;
 };

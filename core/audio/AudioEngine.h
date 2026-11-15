@@ -134,6 +134,8 @@ public:
     float rexLastVelocity() const { return rexSampler.lastVelocity(); }
     float rexMixPeak() const { return rexSampler.lastMixPeak(); }
     float outputPeak() const { return output.lastOutputPeak.load(); }
+    // Hover audition for the cloud map: its own voice, never the preview transport.
+    HoverAudition& hover() { return hoverAudition; }
     float outputGain() const { return output.gain.load(); }
     float rexFirstEnvelope() const { return rexSampler.firstVoiceEnvelope(); }
     double rexFirstPosition() const { return rexSampler.firstVoicePosition(); }
@@ -205,6 +207,7 @@ private:
     Rex2SlicePlayer rexSampler;
     bool rexMode = false;
     SampleAudition sf2Audition;
+    HoverAudition hoverAudition;
     std::unique_ptr<TrackerDocument> trackerDocument;
     TrackerSongRenderer trackerSong;
     SampleVoicePlayer sampleVoices;
@@ -215,7 +218,7 @@ private:
     bool discMode = false;
     SampleAudioPtr discSample;
     juce::uint64 discGenerationValue = 0;
-    PreviewOutput output {source,sampler,sf2Sampler,rexSampler,sf2Audition,externalSampler,trackerSong,sampleVoices};
+    PreviewOutput output {source,sampler,sf2Sampler,rexSampler,sf2Audition,externalSampler,trackerSong,sampleVoices,&hoverAudition};
     juce::AudioSourcePlayer player;
     void attach();
     // Drops the ordinary-file transport before another preview kind takes over. Without it a long

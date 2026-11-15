@@ -1,6 +1,7 @@
 #include "CloudLayoutBuilder.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -182,12 +183,14 @@ void layoutIslands(std::vector<Draft>& islands, const std::vector<std::vector<do
 }
 } // namespace
 
-CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& opt)
+CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& opt,
+                             const std::function<bool()>& isCancelled)
 {
     CloudLayout layout;
     layout.fingerprint = input.fingerprint;
     layout.algorithmVersion = opt.algorithmVersion;
     if (input.nodes.empty()) return layout;
+    auto cancelled = [&]() { return isCancelled && isCancelled(); };
 
     std::map<int64_t, int> tagCounts;
     for (const auto& node : input.nodes)
@@ -224,6 +227,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
         weights[b->second][a->second] = share;
     }
     layoutIslands(islands, weights, opt);
+    if (cancelled()) return {};
 
     double minX = std::numeric_limits<double>::max(), minY = minX;
     double maxX = std::numeric_limits<double>::lowest(), maxY = maxX;
@@ -267,6 +271,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
         const auto spread = std::max(quantile(column, 0.75) - quantile(column, 0.25), 1e-6);
         for (auto& row : basic) row[dim] = (float) std::clamp((row[dim] - centre) / spread, -4.0, 4.0);
     }
+    if (cancelled()) return {};
     const auto basicComponents = principalComponents(basic, 2);
 
     // Raw projection first, one value pair per file with descriptors.
@@ -325,6 +330,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
     layout.points.resize(input.nodes.size());
     for (size_t i = 0; i < input.nodes.size(); ++i)
     {
+        if ((i & 4095) == 0 && cancelled()) return {};
         const auto& node = input.nodes[i];
         double anchorX = 0, anchorY = 0, radius = opt.islandBaseRadius;
         int islandIndex = -1;
@@ -411,6 +417,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
 
             for (int pass = 0; pass < 2; ++pass)
             {
+                if (cancelled()) return {};
                 // Candidate neighbours come from a grid over the current 2D positions; the actual
                 // distance is measured in the reduced 84-value space.
                 const auto cell = 48.0f;

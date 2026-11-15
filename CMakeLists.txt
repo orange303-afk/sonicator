@@ -154,7 +154,7 @@ endif()
 add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/diagnostics/Diagnostics.cpp
     core/settings/ShortcutPreferences.cpp core/database/Database.cpp core/database/CatalogCompatibility.cpp core/database/PathRelocation.cpp core/database/SearchSyntax.cpp core/database/SampleRepository.cpp core/database/FolderIndex.cpp core/settings/AppSettings.cpp
-    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/dsp/RhythmAnalyzer.cpp core/dsp/AnalysisAudio.cpp core/dsp/TonalAnalyzer.cpp core/dsp/AcousticFeatures.cpp core/dsp/FastAcousticRules.cpp core/dsp/FeatureExtractorV2.cpp core/dsp/FeatureJson.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/SonicatorFormats.cpp core/audio/PreviewReaderSource.cpp core/audio/SampleAudition.cpp core/audio/ContainerValidation.cpp
+    core/scanner/FileScanner.cpp core/dsp/BasicAnalyzer.cpp core/dsp/RhythmAnalyzer.cpp core/dsp/AnalysisAudio.cpp core/dsp/TonalAnalyzer.cpp core/dsp/AcousticFeatures.cpp core/dsp/FastAcousticRules.cpp core/dsp/FeatureExtractorV2.cpp core/dsp/FeatureJson.cpp core/audio/AudioEngine.cpp core/audio/MidiSampler.cpp core/audio/SonicatorFormats.cpp core/audio/PreviewReaderSource.cpp core/audio/SampleAudition.cpp core/audio/HoverAudition.cpp core/audio/ContainerValidation.cpp
     core/emu/EblReader.cpp core/emu/EblAudioFormat.cpp
     core/voc/VocAudioFormat.cpp
     core/kurzweil/KrzFile.cpp core/kurzweil/KrzInstrument.cpp
@@ -199,7 +199,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
     core/smart/TapTempo.cpp
     core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp
-    core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp)
+    core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp core/cloud/CloudCache.cpp core/cloud/CloudBuildService.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1

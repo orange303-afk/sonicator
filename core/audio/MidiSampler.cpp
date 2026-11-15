@@ -223,7 +223,7 @@ void MidiSampler::render(juce::AudioBuffer<float>& out,int start,int count,const
 void PreviewOutput::prepareToPlay(int blockSize,double rate)
 {
     transport.prepareToPlay(blockSize,rate); sampler.prepare(rate); sf2.prepare(rate); rex.prepare(rate); audition.prepare(rate); external.prepare(rate);
-    tracker.prepare(rate); sampleVoices.prepare(rate);
+    tracker.prepare(rate); sampleVoices.prepare(rate); if (hover != nullptr) hover->prepare(rate);
     messages.ensureSize(65536);
     midiBuffer.setSize(2,juce::jmax(1,blockSize));
     messages.clear(); collector.drain(messages); messages.clear();
@@ -295,6 +295,9 @@ void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             for (int ch = 0; ch < info.buffer->getNumChannels(); ++ch)
                 info.buffer->addFrom(ch,info.startSample+offset,midiBuffer,juce::jmin(ch,1),0,count,gain.load());
         }
+        // Hover audition is its own voice: it plays while the transport is idle and never shares
+        // the MIDI scratch or the preview transport.
+        if (hover != nullptr && hover->isPlaying()) hover->render(*info.buffer, info.startSample + offset, count);
         messages.clear(); // Input is block-quantised; never retrigger notes for later chunks.
         offset += count;
     }
@@ -303,7 +306,7 @@ void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         lastOutputPeak = juce::jmax(lastOutputPeak.load(),
             info.buffer->getMagnitude(1, info.startSample, info.numSamples));
     if (! midiEnabled && ! kitEnabled && ! externalEnabled && ! sliceEnabled && ! auditionEnabled
-        && ! trackerSong && ! trackerMidi && ! discMidi) return;
+        && ! trackerSong && ! trackerMidi && ! discMidi && ! (hover != nullptr && hover->isPlaying())) return;
     // Smooth safety knee for dense chords; no hard clipping at the hardware output.
     for (int ch = 0; ch < info.buffer->getNumChannels(); ++ch)
         for (int i = info.startSample; i < info.startSample+info.numSamples; ++i)

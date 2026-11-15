@@ -89,3 +89,5 @@ target_sources(SonicatorTests PRIVATE TestPlugin.cpp
     ${CMAKE_SOURCE_DIR}/plugin/PluginEditor.cpp)
 target_sources(SonicatorTests PRIVATE TestCloudSource.cpp)
 target_sources(SonicatorTests PRIVATE TestCloudLayout.cpp)
+target_sources(SonicatorTests PRIVATE TestCloudBuild.cpp)
+target_sources(SonicatorTests PRIVATE TestHoverAudition.cpp)

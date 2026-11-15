@@ -21,7 +21,9 @@ struct CloudLayoutOptions
 
 // Pure, deterministic and free of threads, SQLite and JUCE components. The same CloudInput always
 // produces the same coordinates, so a camera move or a filter change never reflows the map.
-CloudLayout buildCloudLayout(const CloudInput&, const CloudLayoutOptions& = {});
+// `isCancelled` is checked between phases; a cancelled call returns an invalid layout.
+CloudLayout buildCloudLayout(const CloudInput&, const CloudLayoutOptions& = {},
+                             const std::function<bool()>& isCancelled = {});
 
 // Nearest neighbours by the layout distance, for the listening report. Returns (point index,
 // distance) ascending; `index` is the position in layout.points, which matches input.nodes.
