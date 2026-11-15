@@ -73,6 +73,59 @@ FetchContent_Declare(libxmp
     GIT_REPOSITORY https://github.com/libxmp/libxmp.git
     GIT_TAG libxmp-4.6.2 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(libxmp)
+# LAME 3.100 provides the MP3 encoder. The pinned archive is compiled as a small static C
+# library (encoder only; its mpglib decoder and the CLI frontend are not built). The configuration
+# header is checked in for POSIX targets; MSVC uses the upstream configMS.h.
+set(LAME_VERSION 3.100)
+set(LAME_ARCHIVE ${CMAKE_BINARY_DIR}/lame-${LAME_VERSION}.tar.gz)
+set(LAME_SOURCE ${CMAKE_BINARY_DIR}/lame-src)
+if(NOT EXISTS "${LAME_SOURCE}/libmp3lame/lame.c")
+    file(DOWNLOAD
+        "https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz"
+        "${LAME_ARCHIVE}"
+        EXPECTED_HASH SHA256=ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e
+        SHOW_PROGRESS)
+    file(ARCHIVE_EXTRACT INPUT "${LAME_ARCHIVE}" DESTINATION "${CMAKE_BINARY_DIR}/lame-extract")
+    file(RENAME "${CMAKE_BINARY_DIR}/lame-extract/lame-${LAME_VERSION}" "${LAME_SOURCE}")
+endif()
+if(MSVC)
+    configure_file("${LAME_SOURCE}/configMS.h" "${CMAKE_BINARY_DIR}/lame-config/config.h" COPYONLY)
+else()
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/lame-config.h"
+                   "${CMAKE_BINARY_DIR}/lame-config/config.h" COPYONLY)
+endif()
+add_library(lame_static STATIC
+    "${LAME_SOURCE}/libmp3lame/VbrTag.c"
+    "${LAME_SOURCE}/libmp3lame/bitstream.c"
+    "${LAME_SOURCE}/libmp3lame/encoder.c"
+    "${LAME_SOURCE}/libmp3lame/fft.c"
+    "${LAME_SOURCE}/libmp3lame/gain_analysis.c"
+    "${LAME_SOURCE}/libmp3lame/id3tag.c"
+    "${LAME_SOURCE}/libmp3lame/lame.c"
+    "${LAME_SOURCE}/libmp3lame/newmdct.c"
+    "${LAME_SOURCE}/libmp3lame/presets.c"
+    "${LAME_SOURCE}/libmp3lame/psymodel.c"
+    "${LAME_SOURCE}/libmp3lame/quantize.c"
+    "${LAME_SOURCE}/libmp3lame/quantize_pvt.c"
+    "${LAME_SOURCE}/libmp3lame/reservoir.c"
+    "${LAME_SOURCE}/libmp3lame/set_get.c"
+    "${LAME_SOURCE}/libmp3lame/tables.c"
+    "${LAME_SOURCE}/libmp3lame/takehiro.c"
+    "${LAME_SOURCE}/libmp3lame/util.c"
+    "${LAME_SOURCE}/libmp3lame/vbrquantize.c"
+    "${LAME_SOURCE}/libmp3lame/version.c")
+target_include_directories(lame_static PUBLIC
+    "${LAME_SOURCE}/libmp3lame" "${LAME_SOURCE}/include"
+    PRIVATE "${CMAKE_BINARY_DIR}/lame-config")
+# Upstream ships and tests the library with assertions off; the CBR quantizer has internal
+# invariants that assert under a Debug build even for ordinary audio.
+target_compile_definitions(lame_static PRIVATE HAVE_CONFIG_H=1 NDEBUG=1)
+set_target_properties(lame_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(NOT MSVC)
+    target_compile_options(lame_static PRIVATE -w)
+    target_link_libraries(lame_static PUBLIC m)
+endif()
+
 # libsamplerate provides the band-limited conversion used by Batch Processing. The archive is
 # pinned by SHA256 and built statically; its examples, tests and install rules stay off.
 set(SONICATOR_BUILD_TESTING_SAVED ${BUILD_TESTING})
@@ -152,7 +205,7 @@ target_compile_definitions(SonicatorCore PUBLIC
     JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
 target_link_libraries(SonicatorCore PUBLIC
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib
-    SampleRate::samplerate)
+    SampleRate::samplerate lame_static)
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png
     resources/fonts/Manrope-Regular.ttf

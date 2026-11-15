@@ -100,6 +100,25 @@ TEST_CASE("Batch dialog turns its controls into the exact request recipe", "[bat
     conflict->onChange();
     REQUIRE(dialog.conflictPolicy() == ConflictPolicy::skip);
 
+    auto* mp3 = child<juce::ToggleButton>(dialog, "batchFormatMp3");
+    auto* bitrate = child<juce::ComboBox>(dialog, "batchMp3Bitrate");
+    REQUIRE(mp3 != nullptr);
+    REQUIRE(bitrate != nullptr);
+    mp3->setToggleState(true, juce::dontSendNotification);
+    mp3->onClick();
+    bitrate->setSelectedId(256);
+    bitrate->onChange();
+    const auto withMp3 = dialog.currentRecipe();
+    bool mp3Found = false;
+    for (const auto& output : withMp3.outputs)
+        if (output.format == Format::mp3)
+        {
+            mp3Found = true;
+            REQUIRE(output.mp3BitrateKbps == 256);
+            REQUIRE(output.encoding == Encoding::int16);
+        }
+    REQUIRE(mp3Found);
+
     // Loading a built-in preset replaces the step list and is serialized back in order.
     auto* preset = child<juce::ComboBox>(dialog, "batchPreset");
     REQUIRE(preset != nullptr);

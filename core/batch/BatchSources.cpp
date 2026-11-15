@@ -200,6 +200,7 @@ bool planOutputs(PreflightResult& result, const Request& request, CancelCheck ca
             plan.encoding = encoding;
             plan.bits = bits;
             plan.floating = floating;
+            plan.mp3BitrateKbps = preset.mp3BitrateKbps;
             plan.sampleRate = request.recipe.sampleRate > 0 ? request.recipe.sampleRate
                                                            : source.sampleRate;
             switch (request.recipe.channels)

@@ -27,6 +27,13 @@ option requires for a combined work.
   SQLite dependency.
   - https://sqlite.org/copyright.html
   - https://sqlite.org/2024/sqlite-amalgamation-3470200.zip
+- LAME **3.100**, **LGPL-2.1-or-later**, fetched as a pinned archive
+  (`SHA256=ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e`) and linked
+  statically. Only the `libmp3lame` encoder sources are compiled (mpglib decoder, CLI and VBR
+  frontend are not), so Batch Processing can write MP3 without an external executable. The POSIX
+  configuration header is `cmake/lame-config.h`; MSVC uses LAME's `configMS.h`. Assertions are
+  compiled out, as upstream does for the library.
+  - https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
 - libsamplerate **0.2.2**, **BSD-2-Clause**, fetched as a pinned archive
   (`SHA256=16e881487f184250deb4fcb60432d7556ab12cb58caea71ef23960aec6c0405a`) and linked
   statically. It provides the band-limited conversion used by Batch Processing. Examples, tests and

@@ -19,8 +19,10 @@ BatchPreset customPreset()
         { true, FadeIn { 25.0, true } },
         { true, Gain { -2.5 } },
     };
+    OutputPreset mp3 { Format::mp3, Encoding::int16, 5 };
+    mp3.mp3BitrateKbps = 320;
     preset.recipe.outputs = { OutputPreset { Format::wav, Encoding::int24, 5 },
-                              OutputPreset { Format::flac, Encoding::int16, 8 } };
+                              OutputPreset { Format::flac, Encoding::int16, 8 }, mp3 };
     preset.recipe.sampleRate = 48000;
     preset.recipe.channels = ChannelMode::mono;
     preset.recipe.dither = DitherMode::tpdf;

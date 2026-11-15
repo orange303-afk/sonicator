@@ -14,6 +14,7 @@ struct EncodeSettings
     int sampleRate = 0;
     int channels = 0;
     int flacCompressionLevel = 5;
+    int mp3BitrateKbps = 192;
     bool dither = false;
     uint64_t ditherSeed = 0;
     juce::StringPairArray metadata;

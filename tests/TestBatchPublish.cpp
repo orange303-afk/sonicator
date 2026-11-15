@@ -367,3 +367,69 @@ TEST_CASE("Validation can be cancelled and refuses an undecodable tail",
     REQUIRE_FALSE(t.dir.getChildFile("Out/temp.wav").exists());
     REQUIRE(phaseCalls > 0);
 }
+
+TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
+          "[batch][batch-encoding]")
+{
+    TestDirectory t;
+    std::vector<float> samples((size_t) 44100 * 2);
+    for (size_t i = 0; i < samples.size(); ++i)
+        samples[i] = (float) std::sin((double) i * 0.05) * 0.4f;
+    juce::StringPairArray metadata;
+    metadata.set("INAM", "MP3 source");
+    const auto source = floatWav(t.dir.getChildFile("Source/mp3.wav"), samples, metadata);
+    const auto hash = juce::SHA256(source).toHexString();
+    const auto snapshot = snapshotFor(source);
+    InputProtectionSet protection;
+    protection.identities.push_back(snapshot.identity);
+    protection.paths.push_back(source.getFullPathName().toLowerCase());
+    Recipe recipe;
+    OutputPreset mp3;
+    mp3.format = Format::mp3;
+    mp3.encoding = Encoding::int16;
+    mp3.mp3BitrateKbps = 192;
+    recipe.outputs = { mp3 };
+    recipe.sampleRate = 44100;
+    const auto target = t.dir.getChildFile("Out/mp3.mp3");
+    auto plan = planFor(source, Format::mp3, Encoding::int16, 16, false, target);
+    plan.mp3BitrateKbps = 192;
+    auto result = renderAndPublish(preparedFor(source, recipe), plan, snapshot, recipe,
+                                   ConflictPolicy::rename, protection);
+    INFO(result.message);
+    INFO("target frames approx");
+    REQUIRE(result.state == OutputState::completed);
+    REQUIRE(result.target.existsAsFile());
+    REQUIRE(juce::SHA256(source).toHexString() == hash);
+    REQUIRE(result.target.getSize() > 8000);
+    REQUIRE(result.target.getSize() < 120000);
+
+    juce::AudioFormatManager formats;
+    registerSonicatorFormats(formats);
+    std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(result.target));
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->sampleRate == 44100.0);
+    REQUIRE(reader->numChannels == 1);
+    REQUIRE(std::abs(reader->lengthInSamples - 88200) <= 2 * 1152 + 4410);
+    bool preserved = false;
+    for (const auto& warning : result.warnings)
+        if (warning.code == ErrorCode::metadata_not_preserved) preserved = true;
+    REQUIRE(preserved);
+
+    Recipe loud = recipe;
+    loud.steps = { { true, Gain { 12.0 } } };
+    loud.allowIntegerClipping = false;
+    const auto blockedTarget = t.dir.getChildFile("Out/mp3-loud.mp3");
+    auto blockedPlan = planFor(source, Format::mp3, Encoding::int16, 16, false, blockedTarget);
+    blockedPlan.mp3BitrateKbps = 128;
+    auto blocked = renderAndPublish(preparedFor(source, loud), blockedPlan, snapshot, loud,
+                                    ConflictPolicy::rename, protection);
+    REQUIRE(blocked.state == OutputState::failed);
+    REQUIRE(blocked.code == ErrorCode::clipping_prevented);
+    REQUIRE_FALSE(blockedTarget.exists());
+
+    Recipe invalid = recipe;
+    invalid.outputs[0].mp3BitrateKbps = 10;
+    const auto invalidIssues = validateRecipe(invalid);
+    REQUIRE(invalidIssues.size() == 1);
+    REQUIRE(invalidIssues[0].code == ErrorCode::invalid_encoding);
+}

@@ -18,6 +18,7 @@ component is present and what the project does not ship.
 | Manrope | 4 static faces (Regular, Medium, SemiBold, Bold) | Embedded in the binary as `resources/fonts/*.ttf` | SIL Open Font License 1.1 | [`resources/fonts/OFL.txt`](resources/fonts/OFL.txt) |
 | zlib | system copy on macOS (1.2.12 in the SDK), fetched 1.3.1 on Windows | Linked by JUCE and by `core/sampler/FileInstrument.cpp` | Zlib | <https://zlib.net/zlib_license.html> |
 | libsamplerate | 0.2.2 | FetchContent archive pinned by SHA256, linked statically | BSD-2-Clause | <https://github.com/libsndfile/libsamplerate/blob/0.2.2/COPYING> |
+| LAME | 3.100 | Pinned archive, encoder sources compiled into a static library | LGPL-2.1-or-later | <https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz> (`COPYING` in the archive) |
 
 ### Manrope and the OFL
 
@@ -25,6 +26,13 @@ The interface font is embedded in the binary from `resources/fonts/`. The four f
 instances of Manrope whose name tables were unified so the family resolves by weight; the SIL Open
 Font License permits that, the fonts are not sold on their own, and the licence text ships in
 `resources/fonts/OFL.txt`.
+
+### LAME and the LGPL
+
+LAME is linked statically and is used only as the MP3 encoder: the pinned archive is compiled from
+its `libmp3lame` encoder sources, without the mpglib decoder, the CLI frontend or any modification
+to its source. Distribution keeps LAME's source and licence available and lets a recipient relink
+the application against a modified LAME. The archive is fetched by the build and verified by SHA256.
 
 ### libxmp and the LGPL
 

@@ -100,6 +100,7 @@ juce::String formatLabel(Format format)
         case Format::wav: return "WAV";
         case Format::aiff: return "AIFF";
         case Format::flac: return "FLAC";
+        case Format::mp3: return "MP3";
     }
     return {};
 }
@@ -111,6 +112,7 @@ juce::String formatExtension(Format format)
         case Format::wav: return ".wav";
         case Format::aiff: return ".aif";
         case Format::flac: return ".flac";
+        case Format::mp3: return ".mp3";
     }
     return {};
 }
@@ -121,6 +123,7 @@ bool parseFormat(const juce::String& text, Format& format)
     if (lowered == "wav") { format = Format::wav; return true; }
     if (lowered == "aiff" || lowered == "aif") { format = Format::aiff; return true; }
     if (lowered == "flac") { format = Format::flac; return true; }
+    if (lowered == "mp3") { format = Format::mp3; return true; }
     return false;
 }
 
@@ -183,6 +186,19 @@ bool resolveEncoding(const OutputPreset& preset, const SourceSnapshot& source, E
 {
     reason.clear();
     encoding = preset.encoding;
+    if (preset.format == Format::mp3)
+    {
+        if (preset.mp3BitrateKbps < 64 || preset.mp3BitrateKbps > 320)
+        {
+            reason = "MP3 bitrate must be 64..320 kbps";
+            return false;
+        }
+        // LAME consumes float PCM; the "encoding" only describes the internal pipeline depth.
+        encoding = Encoding::int16;
+        bits = 16;
+        floating = false;
+        return true;
+    }
     if (encoding == Encoding::sameAsSource)
     {
         if (source.floating)
@@ -275,6 +291,11 @@ std::vector<Issue> validateRecipe(const Recipe& recipe)
                            "The output sample rate is not one of the supported rates", false, {} });
     for (size_t i = 0; i < recipe.outputs.size(); ++i)
     {
+        if (recipe.outputs[i].format == Format::mp3
+            && (recipe.outputs[i].mp3BitrateKbps < 64 || recipe.outputs[i].mp3BitrateKbps > 320))
+            issues.push_back({ ErrorCode::invalid_encoding,
+                               "Output " + juce::String((int) i + 1)
+                                   + ": MP3 bitrate must be 64..320 kbps", false, {} });
         juce::String reason;
         if (! encodingSupported(recipe.outputs[i].format, recipe.outputs[i].encoding, reason))
             issues.push_back({ ErrorCode::invalid_encoding,
@@ -293,7 +314,7 @@ juce::String recipeFingerprint(const Recipe& recipe)
     for (size_t i = 0; i < recipe.steps.size(); ++i) appendStep(text, recipe.steps[i], (int) i);
     for (const auto& output : recipe.outputs)
         text << "out:" << (int) output.format << ":" << (int) output.encoding << ":"
-             << output.flacCompressionLevel << "\n";
+             << output.flacCompressionLevel << ":" << output.mp3BitrateKbps << "\n";
     return juce::SHA256(text.toRawUTF8(), text.getNumBytesAsUTF8()).toHexString();
 }
 

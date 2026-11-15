@@ -70,8 +70,10 @@ private:
     juce::TextButton addStepButton { "Add step" }, presetBoxButton { "Preset..." };
     juce::ComboBox presetBox;
     juce::TextButton savePresetButton { "Save preset" }, deletePresetButton { "Delete preset" };
-    juce::ToggleButton wavToggle { "WAV" }, aiffToggle { "AIFF" }, flacToggle { "FLAC" };
-    juce::ComboBox wavDepth, aiffDepth, flacDepth, flacLevel, rateBox, channelBox, ditherBox, conflictBox;
+    juce::ToggleButton wavToggle { "WAV" }, aiffToggle { "AIFF" }, flacToggle { "FLAC" },
+        mp3Toggle { "MP3" };
+    juce::ComboBox wavDepth, aiffDepth, flacDepth, flacLevel, mp3Bitrate, rateBox, channelBox,
+        ditherBox, conflictBox;
     juce::ToggleButton allowClipping { "Allow integer clipping (reported)" };
     juce::ToggleButton nextToSources { "Save next to originals" };
     juce::TextEditor outputFolder;

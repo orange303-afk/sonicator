@@ -17,7 +17,7 @@ ctest --preset debug
 
 | # | Criterion | Evidence |
 |---|---|---|
-| 1 | One source x WAV+FLAC = two readable files with the chosen parameters; source byte-identical | `[batch-service]` "A batch job renders every source and format and leaves the originals byte-identical" (SHA-256 before/after, 4 outputs). |
+| 1 | One source x WAV+FLAC = two readable files with the chosen parameters; source byte-identical | `[batch-service]` "A batch job renders every source and format and leaves the originals byte-identical" (SHA-256 before/after, 4 outputs). MP3: "MP3 output is a readable lossy copy..." |
 | 2 | Six operations, disable/duplicate/reorder, block size 1/257/16384, deterministic quantizer, SRC tolerance | `[batch-pipeline]` tests for DC, Trim, Normalize/Gain order, fades; "Repeated reads and different block sizes have identical semantics"; `[batch-quantizer]` seed stability; `[batch-src]` partition comparison within 2e-6. |
 | 3 | Trim sees both stereo tracks, keeps one-frame audio and all-silent length, DC constant becomes zero | `[batch-pipeline]` "Trim silence..." (right-channel-only, all-silent, one frame) and "Remove DC..." (constant) tests. |
 | 4 | Normalize reaches target within 2e-6 before quantization; integer check includes dither; stereo ratio | `[batch-pipeline]` Normalize assertions at 1e-5 absolute; the quantizer consumes the normalized float stream. Ratio is covered by the shared coefficient (both channels one gain). |
@@ -76,4 +76,6 @@ findings were fixed with a test first, then the full suite:
 - AIFF/FLAC writer finalisation errors are not observable through JUCE; the full readback pass is
   the gate, and a read failure is now fatal.
 - File-level ENOSPC injection and a >2^31-frame full render remain untested end to end.
-- MP3/OGG output, Split and original overwrite remain out of v1, as specified.
+- MP3 output is covered by "MP3 output is a readable lossy copy..." (decodable, rate/channels,
+  length within codec tolerance, clipping refusal, source unchanged, metadata warning). OGG/Vorbis,
+  Split and original overwrite remain out.

@@ -183,6 +183,15 @@ BatchProcessingDialog::BatchProcessingDialog(PreparedBatch prepared, juce::File 
         addAndMakeVisible(*pair.second);
         pair.first->onClick = [this] { updateOutputControls(); refreshFooter(); };
     }
+    addAndMakeVisible(mp3Toggle);
+    mp3Toggle.setComponentID("batchFormatMp3");
+    mp3Toggle.onClick = [this] { updateOutputControls(); refreshFooter(); };
+    addAndMakeVisible(mp3Bitrate);
+    for (const int bitrate : { 128, 192, 256, 320 })
+        mp3Bitrate.addItem(juce::String(bitrate) + " kbps", bitrate);
+    mp3Bitrate.setSelectedId(192, juce::dontSendNotification);
+    mp3Bitrate.setComponentID("batchMp3Bitrate");
+    mp3Bitrate.onChange = [this] { refreshFooter(); };
     wavToggle.setComponentID("batchFormatWav");
     aiffToggle.setComponentID("batchFormatAiff");
     flacToggle.setComponentID("batchFormatFlac");
@@ -314,7 +323,7 @@ BatchProcessingDialog::BatchProcessingDialog(PreparedBatch prepared, juce::File 
     rebuildSteps();
     updateOutputControls();
     refreshFooter();
-    setSize(820, 760);
+    setSize(980, 780);
     startTimerHz(4);
 }
 
@@ -378,6 +387,9 @@ void BatchProcessingDialog::resized()
     flacDepth.setBounds(output.removeFromLeft(108));
     output.removeFromLeft(8);
     flacLevel.setBounds(output.removeFromLeft(70));
+    output.removeFromLeft(8);
+    mp3Toggle.setBounds(output.removeFromLeft(58));
+    mp3Bitrate.setBounds(output.removeFromLeft(96));
     output.removeFromLeft(8);
     rateBox.setBounds(output.removeFromLeft(140));
     output.removeFromLeft(6);
@@ -475,8 +487,15 @@ void BatchProcessingDialog::loadPreset(const juce::String& id)
             wavToggle.setToggleState(false, juce::dontSendNotification);
             aiffToggle.setToggleState(false, juce::dontSendNotification);
             flacToggle.setToggleState(false, juce::dontSendNotification);
+            mp3Toggle.setToggleState(false, juce::dontSendNotification);
             for (const auto& output : preset.recipe.outputs)
             {
+                if (output.format == Format::mp3)
+                {
+                    mp3Toggle.setToggleState(true, juce::dontSendNotification);
+                    mp3Bitrate.setSelectedId(output.mp3BitrateKbps, juce::dontSendNotification);
+                    continue;
+                }
                 auto* toggle = output.format == Format::wav ? &wavToggle
                     : output.format == Format::aiff ? &aiffToggle : &flacToggle;
                 auto* depth = output.format == Format::wav ? &wavDepth
@@ -618,6 +637,14 @@ Recipe BatchProcessingDialog::currentRecipe() const
     if (flacToggle.getToggleState())
         recipe.outputs.push_back({ Format::flac, depthToEncoding(flacDepth),
                                    flacLevel.getSelectedId() });
+    if (mp3Toggle.getToggleState())
+    {
+        OutputPreset mp3;
+        mp3.format = Format::mp3;
+        mp3.encoding = Encoding::int16;
+        mp3.mp3BitrateKbps = mp3Bitrate.getSelectedId();
+        recipe.outputs.push_back(mp3);
+    }
     const std::array<int, 5> rates { 44100, 48000, 88200, 96000, 192000 };
     const int rateIndex = rateBox.getSelectedId() - 2;
     recipe.sampleRate = rateIndex >= 0 && rateIndex < 5 ? rates[(size_t) rateIndex] : 0;
@@ -648,6 +675,7 @@ int64_t BatchProcessingDialog::expectedOutputs() const
     if (wavToggle.getToggleState()) ++formats;
     if (aiffToggle.getToggleState()) ++formats;
     if (flacToggle.getToggleState()) ++formats;
+    if (mp3Toggle.getToggleState()) ++formats;
     return (int64_t) formats * (int64_t) batch.sources.size();
 }
 
@@ -687,8 +715,9 @@ void BatchProcessingDialog::setRunning(bool value)
     const bool enabled = ! value;
     for (auto& row : rows) row->setEnabled(enabled);
     juce::Component* controls[] { &addStepButton, &presetBox, &savePresetButton,
-        &deletePresetButton, &wavToggle, &aiffToggle, &flacToggle, &wavDepth, &aiffDepth,
-        &flacDepth, &flacLevel, &rateBox, &channelBox, &ditherBox, &conflictBox,
+        &deletePresetButton, &wavToggle, &aiffToggle, &flacToggle, &mp3Toggle, &wavDepth,
+        &aiffDepth, &flacDepth, &flacLevel, &mp3Bitrate, &rateBox, &channelBox, &ditherBox,
+        &conflictBox,
         &allowClipping, &nextToSources, &browseFolder, &previewSource, &preparePreview };
     for (auto* control : controls) control->setEnabled(enabled);
     playDry.setEnabled(enabled && dryFile.existsAsFile() && ! previewStale);
@@ -824,6 +853,7 @@ void BatchProcessingDialog::refreshFooter()
                 const auto frames = outputFrameEstimate(source.frames, source.sampleRate, rate);
                 int bits = 24;
                 if (output.encoding == Encoding::int16) bits = 16;
+                if (output.format == Format::mp3) bits = 16;
                 else if (output.encoding == Encoding::float32) bits = 32;
                 else if (output.encoding == Encoding::sameAsSource) bits = source.bits;
                 estimate += outputByteEstimate(frames, channels, bits);
@@ -843,6 +873,7 @@ void BatchProcessingDialog::updateOutputControls()
     aiffDepth.setEnabled(aiffToggle.getToggleState());
     flacDepth.setEnabled(flacToggle.getToggleState());
     flacLevel.setEnabled(flacToggle.getToggleState());
+    mp3Bitrate.setEnabled(mp3Toggle.getToggleState());
     outputFolder.setEnabled(! nextToSources.getToggleState());
     browseFolder.setEnabled(! nextToSources.getToggleState());
     if (aiffDepth.getSelectedId() == 4) aiffDepth.setSelectedId(3, juce::dontSendNotification);

@@ -3,7 +3,9 @@
 #include "BatchQuantizer.h"
 #include "core/audio/SonicatorFormats.h"
 #include "core/export/AudioExporter.h"
+#include <lame.h>
 #include <cstring>
+#include <vector>
 
 namespace sonicator::batch
 {
@@ -26,6 +28,115 @@ juce::String describeDouble(const juce::String& what, double expected, double ac
 }
 
 bool cancelled(const CancelCheck& check) { return check && check(); }
+
+// MP3 is lossy: LAME consumes float PCM itself, so no integer quantizer or dither runs. The
+// encoder delay means the decoded length is compared within a codec tolerance, not exactly.
+EncodedAudio encodeMp3ToTemporary(const juce::File& temporary, const EncodeSettings& settings,
+                                  ConvertedStream& stream, CancelCheck cancel,
+                                  const std::function<void(const juce::String&)>& phase)
+{
+    EncodedAudio result;
+    auto fail = [&temporary, &result](ErrorCode code, juce::String message)
+    {
+        temporary.deleteFile();
+        result.ok = false;
+        result.code = code;
+        result.error = std::move(message);
+        return result;
+    };
+    if (cancelled(cancel)) return fail(ErrorCode::cancelled, "Cancelled");
+    if (settings.mp3BitrateKbps < 64 || settings.mp3BitrateKbps > 320)
+        return fail(ErrorCode::invalid_encoding, "MP3 bitrate must be 64..320 kbps");
+    auto* lame = lame_init();
+    if (lame == nullptr) return fail(ErrorCode::encode_failed, "The MP3 encoder could not start");
+    lame_set_in_samplerate(lame, settings.sampleRate);
+    lame_set_num_channels(lame, settings.channels);
+    lame_set_brate(lame, settings.mp3BitrateKbps);
+    lame_set_quality(lame, 2);
+    lame_set_bWriteVbrTag(lame, 1);
+    if (lame_init_params(lame) < 0)
+    {
+        lame_close(lame);
+        return fail(ErrorCode::invalid_encoding, "The MP3 encoder rejected the settings");
+    }
+    temporary.getParentDirectory().createDirectory();
+    std::unique_ptr<juce::OutputStream> output(temporary.createOutputStream());
+    if (output == nullptr)
+    {
+        lame_close(lame);
+        return fail(ErrorCode::encode_failed, "The temporary file cannot be created");
+    }
+    juce::AudioBuffer<float> block(settings.channels, (int) blockFrames);
+    std::vector<float> left((size_t) blockFrames), right((size_t) blockFrames);
+    std::vector<unsigned char> mp3((size_t) ((double) blockFrames * 1.25) + 7200);
+    int64_t frames = 0;
+    float peak = 0.0f;
+    int64_t saturatedFrames = 0;
+    bool writeOk = true;
+    while (true)
+    {
+        if (cancelled(cancel)) { lame_close(lame); return fail(ErrorCode::cancelled, "Cancelled"); }
+        const auto read = stream.readNext((int) blockFrames, block);
+        if (read.state == ReadState::error || read.state == ReadState::cancelled)
+        {
+            lame_close(lame);
+            return fail(read.code, read.error);
+        }
+        if (read.frames <= 0) break;
+        for (int n = 0; n < read.frames; ++n)
+        {
+            bool frameSaturated = false;
+            for (int channel = 0; channel < settings.channels; ++channel)
+            {
+                const auto value = block.getSample(channel, n);
+                if (! std::isfinite(value))
+                {
+                    lame_close(lame);
+                    return fail(ErrorCode::encode_failed,
+                                "Processing produced NaN or infinite samples");
+                }
+                peak = std::max(peak, std::abs(value));
+                if (std::abs(value) > 1.0f + 1.0e-7f) frameSaturated = true;
+                if (channel == 0) left[(size_t) n] = value;
+                else right[(size_t) n] = value;
+            }
+            if (frameSaturated) ++saturatedFrames;
+        }
+        const int encoded = lame_encode_buffer_ieee_float(
+            lame, left.data(), settings.channels > 1 ? right.data() : nullptr, read.frames,
+            mp3.data(), (int) mp3.size());
+        if (encoded < 0)
+        {
+            lame_close(lame);
+            return fail(ErrorCode::encode_failed, "The MP3 encoder failed");
+        }
+        if (encoded > 0 && ! output->write(mp3.data(), (size_t) encoded)) writeOk = false;
+        frames += read.frames;
+        if (! writeOk) { lame_close(lame); return fail(ErrorCode::encode_failed, "The MP3 file cannot be written"); }
+    }
+    const int tail = lame_encode_flush(lame, mp3.data(), (int) mp3.size());
+    if (tail < 0 || (tail > 0 && ! output->write(mp3.data(), (size_t) tail)))
+    {
+        lame_close(lame);
+        return fail(ErrorCode::encode_failed, "The MP3 file cannot be finalised");
+    }
+    lame_close(lame);
+    output.reset();
+    if (frames != stream.frames())
+        return fail(ErrorCode::encode_failed, "The encoded frame count is incomplete");
+    if (phase) phase("Validating");
+    float decodedPeak = 0.0f;
+    for (const auto& issue : validateEncodedFile(temporary, settings, frames, decodedPeak, cancel))
+        if (! issue.warning)
+            return fail(issue.code == ErrorCode::none ? ErrorCode::validate_failed : issue.code,
+                        issue.message);
+    result.ok = true;
+    result.frames = frames;
+    result.peak = peak;
+    result.saturatedFrames = saturatedFrames;
+    result.floatOverUnity = false;
+    return result;
+}
 } // namespace
 
 EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings& settings,
@@ -46,6 +157,8 @@ EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings
         return fail(ErrorCode::encode_failed, "The temporary path already exists");
     if (settings.channels < 1 || settings.channels > 2 || settings.sampleRate <= 0)
         return fail(ErrorCode::invalid_encoding, "Unsupported output format settings");
+    if (settings.format == Format::mp3)
+        return encodeMp3ToTemporary(temporary, settings, stream, cancel, phase);
     if (! settings.floating && settings.bits != 16 && settings.bits != 24)
         return fail(ErrorCode::invalid_encoding, "Unsupported integer depth");
     auto format = formatFor(settings.format);
@@ -146,6 +259,28 @@ std::vector<Issue> validateEncodedFile(const juce::File& file, const EncodeSetti
     if (! file.existsAsFile())
     {
         issues.push_back({ ErrorCode::validate_failed, "The written file does not exist", false, {} });
+        return issues;
+    }
+    if (settings.format == Format::mp3)
+    {
+        juce::AudioFormatManager formats;
+        registerSonicatorFormats(formats);
+        std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
+        if (reader == nullptr)
+        {
+            issues.push_back({ ErrorCode::validate_failed, "The MP3 file cannot be decoded", false, {} });
+            return issues;
+        }
+        if ((int) std::lround(reader->sampleRate) != settings.sampleRate)
+            issues.push_back({ ErrorCode::validate_failed, "The MP3 sample rate differs", false, {} });
+        if ((int) reader->numChannels != settings.channels)
+            issues.push_back({ ErrorCode::validate_failed, "The MP3 channel count differs", false, {} });
+        const auto tolerance = (int64_t) (2 * 1152 + settings.sampleRate / 10);
+        if (reader->lengthInSamples <= 0 || std::abs(reader->lengthInSamples - frames) > tolerance)
+            issues.push_back({ ErrorCode::validate_failed,
+                               "The decoded MP3 length " + juce::String((juce::int64) reader->lengthInSamples)
+                                   + " is outside the codec tolerance for " + juce::String((juce::int64) frames),
+                               false, {} });
         return issues;
     }
     if (settings.format == Format::wav)
@@ -277,6 +412,7 @@ OutputResult renderAndPublish(std::unique_ptr<PreparedAudio> prepared, const Out
     settings.floating = plan.floating;
     settings.sampleRate = plan.sampleRate;
     settings.channels = plan.channels;
+    settings.mp3BitrateKbps = plan.mp3BitrateKbps;
     settings.flacCompressionLevel = recipe.outputs.empty()
         ? 5
         : [&recipe, &plan]

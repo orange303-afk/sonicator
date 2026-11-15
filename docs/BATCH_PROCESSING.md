@@ -41,6 +41,9 @@ Fade out (2 ms, Linear). `No processing` is the empty chain. Built-in presets ar
 - WAV: 16/24-bit PCM or 32-bit float.
 - AIFF: 16/24-bit PCM.
 - FLAC: 16/24-bit PCM, compression level 1..8 (default 5).
+- MP3: CBR 128/192/256/320 kbps (default 192). Lossy output runs no integer dither and reports
+  that metadata is not carried; the decoded length is validated within the codec delay/padding
+  tolerance.
 - Rate: same as source, 44100, 48000, 88200, 96000 or 192000 Hz.
 - Channels: same as source, mono (`(L + R) / 2` in double), stereo (mono duplicated).
 - Dither: Auto, TPDF, Off. Auto adds TPDF when the target depth is reduced, when the source is
@@ -103,8 +106,9 @@ structured error code. It exports as JSON or text. A diagnostic JSON copy is kep
 
 ## Limits of v1
 
-- No Split, no MP3/OGG output, no original overwrite, no nested container/instrument processing, no
-  LUFS/true peak, limiter, time stretch, pitch shift or VST processing.
+- No Split, no OGG/Vorbis output, no original overwrite, no nested container/instrument processing,
+  no LUFS/true peak, limiter, time stretch, pitch shift or VST processing.
+- MP3 support was added as v1.1 after v1: it is CBR only, no VBR preset, no ID3 text/cover copy.
 - One batch job and one preview at a time. Other writers and catalog switches are blocked while it
   runs; simple playback remains available.
 - macOS debug/release builds and the test suite are verified. A Windows build was not run in this
@@ -115,5 +119,6 @@ structured error code. It exports as JSON or text. A diagnostic JSON copy is kep
 ## Dependency
 
 Band-limited resampling uses **libsamplerate 0.2.2** (`SRC_SINC_BEST_QUALITY`), pinned by archive
-SHA256, built statically without its examples, tests or install rules. BSD-2-Clause; see
+SHA256, built statically without its examples, tests or install rules. BSD-2-Clause. MP3 output
+uses **LAME 3.100**, pinned, encoder sources only, linked statically under LGPL-2.1-or-later. See
 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
