@@ -10,6 +10,29 @@ bool sameRange(selection::Range a, selection::Range b)
 {
     return a.start == b.start && a.end == b.end;
 }
+// The thumbnail cache is keyed by the hash of its input source, and JUCE's FileInputSource hashes
+// the path and the modification time only. An in-place save can land inside the same millisecond
+// as the previous write, so the cache then serves the audio the file had before the edit and the
+// waveform keeps the old length. The size is part of the identity here, which distinguishes every
+// save that changes the length and leaves the cache correct for the ordinary case too.
+class IdentifiedFileSource final : public juce::InputSource
+{
+public:
+    explicit IdentifiedFileSource(juce::File sourceFile) : file(std::move(sourceFile)) {}
+    juce::InputStream* createInputStream() override { return file.createInputStream().release(); }
+    juce::InputStream* createInputStreamFor(const juce::String& relatedItemPath) override
+    {
+        return juce::File(relatedItemPath).createInputStream().release();
+    }
+    juce::int64 hashCode() const override
+    {
+        return file.hashCode64()
+            ^ file.getLastModificationTime().toMilliseconds() * 7919
+            ^ file.getSize() * 104729;
+    }
+private:
+    juce::File file;
+};
 }
 WaveformDisplay::WaveformDisplay(const juce::File& folder) : cacheFile(folder.getChildFile("waveforms.cache"))
 {
@@ -42,7 +65,7 @@ void WaveformDisplay::setFile(const juce::File& file)
     zoomSampleRate = 0;
     if (file.existsAsFile())
     {
-        thumbnail.setSource(new juce::FileInputSource(file, true));
+        thumbnail.setSource(new IdentifiedFileSource(file));
         zoomReader.reset(formats.createReaderFor(file));
         if (zoomReader != nullptr) zoomSampleRate = (int) std::lround(zoomReader->sampleRate);
     }

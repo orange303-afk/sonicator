@@ -422,6 +422,15 @@ TEST_CASE("Embedded window does not run the feature backfill", "[plugin][session
         MainComponent application(dbPath, false, {}, t.dir.getChildFile("app-settings.json"),
                                   &engine, false);
         application.setSize(1180, 720);
+        // The backfill owns a background thread that the window cancels when it goes away. Waiting
+        // inside the window keeps the control from racing the destructor on a slow runner.
+        Database probe(dbPath);
+        SampleRepository probeRepo(probe);
+        REQUIRE(pumpUntil([&]
+        {
+            const auto current = probeRepo.allFeedback();
+            return current.size() == 1 && current.front().featureSchema == 2;
+        }));
     }
     Database appDb(dbPath);
     SampleRepository appRepo(appDb);
