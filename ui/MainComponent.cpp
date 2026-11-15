@@ -847,10 +847,11 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     favorites.onFolder = [this](juce::String path)
     {
         if (path.isEmpty()) return;
+        // As above: a programmatic re-selection of the folder already shown keeps the sample and
+        // the tree selection.
+        if (path == selectedFolder) return;
         if (discBrowser) { discBrowser->closeImage(); discBrowser->setVisible(false); }
         folders.clearSelection();
-        // As above: a programmatic re-selection of the folder already shown keeps the sample.
-        if (path == selectedFolder) return;
         selectedFolder = std::move(path); pageOffset = 0;
         sessionSamplePath.clear(); markSessionStateDirty();
         reloadLibrary();
