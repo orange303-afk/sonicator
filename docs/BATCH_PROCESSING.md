@@ -24,7 +24,8 @@ virtual, container and unsaved-editor sources are listed as skipped with a reaso
 
 An empty chain is a plain conversion. Up to 16 steps run in order; steps can be disabled,
 duplicated and reordered. All work happens on the current intermediate result at the source rate.
-Split is the only cardinality-changing step; it may appear once and anywhere in the chain.
+Split is the only cardinality-changing step; it may appear once and anywhere in the chain. Its
+detection runs once per source and is reused by every output format.
 
 | Step | Range | Behaviour |
 |---|---|---|

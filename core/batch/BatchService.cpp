@@ -1,4 +1,5 @@
 #include <optional>
+#include <map>
 #include "BatchService.h"
 #include "BatchEncoder.h"
 #include "BatchPaths.h"
@@ -133,6 +134,14 @@ void BatchService::run()
 
     const auto checkCancel = [this] { return cancelled.load(); };
     const auto protection = InputProtectionSet::from(batch);
+    struct SplitCache
+    {
+        bool ok = false;
+        BatchSplitDetection detection;
+        ErrorCode code = ErrorCode::none;
+        juce::String error;
+    };
+    std::map<size_t, SplitCache> splitCache;
     int done = 0;
     try
     {
@@ -195,17 +204,38 @@ void BatchService::run()
                         std::lock_guard lock(stateMutex);
                         state.phase = "Analyzing";
                     }
-                    auto detectionAudio = prepareAudio(source, batch.request.recipe, checkCancel, {}, true);
-                    if (! detectionAudio.ok)
+                    auto cached = splitCache.find(plan.sourceIndex);
+                    if (cached == splitCache.end())
+                    {
+                        SplitCache entry;
+                        auto detectionAudio = prepareAudio(source, batch.request.recipe, checkCancel,
+                                                           {}, true);
+                        if (! detectionAudio.ok)
+                        {
+                            entry.ok = false;
+                            entry.code = detectionAudio.code;
+                            entry.error = detectionAudio.error;
+                        }
+                        else
+                        {
+                            entry.ok = true;
+                            entry.detection = detectBatchParts(*detectionAudio.audio, *split,
+                                                               checkCancel);
+                        }
+                        ++local.splitAnalyses;
+                        cached = splitCache.emplace(plan.sourceIndex, std::move(entry)).first;
+                    }
+                    const auto& cache = cached->second;
+                    if (! cache.ok)
                     {
                         result.state = checkCancel() ? OutputState::cancelled : OutputState::failed;
-                        result.code = detectionAudio.code;
-                        result.message = detectionAudio.error;
+                        result.code = cache.code;
+                        result.message = cache.error;
                         fatal = result;
                     }
                     else
                     {
-                        const auto detection = detectBatchParts(*detectionAudio.audio, *split, checkCancel);
+                        const auto& detection = cache.detection;
                         if (checkCancel())
                         {
                             result.state = OutputState::cancelled;
@@ -382,6 +412,7 @@ juce::String BatchService::reportToJson(const Report& report)
     root->setProperty("failed", report.failed);
     root->setProperty("cancelled", report.cancelled);
     root->setProperty("cancelledEarly", report.abandoned);
+    root->setProperty("splitAnalyses", report.splitAnalyses);
     juce::Array<juce::var> sources;
     for (const auto& source : report.sources)
     {

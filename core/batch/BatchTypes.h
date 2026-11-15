@@ -311,6 +311,7 @@ struct Report
     int skipped = 0;
     int failed = 0;
     int cancelled = 0;
+    int splitAnalyses = 0; // full decodes done for Split detection (one per source, not per format)
     bool abandoned = false;
 };
 

@@ -195,6 +195,7 @@ TEST_CASE("A split batch writes numbered parts and isolates per-part failures",
             REQUIRE(output.code == ErrorCode::clipping_prevented);
         }
     }
+    REQUIRE(report.splitAnalyses == 1); // one detection per source, not per output format
     REQUIRE(completed == 2); // both formats of the quiet part
     REQUIRE(failed == 2);    // both formats of the loud part
     REQUIRE(paths.size() == 2);
