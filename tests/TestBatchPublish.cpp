@@ -6,6 +6,7 @@
 #include "core/batch/BatchSources.h"
 #include "core/audio/SonicatorFormats.h"
 #include "TestHelpers.h"
+#include <sys/stat.h>
 
 using namespace sonicator;
 using namespace sonicator::batch;
@@ -505,4 +506,31 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
     const auto invalidIssues = validateRecipe(invalid);
     REQUIRE(invalidIssues.size() == 1);
     REQUIRE(invalidIssues[0].code == ErrorCode::invalid_encoding);
+}
+
+TEST_CASE("An unwritable destination fails without touching the source or old output",
+          "[batch][batch-publish]")
+{
+    TestDirectory t;
+    const auto source = floatWav(t.dir.getChildFile("Source/ro.wav"), { 0.2f, -0.2f });
+    const auto hash = juce::SHA256(source).toHexString();
+    const auto snapshot = snapshotFor(source);
+    InputProtectionSet protection;
+    protection.identities.push_back(snapshot.identity);
+    protection.paths.push_back(source.getFullPathName().toLowerCase());
+    const auto folder = t.dir.getChildFile("ReadOnly");
+    folder.createDirectory();
+    const auto target = folder.getChildFile("ro processed.wav");
+    target.replaceWithText("old");
+    const auto oldHash = juce::SHA256(target).toHexString();
+    REQUIRE(::chmod(folder.getFullPathName().toRawUTF8(), 0500) == 0);
+    Recipe recipe;
+    recipe.outputs = { OutputPreset { Format::wav, Encoding::int16, 5 } };
+    auto plan = planFor(source, Format::wav, Encoding::int16, 16, false, target);
+    auto result = renderAndPublish(preparedFor(source, recipe), plan, snapshot, recipe,
+                                   ConflictPolicy::rename, protection);
+    REQUIRE(::chmod(folder.getFullPathName().toRawUTF8(), 0700) == 0);
+    REQUIRE(result.state == OutputState::failed);
+    REQUIRE(juce::SHA256(source).toHexString() == hash);
+    REQUIRE(juce::SHA256(target).toHexString() == oldHash);
 }

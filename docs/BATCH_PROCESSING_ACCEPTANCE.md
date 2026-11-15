@@ -71,7 +71,11 @@ findings were fixed with a test first, then the full suite:
   tests, not by a visual acceptance pass.
 - ENOSPC and a >2^31-frame full render were not simulated end to end.
 - The "controlled in-flight barrier" for close/catalog switch is implemented through the single
-  worker, modal owner and deferred Start, but not exercised by a dedicated timing test.
+  worker, modal owner and deferred Start; double-start and cancel are tested, a dedicated timing
+  test is not.
+- JUCE's Ogg reader exposes non-ASCII Vorbis comments as Latin-1. No application path consumes OGG
+  `metadataValues` today (the catalog does not read them, and Batch writes correct UTF-8 bytes, which
+  its test verifies), so this is a reader-level limitation with no current UI surface.
 - Windows build/tests were not run.
 - AIFF/FLAC writer finalisation errors are not observable through JUCE; the full readback pass is
   the gate, and a read failure is now fatal.

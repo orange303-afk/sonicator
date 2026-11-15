@@ -292,6 +292,11 @@ TEST_CASE("Frame and byte estimates are checked and the 4 GiB container limit is
     REQUIRE(checkedFrameMath(1, 192000, 44100, out));
     REQUIRE(out == 1);
     REQUIRE(outputFrameEstimate(44100, 44100, 96000) == 96000);
+    // Counters and estimates stay in int64 above 2^31 frames.
+    REQUIRE(outputFrameEstimate(3000000000LL, 44100, 44100) == 3000000000LL);
+    REQUIRE(outputFrameEstimate(3000000000LL, 96000, 48000) == 1500000000LL);
+    REQUIRE(outputByteEstimate(3000000000LL, 2, 24) > containerByteLimit);
+    REQUIRE_FALSE(checkedFrameMath(9000000000000000000LL, 44100, 192000, out));
     REQUIRE(outputByteEstimate(44100, 2, 24) > 44100 * 2 * 3);
     REQUIRE(physicalIdentity(juce::File("/definitely/missing/file.wav")).contains("/"));
     REQUIRE(isWarningCode(ErrorCode::unknown_free_space));
