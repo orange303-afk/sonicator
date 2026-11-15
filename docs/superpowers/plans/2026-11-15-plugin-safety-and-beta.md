@@ -52,6 +52,8 @@ Dicer, новые форматы, AI-агенты и Windows сегодня не
 - [x] CI собирает `SonicatorPluginSmoke` и проверяет отсутствие путей дерева сборки.
 - [x] CI на `2e91da6`: macOS Debug, macOS Release и macOS plugin (universal) зелёные;
       Windows падает по-прежнему информационно (порт не начат).
+- [x] CI на `f5ada1e`: тот же набор зелёный после устранения ложного падения теста остановки
+      preview на диске (`TestDiscBrowserService.cpp:246`); Windows — информационно.
 - [x] Локально пройдены: полный `ctest` (1176 случаев, Debug и Release),
       `codesign --verify --deep --strict` для `.app`, `.vst3`, `.component`,
       `auval -v aumu Sncr Orng`, запуск smoke-цели на живом каталоге (схема 19 до и после,
@@ -66,6 +68,12 @@ Dicer, новые форматы, AI-агенты и Windows сегодня не
 - [x] Документация сверена с поведением.
 - [x] Комплект собран из одного коммита, с версией и известными ограничениями:
       `~/Library/Caches/sonicator-build/beta-2026-11-15` (`5f458fa`, README, SHA256SUMS).
+- [x] Второй комплект после всех исправлений:
+      `~/Library/Caches/sonicator-build/beta-2026-11-15-r2` (`f5ada1e`; приложение, VST3 и AU
+      из одной сборки, universal, ad-hoc, `auval` pass, smoke на живом каталоге, README,
+      SHA256SUMS). Первый комплект устарел и не выдаётся за актуальный.
+- [ ] Ручная проверка второго комплекта владельцем: новый экземпляр наследует размер окна и
+      панели; таблицы хостов в `docs/PLUGIN_ACCEPTANCE_2026-11-15.md`.
 - [x] Developer ID: 0 действующих сертификатов — подпись ad-hoc, notarization не выполняется.
 
 ## 7. P2: требования к Match BPM / Match Scale

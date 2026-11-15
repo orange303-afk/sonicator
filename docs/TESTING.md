@@ -49,6 +49,9 @@ Notes:
   the engine is silent immediately after `selectedRowsChanged`, with no messages pumped — and waits
   separately, through `pumpUntil`, for the caption and for the failed decode to update the filter.
   `PreviewPanel::transportPlaying()` and the `previewPlay` component ID exist for that assertion.
+  Locally: 25 isolated Debug runs, 15 Release runs under six CPU hogs, and the full suites in both
+  configurations (1185 cases) pass; CI run 43743285720 is green for macOS Debug, Release and the
+  universal plugin.
 - The CI suite runs 657 cases; four real-library tests skip because Reason and Ableton packs are not
   installed on the runners, which is why the CI assertion count is lower than a local run on a machine
   that has them.
