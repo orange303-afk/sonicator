@@ -69,6 +69,7 @@ else()
         INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include"
     )
 endif()
+include(cmake/RubberBand.cmake)
 FetchContent_Declare(libxmp
     GIT_REPOSITORY https://github.com/libxmp/libxmp.git
     GIT_TAG libxmp-4.6.2 GIT_SHALLOW TRUE)
@@ -199,12 +200,14 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
     core/smart/TapTempo.cpp
     core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp
-    core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp core/cloud/CloudCache.cpp core/cloud/CloudBuildService.cpp)
+    core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp core/cloud/CloudCache.cpp core/cloud/CloudBuildService.cpp
+    core/match/MatchPolicy.cpp core/match/SourceMetadata.cpp core/match/OfflineMatchRenderer.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
-target_link_libraries(SonicatorCore PUBLIC
+target_link_libraries(SonicatorCore PUBLIC sonicator_rubberband
+    
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib
     SampleRate::samplerate lame_static)
 juce_add_binary_data(SonicatorAssets SOURCES
