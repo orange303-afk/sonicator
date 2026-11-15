@@ -186,12 +186,33 @@ BatchProcessingDialog::BatchProcessingDialog(PreparedBatch prepared, juce::File 
     addAndMakeVisible(mp3Toggle);
     mp3Toggle.setComponentID("batchFormatMp3");
     mp3Toggle.onClick = [this] { updateOutputControls(); refreshFooter(); };
+    addAndMakeVisible(mp3Mode);
+    mp3Mode.addItem("CBR", 1);
+    mp3Mode.addItem("VBR", 2);
+    mp3Mode.setSelectedId(1, juce::dontSendNotification);
+    mp3Mode.setComponentID("batchMp3Mode");
+    mp3Mode.onChange = [this] { updateOutputControls(); refreshFooter(); };
     addAndMakeVisible(mp3Bitrate);
     for (const int bitrate : { 128, 192, 256, 320 })
         mp3Bitrate.addItem(juce::String(bitrate) + " kbps", bitrate);
     mp3Bitrate.setSelectedId(192, juce::dontSendNotification);
     mp3Bitrate.setComponentID("batchMp3Bitrate");
     mp3Bitrate.onChange = [this] { refreshFooter(); };
+    addAndMakeVisible(mp3VbrQuality);
+    for (int quality = 0; quality <= 9; ++quality)
+        mp3VbrQuality.addItem("V" + juce::String(quality), quality + 1);
+    mp3VbrQuality.setSelectedId(3, juce::dontSendNotification);
+    mp3VbrQuality.setComponentID("batchMp3VbrQuality");
+    mp3VbrQuality.onChange = [this] { refreshFooter(); };
+    addAndMakeVisible(oggToggle);
+    oggToggle.setComponentID("batchFormatOgg");
+    oggToggle.onClick = [this] { updateOutputControls(); refreshFooter(); };
+    addAndMakeVisible(oggQuality);
+    for (int quality = 0; quality <= 10; ++quality)
+        oggQuality.addItem(juce::String(quality), quality + 1);
+    oggQuality.setSelectedId(7, juce::dontSendNotification);
+    oggQuality.setComponentID("batchOggQuality");
+    oggQuality.onChange = [this] { refreshFooter(); };
     wavToggle.setComponentID("batchFormatWav");
     aiffToggle.setComponentID("batchFormatAiff");
     flacToggle.setComponentID("batchFormatFlac");
@@ -323,7 +344,7 @@ BatchProcessingDialog::BatchProcessingDialog(PreparedBatch prepared, juce::File 
     rebuildSteps();
     updateOutputControls();
     refreshFooter();
-    setSize(980, 780);
+    setSize(1000, 840);
     startTimerHz(4);
 }
 
@@ -387,13 +408,19 @@ void BatchProcessingDialog::resized()
     flacDepth.setBounds(output.removeFromLeft(108));
     output.removeFromLeft(8);
     flacLevel.setBounds(output.removeFromLeft(70));
-    output.removeFromLeft(8);
-    mp3Toggle.setBounds(output.removeFromLeft(58));
-    mp3Bitrate.setBounds(output.removeFromLeft(96));
-    output.removeFromLeft(8);
-    rateBox.setBounds(output.removeFromLeft(140));
-    output.removeFromLeft(6);
-    channelBox.setBounds(output.removeFromLeft(130));
+    area.removeFromTop(6);
+    auto lossy = area.removeFromTop(30);
+    mp3Toggle.setBounds(lossy.removeFromLeft(58));
+    mp3Mode.setBounds(lossy.removeFromLeft(86));
+    mp3Bitrate.setBounds(lossy.removeFromLeft(96));
+    mp3VbrQuality.setBounds(lossy.removeFromLeft(80));
+    lossy.removeFromLeft(10);
+    oggToggle.setBounds(lossy.removeFromLeft(58));
+    oggQuality.setBounds(lossy.removeFromLeft(100));
+    lossy.removeFromLeft(10);
+    rateBox.setBounds(lossy.removeFromLeft(140));
+    lossy.removeFromLeft(6);
+    channelBox.setBounds(lossy.removeFromLeft(130));
     area.removeFromTop(6);
     auto row2 = area.removeFromTop(30);
     ditherBox.setBounds(row2.removeFromLeft(160));
@@ -488,12 +515,23 @@ void BatchProcessingDialog::loadPreset(const juce::String& id)
             aiffToggle.setToggleState(false, juce::dontSendNotification);
             flacToggle.setToggleState(false, juce::dontSendNotification);
             mp3Toggle.setToggleState(false, juce::dontSendNotification);
+            oggToggle.setToggleState(false, juce::dontSendNotification);
             for (const auto& output : preset.recipe.outputs)
             {
                 if (output.format == Format::mp3)
                 {
                     mp3Toggle.setToggleState(true, juce::dontSendNotification);
+                    mp3Mode.setSelectedId(output.mp3Mode == Mp3Mode::vbr ? 2 : 1,
+                                          juce::dontSendNotification);
                     mp3Bitrate.setSelectedId(output.mp3BitrateKbps, juce::dontSendNotification);
+                    mp3VbrQuality.setSelectedId(output.mp3VbrQuality + 1,
+                                                juce::dontSendNotification);
+                    continue;
+                }
+                if (output.format == Format::ogg)
+                {
+                    oggToggle.setToggleState(true, juce::dontSendNotification);
+                    oggQuality.setSelectedId(output.oggQuality + 1, juce::dontSendNotification);
                     continue;
                 }
                 auto* toggle = output.format == Format::wav ? &wavToggle
@@ -642,8 +680,18 @@ Recipe BatchProcessingDialog::currentRecipe() const
         OutputPreset mp3;
         mp3.format = Format::mp3;
         mp3.encoding = Encoding::int16;
+        mp3.mp3Mode = mp3Mode.getSelectedId() == 2 ? Mp3Mode::vbr : Mp3Mode::cbr;
         mp3.mp3BitrateKbps = mp3Bitrate.getSelectedId();
+        mp3.mp3VbrQuality = juce::jlimit(0, 9, mp3VbrQuality.getSelectedId() - 1);
         recipe.outputs.push_back(mp3);
+    }
+    if (oggToggle.getToggleState())
+    {
+        OutputPreset ogg;
+        ogg.format = Format::ogg;
+        ogg.encoding = Encoding::int16;
+        ogg.oggQuality = juce::jlimit(0, 10, oggQuality.getSelectedId() - 1);
+        recipe.outputs.push_back(ogg);
     }
     const std::array<int, 5> rates { 44100, 48000, 88200, 96000, 192000 };
     const int rateIndex = rateBox.getSelectedId() - 2;
@@ -676,6 +724,7 @@ int64_t BatchProcessingDialog::expectedOutputs() const
     if (aiffToggle.getToggleState()) ++formats;
     if (flacToggle.getToggleState()) ++formats;
     if (mp3Toggle.getToggleState()) ++formats;
+    if (oggToggle.getToggleState()) ++formats;
     return (int64_t) formats * (int64_t) batch.sources.size();
 }
 
@@ -715,9 +764,9 @@ void BatchProcessingDialog::setRunning(bool value)
     const bool enabled = ! value;
     for (auto& row : rows) row->setEnabled(enabled);
     juce::Component* controls[] { &addStepButton, &presetBox, &savePresetButton,
-        &deletePresetButton, &wavToggle, &aiffToggle, &flacToggle, &mp3Toggle, &wavDepth,
-        &aiffDepth, &flacDepth, &flacLevel, &mp3Bitrate, &rateBox, &channelBox, &ditherBox,
-        &conflictBox,
+        &deletePresetButton, &wavToggle, &aiffToggle, &flacToggle, &mp3Toggle, &oggToggle,
+        &wavDepth, &aiffDepth, &flacDepth, &flacLevel, &mp3Mode, &mp3Bitrate, &mp3VbrQuality,
+        &oggQuality, &rateBox, &channelBox, &ditherBox, &conflictBox,
         &allowClipping, &nextToSources, &browseFolder, &previewSource, &preparePreview };
     for (auto* control : controls) control->setEnabled(enabled);
     playDry.setEnabled(enabled && dryFile.existsAsFile() && ! previewStale);
@@ -853,7 +902,7 @@ void BatchProcessingDialog::refreshFooter()
                 const auto frames = outputFrameEstimate(source.frames, source.sampleRate, rate);
                 int bits = 24;
                 if (output.encoding == Encoding::int16) bits = 16;
-                if (output.format == Format::mp3) bits = 16;
+                if (output.format == Format::mp3 || output.format == Format::ogg) bits = 16;
                 else if (output.encoding == Encoding::float32) bits = 32;
                 else if (output.encoding == Encoding::sameAsSource) bits = source.bits;
                 estimate += outputByteEstimate(frames, channels, bits);
@@ -873,7 +922,12 @@ void BatchProcessingDialog::updateOutputControls()
     aiffDepth.setEnabled(aiffToggle.getToggleState());
     flacDepth.setEnabled(flacToggle.getToggleState());
     flacLevel.setEnabled(flacToggle.getToggleState());
-    mp3Bitrate.setEnabled(mp3Toggle.getToggleState());
+    const bool mp3On = mp3Toggle.getToggleState();
+    const bool vbr = mp3Mode.getSelectedId() == 2;
+    mp3Mode.setEnabled(mp3On);
+    mp3Bitrate.setEnabled(mp3On && ! vbr);
+    mp3VbrQuality.setEnabled(mp3On && vbr);
+    oggQuality.setEnabled(oggToggle.getToggleState());
     outputFolder.setEnabled(! nextToSources.getToggleState());
     browseFolder.setEnabled(! nextToSources.getToggleState());
     if (aiffDepth.getSelectedId() == 4) aiffDepth.setSelectedId(3, juce::dontSendNotification);

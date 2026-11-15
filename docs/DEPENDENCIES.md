@@ -34,6 +34,9 @@ option requires for a combined work.
   configuration header is `cmake/lame-config.h`; MSVC uses LAME's `configMS.h`. Assertions are
   compiled out, as upstream does for the library.
   - https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
+- Ogg Vorbis writing uses the **libvorbis/libogg code that JUCE 9 embeds** (see
+  `juce_audio_formats/codecs/ogg`); no additional system library is required. Its licence is part of
+  the JUCE distribution inventory above.
 - libsamplerate **0.2.2**, **BSD-2-Clause**, fetched as a pinned archive
   (`SHA256=16e881487f184250deb4fcb60432d7556ab12cb58caea71ef23960aec6c0405a`) and linked
   statically. It provides the band-limited conversion used by Batch Processing. Examples, tests and

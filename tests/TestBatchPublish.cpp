@@ -75,6 +75,40 @@ OutputPlan planFor(const juce::File& source, Format format, Encoding encoding, i
     return plan;
 }
 
+bool fileContains(const juce::File& file, const std::vector<unsigned char>& needle)
+{
+    juce::MemoryBlock block;
+    if (! file.loadFileAsData(block)) return false;
+    const auto* begin = static_cast<const unsigned char*>(block.getData());
+    return std::search(begin, begin + block.getSize(), needle.begin(), needle.end()) != begin + block.getSize();
+}
+
+std::vector<unsigned char> asciiBytes(const juce::String& text)
+{
+    std::vector<unsigned char> out;
+    for (auto c : text) out.push_back((unsigned char) c);
+    return out;
+}
+
+std::vector<unsigned char> utf8Bytes(const juce::String& text)
+{
+    const auto* data = reinterpret_cast<const unsigned char*>(text.toRawUTF8());
+    return { data, data + text.getNumBytesAsUTF8() };
+}
+
+std::vector<unsigned char> utf16Bytes(const juce::String& text, bool bigEndian)
+{
+    std::vector<unsigned char> out;
+    auto pointer = text.toUTF16();
+    for (; ! pointer.isEmpty(); ++pointer)
+    {
+        const auto value = (unsigned short) *pointer;
+        if (bigEndian) { out.push_back((unsigned char) (value >> 8)); out.push_back((unsigned char) value); }
+        else { out.push_back((unsigned char) value); out.push_back((unsigned char) (value >> 8)); }
+    }
+    return out;
+}
+
 std::vector<float> readBack(const juce::File& file)
 {
     juce::AudioFormatManager formats;
@@ -376,7 +410,8 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
     for (size_t i = 0; i < samples.size(); ++i)
         samples[i] = (float) std::sin((double) i * 0.05) * 0.4f;
     juce::StringPairArray metadata;
-    metadata.set("INAM", "MP3 source");
+    metadata.set("INAM", juce::String::fromUTF8("Тест"));
+    metadata.set("IART", "Artist");
     const auto source = floatWav(t.dir.getChildFile("Source/mp3.wav"), samples, metadata);
     const auto hash = juce::SHA256(source).toHexString();
     const auto snapshot = snapshotFor(source);
@@ -396,7 +431,6 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
     auto result = renderAndPublish(preparedFor(source, recipe), plan, snapshot, recipe,
                                    ConflictPolicy::rename, protection);
     INFO(result.message);
-    INFO("target frames approx");
     REQUIRE(result.state == OutputState::completed);
     REQUIRE(result.target.existsAsFile());
     REQUIRE(juce::SHA256(source).toHexString() == hash);
@@ -410,10 +444,49 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
     REQUIRE(reader->sampleRate == 44100.0);
     REQUIRE(reader->numChannels == 1);
     REQUIRE(std::abs(reader->lengthInSamples - 88200) <= 2 * 1152 + 4410);
-    bool preserved = false;
-    for (const auto& warning : result.warnings)
-        if (warning.code == ErrorCode::metadata_not_preserved) preserved = true;
-    REQUIRE(preserved);
+    // ID3v2 frames are present and the Cyrillic title is stored as UTF-16.
+    REQUIRE(fileContains(result.target, asciiBytes("TIT2")));
+    REQUIRE(fileContains(result.target, asciiBytes("TPE1")));
+    const auto titleUtf16 = juce::String::fromUTF8("Тест");
+    REQUIRE((fileContains(result.target, utf16Bytes(titleUtf16, false))
+             || fileContains(result.target, utf16Bytes(titleUtf16, true))));
+
+    // VBR uses the quality control and produces a different, valid stream.
+    Recipe vbrRecipe = recipe;
+    vbrRecipe.outputs[0].mp3Mode = Mp3Mode::vbr;
+    vbrRecipe.outputs[0].mp3VbrQuality = 2;
+    const auto vbrTarget = t.dir.getChildFile("Out/mp3-vbr.mp3");
+    auto vbrPlan = planFor(source, Format::mp3, Encoding::int16, 16, false, vbrTarget);
+    vbrPlan.mp3Mode = Mp3Mode::vbr;
+    vbrPlan.mp3VbrQuality = 2;
+    auto vbrResult = renderAndPublish(preparedFor(source, vbrRecipe), vbrPlan, snapshot,
+                                      vbrRecipe, ConflictPolicy::rename, protection);
+    REQUIRE(vbrResult.state == OutputState::completed);
+    std::unique_ptr<juce::AudioFormatReader> vbrReader(formats.createReaderFor(vbrResult.target));
+    REQUIRE(vbrReader != nullptr);
+    REQUIRE(std::abs(vbrReader->lengthInSamples - 88200) <= 2 * 1152 + 4410);
+
+    // Ogg Vorbis carries the same text tags as comments.
+    Recipe oggRecipe = recipe;
+    OutputPreset ogg;
+    ogg.format = Format::ogg;
+    ogg.encoding = Encoding::int16;
+    ogg.oggQuality = 8;
+    oggRecipe.outputs = { ogg };
+    const auto oggTarget = t.dir.getChildFile("Out/tone.ogg");
+    auto oggPlan = planFor(source, Format::ogg, Encoding::int16, 16, false, oggTarget);
+    oggPlan.oggQuality = 8;
+    auto oggResult = renderAndPublish(preparedFor(source, oggRecipe), oggPlan, snapshot,
+                                      oggRecipe, ConflictPolicy::rename, protection);
+    REQUIRE(oggResult.state == OutputState::completed);
+    std::unique_ptr<juce::AudioFormatReader> oggReader(formats.createReaderFor(oggResult.target));
+    REQUIRE(oggReader != nullptr);
+    REQUIRE(oggReader->sampleRate == 44100.0);
+    REQUIRE(oggReader->numChannels == 1);
+    REQUIRE(std::abs(oggReader->lengthInSamples - 88200) <= 4096 + 4410);
+    // Vorbis comments are UTF-8; verify the bytes rather than JUCE's Latin-1 reader view.
+    REQUIRE(fileContains(oggResult.target, utf8Bytes(titleUtf16)));
+    REQUIRE(oggReader->metadataValues[juce::OggVorbisAudioFormat::id3title].isNotEmpty());
 
     Recipe loud = recipe;
     loud.steps = { { true, Gain { 12.0 } } };

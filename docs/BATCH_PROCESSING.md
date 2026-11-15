@@ -41,9 +41,12 @@ Fade out (2 ms, Linear). `No processing` is the empty chain. Built-in presets ar
 - WAV: 16/24-bit PCM or 32-bit float.
 - AIFF: 16/24-bit PCM.
 - FLAC: 16/24-bit PCM, compression level 1..8 (default 5).
-- MP3: CBR 128/192/256/320 kbps (default 192). Lossy output runs no integer dither and reports
-  that metadata is not carried; the decoded length is validated within the codec delay/padding
-  tolerance.
+- MP3: CBR 128/192/256/320 kbps (default 192) or VBR V0-V9 (default V2). ID3v2 text tags
+  (TIT2/TPE1/TALB/TCON/TDRC/TRCK, COMM) come from the source's existing tags, UTF-16 for non-ASCII.
+- OGG: Ogg Vorbis, quality 0-10 (default 6), through JUCE's embedded encoder. The source tags are
+  written as Vorbis comments (TITLE/ARTIST/ALBUM/GENRE/DATE/TRACKNUMBER/COMMENT).
+- Lossy output runs no integer dither; the decoded length is validated within the codec
+  delay/padding tolerance. No cover art or catalog-only fields are invented.
 - Rate: same as source, 44100, 48000, 88200, 96000 or 192000 Hz.
 - Channels: same as source, mono (`(L + R) / 2` in double), stereo (mono duplicated).
 - Dither: Auto, TPDF, Off. Auto adds TPDF when the target depth is reduced, when the source is
@@ -106,9 +109,10 @@ structured error code. It exports as JSON or text. A diagnostic JSON copy is kep
 
 ## Limits of v1
 
-- No Split, no OGG/Vorbis output, no original overwrite, no nested container/instrument processing,
-  no LUFS/true peak, limiter, time stretch, pitch shift or VST processing.
-- MP3 support was added as v1.1 after v1: it is CBR only, no VBR preset, no ID3 text/cover copy.
+- No Split, no original overwrite, no nested container/instrument processing, no LUFS/true peak,
+  limiter, time stretch, pitch shift or VST processing.
+- Lossy output was added after v1: MP3 CBR/VBR with text ID3 and OGG Vorbis with comments. Cover
+  art, catalog-only fields (manual Genre/BPM/Key) and gapless-specific VBR tuning are out.
 - One batch job and one preview at a time. Other writers and catalog switches are blocked while it
   runs; simple playback remains available.
 - macOS debug/release builds and the test suite are verified. A Windows build was not run in this

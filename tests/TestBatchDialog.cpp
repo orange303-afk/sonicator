@@ -106,18 +106,41 @@ TEST_CASE("Batch dialog turns its controls into the exact request recipe", "[bat
     REQUIRE(bitrate != nullptr);
     mp3->setToggleState(true, juce::dontSendNotification);
     mp3->onClick();
-    bitrate->setSelectedId(256);
-    bitrate->onChange();
+    auto* mode = child<juce::ComboBox>(dialog, "batchMp3Mode");
+    auto* quality = child<juce::ComboBox>(dialog, "batchMp3VbrQuality");
+    auto* ogg = child<juce::ToggleButton>(dialog, "batchFormatOgg");
+    auto* oggQuality = child<juce::ComboBox>(dialog, "batchOggQuality");
+    REQUIRE(mode != nullptr);
+    REQUIRE(quality != nullptr);
+    REQUIRE(ogg != nullptr);
+    REQUIRE(oggQuality != nullptr);
+    mode->setSelectedId(2);
+    mode->onChange();
+    quality->setSelectedId(6);
+    quality->onChange();
+    ogg->setToggleState(true, juce::dontSendNotification);
+    ogg->onClick();
+    oggQuality->setSelectedId(10);
+    oggQuality->onChange();
     const auto withMp3 = dialog.currentRecipe();
     bool mp3Found = false;
     for (const auto& output : withMp3.outputs)
         if (output.format == Format::mp3)
         {
             mp3Found = true;
-            REQUIRE(output.mp3BitrateKbps == 256);
+            REQUIRE(output.mp3Mode == Mp3Mode::vbr);
+            REQUIRE(output.mp3VbrQuality == 5);
             REQUIRE(output.encoding == Encoding::int16);
         }
     REQUIRE(mp3Found);
+    bool oggFound = false;
+    for (const auto& output : withMp3.outputs)
+        if (output.format == Format::ogg)
+        {
+            oggFound = true;
+            REQUIRE(output.oggQuality == 9);
+        }
+    REQUIRE(oggFound);
 
     // Loading a built-in preset replaces the step list and is serialized back in order.
     auto* preset = child<juce::ComboBox>(dialog, "batchPreset");

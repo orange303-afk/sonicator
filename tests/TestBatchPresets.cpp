@@ -20,9 +20,13 @@ BatchPreset customPreset()
         { true, Gain { -2.5 } },
     };
     OutputPreset mp3 { Format::mp3, Encoding::int16, 5 };
+    mp3.mp3Mode = Mp3Mode::vbr;
     mp3.mp3BitrateKbps = 320;
+    mp3.mp3VbrQuality = 1;
+    OutputPreset ogg { Format::ogg, Encoding::int16, 5 };
+    ogg.oggQuality = 9;
     preset.recipe.outputs = { OutputPreset { Format::wav, Encoding::int24, 5 },
-                              OutputPreset { Format::flac, Encoding::int16, 8 }, mp3 };
+                              OutputPreset { Format::flac, Encoding::int16, 8 }, mp3, ogg };
     preset.recipe.sampleRate = 48000;
     preset.recipe.channels = ChannelMode::mono;
     preset.recipe.dither = DitherMode::tpdf;

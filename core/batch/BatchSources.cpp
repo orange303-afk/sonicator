@@ -200,7 +200,10 @@ bool planOutputs(PreflightResult& result, const Request& request, CancelCheck ca
             plan.encoding = encoding;
             plan.bits = bits;
             plan.floating = floating;
+            plan.mp3Mode = preset.mp3Mode;
             plan.mp3BitrateKbps = preset.mp3BitrateKbps;
+            plan.mp3VbrQuality = preset.mp3VbrQuality;
+            plan.oggQuality = preset.oggQuality;
             plan.sampleRate = request.recipe.sampleRate > 0 ? request.recipe.sampleRate
                                                            : source.sampleRate;
             switch (request.recipe.channels)
@@ -212,6 +215,14 @@ bool planOutputs(PreflightResult& result, const Request& request, CancelCheck ca
             plan.estimatedFrames = outputFrameEstimate(source.frames, source.sampleRate,
                                                        plan.sampleRate);
             plan.estimatedBytes = outputByteEstimate(plan.estimatedFrames, plan.channels, bits);
+            if (preset.format == Format::mp3 || preset.format == Format::ogg)
+            {
+                const int kbps = preset.format == Format::mp3
+                    ? (preset.mp3Mode == Mp3Mode::cbr ? preset.mp3BitrateKbps : 245)
+                    : 64 + preset.oggQuality * 24;
+                plan.estimatedBytes = plan.estimatedFrames / std::max(1, plan.sampleRate)
+                    * (int64_t) kbps * 1000 / 8 + 8192;
+            }
             constexpr int64_t flacFrameLimit = 0x1000000000LL; // 2^36 samples per stream
             if (preset.format == Format::flac && plan.estimatedFrames >= flacFrameLimit)
             {

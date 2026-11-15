@@ -101,6 +101,7 @@ juce::String formatLabel(Format format)
         case Format::aiff: return "AIFF";
         case Format::flac: return "FLAC";
         case Format::mp3: return "MP3";
+        case Format::ogg: return "OGG";
     }
     return {};
 }
@@ -113,6 +114,7 @@ juce::String formatExtension(Format format)
         case Format::aiff: return ".aif";
         case Format::flac: return ".flac";
         case Format::mp3: return ".mp3";
+        case Format::ogg: return ".ogg";
     }
     return {};
 }
@@ -124,6 +126,7 @@ bool parseFormat(const juce::String& text, Format& format)
     if (lowered == "aiff" || lowered == "aif") { format = Format::aiff; return true; }
     if (lowered == "flac") { format = Format::flac; return true; }
     if (lowered == "mp3") { format = Format::mp3; return true; }
+    if (lowered == "ogg" || lowered == "vorbis") { format = Format::ogg; return true; }
     return false;
 }
 
@@ -193,7 +196,24 @@ bool resolveEncoding(const OutputPreset& preset, const SourceSnapshot& source, E
             reason = "MP3 bitrate must be 64..320 kbps";
             return false;
         }
+        if (preset.mp3VbrQuality < 0 || preset.mp3VbrQuality > 9)
+        {
+            reason = "MP3 VBR quality must be V0..V9";
+            return false;
+        }
         // LAME consumes float PCM; the "encoding" only describes the internal pipeline depth.
+        encoding = Encoding::int16;
+        bits = 16;
+        floating = false;
+        return true;
+    }
+    if (preset.format == Format::ogg)
+    {
+        if (preset.oggQuality < 0 || preset.oggQuality > 10)
+        {
+            reason = "OGG quality must be 0..10";
+            return false;
+        }
         encoding = Encoding::int16;
         bits = 16;
         floating = false;
@@ -291,11 +311,22 @@ std::vector<Issue> validateRecipe(const Recipe& recipe)
                            "The output sample rate is not one of the supported rates", false, {} });
     for (size_t i = 0; i < recipe.outputs.size(); ++i)
     {
-        if (recipe.outputs[i].format == Format::mp3
-            && (recipe.outputs[i].mp3BitrateKbps < 64 || recipe.outputs[i].mp3BitrateKbps > 320))
+        if (recipe.outputs[i].format == Format::mp3)
+        {
+            if (recipe.outputs[i].mp3BitrateKbps < 64 || recipe.outputs[i].mp3BitrateKbps > 320)
+                issues.push_back({ ErrorCode::invalid_encoding,
+                                   "Output " + juce::String((int) i + 1)
+                                       + ": MP3 bitrate must be 64..320 kbps", false, {} });
+            if (recipe.outputs[i].mp3VbrQuality < 0 || recipe.outputs[i].mp3VbrQuality > 9)
+                issues.push_back({ ErrorCode::invalid_encoding,
+                                   "Output " + juce::String((int) i + 1)
+                                       + ": MP3 VBR quality must be V0..V9", false, {} });
+        }
+        if (recipe.outputs[i].format == Format::ogg
+            && (recipe.outputs[i].oggQuality < 0 || recipe.outputs[i].oggQuality > 10))
             issues.push_back({ ErrorCode::invalid_encoding,
                                "Output " + juce::String((int) i + 1)
-                                   + ": MP3 bitrate must be 64..320 kbps", false, {} });
+                                   + ": OGG quality must be 0..10", false, {} });
         juce::String reason;
         if (! encodingSupported(recipe.outputs[i].format, recipe.outputs[i].encoding, reason))
             issues.push_back({ ErrorCode::invalid_encoding,
@@ -314,7 +345,9 @@ juce::String recipeFingerprint(const Recipe& recipe)
     for (size_t i = 0; i < recipe.steps.size(); ++i) appendStep(text, recipe.steps[i], (int) i);
     for (const auto& output : recipe.outputs)
         text << "out:" << (int) output.format << ":" << (int) output.encoding << ":"
-             << output.flacCompressionLevel << ":" << output.mp3BitrateKbps << "\n";
+             << output.flacCompressionLevel << ":" << (int) output.mp3Mode << ":"
+             << output.mp3BitrateKbps << ":" << output.mp3VbrQuality << ":"
+             << output.oggQuality << "\n";
     return juce::SHA256(text.toRawUTF8(), text.getNumBytesAsUTF8()).toHexString();
 }
 

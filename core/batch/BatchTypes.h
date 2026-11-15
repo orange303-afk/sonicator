@@ -17,7 +17,8 @@ inline constexpr int64_t blockFrames = 16384;
 inline constexpr int64_t containerByteLimit = 0x100000000LL;
 inline constexpr int64_t spaceReserveBytes = 256LL * 1024 * 1024;
 
-enum class Format { wav, aiff, flac, mp3 };
+enum class Format { wav, aiff, flac, mp3, ogg };
+enum class Mp3Mode { cbr, vbr };
 enum class Encoding { sameAsSource, int16, int24, float32 };
 enum class ChannelMode { sameAsSource, mono, stereo };
 enum class DitherMode { automatic, tpdf, off };
@@ -70,7 +71,10 @@ struct OutputPreset
     Format format = Format::wav;
     Encoding encoding = Encoding::int24;
     int flacCompressionLevel = 5; // 1..8
+    Mp3Mode mp3Mode = Mp3Mode::cbr;
     int mp3BitrateKbps = 192;     // 64..320, CBR
+    int mp3VbrQuality = 2;        // V0..V9
+    int oggQuality = 6;           // 0..10
     bool operator==(const OutputPreset&) const = default;
 };
 
@@ -189,7 +193,10 @@ struct OutputPlan
     Encoding encoding = Encoding::int24;
     int bits = 24;
     bool floating = false;
+    Mp3Mode mp3Mode = Mp3Mode::cbr;
     int mp3BitrateKbps = 192;
+    int mp3VbrQuality = 2;
+    int oggQuality = 6;
     int sampleRate = 0;
     int channels = 0;
     juce::File target;

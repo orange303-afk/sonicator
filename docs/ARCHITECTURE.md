@@ -479,8 +479,9 @@ intermediate result. `ConvertedStream` applies channel mapping and libsamplerate
 `SRC_SINC_BEST_QUALITY` with an exact `Nout` contract. `Quantizer` produces left-aligned int32 words
 for integer writers and owns the only TPDF dither pass. `encodeToTemporary` writes, closes and
 reopens the file; `validateEncodedFile` checks the container facts and decodes every frame.
-The MP3 path uses the pinned LAME encoder with the channel-separated float API and validates the
-decoded length within the codec delay/padding tolerance. `publishBatchFile` commits with an atomic
+The MP3 path uses the pinned LAME encoder with the channel-separated float API, CBR or VBR, and
+writes ID3v2 text frames from the source tags as UTF-16. OGG uses JUCE's embedded Vorbis encoder and
+the same tags as comments. Both validate the decoded length within the codec tolerance. `publishBatchFile` commits with an atomic
 no-clobber link (Rename) or a verified atomic replace.
 
 `BatchService` runs one job on one worker and exposes a polled `Progress`/`Report`; the dialog never

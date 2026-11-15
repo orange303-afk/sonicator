@@ -30,12 +30,57 @@ bool isTimeIndexed(const juce::String& key)
 }
 } // namespace
 
+namespace
+{
+juce::String firstValue(const juce::StringPairArray& values, const juce::StringArray& keys)
+{
+    for (const auto& key : keys)
+        if (const auto found = values.getValue(key, {}); found.isNotEmpty()) return found;
+    return {};
+}
+
+TextTags readTags(const juce::StringPairArray& values)
+{
+    TextTags tags;
+    tags.title = firstValue(values, { "INAM", "id3title", "Title" });
+    tags.artist = firstValue(values, { "IART", "id3artist", "Artist" });
+    tags.album = firstValue(values, { "IPRD", "id3album", "Album" });
+    tags.genre = firstValue(values, { "IGNR", "id3genre", "Genre" });
+    tags.date = firstValue(values, { "ICRD", "id3date", "Year", "Date" });
+    tags.comment = firstValue(values, { "ICMT", "id3comment", "Comment" });
+    tags.track = firstValue(values, { "ITRK", "id3trackNumber", "TrackNumber" });
+    return tags;
+}
+} // namespace
+
 MetadataPlan prepareMetadata(const juce::AudioFormatReader& source, Format output, bool timeChanged)
 {
     MetadataPlan plan;
     const auto& metadata = source.metadataValues;
     if (metadata.size() == 0) return plan;
     const bool sourceIsWav = source.getFormatName().containsIgnoreCase("WAV");
+    plan.tags = readTags(metadata);
+    if (output == Format::mp3 || output == Format::ogg)
+    {
+        // Text tags are carried to lossy output; sampler/time-indexed chunks are not. Report only
+        // metadata this policy actually drops.
+        int dropped = 0;
+        for (int i = 0; i < metadata.size(); ++i)
+        {
+            const auto key = metadata.getAllKeys()[i];
+            if (key == "MetaDataSource" || textWhitelist().contains(key)
+                || samplerKeys().contains(key) || isTimeIndexed(key)
+                || key.startsWith("id3") || key == "Title" || key == "Artist" || key == "Album"
+                || key == "Genre" || key == "Year" || key == "Comment" || key == "TrackNumber")
+                continue;
+            ++dropped;
+        }
+        if (dropped > 0)
+            plan.warnings.push_back({ ErrorCode::metadata_not_preserved,
+                                      juce::String(dropped) + " source metadata field(s) are not carried to "
+                                          + formatLabel(output), true, {} });
+        return plan;
+    }
     if (! sourceIsWav || output != Format::wav)
     {
         plan.warnings.push_back({ ErrorCode::metadata_not_preserved,

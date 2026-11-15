@@ -131,7 +131,10 @@ juce::var BatchPresetStore::recipeToVar(const Recipe& recipe)
         entry->setProperty("format", formatLabel(output.format));
         entry->setProperty("encoding", (int) output.encoding);
         entry->setProperty("flacCompressionLevel", output.flacCompressionLevel);
+        entry->setProperty("mp3Mode", (int) output.mp3Mode);
         entry->setProperty("mp3BitrateKbps", output.mp3BitrateKbps);
+        entry->setProperty("mp3VbrQuality", output.mp3VbrQuality);
+        entry->setProperty("oggQuality", output.oggQuality);
         outputs.add(juce::var(entry.release()));
     }
     object->setProperty("outputs", outputs);
@@ -172,7 +175,11 @@ bool BatchPresetStore::recipeFromVar(const juce::var& value, Recipe& recipe, juc
         }
         output.encoding = (Encoding) encoding;
         output.flacCompressionLevel = (int) outputValue.getProperty("flacCompressionLevel", 5);
+        const int mode = (int) outputValue.getProperty("mp3Mode", 0);
+        output.mp3Mode = mode == 1 ? Mp3Mode::vbr : Mp3Mode::cbr;
         output.mp3BitrateKbps = (int) outputValue.getProperty("mp3BitrateKbps", 192);
+        output.mp3VbrQuality = (int) outputValue.getProperty("mp3VbrQuality", 2);
+        output.oggQuality = (int) outputValue.getProperty("oggQuality", 6);
         parsed.outputs.push_back(output);
     }
     parsed.sampleRate = (int) value.getProperty("sampleRate", 0);

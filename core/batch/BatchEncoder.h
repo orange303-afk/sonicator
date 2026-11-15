@@ -1,4 +1,5 @@
 #pragma once
+#include "BatchMetadata.h"
 #include "BatchPublisher.h"
 #include "BatchResampler.h"
 #include <functional>
@@ -14,7 +15,11 @@ struct EncodeSettings
     int sampleRate = 0;
     int channels = 0;
     int flacCompressionLevel = 5;
+    Mp3Mode mp3Mode = Mp3Mode::cbr;
     int mp3BitrateKbps = 192;
+    int mp3VbrQuality = 2;
+    int oggQuality = 6;
+    TextTags tags;
     bool dither = false;
     uint64_t ditherSeed = 0;
     juce::StringPairArray metadata;

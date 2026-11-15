@@ -29,6 +29,40 @@ juce::String describeDouble(const juce::String& what, double expected, double ac
 
 bool cancelled(const CancelCheck& check) { return check && check(); }
 
+std::vector<unsigned short> utf16z(const juce::String& text)
+{
+    std::vector<unsigned short> out;
+    out.push_back(0xFEFFu); // LAME requires a UCS-2 byte-order marker.
+    auto pointer = text.toUTF16();
+    for (; ! pointer.isEmpty(); ++pointer) out.push_back((unsigned short) *pointer);
+    out.push_back(0);
+    return out;
+}
+
+void applyId3(lame_t lame, const TextTags& tags)
+{
+    id3tag_init(lame);
+    id3tag_add_v2(lame);
+    auto set = [lame](const char* frame, const juce::String& value)
+    {
+        if (value.isEmpty()) return;
+        const auto text = utf16z(value);
+        id3tag_set_textinfo_utf16(lame, frame, text.data());
+    };
+    set("TIT2", tags.title);
+    set("TPE1", tags.artist);
+    set("TALB", tags.album);
+    set("TCON", tags.genre);
+    set("TDRC", tags.date);
+    set("TRCK", tags.track);
+    if (tags.comment.isNotEmpty())
+    {
+        const auto text = utf16z(tags.comment);
+        const auto empty = utf16z({});
+        id3tag_set_comment_utf16(lame, "eng", empty.data(), text.data());
+    }
+}
+
 // MP3 is lossy: LAME consumes float PCM itself, so no integer quantizer or dither runs. The
 // encoder delay means the decoded length is compared within a codec tolerance, not exactly.
 EncodedAudio encodeMp3ToTemporary(const juce::File& temporary, const EncodeSettings& settings,
@@ -51,9 +85,18 @@ EncodedAudio encodeMp3ToTemporary(const juce::File& temporary, const EncodeSetti
     if (lame == nullptr) return fail(ErrorCode::encode_failed, "The MP3 encoder could not start");
     lame_set_in_samplerate(lame, settings.sampleRate);
     lame_set_num_channels(lame, settings.channels);
-    lame_set_brate(lame, settings.mp3BitrateKbps);
+    if (settings.mp3Mode == Mp3Mode::vbr)
+    {
+        lame_set_VBR(lame, vbr_default);
+        lame_set_VBR_q(lame, juce::jlimit(0, 9, settings.mp3VbrQuality));
+    }
+    else
+    {
+        lame_set_brate(lame, settings.mp3BitrateKbps);
+    }
     lame_set_quality(lame, 2);
     lame_set_bWriteVbrTag(lame, 1);
+    applyId3(lame, settings.tags);
     if (lame_init_params(lame) < 0)
     {
         lame_close(lame);
@@ -137,6 +180,107 @@ EncodedAudio encodeMp3ToTemporary(const juce::File& temporary, const EncodeSetti
     result.floatOverUnity = false;
     return result;
 }
+
+EncodedAudio encodeOggToTemporary(const juce::File& temporary, const EncodeSettings& settings,
+                                  ConvertedStream& stream, CancelCheck cancel,
+                                  const std::function<void(const juce::String&)>& phase)
+{
+    EncodedAudio result;
+    auto fail = [&temporary, &result](ErrorCode code, juce::String message)
+    {
+        temporary.deleteFile();
+        result.ok = false;
+        result.code = code;
+        result.error = std::move(message);
+        return result;
+    };
+    if (cancelled(cancel)) return fail(ErrorCode::cancelled, "Cancelled");
+    if (settings.oggQuality < 0 || settings.oggQuality > 10)
+        return fail(ErrorCode::invalid_encoding, "OGG quality must be 0..10");
+    temporary.getParentDirectory().createDirectory();
+    juce::OggVorbisAudioFormat format;
+    auto options = juce::AudioFormatWriterOptions{}.withSampleRate((double) settings.sampleRate)
+        .withNumChannels(settings.channels).withBitsPerSample(32)
+        .withQualityOptionIndex(juce::jlimit(0, 10, settings.oggQuality));
+    const std::pair<juce::String, juce::String> tags[] {
+        { juce::OggVorbisAudioFormat::id3title, settings.tags.title },
+        { juce::OggVorbisAudioFormat::id3artist, settings.tags.artist },
+        { juce::OggVorbisAudioFormat::id3album, settings.tags.album },
+        { juce::OggVorbisAudioFormat::id3date, settings.tags.date },
+        { juce::OggVorbisAudioFormat::id3genre, settings.tags.genre },
+        { juce::OggVorbisAudioFormat::id3trackNumber, settings.tags.track },
+        { juce::OggVorbisAudioFormat::id3comment, settings.tags.comment },
+    };
+    for (const auto& tag : tags)
+        if (tag.second.isNotEmpty()) options = options.withMetadata(tag.first, tag.second);
+    std::unique_ptr<juce::OutputStream> output(temporary.createOutputStream());
+    if (output == nullptr) return fail(ErrorCode::encode_failed, "The temporary file cannot be created");
+    auto writer = format.createWriterFor(output, options);
+    if (writer == nullptr) return fail(ErrorCode::invalid_encoding,
+                                       "The OGG encoder rejected the settings");
+    juce::AudioBuffer<float> block(settings.channels, (int) blockFrames);
+    int64_t frames = 0;
+    float peak = 0.0f;
+    int64_t saturatedFrames = 0;
+    while (true)
+    {
+        if (cancelled(cancel))
+        {
+            writer.reset();
+            output.reset();
+            return fail(ErrorCode::cancelled, "Cancelled");
+        }
+        const auto read = stream.readNext((int) blockFrames, block);
+        if (read.state == ReadState::error || read.state == ReadState::cancelled)
+        {
+            writer.reset();
+            output.reset();
+            return fail(read.code, read.error);
+        }
+        if (read.frames <= 0) break;
+        for (int n = 0; n < read.frames; ++n)
+        {
+            bool frameSaturated = false;
+            for (int channel = 0; channel < settings.channels; ++channel)
+            {
+                const auto value = block.getSample(channel, n);
+                if (! std::isfinite(value))
+                {
+                    writer.reset();
+                    output.reset();
+                    return fail(ErrorCode::encode_failed,
+                                "Processing produced NaN or infinite samples");
+                }
+                peak = std::max(peak, std::abs(value));
+                if (std::abs(value) > 1.0f + 1.0e-7f) frameSaturated = true;
+            }
+            if (frameSaturated) ++saturatedFrames;
+        }
+        if (! writer->writeFromFloatArrays(block.getArrayOfReadPointers(), settings.channels,
+                                          read.frames))
+        {
+            writer.reset();
+            output.reset();
+            return fail(ErrorCode::encode_failed, "The OGG file cannot be written");
+        }
+        frames += read.frames;
+    }
+    writer.reset();
+    output.reset();
+    if (frames != stream.frames())
+        return fail(ErrorCode::encode_failed, "The encoded frame count is incomplete");
+    if (phase) phase("Validating");
+    float decodedPeak = 0.0f;
+    for (const auto& issue : validateEncodedFile(temporary, settings, frames, decodedPeak, cancel))
+        if (! issue.warning)
+            return fail(issue.code == ErrorCode::none ? ErrorCode::validate_failed : issue.code,
+                        issue.message);
+    result.ok = true;
+    result.frames = frames;
+    result.peak = peak;
+    result.saturatedFrames = saturatedFrames;
+    return result;
+}
 } // namespace
 
 EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings& settings,
@@ -159,6 +303,8 @@ EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings
         return fail(ErrorCode::invalid_encoding, "Unsupported output format settings");
     if (settings.format == Format::mp3)
         return encodeMp3ToTemporary(temporary, settings, stream, cancel, phase);
+    if (settings.format == Format::ogg)
+        return encodeOggToTemporary(temporary, settings, stream, cancel, phase);
     if (! settings.floating && settings.bits != 16 && settings.bits != 24)
         return fail(ErrorCode::invalid_encoding, "Unsupported integer depth");
     auto format = formatFor(settings.format);
@@ -281,6 +427,26 @@ std::vector<Issue> validateEncodedFile(const juce::File& file, const EncodeSetti
                                "The decoded MP3 length " + juce::String((juce::int64) reader->lengthInSamples)
                                    + " is outside the codec tolerance for " + juce::String((juce::int64) frames),
                                false, {} });
+        return issues;
+    }
+    if (settings.format == Format::ogg)
+    {
+        juce::AudioFormatManager formats;
+        registerSonicatorFormats(formats);
+        std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
+        if (reader == nullptr)
+        {
+            issues.push_back({ ErrorCode::validate_failed, "The OGG file cannot be decoded", false, {} });
+            return issues;
+        }
+        if ((int) std::lround(reader->sampleRate) != settings.sampleRate)
+            issues.push_back({ ErrorCode::validate_failed, "The OGG sample rate differs", false, {} });
+        if ((int) reader->numChannels != settings.channels)
+            issues.push_back({ ErrorCode::validate_failed, "The OGG channel count differs", false, {} });
+        const auto tolerance = (int64_t) (4096 + settings.sampleRate / 10);
+        if (reader->lengthInSamples <= 0 || std::abs(reader->lengthInSamples - frames) > tolerance)
+            issues.push_back({ ErrorCode::validate_failed,
+                               "The decoded OGG length is outside the codec tolerance", false, {} });
         return issues;
     }
     if (settings.format == Format::wav)
@@ -412,7 +578,11 @@ OutputResult renderAndPublish(std::unique_ptr<PreparedAudio> prepared, const Out
     settings.floating = plan.floating;
     settings.sampleRate = plan.sampleRate;
     settings.channels = plan.channels;
+    settings.mp3Mode = plan.mp3Mode;
     settings.mp3BitrateKbps = plan.mp3BitrateKbps;
+    settings.mp3VbrQuality = plan.mp3VbrQuality;
+    settings.oggQuality = plan.oggQuality;
+    settings.tags = metadata.tags;
     settings.flacCompressionLevel = recipe.outputs.empty()
         ? 5
         : [&recipe, &plan]

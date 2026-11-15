@@ -3,9 +3,21 @@
 
 namespace sonicator::batch
 {
+struct TextTags
+{
+    juce::String title, artist, album, genre, date, comment, track;
+    bool any() const
+    {
+        return title.isNotEmpty() || artist.isNotEmpty() || album.isNotEmpty()
+            || genre.isNotEmpty() || date.isNotEmpty() || comment.isNotEmpty()
+            || track.isNotEmpty();
+    }
+};
+
 struct MetadataPlan
 {
     juce::StringPairArray values;
+    TextTags tags;
     std::vector<Issue> warnings;
     bool timeIndexedDropped = false;
 };

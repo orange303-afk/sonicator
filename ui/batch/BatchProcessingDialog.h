@@ -71,9 +71,9 @@ private:
     juce::ComboBox presetBox;
     juce::TextButton savePresetButton { "Save preset" }, deletePresetButton { "Delete preset" };
     juce::ToggleButton wavToggle { "WAV" }, aiffToggle { "AIFF" }, flacToggle { "FLAC" },
-        mp3Toggle { "MP3" };
-    juce::ComboBox wavDepth, aiffDepth, flacDepth, flacLevel, mp3Bitrate, rateBox, channelBox,
-        ditherBox, conflictBox;
+        mp3Toggle { "MP3" }, oggToggle { "OGG" };
+    juce::ComboBox wavDepth, aiffDepth, flacDepth, flacLevel, mp3Mode, mp3Bitrate,
+        mp3VbrQuality, oggQuality, rateBox, channelBox, ditherBox, conflictBox;
     juce::ToggleButton allowClipping { "Allow integer clipping (reported)" };
     juce::ToggleButton nextToSources { "Save next to originals" };
     juce::TextEditor outputFolder;
