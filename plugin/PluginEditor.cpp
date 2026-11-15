@@ -57,7 +57,8 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
         showCatalogProblem(compatibility.message, state);
     }
 
-    setResizable(true, true);
+    // The host owns window resizing; omit JUCE's diagonal bottom-right grip.
+    setResizable(true, false);
     applyInterfaceScale(main != nullptr ? main->interfaceScale() : 1.0f);
     setSize(juce::roundToInt(editorScale * juce::jlimit(PluginState::minimumWidth,
                                                      PluginState::maximumWidth, saved.windowWidth)),

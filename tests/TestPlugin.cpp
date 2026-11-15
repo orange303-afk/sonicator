@@ -218,6 +218,21 @@ TEST_CASE("Plugin editor reports a missing catalog and survives repeated opening
     }
 }
 
+TEST_CASE("Plugin window remains host-resizable without the diagonal corner grip", "[plugin][ui][resize]")
+{
+    TestDirectory t;
+    plugin::PluginProcessor processor(t.dir.getChildFile("absent.sqlite"),
+                                     t.dir.getChildFile("settings.json"));
+    std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+    REQUIRE(editor != nullptr);
+    CHECK(editor->isResizable());
+    for (auto* child : editor->getChildren())
+        CHECK(dynamic_cast<juce::ResizableCornerComponent*>(child) == nullptr);
+    editor->setSize(1300, 800);
+    CHECK(editor->getWidth() == 1300);
+    CHECK(editor->getHeight() == 800);
+}
+
 TEST_CASE("Plugin editor restores the project selection without autoplay", "[plugin][ui][session]")
 {
     TestDirectory t;
