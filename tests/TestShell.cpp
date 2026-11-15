@@ -24,7 +24,10 @@ TEST_CASE("Folder context menu stays beside the click instead of jumping above i
     auto* folders = dynamic_cast<FolderTree*>(app.findChildWithID("folderTree")); REQUIRE(folders != nullptr);
     const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay(); REQUIRE(display != nullptr);
     const auto screen = display->userBounds;
-    const juce::Point<int> click(screen.getX() + screen.getWidth() / 3, screen.getY() + screen.getHeight() * 11 / 20);
+    // The menu is tall and the host moves it up when it would not fit below the click, so the
+    // click goes near the top third: that is where the "beside the click" rule is observable.
+    const juce::Point<int> click(screen.getX() + screen.getWidth() / 3,
+                                 screen.getY() + screen.getHeight() / 6);
     folders->onContextMenu(t.dir.getFullPathName(), false, click);
     auto* menu = juce::Component::getCurrentlyModalComponent(); REQUIRE(menu != nullptr);
     const auto bounds = menu->getScreenBounds();
