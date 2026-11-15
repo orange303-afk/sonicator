@@ -125,6 +125,12 @@ including fonts, and resizes the plugin window without changing JUCE's process-w
 so reopening a project does not apply the scale twice. The shared appearance preference is saved
 as before; changing it in one editor does not force another open editor to resize.
 
+Folder/Analysis widths, Preview height and Favorites height persist in `pluginLayout` when a
+divider drag finishes. Reopening the editor or creating a fresh processor restores that layout
+from settings. The plugin reads Favorites height from its own layout, not the standalone app's
+legacy height field. `tests/TestPlugin.cpp` (`[layout-persistence]`) changes scale and all four
+dividers, then verifies the actual geometry after editor recreation and new-instance state restore.
+
 Settings has a Close button in both standalone and embedded mode. Support links are stacked.
 The plugin's library context menu labels the unavailable file-processing group **Processing**.
 With Loop enabled, dragging a selection outside the editor displays “Отключите луп”; live movement

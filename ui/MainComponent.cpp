@@ -752,7 +752,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     favoritesLabel.setComponentID("favoritesLabel"); favorites.setComponentID("favoritesTree");
     favoritesSplitter.setComponentID("favoritesSplitter");
     favoritesLabel.setVisible(false); favorites.setVisible(false); favoritesSplitter.setVisible(false);
-    favoritePanelHeight = appSettings.favoritesPanelHeight;
+    favoritePanelHeight = embeddedUi ? appSettings.pluginLayout.favoritesHeight
+                                    : appSettings.favoritesPanelHeight;
     favoritesSplitter.getHeight = [this] { return favoritePanelHeight; };
     favoritesSplitter.setHeight = [this](int height)
     {
@@ -799,12 +800,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     previewDivider.onReset = [this] { resetPanelSize("preview"); };
     favoritesSplitter.onRelease = [this]
     {
-        try { settingsStore.update([this](AppSettings& saved) { saved.favoritesPanelHeight = favoritePanelHeight; }); }
-        catch (const std::exception& e)
-        {
-            status.setText("Could not save the favorites divider: " + juce::String::fromUTF8(e.what()),
-                juce::dontSendNotification);
-        }
+        persistLayout();
     };
     folders.onFolder = [this](juce::String path)
     {

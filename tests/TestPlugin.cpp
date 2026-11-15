@@ -122,6 +122,80 @@ TEST_CASE("Plugin state survives serialisation and clamps the window", "[plugin]
     CHECK(futureState.windowWidth == 1024);
 }
 
+TEST_CASE("Plugin scale and panel sizes survive editor reopen and a new instance", "[plugin][layout-persistence]")
+{
+    TestDirectory t;
+    const auto catalog = t.dir.getChildFile("layout.sqlite");
+    { Database db(catalog); SampleRepository repo(db); repo.createTables(); }
+    const auto settingsFile = t.dir.getChildFile("settings.json");
+    AppSettings original;
+    original.standaloneLayout.foldersWidth = 210;
+    original.standaloneLayout.analysisWidth = 240;
+    original.standaloneLayout.favoritesHeight = 180;
+    SettingsStore(settingsFile).save(original);
+    juce::MemoryBlock project;
+    PanelLayoutBounds expected;
+    auto checkRestored = [&](juce::AudioProcessorEditor& editor)
+    {
+        auto* main = dynamic_cast<MainComponent*>(editor.findChildWithID("pluginMain"));
+        REQUIRE(main != nullptr);
+        CHECK(main->getTransform().getScaleFactor() == Catch::Approx(1.25f));
+        CHECK(editor.getWidth() == 2000);
+        CHECK(editor.getHeight() == 1250);
+        CHECK(main->currentLayout().folders == expected.folders);
+        CHECK(main->currentLayout().analysis == expected.analysis);
+        CHECK(main->currentLayout().preview == expected.preview);
+        auto* favorites = dynamic_cast<FavoritesSplitter*>(main->findChildWithID("favoritesSplitter"));
+        REQUIRE(favorites != nullptr);
+        CHECK(favorites->getHeight() == 260);
+    };
+    {
+        plugin::PluginProcessor processor(catalog, settingsFile);
+        std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+        auto* main = dynamic_cast<MainComponent*>(editor->findChildWithID("pluginMain"));
+        REQUIRE(main != nullptr);
+        for (auto* child : main->getChildren())
+            if (auto* button = dynamic_cast<juce::TextButton*>(child))
+                if (button->getButtonText() == "Settings") button->onClick();
+        auto* scale = dynamic_cast<juce::ComboBox*>(findDescendantWithID(*main, "settingsScale"));
+        REQUIRE(scale != nullptr);
+        scale->setSelectedId(125, juce::sendNotificationSync);
+        editor->setSize(2000, 1250); // logical 1600 x 1000, with room for every panel
+        for (const auto& change : std::vector<std::pair<juce::String, int>> {
+                 { "foldersDivider", 45 }, { "analysisDivider", -35 }, { "previewDivider", -40 } })
+        {
+            auto* divider = dynamic_cast<PanelSplitter*>(main->findChildWithID(change.first));
+            REQUIRE(divider != nullptr);
+            divider->onDragBegin(divider->getPreferred());
+            divider->onDrag(change.second);
+            divider->onCommit();
+        }
+        auto* favorites = dynamic_cast<FavoritesSplitter*>(main->findChildWithID("favoritesSplitter"));
+        REQUIRE(favorites != nullptr);
+        favorites->setHeight(260);
+        favorites->onRelease();
+        expected = main->currentLayout();
+        CHECK(SettingsStore(settingsFile).load().scalePercent == 125);
+        CHECK(SettingsStore(settingsFile).load().pluginLayout.favoritesHeight == 260);
+        CHECK(SettingsStore(settingsFile).load().standaloneLayout == original.standaloneLayout);
+        editor.reset();
+        editor.reset(processor.createEditor());
+        checkRestored(*editor);
+        processor.getStateInformation(project);
+    }
+    // Both processor and editor were destroyed. A new instance reads the file again and the
+    // DAW restores only its project state; neither scale nor panel preferences are copied by us.
+    SettingsStore(settingsFile).update([](AppSettings& saved)
+    {
+        // The standalone app may update its legacy Favorites height between plugin runs.
+        saved.favoritesPanelHeight = 180;
+    });
+    plugin::PluginProcessor restarted(catalog, settingsFile);
+    restarted.setStateInformation(project.getData(), (int) project.getSize());
+    std::unique_ptr<juce::AudioProcessorEditor> editor(restarted.createEditor());
+    checkRestored(*editor);
+}
+
 #include "plugin/PluginProcessor.h"
 #include "plugin/PluginEditor.h"
 #include "ui/MainComponent.h"
