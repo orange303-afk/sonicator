@@ -50,7 +50,7 @@ Dicer, новые форматы, AI-агенты и Windows сегодня не
 
 - [x] CI проверяет обе архитектуры, `libonnxruntime` в обоих форматах, manifest.
 - [x] CI собирает `SonicatorPluginSmoke` и проверяет отсутствие путей дерева сборки.
-- [x] Локально пройдены: полный `ctest` (1175 случаев), `codesign --verify --deep --strict`
+- [x] Локально пройдены: полный `ctest` (1176 случаев, Debug и Release), `codesign --verify --deep --strict`
       для `.app`, `.vst3`, `.component`, `auval -v aumu Sncr Orng`, запуск smoke-цели
       на живом каталоге (схема 19 до и после, без новой резервной копии).
 
@@ -58,7 +58,7 @@ Dicer, новые форматы, AI-агенты и Windows сегодня не
 
 - [x] Документация сверена с поведением.
 - [x] Комплект собран из одного коммита, с версией и известными ограничениями:
-      `~/Library/Caches/sonicator-build/beta-2026-11-15` (`be5962e`, README, SHA256SUMS).
+      `~/Library/Caches/sonicator-build/beta-2026-11-15` (`5f458fa`, README, SHA256SUMS).
 - [x] Developer ID: 0 действующих сертификатов — подпись ad-hoc, notarization не выполняется.
 
 ## 7. P2: требования к Match BPM / Match Scale
