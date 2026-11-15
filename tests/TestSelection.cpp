@@ -475,6 +475,52 @@ TEST_CASE("Dragging inside an armed loop moves it live and commits once", "[sele
     REQUIRE(committed.start == Catch::Approx(3.0).margin(0.02));
     REQUIRE(committed.end == Catch::Approx(5.0).margin(0.02));
 }
+
+TEST_CASE("Dragging an armed loop outside the window reports the export attempt", "[selection][acceptance-fixes]")
+{
+    TestDirectory t;
+    WaveformDisplay waveform(t.dir.getChildFile("cache"));
+    waveform.setSize(400, 120);
+    waveform.setPeaks(std::vector<float>(1000, 0.2f), 100, {});
+    waveform.setSelection({ 2.0, 4.0 });
+    waveform.setLoopArmed(true);
+    int attempts = 0;
+    waveform.onExternalDragRequested = [&] { ++attempts; };
+    const juce::Point<float> press(122.4f, 30.0f);
+    waveform.mouseDown(waveformPress(waveform, press));
+    waveform.mouseDrag(waveformDrag(waveform, press, { 170.0f, 30.0f }));
+    CHECK(attempts == 0);
+    waveform.mouseDrag(waveformDrag(waveform, press, { 170.0f, -30.0f }));
+    waveform.mouseDrag(waveformDrag(waveform, press, { 180.0f, -40.0f }));
+    CHECK(attempts == 1);
+}
+
+TEST_CASE("Loop export warning stays visible until Loop is disabled", "[selection][acceptance-fixes]")
+{
+    TestDirectory t;
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    REQUIRE(preview.loadFile(t.wave(), false));
+    preview.selectRange(0.2, 0.4);
+    auto* loop = dynamic_cast<juce::Button*>(preview.findChildWithID("loop"));
+    REQUIRE(loop != nullptr);
+    loop->setToggleState(true, juce::dontSendNotification);
+    loop->onClick();
+    WaveformDisplay* wave = nullptr;
+    for (auto* child : preview.getChildren())
+        if (auto* display = dynamic_cast<WaveformDisplay*>(child)) wave = display;
+    REQUIRE(wave != nullptr);
+    wave->onExternalDragRequested();
+    auto* status = dynamic_cast<juce::Label*>(preview.findChildWithID("selectionStatus"));
+    REQUIRE(status != nullptr);
+    CHECK(status->getText() == juce::String::fromUTF8("Отключите луп"));
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
+    CHECK(status->getText() == juce::String::fromUTF8("Отключите луп"));
+    loop->setToggleState(false, juce::dontSendNotification);
+    loop->onClick();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
+    CHECK(status->getText() != juce::String::fromUTF8("Отключите луп"));
+}
 TEST_CASE("An armed loop edge resizes while the body moves", "[selection][waveform][live]")
 {
     TestDirectory t; WaveformDisplay waveform(t.dir.getChildFile("cache"));

@@ -139,6 +139,9 @@ public:
     // schema). The plugin then shows `catalogError()` and leaves the project state untouched.
     bool catalogIsOpen() const { return readRepo != nullptr; }
     juce::String catalogError() const { return catalogOpenError; }
+    float interfaceScale() const { return appSettings.scalePercent / 100.0f; }
+    // The plugin scales its component tree, never JUCE's process-wide Desktop (the DAW).
+    std::function<void(float)> onInterfaceScaleChanged;
     // Rebuilds the library and favorites trees off the message thread and installs the result.
     void requestFolderTreeRefresh();
     void applyFolderIndex(FolderIndex);

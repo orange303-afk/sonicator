@@ -501,6 +501,19 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
     const auto total = totalLength();
     if (total <= 0) return;
     const auto delta = e.getPosition() - dragOrigin;
+    // Loop mode reserves the selection body/edges for live editing. Leaving the editor is an
+    // attempted external drag instead; let the preview explain why Loop must be turned off.
+    auto* window = getTopLevelComponent();
+    if (loopArmed && pressInsideSelection
+        && ! window->getLocalBounds().contains(window->getLocalPoint(this, e.getPosition())))
+    {
+        if (! externalDragTriggered && selection::exceedsDragThreshold(delta.x, delta.y))
+        {
+            externalDragTriggered = true;
+            if (onExternalDragRequested) onExternalDragRequested();
+        }
+        return;
+    }
     if (dragMode == DragMode::move)
     {
         if (! selection::exceedsDragThreshold(delta.x, delta.y)) return;

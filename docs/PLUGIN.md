@@ -117,6 +117,19 @@ outside" closes on the first click inside the DAW. `MainComponent` implements
 confirmations all use it. `TapTempoDialog` keeps its own window only outside the plugin. The
 Settings panel was already embedded this way.
 
+### Interface scale
+
+General → Interface scale works in the plugin too. It scales the entire editor component tree,
+including fonts, and resizes the plugin window without changing JUCE's process-wide desktop scale
+(which belongs to the DAW). Window dimensions in project state are logical, unscaled dimensions,
+so reopening a project does not apply the scale twice. The shared appearance preference is saved
+as before; changing it in one editor does not force another open editor to resize.
+
+Settings has a Close button in both standalone and embedded mode. Support links are stacked.
+The plugin's library context menu labels the unavailable file-processing group **Processing**.
+With Loop enabled, dragging a selection outside the editor displays “Отключите луп”; live movement
+and resizing of the loop inside the editor remain available. Turn Loop off to export the selection.
+
 ## Limits
 
 - Match BPM and Match Scale are P2: both need time-stretch / pitch-shift and a decision about which

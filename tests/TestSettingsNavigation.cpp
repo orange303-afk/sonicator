@@ -104,6 +104,51 @@ TEST_CASE("Plugin mode hides the host-owned pages and stays on General", "[setti
     REQUIRE(panel.selectedSection() == SettingsSection::general);
 }
 
+TEST_CASE("Plugin settings expose scale and a working close button", "[settings][acceptance-fixes]")
+{
+    SettingsPanel panel({}, juce::File("/tmp/catalog.sqlite"), false);
+    panel.setPluginMode(true);
+    auto* scale = findDescendantWithID(panel, "settingsScale");
+    REQUIRE(scale != nullptr);
+    CHECK(scale->isVisible());
+    juce::TextButton* close = nullptr;
+    for (auto* child : panel.getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*>(child))
+            if (button->getButtonText() == "Close") close = button;
+    REQUIRE(close != nullptr);
+    CHECK(close->isVisible());
+    CHECK_FALSE(close->getBounds().isEmpty());
+    bool closed = false;
+    panel.onClose = [&] { closed = true; };
+    close->onClick();
+    CHECK(closed);
+}
+
+TEST_CASE("Support links are stacked without overlap", "[settings][acceptance-fixes]")
+{
+    SettingsPanel panel({}, juce::File("/tmp/catalog.sqlite"), false);
+    panel.selectSection(SettingsSection::about);
+    juce::HyperlinkButton* kofi = nullptr;
+    juce::HyperlinkButton* boosty = nullptr;
+    std::function<void(juce::Component&)> find = [&](juce::Component& parent)
+    {
+        for (auto* child : parent.getChildren())
+        {
+            if (auto* link = dynamic_cast<juce::HyperlinkButton*>(child))
+            {
+                if (link->getButtonText().contains("ko-fi")) kofi = link;
+                if (link->getButtonText().contains("boosty")) boosty = link;
+            }
+            find(*child);
+        }
+    };
+    find(panel);
+    REQUIRE(kofi != nullptr);
+    REQUIRE(boosty != nullptr);
+    CHECK(kofi->getX() == boosty->getX());
+    CHECK(kofi->getBottom() <= boosty->getY());
+}
+
 TEST_CASE("The Hotkeys page edits the shared registry profile", "[settings][navigation][hotkeys]")
 {
     const auto registry = makeRegistry();

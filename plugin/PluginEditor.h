@@ -25,6 +25,8 @@ private:
     // The host may restore project state while this window is open; the older selection must not
     // be written back over it when the window closes.
     int stateGenerationAtOpen = 0;
+    float editorScale = 1.0f;
+    void applyInterfaceScale(float);
 
     // Replaces the browser with an explanation when the shared catalog cannot be opened.
     void showCatalogProblem(const juce::String& message, const juce::String& componentId);

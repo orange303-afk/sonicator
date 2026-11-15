@@ -325,7 +325,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     addChildComponent(audioContent);
 
     addAndMakeVisible(title);
-    close.setVisible(false);
+    addAndMakeVisible(close);
 
     section = settingsSectionFromId(initial.lastSettingsSection);
     if (!sectionAvailable(section)) section = SettingsSection::general;
@@ -448,21 +448,21 @@ void SettingsPanel::updateSectionVisibility()
 
     // Plugin mode hides the controls the host owns, not the whole General page.
     const bool showLibrary = !pluginMode;
-    for (auto* c : std::array<juce::Component*, 15> {
-             &scaleLabel, &scaleBox, &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
+    for (auto* c : std::array<juce::Component*, 13> {
+             &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
              &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
              &contributeDataToggle, &contributionNote, &contributionPreview, &contributionDelete })
         if (!showLibrary) c->setVisible(false);
     if (showLibrary)
     {
         // Restore the ordinary state; the values are already owned by the controls.
-        for (auto* c : std::array<juce::Component*, 15> {
-                 &scaleLabel, &scaleBox, &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
+        for (auto* c : std::array<juce::Component*, 13> {
+                 &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
                  &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
                  &contributeDataToggle, &contributionNote, &contributionPreview, &contributionDelete })
             c->setVisible(true);
     }
-    close.setVisible(pluginMode);
+    close.setVisible(true);
     nav[(size_t) SettingsSection::audioMidi].setVisible(!pluginMode);
     nav[(size_t) SettingsSection::plugins].setVisible(!pluginMode);
 }
@@ -858,7 +858,7 @@ void SettingsPanel::layoutAboutPage(juce::Rectangle<int> area)
     const int supportTextHeight = supportNote.heightForWidth(cardWidth - 2 * cardPadding);
     const int cardHeight = 2 * cardPadding
         + juce::jmax(captionHeight + 10 + 3 * linkHeight,
-                     captionHeight + 10 + supportTextHeight + studio::spacing + studio::controlHeight);
+                     captionHeight + 10 + supportTextHeight + studio::spacing + 2 * linkHeight);
 
     section(aboutHeading, 0);
     add(34, studio::spacingTight, [this](juce::Rectangle<int> row) { productLabel.setBounds(row); });
@@ -895,11 +895,9 @@ void SettingsPanel::layoutAboutPage(juce::Rectangle<int> area)
         support.removeFromTop(10);
         supportNote.setBounds(support.removeFromTop(supportTextHeight));
 
-        auto buttons = support.removeFromBottom(studio::controlHeight);
-        const auto buttonWidth = (buttons.getWidth() - studio::spacingTight) / 2;
-        kofi.setBounds(buttons.removeFromLeft(buttonWidth));
-        buttons.removeFromLeft(studio::spacingTight);
-        boosty.setBounds(buttons);
+        support.removeFromTop(studio::spacing);
+        kofi.setBounds(support.removeFromTop(linkHeight));
+        boosty.setBounds(support.removeFromTop(linkHeight));
     });
 
     section(reportHeading, studio::spacingSection);

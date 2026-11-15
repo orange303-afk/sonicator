@@ -216,6 +216,7 @@ private:
     bool selectionExportMatches(const SelectionExporter::State&) const;
     juce::uint32 selectionEditedMs = 0;
     bool exportPending = false;
+    bool loopDragBlocked = false;
     selection::Range liveRange;
     void beginExternalDrag();
     void refreshInstrumentSamples();

@@ -1,7 +1,79 @@
 #include <catch2/catch_test_macros.hpp>
 #include "plugin/PluginState.h"
+#include <catch2/catch_approx.hpp>
+#include "plugin/PluginProcessor.h"
+#include "ui/MainComponent.h"
+#include "ui/settings/SettingsPanel.h"
+#include "core/database/SampleRepository.h"
+#include "core/settings/AppSettings.h"
+#include "TestHelpers.h"
 
 using namespace sonicator;
+
+TEST_CASE("Plugin interface scale includes text without scaling the host", "[plugin][acceptance-fixes]")
+{
+    TestDirectory t;
+    const auto catalog = t.dir.getChildFile("scale.sqlite");
+    { Database db(catalog); SampleRepository repo(db); repo.createTables(); }
+    const auto settingsFile = t.dir.getChildFile("settings.json");
+    AppSettings settings;
+    settings.scalePercent = 125;
+    SettingsStore(settingsFile).save(settings);
+    const auto hostScale = juce::Desktop::getInstance().getGlobalScaleFactor();
+    plugin::PluginProcessor processor(catalog, settingsFile);
+    std::unique_ptr<juce::AudioProcessorEditor> editor(processor.createEditor());
+    auto* main = editor->findChildWithID("pluginMain");
+    REQUIRE(main != nullptr);
+    CHECK(main->getTransform().getScaleFactor() == Catch::Approx(1.25f));
+    CHECK(editor->getWidth() == juce::roundToInt(plugin::PluginState::defaultWidth * 1.25f));
+    CHECK(editor->getHeight() == juce::roundToInt(plugin::PluginState::defaultHeight * 1.25f));
+    CHECK(main->getWidth() == juce::roundToInt(editor->getWidth() / 1.25f));
+    CHECK(juce::Desktop::getInstance().getGlobalScaleFactor() == hostScale);
+    auto* browser = dynamic_cast<MainComponent*>(main);
+    REQUIRE(browser != nullptr);
+    juce::TextButton* settingsButton = nullptr;
+    for (auto* child : browser->getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*>(child))
+            if (button->getButtonText() == "Settings") settingsButton = button;
+    REQUIRE(settingsButton != nullptr);
+    settingsButton->onClick();
+    auto* scale = dynamic_cast<juce::ComboBox*>(findDescendantWithID(*main, "settingsScale"));
+    REQUIRE(scale != nullptr);
+    scale->setSelectedId(150, juce::sendNotificationSync);
+    CHECK(main->getTransform().getScaleFactor() == Catch::Approx(1.5f));
+    CHECK(editor->getWidth() == juce::roundToInt(plugin::PluginState::defaultWidth * 1.5f));
+    CHECK(processor.pluginState().windowWidth == plugin::PluginState::defaultWidth);
+    CHECK(juce::Desktop::getInstance().getGlobalScaleFactor() == hostScale);
+    const auto captureDir = juce::SystemStats::getEnvironmentVariable("SONICATOR_PLUGIN_SCREENSHOT_DIR", {});
+    if (captureDir.isNotEmpty())
+    {
+        const juce::File folder(captureDir);
+        REQUIRE(folder.createDirectory());
+        auto* panel = dynamic_cast<SettingsPanel*>(findDescendantWithID(*main, "settingsPanel"));
+        REQUIRE(panel != nullptr);
+        for (int percent : { 100, 125 })
+        {
+            scale->setSelectedId(percent, juce::sendNotificationSync);
+            for (auto page : { SettingsSection::general, SettingsSection::about })
+            {
+                panel->selectSection(page);
+                const auto image = editor->createComponentSnapshot(editor->getLocalBounds());
+                const auto file = folder.getChildFile("plugin-settings-" + settingsSectionId(page)
+                    + "-" + juce::String(percent) + ".png");
+                if (file.existsAsFile()) REQUIRE(file.deleteFile());
+                auto stream = file.createOutputStream();
+                REQUIRE(stream != nullptr);
+                REQUIRE(juce::PNGImageFormat().writeImageToStream(image, *stream));
+            }
+        }
+    }
+    scale->setSelectedId(125, juce::sendNotificationSync);
+    editor.reset();
+    CHECK(processor.pluginState().windowWidth == plugin::PluginState::defaultWidth);
+    editor.reset(processor.createEditor());
+    CHECK(editor->getWidth() == juce::roundToInt(plugin::PluginState::defaultWidth * 1.25f));
+    CHECK(juce::Desktop::getInstance().getGlobalScaleFactor() == hostScale);
+}
 
 TEST_CASE("Plugin state survives serialisation and clamps the window", "[plugin][state]")
 {

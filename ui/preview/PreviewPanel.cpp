@@ -1004,6 +1004,11 @@ void PreviewPanel::prepareSelectionExport()
 }
 void PreviewPanel::refreshSelectionStatus()
 {
+    if (loopDragBlocked && loop.getToggleState())
+    {
+        selectionStatus.setText(juce::String::fromUTF8("Отключите луп"), juce::dontSendNotification);
+        return;
+    }
     const auto range = waveform.selection();
     if (! range.valid()) return;
     const auto state = exporter.state();
@@ -1024,7 +1029,7 @@ void PreviewPanel::refreshSelectionStatus()
     }
     if (state.status == SelectionExporter::Status::ready)
         selectionStatus.setText(loop.getToggleState()
-            ? "Ready - Cmd/Ctrl-drag the selection into a DAW"
+            ? "Ready - turn Loop off to drag the selection into a DAW"
             : "Ready - drag the selection into a DAW",juce::dontSendNotification);
     else if (state.status == SelectionExporter::Status::failed)
         selectionStatus.setText(state.error,juce::dontSendNotification);
@@ -1050,6 +1055,12 @@ void PreviewPanel::beginExternalDrag()
 {
     const auto range = waveform.selection();
     if (! range.valid()) return;
+    if (loop.getToggleState())
+    {
+        loopDragBlocked = true;
+        selectionStatus.setText(juce::String::fromUTF8("Отключите луп"), juce::dontSendNotification);
+        return;
+    }
     if (exportPending)
     {
         exportPending = false;
@@ -1076,6 +1087,7 @@ void PreviewPanel::togglePlayback()
 void PreviewPanel::applyTransportLooping()
 {
     const bool loopEnabled = loop.getToggleState();
+    if (! loopEnabled) loopDragBlocked = false;
     engine.setMidiLooping(loopEnabled);
     waveform.setLoopArmed(loopEnabled);
     const auto range = waveform.selection();

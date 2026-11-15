@@ -4313,7 +4313,7 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     // stay in the application, where the user started them.
     if (embeddedUi)
     {
-        menu.addSectionHeader("Split, extract, normalize and batch run in the SONICATOR app");
+        menu.addSectionHeader("Processing");
     }
     else
     {
@@ -5464,6 +5464,8 @@ void MainComponent::applySettings(const AppSettings& next)
     if (! embeddedUi)
         juce::Desktop::getInstance().setGlobalScaleFactor(
             juce::jlimit(0.75f, 2.0f, appSettings.scalePercent / 100.0f));
+    else if (onInterfaceScaleChanged)
+        onInterfaceScaleChanged(interfaceScale());
     try
     {
         settingsStore.update([this](AppSettings& saved)

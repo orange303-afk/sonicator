@@ -38,6 +38,7 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
         main->setComponentID("pluginMain");
         if (main->catalogIsOpen())
         {
+            main->onInterfaceScaleChanged = [this](float scale) { applyInterfaceScale(scale); };
             addAndMakeVisible(*main);
         }
         else
@@ -57,10 +58,11 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
     }
 
     setResizable(true, true);
-    setResizeLimits(PluginState::minimumWidth, PluginState::minimumHeight,
-                    PluginState::maximumWidth, PluginState::maximumHeight);
-    setSize(juce::jlimit(PluginState::minimumWidth, PluginState::maximumWidth, saved.windowWidth),
-            juce::jlimit(PluginState::minimumHeight, PluginState::maximumHeight, saved.windowHeight));
+    applyInterfaceScale(main != nullptr ? main->interfaceScale() : 1.0f);
+    setSize(juce::roundToInt(editorScale * juce::jlimit(PluginState::minimumWidth,
+                                                     PluginState::maximumWidth, saved.windowWidth)),
+            juce::roundToInt(editorScale * juce::jlimit(PluginState::minimumHeight,
+                                                     PluginState::maximumHeight, saved.windowHeight)));
     // The host can load another project into this running instance. Polling the processor's
     // generation is how the window learns about it: the message thread is the only one allowed to
     // touch these components, and the processor is called from the host's thread.
@@ -77,7 +79,8 @@ PluginEditor::~PluginEditor()
         if (processor.stateGeneration() == stateGenerationAtOpen)
         {
             processor.updateSession(main->selectedFolderPath(), main->selectedSamplePath());
-            processor.updateWindowSize(getWidth(), getHeight());
+            processor.updateWindowSize(juce::roundToInt(getWidth() / editorScale),
+                                       juce::roundToInt(getHeight() / editorScale));
         }
         main.reset();
     }
@@ -106,7 +109,23 @@ void PluginEditor::timerCallback()
                                    saved.windowWidth);
     const int height = juce::jlimit(PluginState::minimumHeight, PluginState::maximumHeight,
                                     saved.windowHeight);
-    if (width != getWidth() || height != getHeight()) setSize(width, height);
+    const int scaledWidth = juce::roundToInt(width * editorScale);
+    const int scaledHeight = juce::roundToInt(height * editorScale);
+    if (scaledWidth != getWidth() || scaledHeight != getHeight()) setSize(scaledWidth, scaledHeight);
+}
+
+void PluginEditor::applyInterfaceScale(float scale)
+{
+    const int width = juce::roundToInt(getWidth() / editorScale);
+    const int height = juce::roundToInt(getHeight() / editorScale);
+    editorScale = scale;
+    setResizeLimits(juce::roundToInt(PluginState::minimumWidth * scale),
+                    juce::roundToInt(PluginState::minimumHeight * scale),
+                    juce::roundToInt(PluginState::maximumWidth * scale),
+                    juce::roundToInt(PluginState::maximumHeight * scale));
+    setSize(juce::roundToInt(juce::jlimit(PluginState::minimumWidth, PluginState::maximumWidth, width) * scale),
+            juce::roundToInt(juce::jlimit(PluginState::minimumHeight, PluginState::maximumHeight, height) * scale));
+    resized();
 }
 
 void PluginEditor::paint(juce::Graphics& g)
@@ -119,8 +138,12 @@ void PluginEditor::resized()
     auto bounds = getLocalBounds();
     if (main != nullptr)
     {
-        main->setBounds(bounds);
-        processor.updateWindowSize(getWidth(), getHeight());
+        const auto scale = main->interfaceScale();
+        main->setTransform(juce::AffineTransform::scale(scale));
+        main->setBounds(0, 0, juce::roundToInt(bounds.getWidth() / scale),
+                             juce::roundToInt(bounds.getHeight() / scale));
+        processor.updateWindowSize(juce::roundToInt(getWidth() / scale),
+                                   juce::roundToInt(getHeight() / scale));
     }
     else
     {
