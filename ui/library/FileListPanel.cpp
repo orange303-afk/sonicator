@@ -258,6 +258,7 @@ void FileListPanel::handleDrag(const juce::MouseEvent& e)
     if (! ExternalFileDrag::exceedsThreshold(pos.x - dragOrigin.x, pos.y - dragOrigin.y)) return;
     dragStarted = true;
     dragArmed = false;
+    if (onMatchedDrag && onMatchedDrag (getSelectedSamples(), &table)) return;
     const auto paths = dragPaths();
     if (paths.isEmpty())
     {

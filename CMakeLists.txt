@@ -201,7 +201,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/smart/TapTempo.cpp
     core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp
     core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp core/cloud/CloudCache.cpp core/cloud/CloudBuildService.cpp
-    core/match/MatchPolicy.cpp core/match/SourceMetadata.cpp core/match/OfflineMatchRenderer.cpp)
+    core/match/MatchPolicy.cpp core/match/SourceMetadata.cpp core/match/OfflineMatchRenderer.cpp core/match/MatchRenderService.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
@@ -218,7 +218,7 @@ juce_add_binary_data(SonicatorAssets SOURCES
     resources/fonts/Manrope-Bold.ttf
     resources/ml/global_prototypes.json
     resources/ml/global_model.json)
-add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/shell/AppFonts.cpp ui/shell/WrappedText.cpp ui/analysis/AnalysisCard.cpp ui/analysis/KeyBpmBlock.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/shell/StudioControls.cpp ui/shell/PanelLayout.cpp ui/shell/PanelSplitter.cpp ui/commands/CommandRegistry.cpp ui/commands/ShortcutBindings.cpp ui/commands/CommandRouter.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/shell/DialogSurface.cpp ui/settings/SettingsPanel.cpp ui/settings/HotkeysPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp ui/batch/BatchProcessingDialog.cpp ui/cloud/CloudIndex.cpp ui/cloud/CloudView.cpp)
+add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/shell/AppFonts.cpp ui/shell/WrappedText.cpp ui/analysis/AnalysisCard.cpp ui/analysis/KeyBpmBlock.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/PluginMatchControls.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/shell/StudioControls.cpp ui/shell/PanelLayout.cpp ui/shell/PanelSplitter.cpp ui/commands/CommandRegistry.cpp ui/commands/ShortcutBindings.cpp ui/commands/CommandRouter.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/shell/DialogSurface.cpp ui/settings/SettingsPanel.cpp ui/settings/HotkeysPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp ui/batch/BatchProcessingDialog.cpp ui/cloud/CloudIndex.cpp ui/cloud/CloudView.cpp)
 if(APPLE)
     target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.mm)
 else()

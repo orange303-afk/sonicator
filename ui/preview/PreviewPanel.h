@@ -7,6 +7,8 @@
 #include "core/edit/AudioEditBuffer.h"
 #include "EditCommands.h"
 #include "SongProgress.h"
+#include "PluginMatchControls.h"
+#include "core/match/MatchRenderService.h"
 namespace sonicator {
 // Selector that also steps with Up/Down and the mouse wheel while closed. The popup keeps its
 // own keyboard behaviour when open.
@@ -111,7 +113,7 @@ public:
     void applyEditCommand(EditCommand);
     // Transport entry points for the command registry. The buttons call the same code.
     void playPause() { togglePlayback(); }
-    void stopPlayback() { engine.stop(); }
+    void stopPlayback();
     // Escape: clears the selection and stops the transport, except in instrument mode where the
     // pin is lifted and the MIDI voices keep sounding.
     void stopAndClearSelection();
@@ -129,6 +131,19 @@ public:
     void saveEditsAsCopyForTest();
     void overwriteEditsForTest();
     void discardEditsForTest();
+    // Plugin-only Match BPM / Match Scale. Installing a context reveals the controls; the
+    // standalone never calls this, so no toggle exists there.
+    void setPluginMatchContext(PluginMatchContext);
+    // Applies a project state the host loaded into an open editor without writing it back.
+    void applyPluginMatchPreferences(const PluginMatchPreferences&);
+    bool matchControlsVisible() const { return matchControls != nullptr; }
+    bool matchedPreviewActive() const { return matchApplied; }
+    juce::String matchDragBlockMessage() const { return matchBlockMessage; }
+    // Waits for the running preparation and applies it, as the panel timer would. Tests call it
+    // directly instead of sleeping.
+    bool waitForMatchedPreview(int timeoutMs);
+    juce::File matchedPreviewFile() const { return matchPreparedFile; }
+    PluginMatchControls* matchPanel() { return matchControls.get(); }
     int64_t editingSampleId = 0;
     std::function<void(const juce::File& target, int64_t sampleId)> onFileSavedInPlace;
     std::function<void(const juce::File& copy, int64_t templateSampleId)> onCopySaved;
@@ -234,5 +249,25 @@ private:
     void prepareWholeTrackerSample();
     juce::String discSampleSummary() const;
     void prepareWholeDiscSample();
+    // Match state. The plan is the single decision shared by preview, waveform and drag.
+    std::optional<PluginMatchContext> matchContext;
+    std::unique_ptr<PluginMatchControls> matchControls;
+    std::unique_ptr<MatchRenderService> matchService;
+    std::unique_ptr<MatchRequestScheduler> matchScheduler;
+    PluginMatchPreferences appliedMatchPreferences;
+    MatchSource matchSource;
+    MatchPlan matchPlan;
+    juce::String matchDesiredKey, matchActivatedKey, matchBlockMessage;
+    juce::File matchPreparedFile;
+    juce::File matchFolder;
+    int64_t matchSourceSize = 0, matchSourceModified = 0;
+    bool matchApplied = false, matchAutoPlayPending = false;
+    juce::uint64 lastTempoRevision = 0;
+    void commitMatchPreferences(const PluginMatchPreferences&);
+    void refreshMatch(bool debounceTempo);
+    void pollMatch();
+    void clearMatchedPreview(bool restoreMidiSelection);
+    void activateMatchedPreview(const MatchRenderService::State&);
+    juce::String matchStatusText() const;
 };
 } // namespace sonicator

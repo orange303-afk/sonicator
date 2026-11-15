@@ -54,7 +54,8 @@ juce::String makeMatchResultKey (const MatchSource& source, const MatchPlan& pla
                                  int64_t sourceSize, int64_t sourceModified);
 
 // <root>/<key>/<stem>-match.wav, created by the renderer only.
-juce::File matchOutputFile (const juce::String& key, const juce::String& sourceStem);
+juce::File matchOutputFile (const juce::String& key, const juce::String& sourceStem,
+                            const juce::File& root = {});
 
 // Reopens a published file and checks its format and frame count. Used before reusing a cached
 // result: a truncated or foreign file with the right name is not Ready.

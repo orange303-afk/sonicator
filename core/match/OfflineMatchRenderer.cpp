@@ -117,11 +117,13 @@ juce::String makeMatchResultKey (const MatchSource& source, const MatchPlan& pla
         .toHexString().substring (0, 40);
 }
 
-juce::File matchOutputFile (const juce::String& key, const juce::String& sourceStem)
+juce::File matchOutputFile (const juce::String& key, const juce::String& sourceStem,
+                            const juce::File& root)
 {
     auto stem = AudioExporter::sanitizeStem (sourceStem);
     if (stem.isEmpty()) stem = "sample";
-    return matchExportRoot().getChildFile (key).getChildFile (stem + "-match.wav");
+    const auto base = root == juce::File() ? matchExportRoot() : root;
+    return base.getChildFile (key).getChildFile (stem + "-match.wav");
 }
 
 bool validateMatchOutput (const juce::File& file, int64_t expectedFrames, double sampleRate,

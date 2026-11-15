@@ -1,4 +1,5 @@
 #include "PreviewPanel.h"
+#include "core/match/MatchPolicy.h"
 #include "core/edit/AudioEditWriter.h"
 #include "core/audio/SonicatorFormats.h"
 #include "ui/shell/ThemedDialogs.h"
@@ -94,7 +95,7 @@ void PreviewPanel::refreshSourceList()
     if (onSourcesChanged) onSourcesChanged();
 }
 PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,const juce::File& exportFolder)
-    : engine(audio),waveform(cacheFolder),exporter(exportFolder)
+    : engine(audio),waveform(cacheFolder),exporter(exportFolder),matchFolder(exportFolder.getChildFile("match"))
 {
     for (auto* c : std::array<juce::Component*,20>{&waveform, &songProgress, &filename, &time, &formatLine, &play, &stop, &loop, &volume,
                                                    &midi, &skipSilence, &autoPreview, &clearSelectionButton, &selectionStatus,
@@ -479,6 +480,7 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     resized(); // the tracker/sample selectors appear or disappear with the loaded asset
     instrumentHead = true;
     refreshSourceList();
+    if (success) refreshMatch(false);
     if (allowAutoPlay && success && ! soundFont && !reason && autoPreview.getToggleState()) engine.play();
     return success;
 }
@@ -781,9 +783,16 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
     return true;
 }
 
+void PreviewPanel::stopPlayback()
+{
+    matchAutoPlayPending = false;
+    engine.stop();
+}
+
 void PreviewPanel::clearSource()
 {
     resetEditSession();
+    clearMatchedPreview(false);
     engine.stop();
     engine.loadFile(juce::File());
     engine.clearDiscSample();
@@ -887,7 +896,7 @@ void PreviewPanel::selectionChanged(selection::Range range)
     {
         exportPending = false;
         liveRange = {};
-        engine.setMidiSelection(0.0, 0.0);
+        if (! matchApplied) engine.setMidiSelection(0.0, 0.0);
         clearSelectionButton.setVisible(false);
         selectionStatus.setText({},juce::dontSendNotification);
         exporter.cancel();
@@ -905,7 +914,8 @@ void PreviewPanel::selectionChanging(selection::Range range)
     // Dragging or resizing while audio runs keeps the playhead at the same relative point inside
     // the window, so the material under it changes with the mouse instead of only at the edges.
     followPlayheadInto(range);
-    engine.setMidiSelection(range.start, range.end);
+    // Transformed seconds are not original seconds: they never reach the original MIDI sampler.
+    if (! matchApplied) engine.setMidiSelection(range.start, range.end);
     applyTransportLooping();
     liveRange = range;
     clearSelectionButton.setVisible(true);
@@ -935,6 +945,12 @@ void PreviewPanel::prepareSelectionExport()
     const auto range = waveform.selection();
     if (! range.valid()) return;
     selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
+    if (matchApplied && matchPreparedFile.existsAsFile())
+    {
+        // Crop the prepared result; no second stretch or pitch shift is applied.
+        exporter.prepare(matchPreparedFile, range.start, range.end);
+        return;
+    }
     if (engine.isTrackerMode())
     {
         // Only a selected tracker sample owns a waveform selection. In whole-song mode the
@@ -1055,6 +1071,25 @@ bool PreviewPanel::waitForSelectionPreparation(int timeoutMs)
 void PreviewPanel::beginExternalDrag()
 {
     const auto range = waveform.selection();
+    // Match owns the drag while it is on: the OS gets the prepared result or nothing, never the
+    // original presented as matched audio.
+    const bool matchOn = matchControls != nullptr
+        && (matchControls->preferences().matchBpm || matchControls->preferences().matchScale);
+    if (matchOn && ! matchApplied)
+    {
+        selectionStatus.setText (matchBlockMessage.isNotEmpty() ? matchBlockMessage
+                                                              : juce::String::fromUTF8 ("Preparing\xe2\x80\xa6"),
+                                 juce::dontSendNotification);
+        return;
+    }
+    if (matchApplied && ! range.valid())
+    {
+        if (! matchPreparedFile.existsAsFile()) return;
+        juce::StringArray files;
+        files.add (matchPreparedFile.getFullPathName());
+        juce::DragAndDropContainer::performExternalDragDropOfFiles (files, false, &waveform);
+        return;
+    }
     if (! range.valid()) return;
     if (loop.getToggleState())
     {
@@ -1175,6 +1210,22 @@ bool PreviewPanel::keyPressed(const juce::KeyPress& k)
 }
 void PreviewPanel::timerCallback()
 {
+    pollMatch();
+    if (matchScheduler && matchControls && matchContext)
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+        if (matchControls->preferences().matchBpm)
+        {
+            const auto tempo = matchContext->hostTempo ? matchContext->hostTempo()
+                                                       : plugin::HostTempoValue {};
+            if (tempo.revision != lastTempoRevision)
+            {
+                lastTempoRevision = tempo.revision;
+                if (tempo.valid) refreshMatch(true);
+            }
+        }
+        matchScheduler->tick(now);
+    }
     refreshMidiFollow();
     updateSelectionPlayback();
     // A drag or a wheel gesture publishes live ranges; the WAV export waits until the gesture
@@ -1343,7 +1394,9 @@ void PreviewPanel::resized()
     time.setBounds(block.removeFromTop(17));
     formatLine.setBounds(block);
 
-    const int clusterBelow = 2 * studio::chipSmallHeight + gap;
+    const bool matchRow = matchControls != nullptr && matchControls->isVisible();
+    const int matchBlock = matchRow ? PluginMatchControls::preferredHeight + gap : 0;
+    const int clusterBelow = 2 * studio::chipSmallHeight + gap + matchBlock;
     int transportTop = waveform.getY() + waveform.getHeight() / 2 - studio::circleButtonSize / 2;
     transportTop = juce::jmax(block.getBottom() + gap, transportTop);
     transportTop = juce::jmin(transportTop, controls.getBottom() - clusterBelow
@@ -1356,9 +1409,13 @@ void PreviewPanel::resized()
                        .withSizeKeepingCentre(studio::iconButtonSize, studio::iconButtonSize));
     transport.removeFromLeft(studio::spacingTight);
     volume.setBounds(transport);
+    if (matchRow)
+        matchControls->setBounds(controls.getX(), transportTop + studio::circleButtonSize + gap,
+                                 controls.getWidth(), PluginMatchControls::preferredHeight);
 
     // Row A carries Loop, Auto Preview and, in REx mode, the gate; row B the two preview toggles.
-    auto rowA = juce::Rectangle<int>(controls.getX(), transportTop + studio::circleButtonSize + gap,
+    auto rowA = juce::Rectangle<int>(controls.getX(),
+                                     transportTop + studio::circleButtonSize + gap + matchBlock,
                                      controls.getWidth(), studio::chipSmallHeight);
     {
         auto row = rowA;
@@ -1379,6 +1436,7 @@ void PreviewPanel::resized()
 
 bool PreviewPanel::sourceIsEditable() const
 {
+    if (matchApplied) return false;
     if (engine.isReasonMode() || engine.isRex2Mode() || waveform.totalLength() <= 0) return false;
     if (engine.isTrackerMode() && ! engine.isTrackerSampleSelected()) return false;
     if (const auto audio = currentEditableAudio())
@@ -1520,6 +1578,12 @@ void PreviewPanel::refreshDirtyMark()
 
 void PreviewPanel::applyEditCommand(EditCommand command)
 {
+    // A prepared Match result is read-only: Save, Normalize and edits must return after Match off.
+    if (matchApplied)
+    {
+        selectionStatus.setText("Read-only matched preview; turn Match off to edit", juce::dontSendNotification);
+        return;
+    }
     switch (command)
     {
         case EditCommand::zoomToFit: waveform.zoomToFit(); return;
@@ -1631,6 +1695,12 @@ void PreviewPanel::showWaveformMenu(juce::Point<int> screenPosition)
 
 void PreviewPanel::saveEdits(std::function<void(bool)> done)
 {
+    if (matchApplied)
+    {
+        selectionStatus.setText("Read-only matched preview; turn Match off to save", juce::dontSendNotification);
+        if (done) done(false);
+        return;
+    }
     if (! hasUnsavedEdits())
     {
         if (done) done(true);
@@ -1781,6 +1851,278 @@ void PreviewPanel::discardEdits()
         loadFile(file, false);
         if (sampleId != invalidSampleId) applyInstrumentSample(sampleId, false);
     }
+}
+
+
+void PreviewPanel::setPluginMatchContext(PluginMatchContext context)
+{
+    matchContext = std::move (context);
+    if (matchControls == nullptr)
+    {
+        matchControls = std::make_unique<PluginMatchControls>();
+        addAndMakeVisible (*matchControls);
+    }
+    matchService = std::make_unique<MatchRenderService>();
+    matchScheduler = std::make_unique<MatchRequestScheduler>(*matchService);
+    appliedMatchPreferences = matchContext->getPreferences ? matchContext->getPreferences()
+                                                            : PluginMatchPreferences {};
+    matchControls->setPreferences (appliedMatchPreferences, juce::dontSendNotification);
+    matchControls->onChange = [this]
+    {
+        const auto next = matchControls->preferences();
+        const bool wasEnabled = appliedMatchPreferences.matchBpm || appliedMatchPreferences.matchScale;
+        const bool nowEnabled = next.matchBpm || next.matchScale;
+        if (nowEnabled && ! wasEnabled && hasUnsavedEdits())
+        {
+            // The existing guard decides; Cancel restores the previous flags, sound and selection.
+            withUnsavedEditsConfirmed ([safe = juce::Component::SafePointer<PreviewPanel>(this), next] (bool proceed)
+            {
+                if (safe == nullptr) return;
+                if (! proceed)
+                {
+                    safe->matchControls->setPreferences (safe->appliedMatchPreferences,
+                                                         juce::dontSendNotification);
+                    return;
+                }
+                safe->commitMatchPreferences (next);
+            });
+            return;
+        }
+        commitMatchPreferences (next);
+    };
+    matchControls->onTargetChanged = [this] { commitMatchPreferences (matchControls->preferences()); };
+    // A block map is a different source: hover stays original and Match belongs to the confirmed
+    // selection only.
+    refreshMatch (false);
+    resized();
+}
+
+void PreviewPanel::applyPluginMatchPreferences(const PluginMatchPreferences& preferences)
+{
+    if (matchControls == nullptr) return;
+    appliedMatchPreferences = preferences;
+    matchControls->setPreferences (preferences, juce::dontSendNotification);
+    matchAutoPlayPending = false; // restoring a project never starts audio
+    matchActivatedKey.clear();
+    refreshMatch (false);
+}
+
+void PreviewPanel::commitMatchPreferences(const PluginMatchPreferences& preferences)
+{
+    appliedMatchPreferences = preferences;
+    if (matchContext && matchContext->setPreferences) matchContext->setPreferences (preferences);
+    matchAutoPlayPending = false;
+    refreshMatch (false);
+}
+
+juce::String PreviewPanel::matchStatusText() const
+{
+    if (! matchPlan.tempoApplied && ! matchPlan.pitchApplied) return "Ready";
+    auto formatBpm = [] (double bpm)
+    {
+        return std::abs (bpm - std::round (bpm)) < 0.05
+            ? juce::String ((int) std::round (bpm)) : juce::String (bpm, 1);
+    };
+    juce::StringArray parts;
+    if (matchPlan.tempoApplied)
+        parts.add (formatBpm (matchPlan.sourceBpm) + juce::String::fromUTF8(" \xe2\x86\x92 ") + formatBpm (matchPlan.targetBpm)
+                   + " BPM");
+    if (matchPlan.pitchApplied)
+    {
+        juce::String from;
+        if (matchSource.keyState == MetadataState::known && matchSource.keyTonic >= 0)
+            from = tonicName (matchSource.keyTonic) + " " + matchSource.keyMode;
+        const auto to = tonicName (matchPlan.targetTonic) + " " + targetModeName (matchPlan.targetMode);
+        const int semitones = (int) std::llround (matchPlan.semitones);
+        parts.add ((from.isNotEmpty() ? from + juce::String::fromUTF8(" \xe2\x86\x92 ") : "") + to + " ("
+                   + (semitones > 0 ? "+" : "") + juce::String (semitones) + " st)");
+    }
+    return parts.joinIntoString (juce::String::fromUTF8("  \xc2\xb7  "));
+}
+
+void PreviewPanel::refreshMatch(bool debounceTempo)
+{
+    if (matchControls == nullptr || matchService == nullptr) return;
+    const auto preferences = matchControls->preferences();
+    appliedMatchPreferences = preferences;
+    if (! preferences.matchBpm && ! preferences.matchScale)
+    {
+        matchScheduler->cancel();
+        clearMatchedPreview (true);
+        matchControls->setStatus ({});
+        matchDesiredKey.clear();
+        matchBlockMessage.clear();
+        return;
+    }
+    if (engine.isSamplerInstrumentMode() || engine.isTrackerMode() || engine.isDiscMode()
+        || engine.isRex2Mode() || engine.isReasonMode() || loadedFile == juce::File()
+        || ! matchContext || ! matchContext->sourceInfo)
+    {
+        matchScheduler->cancel();
+        clearMatchedPreview (false);
+        matchDesiredKey.clear();
+        matchBlockMessage = "Unsupported source for Match";
+        matchControls->setStatus (matchBlockMessage, true);
+        return;
+    }
+    int64_t size = 0, modified = 0;
+    auto source = matchContext->sourceInfo (loadedFile, size, modified);
+    if (! source.has_value())
+    {
+        matchScheduler->cancel();
+        clearMatchedPreview (false);
+        matchDesiredKey.clear();
+        matchBlockMessage = "Unsupported source for Match";
+        matchControls->setStatus (matchBlockMessage, true);
+        return;
+    }
+    matchSource = *source;
+    matchSourceSize = size;
+    matchSourceModified = modified;
+    const auto host = matchContext->hostTempo ? matchContext->hostTempo() : plugin::HostTempoValue {};
+    matchPlan = resolveMatch (matchSource, preferences, host);
+    if (matchPlan.action == MatchAction::blocked)
+    {
+        matchScheduler->cancel();
+        clearMatchedPreview (false);
+        matchDesiredKey = makeMatchResultKey (matchSource, matchPlan, size, modified);
+        matchBlockMessage = matchBlockReasonText (matchPlan.reason);
+        matchScheduler->requestBlocked (matchDesiredKey, matchPlan, matchBlockMessage);
+        matchControls->setStatus (matchBlockMessage, true);
+        return;
+    }
+    if (! matchPlan.tempoApplied && ! matchPlan.pitchApplied)
+    {
+        matchScheduler->cancel();
+        clearMatchedPreview (false);
+        matchDesiredKey.clear();
+        matchBlockMessage = matchBlockReasonText (matchPlan.reason);
+        matchControls->setStatus (matchBlockMessage, matchBlockMessage.isNotEmpty());
+        return;
+    }
+    const auto key = makeMatchResultKey (matchSource, matchPlan, size, modified);
+    const auto output = matchOutputFile (key, loadedFile.getFileNameWithoutExtension(), matchFolder);
+    matchDesiredKey = key;
+    if (matchActivatedKey == key && matchApplied && matchPreparedFile.existsAsFile())
+    {
+        matchControls->setStatus (matchStatusText());
+        return;
+    }
+    juce::String validationError;
+    if (output.existsAsFile()
+        && validateMatchOutput (output, matchPlan.targetFrames, matchSource.sampleRate,
+                                matchSource.channels, validationError))
+    {
+        // A validated, already published result is Ready without another render.
+        matchService->cancel();
+        MatchRenderService::State cached;
+        cached.status = MatchRenderService::Status::ready;
+        cached.generation = 0;
+        cached.key = key;
+        cached.file = output;
+        cached.plan = matchPlan;
+        activateMatchedPreview (cached);
+        return;
+    }
+    MatchRenderRequest request;
+    request.sourceFile = loadedFile;
+    request.source = matchSource;
+    request.plan = matchPlan;
+    request.key = key;
+    request.outputFile = output;
+    request.sourceSize = size;
+    request.sourceModified = modified;
+    matchBlockMessage.clear();
+    matchControls->setStatus (juce::String::fromUTF8("Preparing\xe2\x80\xa6"));
+    // Auto Preview may start the prepared result only if the user has not pressed Stop and the
+    // selection is still current; Stop clears this before the render finishes.
+    matchAutoPlayPending = autoPreview.getToggleState() && ! engine.isPlaying();
+    if (debounceTempo)
+        matchScheduler->request (std::move (request), juce::Time::getMillisecondCounter());
+    else
+        matchService->submit (std::move (request));
+}
+
+bool PreviewPanel::waitForMatchedPreview(int timeoutMs)
+{
+    if (matchService == nullptr) return false;
+    if (! matchService->waitUntilFinished (timeoutMs)) return false;
+    pollMatch();
+    return matchApplied && matchActivatedKey == matchDesiredKey;
+}
+
+void PreviewPanel::pollMatch()
+{
+    if (matchService == nullptr || matchControls == nullptr) return;
+    const auto state = matchService->poll();
+    if (state.status == MatchRenderService::Status::ready)
+    {
+        if (state.key == matchDesiredKey) activateMatchedPreview (state);
+        return;
+    }
+    if (state.status == MatchRenderService::Status::failed)
+    {
+        if (state.key == matchDesiredKey)
+        {
+            matchControls->setStatus (state.error, true);
+            clearMatchedPreview (false);
+        }
+        return;
+    }
+    if (state.status == MatchRenderService::Status::blocked || state.status == MatchRenderService::Status::preparing)
+    {
+        if (state.status == MatchRenderService::Status::preparing) matchControls->setStatus (juce::String::fromUTF8("Preparing\xe2\x80\xa6"));
+        return;
+    }
+}
+
+void PreviewPanel::activateMatchedPreview(const MatchRenderService::State& state)
+{
+    if (state.file == juce::File() || ! state.file.existsAsFile()) return;
+    if (matchActivatedKey == state.key && matchApplied && matchPreparedFile == state.file) return;
+    if (! engine.setMatchedTransport (state.file))
+    {
+        matchControls->setStatus ("Matched WAV cannot be played", true);
+        return;
+    }
+    matchPreparedFile = state.file;
+    matchActivatedKey = state.key;
+    matchApplied = true;
+    waveform.setFile (state.file);
+    waveform.clearSelection(); // the previous selection lived on the original duration
+    engine.setMidiSelection (0.0, 0.0);
+    exporter.cancel();
+    matchControls->setStatus (matchStatusText());
+    refreshFormatLine();
+    if (matchAutoPlayPending && autoPreview.getToggleState())
+    {
+        matchAutoPlayPending = false;
+        engine.play();
+    }
+    else
+        matchAutoPlayPending = false;
+    refreshSelectionStatus();
+    resized();
+}
+
+void PreviewPanel::clearMatchedPreview(bool restoreMidiSelection)
+{
+    if (matchApplied)
+    {
+        engine.clearMatchedTransport();
+        waveform.setFile (loadedFile);
+        matchApplied = false;
+        matchActivatedKey.clear();
+        exporter.cancel();
+        if (restoreMidiSelection)
+        {
+            const auto range = waveform.selection();
+            if (range.valid()) engine.setMidiSelection (range.start, range.end);
+        }
+        refreshFormatLine();
+        resized();
+    }
+    matchPreparedFile = juce::File();
 }
 
 void PreviewPanel::withUnsavedEditsConfirmed(std::function<void(bool)> done)

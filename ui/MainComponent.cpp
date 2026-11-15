@@ -1,4 +1,7 @@
 #include "MainComponent.h"
+#include "core/audio/SonicatorFormats.h"
+#include "core/match/SourceMetadata.h"
+#include "core/match/MatchedDrag.h"
 #include "core/export/ExternalFileDrag.h"
 #include <unordered_set>
 #include "core/dsp/FeatureExtractorV2.h"
@@ -699,6 +702,7 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         if (readRepo == nullptr) return false;
         auto record = readRepo->findById(sampleId);
         if (! record) return false;
+        if (beginMatchedDrag({ *record }, source)) return true;
         juce::StringArray files;
         files.add(record->filePath);
         return ExternalFileDrag::start(files, source);
@@ -751,6 +755,10 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     };
     library.onOpen = [this](const SampleRecord& r) { openDiscImage(r); };
     library.onDragMessage = [this](const juce::String& message) { status.setText(message,juce::dontSendNotification); };
+    library.onMatchedDrag = [this](const std::vector<SampleRecord>& records, juce::Component* source)
+    {
+        return beginMatchedDrag(records, source);
+    };
     library.onContextMenu = [this](const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> position)
     {
         showSampleContextMenu(selection, lead, position);
@@ -6237,5 +6245,84 @@ void MainComponent::resized()
     list.removeFromTop(8); library.setBounds(list);
     if (discBrowser != nullptr) discBrowser->setBounds(library.getBounds());
     if (cloudPanel != nullptr) cloudPanel->setBounds(library.getBounds());
+}
+
+void MainComponent::setPluginMatchContext(std::function<PluginMatchPreferences()> getPreferences,
+                                          std::function<void (const PluginMatchPreferences&)> setPreferences,
+                                          std::function<plugin::HostTempoValue()> hostTempo)
+{
+    PluginMatchContext context;
+    context.getPreferences = std::move (getPreferences);
+    context.setPreferences = std::move (setPreferences);
+    context.hostTempo = std::move (hostTempo);
+    context.sourceInfo = [safe = juce::Component::SafePointer<MainComponent>(this)] (
+        const juce::File& file, int64_t& sourceSize, int64_t& sourceModified) -> std::optional<MatchSource>
+    {
+        if (safe == nullptr) return std::nullopt;
+        return safe->buildMatchSource (file, sourceSize, sourceModified);
+    };
+    preview.setPluginMatchContext (std::move (context));
+}
+
+void MainComponent::applyPluginMatchPreferences(const PluginMatchPreferences& preferences)
+{
+    preview.applyPluginMatchPreferences (preferences);
+}
+
+bool MainComponent::matchControlsVisible() const
+{
+    return preview.matchControlsVisible();
+}
+
+bool MainComponent::beginMatchedDrag(const std::vector<SampleRecord>& records,
+                                     juce::Component* source)
+{
+    // No context means the standalone window: the existing drag path is not touched at all.
+    if (! preview.matchControlsVisible()) return false;
+    const auto prefs = preview.matchPanel()->preferences();
+    const bool matchOn = prefs.matchBpm || prefs.matchScale;
+    if (! matchOn) return false;
+    const bool sameSource = records.size() == 1
+        && juce::File(records.front().filePath) == preview.loadedFilePath();
+    const auto decision = resolveMatchedDrag(matchOn, (int) records.size(), sameSource,
+                                              preview.matchedPreviewActive(),
+                                              preview.matchedPreviewFile(),
+                                              preview.matchDragBlockMessage());
+    if (decision.startsDrag())
+    {
+        juce::StringArray files;
+        files.add(decision.file.getFullPathName());
+        ExternalFileDrag::start(files, source);
+        return true;
+    }
+    status.setText(decision.message, juce::dontSendNotification);
+    return true;
+}
+
+std::optional<MatchSource> MainComponent::buildMatchSource(const juce::File& file,
+                                                           int64_t& sourceSize,
+                                                           int64_t& sourceModified)
+{
+    if (readRepo == nullptr || ! file.existsAsFile()) return std::nullopt;
+    const auto record = readRepo->findByPath (file.getFullPathName());
+    if (! record.has_value()) return std::nullopt;
+
+    juce::AudioFormatManager formats;
+    registerSonicatorFormats (formats);
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    // Sampler banks, tracker modules, disc entries and REX containers have no single ordinary
+    // reader here; they are refused explicitly instead of matching only their first part.
+    if (reader == nullptr || reader->numChannels < 1 || reader->numChannels > 2
+        || reader->lengthInSamples <= 0 || reader->sampleRate <= 0.0)
+        return std::nullopt;
+
+    SmartResult result;
+    if (const auto stored = readRepo->smartResult (record->id)) result = *stored;
+    const auto identity = "catalog:" + juce::String (record->id) + ":" + file.getFullPathName();
+    auto source = sourceFromSmartResult (result, identity, 0, reader->lengthInSamples,
+                                         reader->sampleRate, (int) reader->numChannels);
+    sourceSize = file.getSize();
+    sourceModified = file.getLastModificationTime().toMilliseconds();
+    return source;
 }
 } // namespace sonicator

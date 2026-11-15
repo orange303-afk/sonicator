@@ -20,6 +20,9 @@ bool AudioEngine::selectReasonReference(int index)
 AudioEngine::AudioEngine(bool openDevice) : deviceMode(openDevice)
 {
     registerSonicatorFormats(formats);
+    // The matched transport may be used from the host before any device callback exists, so its
+    // read-ahead thread is owned for the whole engine lifetime.
+    matchReadAhead.startThread();
     if (deviceMode)
     {
         readAhead.startThread();
@@ -37,7 +40,11 @@ AudioEngine::~AudioEngine()
     player.setSource(nullptr);
     source.setSource(nullptr);
     reader.reset();
+    matchedActive.store(false);
+    matchedSource.setSource(nullptr);
+    matchReader.reset();
     readAhead.stopThread(-1);
+    matchReadAhead.stopThread(-1);
     devices.closeAudioDevice();
 }
 void AudioEngine::startHostAudio(double sampleRate, int maximumBlockSize)
@@ -199,6 +206,15 @@ bool AudioEngine::loadFile(const juce::File& file)
 }
 void AudioEngine::play()
 {
+    if (matchedActive.load())
+    {
+        if (! matchReader) return;
+        if (matchedSource.hasStreamFinished() || startAtNextPlay)
+            matchedSource.setPosition(0);
+        startAtNextPlay = false;
+        matchedSource.start();
+        return;
+    }
     if (trackerMode)
     {
         if (trackerSampleChosen) { sf2Audition.play(looping); return; }
@@ -708,6 +724,14 @@ bool AudioEngine::previewSoundFont(const juce::File& file, int presetIndex)
 }
 void AudioEngine::pause()
 {
+    if (matchedActive.load())
+    {
+        // Pause keeps the position. Without a running callback, rebuild instead of waiting.
+        const auto positionBefore = matchedSource.getCurrentPosition();
+        if (stopMatchedTransport() && matchReader != nullptr)
+            matchedSource.setPosition(positionBefore);
+        return;
+    }
     if (trackerMode)
     {
         if (trackerSampleChosen) sf2Audition.pause();
@@ -724,6 +748,13 @@ void AudioEngine::pause()
 }
 void AudioEngine::stop()
 {
+    if (matchedActive.load())
+    {
+        stopMatchedTransport();
+        matchedSource.setPosition(0);
+        startAtNextPlay = true;
+        return;
+    }
     if (auditionMode()) sf2Audition.stop();
     if (rexMode) rexSampler.stopAudition();
     if (trackerMode && trackerSampleChosen) sf2Audition.stop();
@@ -741,6 +772,12 @@ void AudioEngine::stop()
 void AudioEngine::seek(double seconds)
 {
     if (! std::isfinite(seconds)) return;
+    if (matchedActive.load())
+    {
+        matchedSource.setPosition(juce::jlimit(0.0, length(), seconds));
+        startAtNextPlay = false;
+        return;
+    }
     if (trackerMode)
     {
         if (trackerSampleChosen) { sf2Audition.seek(juce::jlimit(0.0, length(), seconds)); return; }
@@ -755,6 +792,49 @@ void AudioEngine::seek(double seconds)
     if (rexMode) { rexSampler.seekAudition(juce::jlimit(0.0, length(), seconds)); return; }
     source.setPosition(juce::jlimit(0.0, length(), seconds)); startAtNextPlay = false;
 }
+bool AudioEngine::stopMatchedTransport()
+{
+    if (! hostMode && ! deviceMode) { matchedSource.setSource(nullptr); return true; }
+    const bool callbackAcknowledges = deviceMode
+        || (hostMode && juce::Time::getMillisecondCounter() - lastHostBlockMs.load() < 250);
+    if (callbackAcknowledges) { matchedSource.stop(); return false; }
+    matchedSource.setSource(nullptr);
+    return true;
+}
+
+bool AudioEngine::setMatchedTransport(const juce::File& preparedFile)
+{
+    if (! preparedFile.existsAsFile()) return false;
+    std::unique_ptr<juce::AudioFormatReader> decoded(formats.createReaderFor(preparedFile));
+    if (! decoded || decoded->lengthInSamples <= 0 || decoded->sampleRate <= 0.0)
+        return false;
+    // Stop the ordinary transport through the same lifecycle, then attach the prepared result.
+    const double matchedRate = decoded->sampleRate;
+    stopTransport();
+    matchedActive.store(false);
+    matchedSource.setSource(nullptr);
+    matchReader = std::make_unique<PreviewReaderSource>(
+        std::unique_ptr<juce::AudioFormatReader>(decoded.release()));
+    matchReader->setLooping(false);
+    matchedSource.setSource(matchReader.get(), 32768, &matchReadAhead, matchedRate);
+    matchedFile = preparedFile;
+    startAtNextPlay = true;
+    matchedActive.store(true);
+    return true;
+}
+
+void AudioEngine::clearMatchedTransport()
+{
+    if (! matchedActive.load() && matchReader == nullptr) return;
+    stopMatchedTransport();
+    matchedActive.store(false);
+    matchedSource.setSource(nullptr);
+    matchedSource.setPosition(0);
+    matchReader.reset();
+    matchedFile = juce::File();
+    startAtNextPlay = true;
+}
+
 void AudioEngine::setVolume(float gain)
 {
     source.setGain(std::isfinite(gain) ? juce::jlimit(0.0f,1.0f,gain) : 0.0f);
