@@ -86,6 +86,14 @@ void CloudView::setEmptyMessage(const juce::String& message)
     repaint();
 }
 
+void CloudView::setNotice(const juce::String& text)
+{
+    if (notice == text) return;
+    notice = text;
+    frameValid = false; // the notice is painted into the cached frame's dynamic layer
+    repaint();
+}
+
 bool CloudView::isPointVisible(size_t index) const
 {
     if (index >= current.points.size()) return false;
@@ -545,6 +553,17 @@ void CloudView::paintDynamic(juce::Graphics& g)
         g.fillRoundedRectangle(x, y, (float) width, 18.0f, 4.0f);
         g.setColour(theme::text);
         g.drawText(text, (int) x, (int) y, width, 18, juce::Justification::centred);
+    }
+
+    if (notice.isNotEmpty())
+    {
+        g.setFont(studio::controlFont());
+        const auto width = juce::GlyphArrangement::getStringWidthInt(studio::controlFont(), notice) + 24;
+        const juce::Rectangle<int> box(getWidth() / 2 - width / 2, 16, width, 24);
+        g.setColour(theme::raised.withAlpha(0.92f));
+        g.fillRoundedRectangle(box.toFloat(), 6.0f);
+        g.setColour(theme::text);
+        g.drawText(notice, box, juce::Justification::centred);
     }
 
     if (loading)

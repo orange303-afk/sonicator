@@ -27,6 +27,9 @@ public:
     void setLabel(int64_t sampleId, juce::String text);
     void setLoading(bool loading, const juce::String& message = {});
     void setEmptyMessage(const juce::String&);
+    // A short line over the map (for example "Nothing matches the filter"); empty clears it. The
+    // map itself is never replaced, so the context stays visible.
+    void setNotice(const juce::String& text);
     void setHoverAudioEnabled(bool enabled) { hoverAudio = enabled; }
 
     void fitAll();
@@ -139,6 +142,7 @@ private:
     bool loading = false;
     juce::String loadingText;
     juce::String emptyText { "No tagged files yet" };
+    juce::String notice;
 
     studio::Chip backButton { "Back" }, fitButton { "Overview" };
 };

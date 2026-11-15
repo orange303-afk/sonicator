@@ -1375,6 +1375,7 @@ void MainComponent::updateCloudMatches()
     if (! filtered)
     {
         cloudPanel->setFilter({});
+        cloudPanel->setNotice({});
         cloudMatches.clear();
         countLabel.setText(juce::String((int) points.size()) + " tagged files on the map", juce::dontSendNotification);
         return;
@@ -1388,6 +1389,7 @@ void MainComponent::updateCloudMatches()
     const auto total = (int) points.size();
     int matching = 0;
     for (bool match : cloudMatches) matching += match ? 1 : 0;
+    cloudPanel->setNotice(matching == 0 ? "Nothing matches the filter" : juce::String());
     countLabel.setText(juce::String(total) + " tagged files on the map  |  " + juce::String(matching) + " matching",
                        juce::dontSendNotification);
 }
