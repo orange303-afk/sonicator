@@ -1861,6 +1861,33 @@ std::map<int64_t, std::vector<Tag>> SampleRepository::tagsForSamples(const std::
     }
     return out;
 }
+std::vector<SampleRecord> SampleRepository::taggedSamples() const
+{
+    std::lock_guard lock(db.mutex);
+    const auto sql = juce::String("SELECT ") + columns
+        + " FROM samples WHERE id IN (SELECT sample_id FROM sample_tags) ORDER BY id";
+    detail::Statement s(db.handle, sql.toRawUTF8());
+    std::vector<SampleRecord> out;
+    while (s.step()) out.push_back(read(s));
+    return out;
+}
+
+std::map<int64_t, std::vector<float>> SampleRepository::feedbackV2() const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT sample_id, features_v2 FROM ml_feedback_samples WHERE features_v2 IS NOT NULL");
+    std::map<int64_t, std::vector<float>> out;
+    while (s.step())
+    {
+        const auto* data = reinterpret_cast<const float*>(s.blob(1));
+        const int bytes = s.bytes(1);
+        if (data == nullptr || bytes < (int) (sizeof(float) * 84)) continue;
+        out[s.integer(0)] = std::vector<float>(data, data + (bytes / (int) sizeof(float)));
+    }
+    return out;
+}
+
 int64_t SampleRepository::createTag(const juce::String& name, uint32_t colour)
 {
     const auto trimmed = name.trim();

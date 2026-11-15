@@ -149,6 +149,12 @@ public:
     std::vector<Tag> tags() const;
     std::vector<Tag> tagsForSample(int64_t sampleId) const;
     std::map<int64_t, std::vector<Tag>> tagsForSamples(const std::vector<int64_t>& sampleIds) const;
+    // Every file that carries at least one tag, ascending id. The cloud view reads the tagged part
+    // of the catalog in one batch; it never pages the table and never queries per file.
+    std::vector<SampleRecord> taggedSamples() const;
+    // The stored schema-2 vectors, sample id -> 84 floats. They live in the training table because
+    // that is where the extractor wrote them; the map reads them, it never writes there.
+    std::map<int64_t, std::vector<float>> feedbackV2() const;
     int64_t createTag(const juce::String& name, uint32_t colour);
     void setTagColour(int64_t tagId, uint32_t colour);
     bool renameTag(int64_t tagId, const juce::String& name);

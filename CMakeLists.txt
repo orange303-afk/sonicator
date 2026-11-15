@@ -198,7 +198,8 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/updates/UpdateCheck.cpp
     core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
     core/smart/TapTempo.cpp
-    core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp)
+    core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp
+    core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
@@ -253,6 +254,14 @@ if(APPLE)
         VERBATIM)
 endif()
 include(CTest)
+option(SONICATOR_BUILD_TOOLS "Build development tools (layout report)" OFF)
+if(SONICATOR_BUILD_TOOLS)
+    add_executable(cloud-layout-report tools/cloud-layout-report/main.cpp)
+    target_link_libraries(cloud-layout-report PRIVATE SonicatorCore)
+    if(APPLE)
+        set_target_properties(cloud-layout-report PROPERTIES BUILD_RPATH "${onnxruntime_SOURCE_DIR}/lib")
+    endif()
+endif()
 if(BUILD_TESTING)
     FetchContent_Declare(Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
