@@ -17,7 +17,7 @@ struct SourceProbe
 };
 
 SourceProbe probeSource(const juce::File&, int64_t sampleId, const juce::String& root,
-                        CancelCheck);
+                        const juce::String& layoutBase, CancelCheck);
 
 // Longest registered root that contains the path (separator aware). Empty when none.
 juce::String registeredRootFor(const juce::String& path, const juce::StringArray& roots);
@@ -26,4 +26,7 @@ juce::String registeredRootFor(const juce::String& path, const juce::StringArray
 // enumerated recursively from the catalog without table filters or pagination. The result is
 // immutable and never re-reads the catalog.
 PreflightResult prepareBatch(SampleRepository&, const Request&, CancelCheck);
+// Re-plans outputs from an existing snapshot without touching the catalog or re-probing readers.
+// Used when Start applies the dialog's settings to the sources already accepted at open time.
+PreflightResult replanBatch(const PreparedBatch&, const Request&, CancelCheck = {});
 } // namespace sonicator::batch

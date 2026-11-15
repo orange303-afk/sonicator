@@ -332,3 +332,38 @@ TEST_CASE("WAV metadata whitelist survives and time-indexed chunks are dropped w
     REQUIRE(written != nullptr);
     REQUIRE(written->metadataValues["INAM"] == "Kick");
 }
+
+TEST_CASE("Validation can be cancelled and refuses an undecodable tail",
+          "[batch][batch-encoding]")
+{
+    TestDirectory t;
+    const auto source = floatWav(t.dir.getChildFile("Source/v.wav"), { 0.1f, -0.1f });
+    Recipe recipe;
+    recipe.outputs = { OutputPreset { Format::wav, Encoding::int16, 5 } };
+    const auto snapshot = snapshotFor(source);
+    InputProtectionSet protection;
+    protection.identities.push_back(snapshot.identity);
+    protection.paths.push_back(source.getFullPathName().toLowerCase());
+    const auto target = t.dir.getChildFile("Out/v.wav");
+    auto plan = planFor(source, Format::wav, Encoding::int16, 16, false, target);
+    auto prepared = preparedFor(source, recipe);
+    auto converted = std::make_unique<ConvertedStream>(std::move(prepared), 44100, 1);
+    EncodeSettings settings;
+    settings.format = Format::wav;
+    settings.bits = 16;
+    settings.sampleRate = 44100;
+    settings.channels = 1;
+    bool cancelNow = false;
+    int phaseCalls = 0;
+    auto outcome = encodeToTemporary(t.dir.getChildFile("Out/temp.wav"), settings, *converted,
+        [&cancelNow] { return cancelNow; },
+        [&cancelNow, &phaseCalls](const juce::String& phase)
+        {
+            ++phaseCalls;
+            if (phase == "Validating") cancelNow = true;
+        });
+    REQUIRE_FALSE(outcome.ok);
+    REQUIRE(outcome.code == ErrorCode::cancelled);
+    REQUIRE_FALSE(t.dir.getChildFile("Out/temp.wav").exists());
+    REQUIRE(phaseCalls > 0);
+}

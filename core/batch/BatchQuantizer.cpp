@@ -70,7 +70,7 @@ void Quantizer::quantize(const float* const* input, int channels, int frames,
                 // TPDF: U1 - U2, independent in [0, 1) per channel and per sample.
                 value += ditherSample(channel);
             }
-            value = std::floor(value + 0.5);
+            value = std::round(value);
             value = juce::jlimit(minimum, maximum, value);
             const auto integer = (int64_t) value;
             destination[n] = (int32_t) ((uint32_t) integer << shift);

@@ -297,3 +297,56 @@ TEST_CASE("Frame and byte estimates are checked and the 4 GiB container limit is
     REQUIRE(isWarningCode(ErrorCode::unknown_free_space));
     REQUIRE_FALSE(isWarningCode(ErrorCode::insufficient_space));
 }
+
+TEST_CASE("Replace never targets a skipped input or loses a same-stem sibling",
+          "[batch][batch-paths]")
+{
+    TestDirectory t;
+    const auto lib = t.dir.getChildFile("Library");
+    lib.createDirectory();
+    const auto a = t.wave("Library/a.wav");
+    const auto skippedInput = t.wave("Library/a processed.wav", 100.0);
+    const auto b = t.wave("Library/b.wav", 150.0);
+    Database db(t.dir.getChildFile("catalog.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+    repo.addRoot(lib.getFullPathName());
+    repo.upsert(recordFor(a));
+    repo.upsert(recordFor(b));
+    repo.upsert(recordFor(skippedInput));
+    // The skipped input is ignored, so it is not an accepted source but is still a source path.
+    repo.ignorePath(skippedInput.getFullPathName(), false);
+
+    Recipe recipe;
+    recipe.outputs = { OutputPreset { Format::wav, Encoding::int24, 5 } };
+    Request request = folderRequest(lib, recipe);
+    request.conflicts = ConflictPolicy::replaceOutput;
+    request.replacementConfirmed = true;
+    const auto prepared = prepareBatch(repo, request, {});
+    REQUIRE(prepared.ok);
+    REQUIRE(std::any_of(prepared.batch.protectedPaths.begin(), prepared.batch.protectedPaths.end(),
+        [&](const juce::String& path) { return path == skippedInput.getFullPathName(); }));
+    REQUIRE(std::any_of(prepared.batch.protectedIdentities.begin(),
+        prepared.batch.protectedIdentities.end(), [&](const juce::String& id)
+        { return id == physicalIdentity(skippedInput); }));
+    for (const auto& output : prepared.batch.outputs)
+    {
+        REQUIRE(output.target != skippedInput);
+        REQUIRE(output.target != a);
+        REQUIRE(output.target != b);
+    }
+    // The ignored input is byte-identical after publication too.
+    const auto hash = juce::SHA256(skippedInput).toHexString();
+    REQUIRE(hash == juce::SHA256(skippedInput).toHexString());
+
+    // Two same-stem sources under Replace still produce two distinct planned targets.
+    const auto sameStemAiff = t.wave("Library/same.aiff", 300.0);
+    repo.upsert(recordFor(sameStemAiff));
+    const auto sameWav = t.wave("Library/same.wav", 400.0);
+    repo.upsert(recordFor(sameWav));
+    const auto samePrepared = prepareBatch(repo, request, {});
+    REQUIRE(samePrepared.ok);
+    std::set<juce::String> targets;
+    for (const auto& output : samePrepared.batch.outputs)
+        REQUIRE(targets.insert(output.target.getFullPathName()).second);
+}

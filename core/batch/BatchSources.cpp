@@ -49,7 +49,7 @@ juce::String registeredRootFor(const juce::String& path, const juce::StringArray
 }
 
 SourceProbe probeSource(const juce::File& file, int64_t sampleId, const juce::String& root,
-                        CancelCheck cancel)
+                        const juce::String& layoutBase, CancelCheck cancel)
 {
     SourceProbe probe;
     if (cancelled(cancel))
@@ -125,7 +125,7 @@ SourceProbe probeSource(const juce::File& file, int64_t sampleId, const juce::St
     snapshot.sampleId = sampleId;
     snapshot.path = file;
     snapshot.root = root;
-    snapshot.relativeDir = relativeToRoot(path, root);
+    snapshot.relativeDir = relativeToRoot(path, layoutBase);
     if (const auto slash = snapshot.relativeDir.lastIndexOfChar('/'); slash >= 0)
         snapshot.relativeDir = snapshot.relativeDir.substring(0, slash);
     else
@@ -143,6 +143,134 @@ SourceProbe probeSource(const juce::File& file, int64_t sampleId, const juce::St
     probe.snapshot = std::move(snapshot);
     return probe;
 }
+
+
+namespace
+{
+// Plans outputs for an already snapshotted batch. Shared by the first preflight and by Start,
+// where re-probing every source would freeze the message thread.
+bool planOutputs(PreflightResult& result, const Request& request, CancelCheck cancel)
+{
+    auto fail = [&result](ErrorCode code, const juce::String& message)
+    {
+        result.ok = false;
+        result.issues.push_back({ code, message, false, {} });
+        result.batch.skipped.push_back({ code, message, false, {} });
+        return false;
+    };
+    std::set<juce::String> baseRoots;
+    for (const auto& source : result.batch.sources)
+        baseRoots.insert(source.root.isNotEmpty() ? source.root
+                                                  : source.path.getParentDirectory().getFullPathName());
+    const bool multipleRoots = baseRoots.size() > 1;
+
+    PathReserver reserver(result.batch.protectedIdentities, result.batch.protectedPaths);
+    const auto group = [&multipleRoots](const SourceSnapshot& source)
+    {
+        if (! multipleRoots) return juce::String();
+        return rootGroupPrefix(source.root.isNotEmpty()
+                                   ? source.root
+                                   : source.path.getParentDirectory().getFullPathName());
+    };
+
+    int outputsRejected = 0;
+    for (size_t index = 0; index < result.batch.sources.size(); ++index)
+    {
+        const auto& source = result.batch.sources[index];
+        for (const auto& preset : request.recipe.outputs)
+        {
+            if (cancelled(cancel)) return fail(ErrorCode::cancelled, "Cancelled");
+            const auto outputPrefix = source.path.getFileName() + " -> " + formatLabel(preset.format);
+            Encoding encoding = preset.encoding;
+            int bits = 0;
+            bool floating = false;
+            juce::String reason;
+            if (! resolveEncoding(preset, source, encoding, bits, floating, reason))
+            {
+                ++outputsRejected;
+                result.issues.push_back({ ErrorCode::invalid_encoding,
+                                          outputPrefix + ": " + reason, false,
+                                          source.path.getFullPathName() });
+                continue;
+            }
+            OutputPlan plan;
+            plan.outputIndex = result.batch.outputs.size();
+            plan.sourceIndex = index;
+            plan.format = preset.format;
+            plan.encoding = encoding;
+            plan.bits = bits;
+            plan.floating = floating;
+            plan.sampleRate = request.recipe.sampleRate > 0 ? request.recipe.sampleRate
+                                                           : source.sampleRate;
+            switch (request.recipe.channels)
+            {
+                case ChannelMode::sameAsSource: plan.channels = source.channels; break;
+                case ChannelMode::mono: plan.channels = 1; break;
+                case ChannelMode::stereo: plan.channels = 2; break;
+            }
+            plan.estimatedFrames = outputFrameEstimate(source.frames, source.sampleRate,
+                                                       plan.sampleRate);
+            plan.estimatedBytes = outputByteEstimate(plan.estimatedFrames, plan.channels, bits);
+            constexpr int64_t flacFrameLimit = 0x1000000000LL; // 2^36 samples per stream
+            if (preset.format == Format::flac && plan.estimatedFrames >= flacFrameLimit)
+            {
+                ++outputsRejected;
+                result.issues.push_back({ ErrorCode::container_limit,
+                                          outputPrefix + ": the file would exceed the FLAC frame limit",
+                                          false, source.path.getFullPathName() });
+                continue;
+            }
+            if ((preset.format == Format::wav || preset.format == Format::aiff)
+                && plan.estimatedBytes >= containerByteLimit)
+            {
+                ++outputsRejected;
+                result.issues.push_back({ ErrorCode::container_limit,
+                                          outputPrefix + ": the file would exceed the 4 GiB container limit",
+                                          false, source.path.getFullPathName() });
+                continue;
+            }
+            PlannedPath planned;
+            Issue pathIssue;
+            if (! reserver.plan(source, request, group(source), preset.format,
+                                request.conflicts, planned, pathIssue))
+            {
+                ++outputsRejected;
+                result.issues.push_back(pathIssue);
+                continue;
+            }
+            plan.target = planned.target;
+            plan.skipExisting = planned.skipExisting;
+            plan.replaceExisting = planned.replaceExisting;
+            plan.previousFingerprint = planned.previousFingerprint;
+            result.batch.outputs.push_back(plan);
+        }
+    }
+    if (result.batch.outputs.empty())
+    {
+        if (outputsRejected > 0) return fail(ErrorCode::no_outputs, "No output format can be written");
+        return fail(ErrorCode::no_outputs, "Select at least one output format");
+    }
+
+    for (const auto& plan : result.batch.outputs) result.batch.estimatedBytes += plan.estimatedBytes;
+    if (! result.batch.outputs.empty())
+    {
+        const auto target = PathReserver::baseFolder(result.batch.sources[result.batch.outputs[0].sourceIndex],
+                                                     request, group(result.batch.sources[result.batch.outputs[0].sourceIndex]));
+        result.batch.freeBytes = freeBytesFor(target);
+        result.batch.freeSpaceKnown = result.batch.freeBytes >= 0;
+        if (! result.batch.freeSpaceKnown)
+            result.issues.push_back({ ErrorCode::unknown_free_space,
+                                      "Free disk space could not be checked", true,
+                                      target.getFullPathName() });
+        else if (result.batch.freeBytes < result.batch.estimatedBytes + spaceReserveBytes)
+            return fail(ErrorCode::insufficient_space,
+                        "Not enough free space for the planned outputs");
+    }
+    result.ok = true;
+    return true;
+}
+
+} // namespace
 
 PreflightResult prepareBatch(SampleRepository& repo, const Request& request, CancelCheck cancel)
 {
@@ -169,6 +297,7 @@ PreflightResult prepareBatch(SampleRepository& repo, const Request& request, Can
     const auto roots = repo.roots();
     struct Candidate { juce::File file; int64_t sampleId; };
     std::vector<Candidate> candidates;
+    std::vector<juce::File> requestedFiles;
     std::unordered_set<std::string> seen;
     auto wanted = [&request](int64_t id)
     {
@@ -192,6 +321,7 @@ PreflightResult prepareBatch(SampleRepository& repo, const Request& request, Can
         for (const auto& record : records)
         {
             if (cancelled(cancel)) return fail(ErrorCode::cancelled, "Cancelled");
+            requestedFiles.emplace_back(record.filePath);
             if (record.isDiscEntry())
             {
                 addSkipped(result, ErrorCode::unsupported_source,
@@ -247,6 +377,7 @@ PreflightResult prepareBatch(SampleRepository& repo, const Request& request, Can
         for (const auto& entry : entries)
         {
             if (cancelled(cancel)) return fail(ErrorCode::cancelled, "Cancelled");
+            requestedFiles.emplace_back(entry.path);
             if (entry.containerPath.isNotEmpty()) continue;
             if (isPathIgnored(entry.path, ignored))
             {
@@ -274,7 +405,10 @@ PreflightResult prepareBatch(SampleRepository& repo, const Request& request, Can
     {
         if (cancelled(cancel)) return fail(ErrorCode::cancelled, "Cancelled");
         const auto root = registeredRootFor(candidate.file.getFullPathName(), roots);
-        auto probe = probeSource(candidate.file, candidate.sampleId, root, cancel);
+        const auto layoutBase = request.sources.kind == SourceSelection::Kind::folder
+            ? juce::File(request.sources.folder).getFullPathName()
+            : (root.isNotEmpty() ? root : candidate.file.getParentDirectory().getFullPathName());
+        auto probe = probeSource(candidate.file, candidate.sampleId, root, layoutBase, cancel);
         if (! probe.ok)
         {
             addSkipped(result, probe.code, probe.message, candidate.file.getFullPathName());
@@ -291,110 +425,55 @@ PreflightResult prepareBatch(SampleRepository& repo, const Request& request, Can
                   return a.path.getFullPathName().compareIgnoreCase(b.path.getFullPathName()) < 0;
               });
 
-    std::set<juce::String> baseRoots;
-    for (const auto& source : result.batch.sources)
-        baseRoots.insert(source.root.isNotEmpty() ? source.root
-                                                  : source.path.getParentDirectory().getFullPathName());
-    const bool multipleRoots = baseRoots.size() > 1;
-
+    // Every candidate in the request is protected, including inputs that were skipped (ignored,
+    // unsupported channels, unsaved editor rows). Replace must never turn a skipped input into an
+    // output target.
+    for (const auto& file : requestedFiles)
+    {
+        if (! file.exists()) continue;
+        result.batch.protectedIdentities.push_back(physicalIdentity(file));
+        result.batch.protectedPaths.push_back(file.getFullPathName());
+    }
+    for (const auto& candidate : candidates)
+    {
+        if (! candidate.file.exists()) continue;
+        result.batch.protectedIdentities.push_back(physicalIdentity(candidate.file));
+        result.batch.protectedPaths.push_back(candidate.file.getFullPathName());
+    }
     for (const auto& source : result.batch.sources)
     {
         result.batch.protectedIdentities.push_back(source.identity);
         result.batch.protectedPaths.push_back(source.path.getFullPathName());
     }
-    PathReserver reserver(result.batch.protectedIdentities, result.batch.protectedPaths);
-    const auto group = [&multipleRoots](const SourceSnapshot& source)
+    if (! planOutputs(result, request, cancel)) return result;
+    result.ok = true;
+    return result;
+}
+PreflightResult replanBatch(const PreparedBatch& base, const Request& request, CancelCheck cancel)
+{
+    PreflightResult result;
+    result.batch = base;
+    result.batch.request = request;
+    result.batch.jobId = juce::Uuid().toDashedString();
+    result.batch.outputs.clear();
+    result.batch.estimatedBytes = 0;
+    result.issues.clear();
+    result.ok = true;
+    if (base.sources.empty())
     {
-        if (! multipleRoots) return juce::String();
-        return rootGroupPrefix(source.root.isNotEmpty()
-                                   ? source.root
-                                   : source.path.getParentDirectory().getFullPathName());
-    };
-
-    int outputsRejected = 0;
-    for (size_t index = 0; index < result.batch.sources.size(); ++index)
-    {
-        const auto& source = result.batch.sources[index];
-        for (const auto& preset : request.recipe.outputs)
-        {
-            if (cancelled(cancel)) return fail(ErrorCode::cancelled, "Cancelled");
-            const auto outputPrefix = source.path.getFileName() + " -> " + formatLabel(preset.format);
-            Encoding encoding = preset.encoding;
-            int bits = 0;
-            bool floating = false;
-            juce::String reason;
-            if (! resolveEncoding(preset, source, encoding, bits, floating, reason))
-            {
-                ++outputsRejected;
-                result.issues.push_back({ ErrorCode::invalid_encoding,
-                                          outputPrefix + ": " + reason, false,
-                                          source.path.getFullPathName() });
-                continue;
-            }
-            OutputPlan plan;
-            plan.outputIndex = result.batch.outputs.size();
-            plan.sourceIndex = index;
-            plan.format = preset.format;
-            plan.encoding = encoding;
-            plan.bits = bits;
-            plan.floating = floating;
-            plan.sampleRate = request.recipe.sampleRate > 0 ? request.recipe.sampleRate
-                                                           : source.sampleRate;
-            switch (request.recipe.channels)
-            {
-                case ChannelMode::sameAsSource: plan.channels = source.channels; break;
-                case ChannelMode::mono: plan.channels = 1; break;
-                case ChannelMode::stereo: plan.channels = 2; break;
-            }
-            plan.estimatedFrames = outputFrameEstimate(source.frames, source.sampleRate,
-                                                       plan.sampleRate);
-            plan.estimatedBytes = outputByteEstimate(plan.estimatedFrames, plan.channels, bits);
-            if ((preset.format == Format::wav || preset.format == Format::aiff)
-                && plan.estimatedBytes >= containerByteLimit)
-            {
-                ++outputsRejected;
-                result.issues.push_back({ ErrorCode::container_limit,
-                                          outputPrefix + ": the file would exceed the 4 GiB container limit",
-                                          false, source.path.getFullPathName() });
-                continue;
-            }
-            PlannedPath planned;
-            Issue pathIssue;
-            if (! reserver.plan(source, request, group(source), preset.format,
-                                request.conflicts, planned, pathIssue))
-            {
-                ++outputsRejected;
-                result.issues.push_back(pathIssue);
-                continue;
-            }
-            plan.target = planned.target;
-            plan.skipExisting = planned.skipExisting;
-            plan.replaceExisting = planned.replaceExisting;
-            plan.previousFingerprint = planned.previousFingerprint;
-            result.batch.outputs.push_back(plan);
-        }
+        result.ok = false;
+        result.issues.push_back({ ErrorCode::no_sources, "No eligible source file", false, {} });
+        return result;
     }
-    if (result.batch.outputs.empty())
+    const auto recipeIssues = validateRecipe(request.recipe);
+    bool fatal = false;
+    for (const auto& issue : recipeIssues)
     {
-        if (outputsRejected > 0) return fail(ErrorCode::no_outputs, "No output format can be written");
-        return fail(ErrorCode::no_outputs, "Select at least one output format");
+        result.issues.push_back(issue);
+        if (! issue.warning) fatal = true;
     }
-
-    for (const auto& plan : result.batch.outputs) result.batch.estimatedBytes += plan.estimatedBytes;
-    if (! result.batch.outputs.empty())
-    {
-        const auto target = PathReserver::baseFolder(result.batch.sources[result.batch.outputs[0].sourceIndex],
-                                                     request, group(result.batch.sources[result.batch.outputs[0].sourceIndex]));
-        result.batch.freeBytes = freeBytesFor(target);
-        result.batch.freeSpaceKnown = result.batch.freeBytes >= 0;
-        if (! result.batch.freeSpaceKnown)
-            result.issues.push_back({ ErrorCode::unknown_free_space,
-                                      "Free disk space could not be checked", true,
-                                      target.getFullPathName() });
-        else if (result.batch.freeBytes < result.batch.estimatedBytes + spaceReserveBytes)
-            return fail(ErrorCode::insufficient_space,
-                        "Not enough free space for the planned outputs");
-    }
+    if (fatal) { result.ok = false; return result; }
+    if (! planOutputs(result, request, cancel)) return result;
     result.ok = true;
     return result;
 }

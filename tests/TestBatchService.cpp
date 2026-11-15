@@ -249,3 +249,22 @@ TEST_CASE("Diagnostic reports are JSON, bounded by count and age", "[batch][batc
     BatchService::saveReport(newer, folder, 20, 30);
     REQUIRE_FALSE(oldest.existsAsFile());
 }
+
+TEST_CASE("Batch temporaries are never scanned as samples", "[batch][batch-service]")
+{
+    TestDirectory t;
+    const auto folder = t.dir.getChildFile("Library");
+    folder.createDirectory();
+    const auto source = floatWav(folder.getChildFile("a.wav"), { 0.1f });
+    const auto temporary = folder.getChildFile(".a.1234.batchtmp.wav");
+    temporary.replaceWithText("partial");
+    const auto scanned = FileScanner::scanDirectory(folder);
+    bool sawTemporary = false, sawSource = false;
+    for (const auto& entry : scanned)
+    {
+        if (entry.file == temporary) sawTemporary = true;
+        if (entry.file == source) sawSource = true;
+    }
+    REQUIRE_FALSE(sawTemporary);
+    REQUIRE(sawSource);
+}

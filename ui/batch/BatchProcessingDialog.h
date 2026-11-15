@@ -35,6 +35,7 @@ public:
     void setPreviewReady(const PreviewResult&, bool stale);
     void setPreviewStatus(const juce::String&);
     const std::vector<SourceSnapshot>& sources() const { return batch.sources; }
+    const PreparedBatch& prepared() const { return batch; }
     const SourceSelection& selection() const { return batch.request.sources; }
     std::function<void()> onStart, onCancelJob, onClose;
     std::function<void(SourceSnapshot, Recipe, int)> onPreparePreview;
@@ -61,6 +62,7 @@ private:
     PreparedBatch batch;
     BatchPresetStore presetStore;
     std::vector<ProcessStep> steps;
+    std::vector<juce::String> presetIds;
     std::vector<std::unique_ptr<StepRow>> rows;
     juce::Label title, summary, phase, reportLabel, previewLabel, destinationLabel;
     juce::Viewport stepsViewport;
@@ -89,6 +91,7 @@ private:
     Report latestReport;
     int previewGeneration = 0;
     bool running = false, finished = false, reportShown = false, controlRefresh = false;
-    bool showingPreview = false;
+    bool showingPreview = false, previewStale = false;
+    juce::String previewFingerprint;
 };
 } // namespace sonicator::batch

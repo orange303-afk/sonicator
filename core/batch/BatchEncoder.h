@@ -33,11 +33,12 @@ struct EncodedAudio
 // Writes the converted stream to an existing-free temporary and reopens it for a structural and
 // full decode validation. The temporary is deleted on any failure.
 EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings&,
-                               ConvertedStream&, CancelCheck);
+                               ConvertedStream&, CancelCheck,
+                               const std::function<void(const juce::String&)>& phase = {});
 
 // Empty when the file matches rate/channels/depth/float flag/frame count and decodes end to end.
 std::vector<Issue> validateEncodedFile(const juce::File&, const EncodeSettings&, int64_t frames,
-                                       float& decodedPeak);
+                                       float& decodedPeak, CancelCheck = {});
 
 // Full output pipeline for one planned file. Takes ownership of PreparedAudio because the
 // converted stream owns the reader. Never publishes a file that failed validation or clipping.

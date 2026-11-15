@@ -39,7 +39,7 @@ class PreparedAudio
 public:
     PreparedAudio(std::unique_ptr<juce::AudioFormatReader>, int sampleRate, int channels,
                   int64_t frames, std::vector<StageSpec> stages,
-                  std::vector<StepOutcome> outcomes = {});
+                  std::vector<StepOutcome> outcomes = {}, CancelCheck cancel = {});
     ~PreparedAudio();
     PreparedAudio(const PreparedAudio&) = delete;
     PreparedAudio& operator=(const PreparedAudio&) = delete;
@@ -69,6 +69,7 @@ private:
     bool chainStarted = false;
     bool peakKnown = false;
     float cachedPeak = 0.0f;
+    CancelCheck cancelCheck;
 };
 
 struct PrepareAudioResult

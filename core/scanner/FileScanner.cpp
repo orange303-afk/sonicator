@@ -12,6 +12,9 @@ bool FileScanner::isMetadataOnlyFormat(const juce::File& f)
 }
 bool FileScanner::isSupportedFormat(const juce::File& f)
 {
+    // Batch Processing writes a hidden same-folder temporary while encoding; a crash can leave it
+    // behind and a rescan must never index partial audio as a sample.
+    if (f.getFileName().containsIgnoreCase(".batchtmp")) return false;
     // A Kurzweil set is one row: its later parts are data only and are joined on load.
     if (krz::continuationPartNumber(f) >= 2) return false;
     if (isMetadataOnlyFormat(f)) return true;

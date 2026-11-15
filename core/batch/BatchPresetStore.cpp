@@ -247,9 +247,10 @@ BatchPresetStore::Document BatchPresetStore::readDocument() const
             }
             if (! recipeFromVar(value.getProperty("recipe", {}), preset.recipe, document.error))
             {
-                document.state = Document::State::corrupt;
+                // One unusable preset never hides the healthy ones and the file stays untouched
+                // until a later explicit save rewrites it.
                 document.error = "Preset " + preset.name + ": " + document.error;
-                return document;
+                continue;
             }
             const int conflicts = (int) value.getProperty("conflicts", 0);
             preset.conflicts = conflicts >= 0 && conflicts <= (int) ConflictPolicy::replaceOutput
@@ -307,6 +308,7 @@ PresetLoadResult BatchPresetStore::load() const
         return result;
     }
     result.ok = true;
+    result.error = document.error;
     result.presets.insert(result.presets.end(), document.custom.begin(), document.custom.end());
     return result;
 }
@@ -316,6 +318,8 @@ BatchPresetStore::SaveResult BatchPresetStore::save(const BatchPreset& preset, b
     SaveResult result;
     auto name = preset.name.trim();
     if (name.isEmpty()) { result.error = "The preset needs a name"; return result; }
+    for (const auto& issue : validateRecipe(preset.recipe))
+        if (! issue.warning) { result.error = issue.message; return result; }
     for (const auto& builtIn : builtIns())
         if (lowerName(builtIn.name) == lowerName(name) || builtIn.id == preset.id)
         {

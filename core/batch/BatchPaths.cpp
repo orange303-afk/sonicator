@@ -157,7 +157,8 @@ bool PathReserver::plan(const SourceSnapshot& source, const Request& request,
         reserved.insert(lowerPath(candidate));
         return true;
     }
-    if (conflicts == ConflictPolicy::replaceOutput)
+    if (conflicts == ConflictPolicy::replaceOutput
+        && reserved.count(lowerPath(candidate)) == 0)
     {
         if (! request.replacementConfirmed)
         {
@@ -180,8 +181,9 @@ bool PathReserver::plan(const SourceSnapshot& source, const Request& request,
         reserved.insert(lowerPath(candidate));
         return true;
     }
-    // Rename (default) and Replace for a missing target both reserve the first free name.
-    while (existsNow(candidate) && ! (conflicts == ConflictPolicy::replaceOutput))
+    // Rename (default) and Replace for a target already owned by this batch both reserve the first
+    // free name. A same-stem sibling never loses its planned output.
+    while (existsNow(candidate))
     {
         candidate = folder.getChildFile(processedStem(source) + " " + juce::String(suffix++)
                                                       + extension);

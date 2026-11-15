@@ -261,3 +261,21 @@ TEST_CASE("Fade coefficients match the documented formulas", "[batch][batch-pipe
     REQUIRE(fadeCoefficient(1, 3, 3, false, true) == Catch::Approx(0.5f));
     REQUIRE(fadeCoefficient(5, 10, 0, false, false) == Catch::Approx(1.0f));
 }
+
+TEST_CASE("A prepared stream honours cancellation even while a trim drops a long prefix",
+          "[batch][batch-pipeline]")
+{
+    TestDirectory t;
+    std::vector<float> samples(500000, 0.0f);
+    samples.back() = 0.5f;
+    const auto file = floatWav(t.dir.getChildFile("prefix.wav"), { samples });
+    TrimSilence trim; trim.thresholdDb = -60.0; trim.paddingMs = 0.0;
+    bool cancelNow = false;
+    const auto snapshot = snapshotFor(file);
+    auto prepared = prepareAudio(snapshot, oneStep(trim), [&cancelNow] { return cancelNow; });
+    REQUIRE(prepared.ok);
+    cancelNow = true;
+    juce::AudioBuffer<float> block(1, 64);
+    const auto read = prepared.audio->readFrames(0, 64, block);
+    REQUIRE(read.state == ReadState::cancelled);
+}

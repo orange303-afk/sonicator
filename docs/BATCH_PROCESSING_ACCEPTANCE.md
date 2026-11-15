@@ -32,8 +32,38 @@ ctest --preset debug
 | 13 | Folder is recursive, filters do not limit, ignored/virtual/unsupported/unsaved explained, later files/results absent | `[batch-preflight]` folder snapshot test; unsaved rows are a snapshot input; later files are excluded by the prepared batch. |
 | 14 | Long synthetic stream does not allocate by duration; counters after 2^31 frames do not overflow; cancel does not wait for the whole file | Frame math is int64 and checked (`[batch-paths]`); the pipeline uses a 16384-frame window and only measured block buffers. A >2^31-frame end-to-end render was not run; cancellation is checked per block and covered by `[batch-service]`/`[batch-preview]`. |
 | 15 | Preset round-trip; corrupt/future JSON and settings isolation; A/B uses global stats and is gone after close | `[batch-presets]`, `[batch-preview]` global-normalize test and cancellation cleanup; the dialog owns no device and restores the previous source without autoplay. |
-| 16 | Busy state, close, catalog switch and preview release verified with controlled barriers | Busy state and modal close are covered by the owner wiring; the controlled worker barrier is not yet a unit test. Preview release is covered by cancellation cleanup. |
+| 16 | Busy state, close, catalog switch and preview release verified with controlled barriers | Busy state, frozen controls and preview release are covered by the dialog and owner wiring; Start waits for the preview worker through the timer, never a message-thread join. A deterministic timing-barrier test is still missing. |
 | 17 | Full debug ctest green; release builds and passes codesign; real screenshots at 100%/125%, both themes; Windows only via CI | `ctest --preset debug` was run on 2026-11-15 and passed. Release/codesign result is recorded in the stage handoff. Screenshots were not produced in this headless session; Windows was not built. |
+
+## Independent review and fixes
+
+A fresh-context review of the whole branch was run on 2026-11-15. Its Critical and Important
+findings were fixed with a test first, then the full suite:
+
+- Replace could target a skipped input (ignored, unsupported, unsaved): every requested physical
+  path is now in the protection set, not only accepted sources. Test: "Replace never targets a
+  skipped input...".
+- Replace was auto-confirmed: the owner now shows the exact number of existing outputs and starts
+  only after an explicit Replace. The same test protects the skipped file.
+- Two same-stem sources under Replace collapsed onto one target: a target already reserved by the
+  batch now falls through to the next free name. Same test.
+- Validation is cancellable and checks every `read()` result; a truncated tail fails. Test:
+  "Validation can be cancelled and refuses an undecodable tail".
+- Preview files are deleted when the preview stops or the dialog closes; Start cancels the preview
+  and launches after its worker exits, without a message-thread join.
+- The dialog freezes every configuration and preview control while a job runs. Test: "A running
+  batch freezes configuration and preview controls".
+- A preview whose recipe changed (or whose generation is older) is marked stale and A/B is
+  disabled.
+- Start re-plans outputs from the frozen snapshot (`replanBatch`) instead of re-probing every file
+  on the message thread, and reports DB/IO exceptions as a message.
+- Saving an invalid recipe is refused; one unusable stored preset is reported without hiding the
+  healthy presets. Test: "An invalid recipe is refused...".
+- The scanner ignores `.batchtmp` files. Test: "Batch temporaries are never scanned as samples".
+- A prepared stream honours cancellation while a trim drops a long prefix. Test: "A prepared stream
+  honours cancellation...".
+- Report completeness after a worker exception, per-output free-space check, per-frame clipping
+  count, honest Validating phase, selection-relative folder layout, libsamplerate credit.
 
 ## Known gaps
 
@@ -41,6 +71,9 @@ ctest --preset debug
   tests, not by a visual acceptance pass.
 - ENOSPC and a >2^31-frame full render were not simulated end to end.
 - The "controlled in-flight barrier" for close/catalog switch is implemented through the single
-  worker and modal owner, but not exercised by a dedicated deterministic test.
+  worker, modal owner and deferred Start, but not exercised by a dedicated timing test.
 - Windows build/tests were not run.
+- AIFF/FLAC writer finalisation errors are not observable through JUCE; the full readback pass is
+  the gate, and a read failure is now fatal.
+- File-level ENOSPC injection and a >2^31-frame full render remain untested end to end.
 - MP3/OGG output, Split and original overwrite remain out of v1, as specified.

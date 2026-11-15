@@ -29,7 +29,8 @@ bool cancelled(const CancelCheck& check) { return check && check(); }
 } // namespace
 
 EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings& settings,
-                               ConvertedStream& stream, CancelCheck cancel)
+                               ConvertedStream& stream, CancelCheck cancel,
+                               const std::function<void(const juce::String&)>& phase)
 {
     EncodedAudio result;
     auto fail = [&temporary, &result](ErrorCode code, juce::String message)
@@ -87,9 +88,9 @@ EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings
         if (read.state == ReadState::error || read.state == ReadState::cancelled)
             return fail(read.code, read.error);
         if (read.frames <= 0) break;
-        bool blockSaturated = false;
         for (int n = 0; n < read.frames; ++n)
         {
+            bool frameSaturated = false;
             for (int channel = 0; channel < settings.channels; ++channel)
             {
                 const auto value = block.getSample(channel, n);
@@ -97,9 +98,9 @@ EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings
                     return fail(ErrorCode::encode_failed,
                                 "Processing produced NaN or infinite samples");
                 peak = std::max(peak, std::abs(value));
-                if (std::abs(value) > 1.0f + 1.0e-7f) blockSaturated = true;
+                if (std::abs(value) > 1.0f + 1.0e-7f) frameSaturated = true;
             }
-            if (blockSaturated) ++saturatedFrames;
+            if (frameSaturated) ++saturatedFrames;
         }
         const bool wrote = settings.floating
             ? writer->writeFromFloatArrays(block.getArrayOfReadPointers(), settings.channels,
@@ -122,8 +123,9 @@ EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings
     if (frames != stream.frames())
         return fail(ErrorCode::encode_failed, "The encoded frame count is incomplete");
 
+    if (phase) phase("Validating");
     float decodedPeak = 0.0f;
-    const auto validation = validateEncodedFile(temporary, settings, frames, decodedPeak);
+    const auto validation = validateEncodedFile(temporary, settings, frames, decodedPeak, cancel);
     for (const auto& issue : validation)
         if (! issue.warning)
             return fail(issue.code == ErrorCode::none ? ErrorCode::validate_failed : issue.code,
@@ -137,7 +139,7 @@ EncodedAudio encodeToTemporary(const juce::File& temporary, const EncodeSettings
 }
 
 std::vector<Issue> validateEncodedFile(const juce::File& file, const EncodeSettings& settings,
-                                       int64_t frames, float& decodedPeak)
+                                       int64_t frames, float& decodedPeak, CancelCheck cancel)
 {
     std::vector<Issue> issues;
     decodedPeak = 0.0f;
@@ -189,8 +191,18 @@ std::vector<Issue> validateEncodedFile(const juce::File& file, const EncodeSetti
     int64_t position = 0;
     while (position < reader->lengthInSamples)
     {
+        if (cancelled(cancel))
+        {
+            issues.push_back({ ErrorCode::cancelled, "Cancelled", false, {} });
+            return issues;
+        }
         const int wanted = (int) std::min<int64_t>(65536, reader->lengthInSamples - position);
-        reader->read(&block, 0, wanted, position, true, true);
+        if (! reader->read(&block, 0, wanted, position, true, true))
+        {
+            issues.push_back({ ErrorCode::validate_failed,
+                               "The written file could not be decoded to the end", false, {} });
+            return issues;
+        }
         for (int channel = 0; channel < (int) reader->numChannels; ++channel)
             for (int n = 0; n < wanted; ++n)
             {
@@ -283,7 +295,15 @@ OutputResult renderAndPublish(std::unique_ptr<PreparedAudio> prepared, const Out
     auto converted = std::make_unique<ConvertedStream>(std::move(prepared), plan.sampleRate,
                                                        plan.channels, cancel);
     const auto temporary = createBatchTemporary(plan.target);
-    auto encoded = encodeToTemporary(temporary, settings, *converted, cancel);
+    struct TemporaryGuard
+    {
+        juce::File file;
+        ~TemporaryGuard()
+        {
+            if (file.existsAsFile()) file.deleteFile();
+        }
+    } guard { temporary };
+    auto encoded = encodeToTemporary(temporary, settings, *converted, cancel, phase);
     if (! encoded.ok)
     {
         temporary.deleteFile();
@@ -310,7 +330,6 @@ OutputResult renderAndPublish(std::unique_ptr<PreparedAudio> prepared, const Out
                                     true, {} });
     }
 
-    if (phase) phase("Validating");
     if (phase) phase("Publishing");
     const auto published = publishBatchFile(temporary, plan, policy, protection, source, cancel);
     if (! published.ok)

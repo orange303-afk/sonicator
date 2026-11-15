@@ -228,6 +228,7 @@ struct StepOutcome
     bool changed = false;
     juce::String detail;
     double value = 0.0;
+    ErrorCode code = ErrorCode::none;
 };
 
 struct OutputResult

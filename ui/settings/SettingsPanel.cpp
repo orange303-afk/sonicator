@@ -210,7 +210,7 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     creditsHeading.setText("TECHNOLOGY & CREDITS", juce::dontSendNotification);
     creditsHeading.setFont(sectionFont());
     creditsText.setText(juce::String::fromUTF8(
-        "JUCE 9.0.5  ·  SQLite 3.47.2  ·  libxmp 4.6.2  ·  ONNX Runtime 1.20.1  ·  Catch2 (tests)\n"
+        "JUCE 9.0.5  ·  SQLite 3.47.2  ·  libxmp 4.6.2  ·  libsamplerate 0.2.2  ·  ONNX Runtime 1.20.1  ·  Catch2 (tests)\n"
         "\n"
         "Analysis: own DSP - YIN pitch, chroma key, spectral-flux rhythm, adaptive prototypes. "
         "REX2 decoder based on VelociLoops (Unlicense).\n"

@@ -186,7 +186,11 @@ private:
     bool batchClosePending = false;
     bool batchPreviewWasRunning = false;
     juce::File batchPreviewRestore;
+    juce::File batchPreviewFolder;
+    batch::Request pendingBatchRequest;
     bool batchPreviewAuditioned = false;
+    bool pendingBatchLaunch = false;
+    bool pendingPreviewStop = false;
     std::unique_ptr<ExtractService> extractor;
     std::unique_ptr<NormalizeService> normalizer;
     // Poll on the message thread; join before destroying/replacing the catalog repositories.
@@ -332,6 +336,7 @@ private:
     void startSplit(const std::vector<juce::File>& files);
     void openBatchProcessing(const batch::SourceSelection&);
     void startBatchProcessing();
+    void launchBatch(batch::Request);
     void startBatchPreview(const batch::SourceSnapshot&, const batch::Recipe&, int generation);
     void auditionBatchPreview(const juce::File&, bool processed);
     void stopBatchPreview();

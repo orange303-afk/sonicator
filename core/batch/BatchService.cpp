@@ -48,6 +48,7 @@ juce::var outputVar(const OutputResult& result)
         stepObject->setProperty("changed", step.changed);
         stepObject->setProperty("detail", step.detail);
         stepObject->setProperty("value", step.value);
+        stepObject->setProperty("code", errorCodeName(step.code));
         steps.add(juce::var(stepObject.release()));
     }
     object->setProperty("steps", steps);
@@ -168,6 +169,13 @@ void BatchService::run()
                 result.code = ErrorCode::conflict_skipped;
                 result.message = "The output already exists and Skip was chosen";
             }
+            else if (const auto free = freeBytesFor(plan.target.getParentDirectory());
+                     free >= 0 && free < plan.estimatedBytes + spaceReserveBytes)
+            {
+                result.state = OutputState::failed;
+                result.code = ErrorCode::insufficient_space;
+                result.message = "Not enough free space for this output";
+            }
             else
             {
                 {
@@ -222,6 +230,28 @@ void BatchService::run()
         local.skippedSources.push_back({ ErrorCode::encode_failed,
                                          juce::String("The worker stopped: ") + error.what(),
                                          false, {} });
+    }
+    for (size_t index = local.outputs.size(); index < batch.outputs.size(); ++index)
+    {
+        const auto& plan = batch.outputs[index];
+        const auto& source = batch.sources[plan.sourceIndex];
+        OutputResult missing;
+        missing.outputIndex = index;
+        missing.sampleId = source.sampleId;
+        missing.source = source.path;
+        missing.target = plan.target;
+        missing.format = plan.format;
+        missing.bits = plan.bits;
+        missing.sampleRate = plan.sampleRate;
+        missing.channels = plan.channels;
+        missing.state = OutputState::cancelled;
+        missing.code = ErrorCode::cancelled;
+        missing.message = "The worker stopped before this output";
+        missing.startedMs = juce::Time::currentTimeMillis();
+        missing.finishedMs = missing.startedMs;
+        if (plan.sourceIndex < local.sources.size()) ++local.sources[plan.sourceIndex].cancelled;
+        ++local.cancelled;
+        local.outputs.push_back(std::move(missing));
     }
     local.finishedMs = juce::Time::currentTimeMillis();
     if (reportFolder.getFullPathName().isNotEmpty())

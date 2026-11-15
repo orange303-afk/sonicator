@@ -2798,6 +2798,16 @@ void MainComponent::openBatchProcessing(const batch::SourceSelection& selection)
     }
     batch::Request request;
     request.sources = selection;
+    if (preview.hasUnsavedEdits() && selection.kind == batch::SourceSelection::Kind::rows)
+    {
+        const auto unsaved = preview.loadedFilePath();
+        for (const auto id : selection.rows)
+        {
+            const auto record = readRepo->findById(id);
+            if (record.has_value() && juce::File(record->filePath) == unsaved)
+                request.sources.unsavedEditedRows.push_back(id);
+        }
+    }
     batch::PreflightResult prepared;
     try { prepared = batch::prepareBatch(*readRepo, request, {}); }
     catch (const std::exception& error)
@@ -2922,18 +2932,68 @@ void MainComponent::openBatchProcessing(const batch::SourceSelection& selection)
 void MainComponent::startBatchProcessing()
 {
     if (batchContent == nullptr || readRepo == nullptr || isBatchRunning()) return;
-    if (preview.hasUnsavedEdits())
-    {
-        batchContent->setPreviewStatus("Save or discard the editor changes before starting a batch.");
-        return;
-    }
     batch::Request request;
     request.sources = batchContent->selection();
     request.recipe = batchContent->currentRecipe();
     request.conflicts = batchContent->conflictPolicy();
     request.destination = batchContent->destination();
-    request.replacementConfirmed = request.conflicts == batch::ConflictPolicy::replaceOutput;
-    auto prepared = batch::prepareBatch(*readRepo, request, {});
+    if (request.conflicts == batch::ConflictPolicy::replaceOutput)
+    {
+        batch::PreflightResult check;
+        try { check = batch::replanBatch(batchContent->prepared(), request, {}); }
+        catch (const std::exception& error)
+        {
+            batchContent->setPreviewStatus("Batch preflight failed: "
+                + juce::String::fromUTF8(error.what()));
+            return;
+        }
+        int replacements = 0;
+        for (const auto& issue : check.issues)
+            if (issue.code == batch::ErrorCode::replacement_not_confirmed) ++replacements;
+        if (replacements > 0)
+        {
+            auto captured = request;
+            juce::AlertWindow::showOkCancelBox(juce::MessageBoxIconType::QuestionIcon,
+                "Replace existing outputs",
+                juce::String(replacements)
+                    + " existing output file(s) will be replaced. A file that changed since "
+                      "preflight is refused, never overwritten.\n\nReplace them?",
+                "Replace", "Cancel", this,
+                juce::ModalCallbackFunction::create(
+                    [safe = juce::Component::SafePointer<MainComponent>(this), captured](int choice) mutable
+                    {
+                        if (safe == nullptr || choice == 0) return;
+                        captured.replacementConfirmed = true;
+                        safe->launchBatch(std::move(captured));
+                    }));
+            return;
+        }
+    }
+    request.replacementConfirmed = true;
+    launchBatch(std::move(request));
+}
+
+void MainComponent::launchBatch(batch::Request request)
+{
+    if (batchContent == nullptr || isBatchRunning()) return;
+    if (batchPreview != nullptr && batchPreview->isRunning())
+    {
+        // Start never blocks the message thread on the preview worker: cancel it and let the
+        // timer launch the job once that thread has stopped.
+        batchPreview->cancel();
+        pendingBatchRequest = std::move(request);
+        pendingBatchLaunch = true;
+        batchContent->setPreviewStatus("Stopping the preview before Start...");
+        return;
+    }
+    batch::PreflightResult prepared;
+    try { prepared = batch::replanBatch(batchContent->prepared(), request, {}); }
+    catch (const std::exception& error)
+    {
+        batchContent->setPreviewStatus("Batch preflight failed: "
+            + juce::String::fromUTF8(error.what()));
+        return;
+    }
     if (! prepared.ok)
     {
         juce::String message;
@@ -2952,25 +3012,30 @@ void MainComponent::startBatchProcessing()
     }
     batchWasRunning = true;
     batchContent->setRunning(true);
-    closeSplitDialog();
     status.setText("Batch Processing started", juce::dontSendNotification);
 }
 
 void MainComponent::startBatchPreview(const batch::SourceSnapshot& snapshot,
                                       const batch::Recipe& recipe, int generation)
 {
-    if (batchContent == nullptr) return;
+    if (batchContent == nullptr || isBatchRunning()) return;
     if (preview.hasUnsavedEdits())
     {
         batchContent->setPreviewStatus("Save or discard the editor changes before auditioning.");
         return;
     }
-    stopBatchPreview();
+    if (batchPreview != nullptr && batchPreview->isRunning())
+    {
+        batchContent->setPreviewStatus("A preview is still running; stop it first.");
+        return;
+    }
+    if (batchPreview != nullptr) batchPreview.reset();
+    if (batchPreviewFolder != juce::File()) batchPreviewFolder.deleteRecursively();
     if (! batchPreviewRestore.existsAsFile() && preview.loadedFilePath().existsAsFile())
         batchPreviewRestore = preview.loadedFilePath();
     batchPreview = std::make_unique<batch::BatchPreviewService>();
-    const auto folder = settingsStore.file().getParentDirectory().getChildFile("batch-preview");
-    if (! batchPreview->start(snapshot, recipe, generation, folder))
+    batchPreviewFolder = settingsStore.file().getParentDirectory().getChildFile("batch-preview");
+    if (! batchPreview->start(snapshot, recipe, generation, batchPreviewFolder))
     {
         batchPreview.reset();
         batchContent->setPreviewStatus("Only one preview can run at a time.");
@@ -2993,10 +3058,11 @@ void MainComponent::auditionBatchPreview(const juce::File& file, bool processed)
 
 void MainComponent::stopBatchPreview()
 {
-    if (batchPreview != nullptr)
+    if (batchPreview != nullptr && batchPreview->isRunning())
     {
         batchPreview->cancel();
-        if (batchPreview->waitUntilFinished(2000)) batchPreview.reset();
+        pendingPreviewStop = true;
+        return;
     }
     preview.stopPlayback();
     if (batchPreviewAuditioned && batchPreviewRestore.existsAsFile())
@@ -3004,6 +3070,18 @@ void MainComponent::stopBatchPreview()
         preview.loadFile(batchPreviewRestore, false);
         batchPreviewAuditioned = false;
     }
+    if (batchPreview != nullptr)
+    {
+        const auto result = batchPreview->takeResult();
+        juce::ignoreUnused(result);
+        batchPreview.reset();
+    }
+    if (batchPreviewFolder != juce::File())
+    {
+        batchPreviewFolder.deleteRecursively();
+        batchPreviewFolder = juce::File();
+    }
+    pendingPreviewStop = false;
 }
 
 void MainComponent::closeBatchDialog()
@@ -3012,9 +3090,20 @@ void MainComponent::closeBatchDialog()
     {
         if (batchService != nullptr) batchService->cancel();
         batchClosePending = true;
+    }
+    if (batchPreview != nullptr && batchPreview->isRunning())
+    {
+        batchPreview->cancel();
+        pendingPreviewStop = true;
+        batchClosePending = true;
         return;
     }
     stopBatchPreview();
+    if (isBatchRunning() || batchClosePending)
+    {
+        batchClosePending = true;
+        return;
+    }
     if (batchDialog != nullptr)
     {
         batchDialog->exitModalState(0);
@@ -4858,14 +4947,38 @@ void MainComponent::timerCallback()
             if (report.completed > 0) requestFolderTreeRefresh();
         }
     }
-    if (batchClosePending && ! isBatchRunning()) closeBatchDialog();
     if (batchPreview != nullptr && batchPreviewWasRunning && ! batchPreview->isRunning())
     {
         const auto previewResult = batchPreview->takeResult();
-        if (batchContent != nullptr) batchContent->setPreviewReady(previewResult, false);
         batchPreviewWasRunning = false;
         batchPreview.reset();
+        const bool discard = pendingPreviewStop || batchClosePending;
+        if (! discard && batchContent != nullptr) batchContent->setPreviewReady(previewResult, false);
+        if (discard)
+        {
+            preview.stopPlayback();
+            if (batchPreviewAuditioned && batchPreviewRestore.existsAsFile())
+            {
+                preview.loadFile(batchPreviewRestore, false);
+                batchPreviewAuditioned = false;
+            }
+            pendingPreviewStop = false;
+        }
+        if (batchPreviewFolder != juce::File())
+        {
+            batchPreviewFolder.deleteRecursively();
+            batchPreviewFolder = juce::File();
+        }
+        if (pendingBatchLaunch)
+        {
+            auto request = pendingBatchRequest;
+            pendingBatchLaunch = false;
+            launchBatch(std::move(request));
+        }
     }
+    if (batchClosePending && ! isBatchRunning()
+        && (batchPreview == nullptr || ! batchPreview->isRunning()))
+        closeBatchDialog();
     if (p.running)
     {
         const auto now = juce::Time::getMillisecondCounter();

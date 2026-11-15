@@ -127,10 +127,37 @@ TEST_CASE("A save failure keeps the previous preset file", "[batch][batch-preset
     const auto file = folder.getChildFile("batch-presets.json");
     BatchPresetStore store(file);
     REQUIRE(store.save(customPreset()).ok);
+    BatchPreset healthy = customPreset();
+    healthy.name = "Keep me";
+    healthy.recipe.steps = { { true, Normalize { -1.0 } } };
+    REQUIRE(store.save(healthy).ok);
     const auto before = file.loadFileAsString();
     // An unknown step type in the stored document must be reported, not silently dropped.
     file.replaceWithText(before.replace("\"gain\"", "\"futureStep\""));
     const auto loaded = store.load();
-    REQUIRE_FALSE(loaded.ok);
+    // One unusable preset is reported, the healthy presets stay readable and the file is intact.
+    REQUIRE(loaded.ok);
+    REQUIRE(loaded.error.contains("futureStep"));
+    REQUIRE(loaded.presets.size() == 3);
     REQUIRE(file.loadFileAsString().contains("futureStep"));
+}
+
+TEST_CASE("An invalid recipe is refused before it can corrupt the preset file",
+          "[batch][batch-presets]")
+{
+    TestDirectory t;
+    const auto file = t.dir.getChildFile("settings/batch-presets.json");
+    BatchPresetStore store(file);
+    REQUIRE(store.save(customPreset()).ok);
+    const auto before = file.loadFileAsString();
+    BatchPreset invalid = customPreset();
+    invalid.name = "Broken";
+    invalid.recipe.outputs.clear();
+    invalid.recipe.steps = { { true, Gain { 100.0 } } };
+    const auto saved = store.save(invalid);
+    REQUIRE_FALSE(saved.ok);
+    REQUIRE(file.loadFileAsString() == before);
+    const auto loaded = store.load();
+    REQUIRE(loaded.ok);
+    REQUIRE(loaded.presets.size() == 3);
 }

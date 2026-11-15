@@ -54,9 +54,10 @@ explicit 16/24-bit choice instead of silently rounding. WAV/AIFF payloads at or 
 container limit are refused before writing.
 
 Names default to `<stem> processed.<ext>` next to each original, or in the chosen folder while
-preserving the path below the source root. A batch from several registered roots gets a stable
+preserving the path below the selected folder (row selections use their registered root). A batch from several registered roots gets a stable
 `<root-name>-<hash8>` group. Existing outputs are renamed (`processed 2`, `processed 3`, ...),
-skipped, or replaced only after an explicit confirmation and only if the old file is unchanged.
+skipped, or replaced only after a confirmation that names the exact count and only if the old file
+is unchanged.
 No policy can replace an input, a hard-link alias or a symbolic-link target.
 
 ## Safety
@@ -82,7 +83,8 @@ No policy can replace an input, a hard-link alias or a symbolic-link target.
 ## Preview
 
 Preview measures the global chain parameters on the whole selected source in a worker, then writes
-a dry and a processed WAV float (at most 10 seconds each) starting at the first frame that survives
+a dry and a processed WAV float (at most 10 seconds each; deleted when the preview stops or the
+dialog closes) starting at the first frame that survives
 Trim. Playback uses the existing AudioEngine; no second audio device is created. The processed
 preview skips integer dither and codec round-trip, and says so. After the preview, the previously
 loaded source is restored without autoplay.

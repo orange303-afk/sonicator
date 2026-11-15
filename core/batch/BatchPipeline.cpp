@@ -118,9 +118,9 @@ float fadeCoefficient(int64_t n, int64_t total, int64_t fadeFrames, bool fadeOut
 
 PreparedAudio::PreparedAudio(std::unique_ptr<juce::AudioFormatReader> input, int sampleRate,
                              int channels, int64_t frames, std::vector<StageSpec> stageSpecs,
-                             std::vector<StepOutcome> stepOutcomes)
+                             std::vector<StepOutcome> stepOutcomes, CancelCheck cancel)
     : reader(std::move(input)), rate(sampleRate), channelCount(channels), sourceFrames(frames),
-      stages(std::move(stageSpecs)), outcomes(std::move(stepOutcomes))
+      stages(std::move(stageSpecs)), outcomes(std::move(stepOutcomes)), cancelCheck(std::move(cancel))
 {
     runtime.resize(stages.size());
     working.setSize(std::max(1, channelCount), (int) blockFrames);
@@ -149,7 +149,7 @@ void PreparedAudio::resetChain()
 ReadResult PreparedAudio::readBlock(int capacity, int& produced, CancelCheck cancel)
 {
     produced = 0;
-    if (cancel && cancel()) return cancelledResult();
+    if (cancelCheck && cancelCheck()) return cancelledResult();
     if (reader == nullptr) return errorResult(ErrorCode::decode_failed, "The source reader is closed");
     while (produced < capacity && sourcePosition < sourceFrames)
     {
@@ -365,6 +365,7 @@ PrepareAudioResult prepareAudio(const SourceSnapshot& source, const Recipe& reci
             {
                 outcome.detail = "The prepared stream is silent; its length is unchanged";
                 outcome.changed = false;
+                outcome.code = ErrorCode::silent_trim_unchanged;
             }
             else
             {
@@ -445,7 +446,7 @@ PrepareAudioResult prepareAudio(const SourceSnapshot& source, const Recipe& reci
     if (finalReader == nullptr) return fail(ErrorCode::decode_failed, "The source cannot be decoded");
     result.audio = std::make_unique<PreparedAudio>(std::move(finalReader), source.sampleRate,
                                                    source.channels, source.frames, std::move(specs),
-                                                   std::move(outcomes));
+                                                   std::move(outcomes), cancel);
     result.ok = true;
     return result;
 }

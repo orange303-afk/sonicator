@@ -153,8 +153,8 @@ BatchProcessingDialog::BatchProcessingDialog(PreparedBatch prepared, juce::File 
     presetBox.onChange = [this]
     {
         const int selected = presetBox.getSelectedId();
-        if (selected > 0) loadPreset(presetBox.getItemText(presetBox.getSelectedItemIndex())
-                                         .replace(" (built-in)", ""));
+        if (selected > 0 && selected <= (int) presetIds.size())
+            loadPreset(presetIds[(size_t) selected - 1]);
     };
     addAndMakeVisible(addStepButton);
     addAndMakeVisible(savePresetButton);
@@ -455,17 +455,21 @@ void BatchProcessingDialog::rebuildSteps()
 void BatchProcessingDialog::rebuildPresets()
 {
     presetBox.clear(juce::dontSendNotification);
+    presetIds.clear();
     const auto loaded = presetStore.load();
     for (const auto& preset : loaded.presets)
+    {
         presetBox.addItem(preset.name + (preset.builtIn ? " (built-in)" : ""),
                           presetBox.getNumItems() + 1);
+        presetIds.push_back(preset.id);
+    }
 }
 
-void BatchProcessingDialog::loadPreset(const juce::String& name)
+void BatchProcessingDialog::loadPreset(const juce::String& id)
 {
     const auto loaded = presetStore.load();
     for (const auto& preset : loaded.presets)
-        if (preset.name == name)
+        if (preset.id == id)
         {
             steps = preset.recipe.steps;
             wavToggle.setToggleState(false, juce::dontSendNotification);
@@ -547,19 +551,16 @@ void BatchProcessingDialog::savePreset()
 void BatchProcessingDialog::deletePreset()
 {
     const int selected = presetBox.getSelectedItemIndex();
-    if (selected < 0) return;
-    const auto name = presetBox.getItemText(selected);
-    const auto loaded = presetStore.load();
-    for (const auto& preset : loaded.presets)
-        if (preset.name == name)
-        {
-            const auto result = presetStore.remove(preset.id);
+    if (selected < 0 || selected >= (int) presetIds.size()) return;
+    const auto id = presetIds[(size_t) selected];
+    {
+            const auto result = presetStore.remove(id);
             if (! result.ok)
                 juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
                                                        "Preset not removed", result.error);
             rebuildPresets();
             return;
-        }
+    }
 }
 
 void BatchProcessingDialog::addStep(int type)
@@ -683,7 +684,16 @@ void BatchProcessingDialog::setRunning(bool value)
     running = value;
     finished = false;
     reportShown = false;
-    for (auto& row : rows) row->setEnabled(! value);
+    const bool enabled = ! value;
+    for (auto& row : rows) row->setEnabled(enabled);
+    juce::Component* controls[] { &addStepButton, &presetBox, &savePresetButton,
+        &deletePresetButton, &wavToggle, &aiffToggle, &flacToggle, &wavDepth, &aiffDepth,
+        &flacDepth, &flacLevel, &rateBox, &channelBox, &ditherBox, &conflictBox,
+        &allowClipping, &nextToSources, &browseFolder, &previewSource, &preparePreview };
+    for (auto* control : controls) control->setEnabled(enabled);
+    playDry.setEnabled(enabled && dryFile.existsAsFile() && ! previewStale);
+    playWet.setEnabled(enabled && wetFile.existsAsFile() && ! previewStale);
+    outputFolder.setEnabled(enabled && ! nextToSources.getToggleState());
     startButton.setEnabled(! value && canStart());
     cancelButton.setButtonText(value ? "Cancel job" : "Cancel");
     progressBar.setVisible(value);
@@ -725,6 +735,10 @@ void BatchProcessingDialog::showReport(const Report& result)
 void BatchProcessingDialog::setPreviewReady(const PreviewResult& result, bool stale)
 {
     showingPreview = false;
+    stale = stale || result.generation != previewGeneration
+        || (previewFingerprint.isNotEmpty()
+            && recipeFingerprint(currentRecipe()) != previewFingerprint);
+    previewStale = stale;
     previewGeneration = result.generation;
     if (! result.ok)
     {
@@ -737,8 +751,8 @@ void BatchProcessingDialog::setPreviewReady(const PreviewResult& result, bool st
     }
     dryFile = result.dry;
     wetFile = result.wet;
-    playDry.setEnabled(dryFile.existsAsFile());
-    playWet.setEnabled(wetFile.existsAsFile());
+    playDry.setEnabled(! stale && dryFile.existsAsFile());
+    playWet.setEnabled(! stale && wetFile.existsAsFile());
     previewStatus.setText("Dry " + juce::String(result.dryInfo.frames) + " frames, peak "
         + juce::String(result.dryInfo.peak, 3) + ", DC " + juce::String(result.dryInfo.dc, 5)
         + " | wet " + juce::String(result.wetInfo.frames) + " frames, peak "
@@ -773,6 +787,8 @@ void BatchProcessingDialog::startPreview()
     wetFile = juce::File();
     playDry.setEnabled(false);
     playWet.setEnabled(false);
+    previewStale = false;
+    previewFingerprint = recipeFingerprint(recipe);
     showingPreview = true;
     ++previewGeneration;
     previewStatus.setText("Analyzing the whole source...", juce::dontSendNotification);
@@ -783,6 +799,14 @@ void BatchProcessingDialog::refreshFooter()
 {
     if (controlRefresh) return;
     controlRefresh = true;
+    if (dryFile.existsAsFile() && previewFingerprint.isNotEmpty()
+        && recipeFingerprint(currentRecipe()) != previewFingerprint)
+    {
+        previewStale = true;
+        playDry.setEnabled(false);
+        playWet.setEnabled(false);
+        previewStatus.setText("Preview settings changed; prepare it again", juce::dontSendNotification);
+    }
     const auto message = validationMessage();
     juce::String text = juce::String((int) batch.sources.size()) + " source(s), "
         + juce::String((int) expectedOutputs()) + " expected output(s)";
@@ -790,13 +814,21 @@ void BatchProcessingDialog::refreshFooter()
     else
     {
         const auto recipe = currentRecipe();
-        const auto plan = outputFrameEstimate(
-            batch.sources.empty() ? 0 : batch.sources.front().frames,
-            batch.sources.empty() ? 44100 : batch.sources.front().sampleRate,
-            recipe.sampleRate > 0 ? recipe.sampleRate
-                                  : (batch.sources.empty() ? 44100 : batch.sources.front().sampleRate));
-        juce::ignoreUnused(plan);
-        const auto bytes = (double) batch.estimatedBytes / (1024.0 * 1024.0);
+        int64_t estimate = 0;
+        for (const auto& source : batch.sources)
+            for (const auto& output : recipe.outputs)
+            {
+                const int rate = recipe.sampleRate > 0 ? recipe.sampleRate : source.sampleRate;
+                const int channels = recipe.channels == ChannelMode::mono ? 1
+                    : recipe.channels == ChannelMode::stereo ? 2 : source.channels;
+                const auto frames = outputFrameEstimate(source.frames, source.sampleRate, rate);
+                int bits = 24;
+                if (output.encoding == Encoding::int16) bits = 16;
+                else if (output.encoding == Encoding::float32) bits = 32;
+                else if (output.encoding == Encoding::sameAsSource) bits = source.bits;
+                estimate += outputByteEstimate(frames, channels, bits);
+            }
+        const auto bytes = (double) estimate / (1024.0 * 1024.0);
         text += "  |  about " + juce::String(bytes, 1) + " MiB";
     }
     summary.setText(text, juce::dontSendNotification);

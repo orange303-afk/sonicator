@@ -166,3 +166,28 @@ TEST_CASE("Batch commands are registered without default hotkeys", "[batch][batc
     REQUIRE_FALSE(registry.state("folders.batchProcess").canRun());
     AppSettings::setTestSettingsDirectory({});
 }
+
+TEST_CASE("A running batch freezes configuration and preview controls", "[batch][batch-dialog]")
+{
+    TestDirectory t;
+    const auto lib = t.dir.getChildFile("Library");
+    lib.createDirectory();
+    const auto source = t.wave("Library/run.wav");
+    Database db(t.dir.getChildFile("catalog.sqlite"));
+    SampleRepository repo(db);
+    repo.createTables();
+    repo.addRoot(lib.getFullPathName());
+    const auto id = repo.upsert(recordFor(source));
+    Request request;
+    request.sources.rows = { id };
+    const auto prepared = prepareBatch(repo, request, {});
+    REQUIRE(prepared.ok);
+    BatchProcessingDialog dialog(prepared.batch, t.dir.getChildFile("settings/batch-presets.json"));
+    dialog.setRunning(true);
+    REQUIRE_FALSE(child<juce::TextButton>(dialog, "batchStart")->isEnabled());
+    REQUIRE_FALSE(child<juce::TextButton>(dialog, "batchPreparePreview")->isEnabled());
+    REQUIRE_FALSE(child<juce::ToggleButton>(dialog, "batchFormatFlac")->isEnabled());
+    REQUIRE(child<juce::TextButton>(dialog, "batchCancel")->isEnabled());
+    dialog.setRunning(false);
+    REQUIRE(child<juce::TextButton>(dialog, "batchStart")->isEnabled());
+}
