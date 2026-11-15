@@ -80,3 +80,10 @@ target_sources(SonicatorTests PRIVATE TestCustomGenres.cpp)
 target_sources(SonicatorTests PRIVATE TestCatalogSort.cpp)
 target_sources(SonicatorTests PRIVATE TestWorkspaceStudio.cpp)
 target_sources(SonicatorTests PRIVATE TestBatchPreflight.cpp TestBatchPipeline.cpp TestBatchResampler.cpp TestBatchPublish.cpp TestBatchService.cpp TestBatchPresets.cpp TestBatchPreview.cpp TestBatchSplit.cpp TestBatchDialog.cpp)
+# The plugin sources are part of the test binary: the processor and editor are exercised with the
+# same shared catalog and settings the host build uses. PluginFactory.cpp stays out so the test
+# executable defines no createPluginFilter.
+target_sources(SonicatorTests PRIVATE TestPlugin.cpp
+    ${CMAKE_SOURCE_DIR}/plugin/PluginState.cpp
+    ${CMAKE_SOURCE_DIR}/plugin/PluginProcessor.cpp
+    ${CMAKE_SOURCE_DIR}/plugin/PluginEditor.cpp)

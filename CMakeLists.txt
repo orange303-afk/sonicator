@@ -226,9 +226,9 @@ option(SONICATOR_BUILD_TRAINING_TOOLS "Build the training feature extraction too
 if(SONICATOR_BUILD_TRAINING_TOOLS)
     add_subdirectory(tools/sonicator-features)
 endif()
-# Technical spike for the VST3/AU plugin: off by default, no effect on the application build.
-option(SONICATOR_BUILD_PLUGIN_SPIKE "Build the VST3/AU plugin spike" OFF)
-if(SONICATOR_BUILD_PLUGIN_SPIKE)
+# The VST3/AU plugin: off by default, no effect on the application build.
+option(SONICATOR_BUILD_PLUGIN "Build the VST3/AU plugin" OFF)
+if(SONICATOR_BUILD_PLUGIN)
     add_subdirectory(plugin)
 endif()
 juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"

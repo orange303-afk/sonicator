@@ -49,6 +49,14 @@ private:
     void timerCallback() override;
     bool active = false, lit = true;
 };
+// Project state a DAW host hands to an embedded window. The application keeps the same fields in
+// settings.json; a plugin project owns its own copy and receives every selection change back.
+struct EmbeddedSession
+{
+    juce::String lastFolder;
+    juce::String lastSamplePath;
+    std::function<void(const juce::String& folder, const juce::String& sample)> onChanged;
+};
 class FavoritesSplitter final : public juce::Component
 {
 public:
@@ -81,12 +89,15 @@ public:
     const PanelLayoutBounds& currentLayout() const { return layoutBounds; }
     // hostEngine and embeddedUi are used by the DAW plugin: the processor owns the audio engine
     // (no device is opened) and dialogs render inside the editor instead of separate windows.
+    // embeddedSession supplies the project's last folder/sample and receives changes back; the
+    // embedded window never reads or writes the application's session fields.
     explicit MainComponent(const juce::File& databaseFile = defaultDatabaseFile(),
                            bool openDevice = true,
                            AppSettings initialSettings = {},
                            juce::File settingsFile = {},
                            AudioEngine* hostEngine = nullptr,
-                           bool embeddedUi = false);
+                           bool embeddedUi = false,
+                           EmbeddedSession embeddedSession = {});
     ~MainComponent() override;
     void paint(juce::Graphics& g) override;
     // Asks about unsaved edits before quitting; `done(true)` means it is safe to leave.
@@ -116,6 +127,9 @@ public:
     void persistPreviewSettings();
     // Writes the pending last folder/file immediately. Used by shutdown and session tests.
     void flushSessionState();
+    // Current selection, so an embedded editor can store it in the DAW project on close.
+    juce::String selectedFolderPath() const { return selectedFolder; }
+    juce::String selectedSamplePath() const { return sessionSamplePath; }
     // Rebuilds the library and favorites trees off the message thread and installs the result.
     void requestFolderTreeRefresh();
     void applyFolderIndex(FolderIndex);
@@ -135,6 +149,7 @@ private:
     AudioEngine ownedEngine;
     AudioEngine& engine;
     bool embeddedUi = false;
+    EmbeddedSession embeddedSession;
     PreviewPanel preview;
     FileListPanel library;
     FolderTree folders;

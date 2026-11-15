@@ -347,9 +347,13 @@ void MainComponent::registerCommands()
         auto state = [this, action]() -> CommandState
         {
             if (action == EditAction::normalizeSelected)
+            {
+                if (embeddedUi)
+                    return CommandState::unavailable("Normalize selection runs in the SONICATOR app");
                 return (! library.getSelectedSamples().empty() && ! isNormalizeRunning())
                     ? CommandState::ready()
                     : CommandState::unavailable("Select one or more ordinary files");
+            }
             return preview.sourceIsEditable() ? CommandState::ready()
                                               : CommandState::unavailable("No editable audio in the preview");
         };
@@ -432,6 +436,8 @@ void MainComponent::registerCommands()
         spec.category = "Library";
         auto state = [this]() -> CommandState
         {
+            if (embeddedUi)
+                return CommandState::unavailable("Batch Processing runs in the SONICATOR app");
             if (library.getSelectedSamples().empty())
                 return CommandState::unavailable("Select one or more files");
             if (isBatchRunning())
@@ -457,6 +463,8 @@ void MainComponent::registerCommands()
         spec.category = "Folders";
         auto state = [this]() -> CommandState
         {
+            if (embeddedUi)
+                return CommandState::unavailable("Batch Processing runs in the SONICATOR app");
             if (selectedFolder.isEmpty())
                 return CommandState::unavailable("Select a catalogued folder");
             if (isBatchRunning())
@@ -598,16 +606,20 @@ bool MainComponent::dispatchCommandKey(const juce::KeyPress& key)
     return commandRouter->dispatch(key, commandFocus());
 }
 MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppSettings initialSettings,
-                             juce::File settingsFile,AudioEngine* hostEngine,bool embeddedUiMode)
+                             juce::File settingsFile,AudioEngine* hostEngine,bool embeddedUiMode,
+                             EmbeddedSession sessionState)
     : dbPath(databaseFile), appSettings(std::move(initialSettings)),
       settingsStore(settingsFile != juce::File() ? std::move(settingsFile) : AppSettings::nextUiSettingsFile()),
       ownedEngine(openDevice && hostEngine == nullptr),
       engine(hostEngine != nullptr ? *hostEngine : ownedEngine),
       embeddedUi(embeddedUiMode),
+      embeddedSession(std::move(sessionState)),
       preview(engine,dbPath.getParentDirectory().getChildFile("cache"))
 {
     theme::apply(appSettings.theme);
-    persistSessionState = juce::JUCEApplicationBase::getInstance() != nullptr;
+    // A DAW project owns its own session; only the standalone application may write the shared
+    // settings file, register system packs or contact the contribution endpoint.
+    persistSessionState = ! embeddedUi && juce::JUCEApplicationBase::getInstance() != nullptr;
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
     for (auto* c : std::array<juce::Component*,34>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
@@ -882,13 +894,20 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         menu.setLookAndFeel(&look);
         // Keep every item clickable even while a background job runs. The actions report what to
         // wait for instead of leaving the whole menu grey and apparently broken.
-        menu.addItem(1, "Add folder...");
-        menu.addItem(2, "Rescan");
-        menu.addItem(3, "Rescan and analyze new files");
-        menu.addSeparator();
-        menu.addItem(4, "Reanalyze all");
-        menu.addItem(5, "Smart metadata");
-        menu.addSeparator();
+        if (embeddedUi)
+        {
+            menu.addSectionHeader("Scanning and file processing run in the SONICATOR app");
+        }
+        else
+        {
+            menu.addItem(1, "Add folder...");
+            menu.addItem(2, "Rescan");
+            menu.addItem(3, "Rescan and analyze new files");
+            menu.addSeparator();
+            menu.addItem(4, "Reanalyze all");
+            menu.addItem(5, "Smart metadata");
+            menu.addSeparator();
+        }
         menu.addItem(6, "Show ignored", true, filter.showIgnored);
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraryMenu),
             [safe = juce::Component::SafePointer<MainComponent>(this)](int result)
@@ -1038,18 +1057,22 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         extractor = std::make_unique<ExtractService>();
         normalizer = std::make_unique<NormalizeService>();
         restoringSession = true;
-        if (! appSettings.lastFolder.isEmpty()
-            && juce::File(appSettings.lastFolder).isDirectory()
-            && readRepo->countInFolder(appSettings.lastFolder) > 0)
-            selectedFolder = appSettings.lastFolder;
+        // A plugin restores its own project, never the application's last session.
+        const auto initialFolder = embeddedUi ? embeddedSession.lastFolder : appSettings.lastFolder;
+        const auto initialSample = embeddedUi ? embeddedSession.lastSamplePath
+                                              : appSettings.lastSamplePath;
+        if (! initialFolder.isEmpty()
+            && juce::File(initialFolder).isDirectory()
+            && readRepo->countInFolder(initialFolder) > 0)
+            selectedFolder = initialFolder;
         pendingTreeSelection = selectedFolder;
         requestFolderTreeRefresh();
         refreshFavorites();   // the favorites panel follows its visibility at once; its content
                               // arrives with the background build
         reloadLibrary();
-        if (! appSettings.lastSamplePath.isEmpty())
+        if (! initialSample.isEmpty())
         {
-            if (const auto record = readRepo->findByPath(appSettings.lastSamplePath))
+            if (const auto record = readRepo->findByPath(initialSample))
             {
                 const bool inScope = selectedFolder.isEmpty()
                     || juce::File(record->filePath).isAChildOf(juce::File(selectedFolder));
@@ -1098,9 +1121,16 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         status.setText("Audio device: " + engine.error(),juce::dontSendNotification);
     }
     pause.setEnabled(false); cancel.setEnabled(false);
-    addFolder.setEnabled(indexer != nullptr); rescan.setEnabled(indexer != nullptr);
-    reanalyze.setEnabled(indexer != nullptr); newFiles.setEnabled(indexer != nullptr);
-    smartButton.setEnabled(indexer != nullptr);
+    // A plugin browses the shared library; scanning, analysis and file processing stay in the
+    // application, so two processes never run long writes against one catalog.
+    addFolder.setEnabled(indexer != nullptr && ! embeddedUi);
+    rescan.setEnabled(indexer != nullptr && ! embeddedUi);
+    reanalyze.setEnabled(indexer != nullptr && ! embeddedUi);
+    newFiles.setEnabled(indexer != nullptr && ! embeddedUi);
+    smartButton.setEnabled(indexer != nullptr && ! embeddedUi);
+    if (embeddedUi)
+        for (auto* button : { &addFolder, &rescan, &reanalyze, &newFiles, &smartButton })
+            button->setTooltip("Scanning and file processing run in the SONICATOR app");
     sendLookAndFeelChange();
     addKeyListener(&enterKeyListener);
     startTimerHz(10);
@@ -1290,6 +1320,11 @@ void MainComponent::setTagFilters(std::vector<int64_t> include, std::vector<int6
 }
 void MainComponent::chooseFolder()
 {
+    if (embeddedUi)
+    {
+        status.setText("Adding folders runs in the SONICATOR app.", juce::dontSendNotification);
+        return;
+    }
     chooser = std::make_unique<juce::FileChooser>("Choose a sample folder");
     chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
         [safe = juce::Component::SafePointer<MainComponent>(this)](const juce::FileChooser& fc)
@@ -1300,6 +1335,11 @@ void MainComponent::chooseFolder()
 }
 void MainComponent::beginImport(const juce::File& folder)
 {
+    if (embeddedUi)
+    {
+        status.setText("Adding folders runs in the SONICATOR app.", juce::dontSendNotification);
+        return;
+    }
     if (isSplitRunning())
     {
         status.setText("Wait for Split to finish.", juce::dontSendNotification);
@@ -1410,6 +1450,11 @@ bool MainComponent::removeFolderFromLibrary(const juce::String& path)
 }
 void MainComponent::requestScan(bool reanalyzeAll)
 {
+    if (embeddedUi)
+    {
+        status.setText("Scanning runs in the SONICATOR app.", juce::dontSendNotification);
+        return;
+    }
     if (isSplitRunning())
     {
         status.setText("Wait for Split to finish.", juce::dontSendNotification);
@@ -1446,6 +1491,11 @@ void MainComponent::requestScan(bool reanalyzeAll)
 }
 void MainComponent::scanRoots(bool force, bool newOnly)
 {
+    if (embeddedUi)
+    {
+        status.setText("Scanning runs in the SONICATOR app.", juce::dontSendNotification);
+        return;
+    }
     if (isSplitRunning())
     {
         status.setText("Wait for Split to finish.", juce::dontSendNotification);
@@ -2423,7 +2473,11 @@ void MainComponent::showEditTagsMenu()
 }
 void MainComponent::markSessionStateDirty()
 {
-    if (! restoringSession) sessionDirty = true;
+    if (restoringSession) return;
+    sessionDirty = true;
+    // The plugin stores the same two values in the DAW project instead of settings.json.
+    if (embeddedSession.onChanged != nullptr)
+        embeddedSession.onChanged(selectedFolder, sessionSamplePath);
 }
 void MainComponent::flushSessionState()
 {
@@ -2432,6 +2486,8 @@ void MainComponent::flushSessionState()
 void MainComponent::saveSessionState()
 {
     if (! sessionDirty) return;
+    // An embedded window's session belongs to the DAW project, not to the application's file.
+    if (embeddedUi) return;
     try
     {
         settingsStore.update([this](AppSettings& saved)
@@ -3628,18 +3684,26 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
         && (tagging == nullptr || ! tagging->progress().running)
         && (autoTag == nullptr || ! autoTag->progress().running)
         && ! splitBusy;
-    if (isDiscImage) menu.addItem(7012, "Extract samples...", extractIdle);
-    menu.addItem(7013, "Batch Processing...", catalogued > 0 && ! isBatchRunning() && ! splitBusy);
-    menu.addItem(7002, "Scan folder", indexer != nullptr && ! indexer->progress().running && ! splitBusy);
-    menu.addItem(7003, "Analyze smart metadata (" + juce::String(catalogued) + ")",
-                 smart != nullptr && ! smart->progress().running && ! splitBusy
-                     && (indexer == nullptr || ! indexer->progress().running));
     const bool autoTagIdle = autoTag != nullptr && ! autoTag->progress().running
         && (indexer == nullptr || ! indexer->progress().running)
         && (smart == nullptr || ! smart->progress().running)
         && (tagging == nullptr || ! tagging->progress().running)
         && ! splitBusy;
-    menu.addItem(7004, "AutoTag folder...", autoTagIdle && catalogued > 0);
+    // The plugin browses and tags; jobs that own the catalog or rewrite files stay in the app.
+    if (embeddedUi)
+    {
+        menu.addSectionHeader("Scan, analyze, extract and batch run in the SONICATOR app");
+    }
+    else
+    {
+        if (isDiscImage) menu.addItem(7012, "Extract samples...", extractIdle);
+        menu.addItem(7013, "Batch Processing...", catalogued > 0 && ! isBatchRunning() && ! splitBusy);
+        menu.addItem(7002, "Scan folder", indexer != nullptr && ! indexer->progress().running && ! splitBusy);
+        menu.addItem(7003, "Analyze smart metadata (" + juce::String(catalogued) + ")",
+                     smart != nullptr && ! smart->progress().running && ! splitBusy
+                         && (indexer == nullptr || ! indexer->progress().running));
+        menu.addItem(7004, "AutoTag folder...", autoTagIdle && catalogued > 0);
+    }
     menu.addSeparator();
     menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0 && ! splitBusy);
     const auto genreNames = readRepo->genreNames();
@@ -3649,12 +3713,13 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     genreMenu.addItem(7090, "+ Custom genre...");
     menu.addSubMenu("Set genre...", genreMenu,
                    catalogued > 0 && writeRepo != nullptr && normalizeJobIdle() && ! isNormalizeRunning());
-    menu.addItem(7005, "Reset tags...", catalogued > 0 && autoTagIdle && autoTagDialog == nullptr);
+    menu.addItem(7005, "Reset tags...", ! embeddedUi && catalogued > 0 && autoTagIdle
+                                            && autoTagDialog == nullptr);
     const bool removable = available || readRepo->roots().contains(path);
     if (removable)
     {
         menu.addSeparator();
-        menu.addItem(7008, "Remove from library...", autoTagIdle);
+        menu.addItem(7008, "Remove from library...", autoTagIdle && ! embeddedUi);
     }
     const juce::String folderPath = path;
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&folders).withTargetScreenArea(
@@ -4216,15 +4281,24 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     menu.addItem(9000, "Copy", anyExisting);
     menu.addItem(9009, anyInherited ? "Ignored with folder" : "Ignore",
                  ! anyInherited, allIgnored);
-    menu.addItem(9008, splitCandidates.size() > 1
-        ? "Split by silence (" + juce::String((int) splitCandidates.size()) + ")..."
-        : juce::String("Split by silence..."), ! splitCandidates.empty());
-    menu.addItem(9010, extractCandidates.sourceCount() > 1
-        ? "Extract samples from " + juce::String(extractCandidates.sourceCount()) + " item(s)..."
-        : juce::String("Extract samples..."), ! extractCandidates.empty());
-    menu.addItem(editCommandMenuItem(EditAction::normalizeSelected,
-                                     ! normalizeRecords.empty() && ! isNormalizeRunning()));
-    menu.addItem(9025, "Batch Processing...", ! existingFiles.empty() && ! isBatchRunning());
+    // File-processing jobs write many files and own the catalog for minutes; in a plugin they
+    // stay in the application, where the user started them.
+    if (embeddedUi)
+    {
+        menu.addSectionHeader("Split, extract, normalize and batch run in the SONICATOR app");
+    }
+    else
+    {
+        menu.addItem(9008, splitCandidates.size() > 1
+            ? "Split by silence (" + juce::String((int) splitCandidates.size()) + ")..."
+            : juce::String("Split by silence..."), ! splitCandidates.empty());
+        menu.addItem(9010, extractCandidates.sourceCount() > 1
+            ? "Extract samples from " + juce::String(extractCandidates.sourceCount()) + " item(s)..."
+            : juce::String("Extract samples..."), ! extractCandidates.empty());
+        menu.addItem(editCommandMenuItem(EditAction::normalizeSelected,
+                                         ! normalizeRecords.empty() && ! isNormalizeRunning()));
+        menu.addItem(9025, "Batch Processing...", ! existingFiles.empty() && ! isBatchRunning());
+    }
     for (int i = 0; i < (int) allTags.size(); ++i)
         tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
                          allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
@@ -4829,9 +4903,9 @@ void MainComponent::timerCallback()
     activityDot.setActive(busy);
     pause.setEnabled(! splitRunning && (p.running || smartRunning));
     cancel.setEnabled(! batchRunning && busy && ! genreRunning);
-    addFolder.setEnabled(! busy); rescan.setEnabled(! busy);
-    reanalyze.setEnabled(! busy); newFiles.setEnabled(! busy);
-    smartButton.setEnabled(! busy);
+    addFolder.setEnabled(! busy && ! embeddedUi); rescan.setEnabled(! busy && ! embeddedUi);
+    reanalyze.setEnabled(! busy && ! embeddedUi); newFiles.setEnabled(! busy && ! embeddedUi);
+    smartButton.setEnabled(! busy && ! embeddedUi);
     pause.setButtonText((p.running ? p.paused : s.paused) ? "Resume" : "Pause");
     if (splitRunning || splitWasRunning)
     {

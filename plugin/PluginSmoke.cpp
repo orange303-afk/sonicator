@@ -1,27 +1,29 @@
-// Opens the spike editor once, with the real catalog copy, and quits after a few seconds.
-// Purpose: catch crashes or exceptions in MainComponent construction before the plugin is
-// handed to a DAW host, record how long the editor takes to become ready, and optionally time
+// Opens the plugin editor once against the shared application catalog and quits after a few
+// seconds. Purpose: catch crashes or exceptions in MainComponent construction before the plugin
+// is handed to a DAW host, record how long the editor takes to become ready, and optionally time
 // library selections the way a user feels them.
-// SONICATOR_SPIKE_SELECT=<rows> selects that many rows in turn and logs each duration.
-#include "plugin/SpikeProcessor.h"
-#include "plugin/SpikeEditor.h"
+// SONICATOR_PLUGIN_SELECT=<rows> selects that many rows in turn and logs each duration.
+#include "plugin/PluginProcessor.h"
+#include "plugin/PluginEditor.h"
+#include "core/settings/AppSettings.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/settings/SettingsPanel.h"
 #include <juce_events/juce_events.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <cstdlib>
+#include <functional>
 
 namespace {
-juce::File spikeFolder()
+juce::File smokeFolder()
 {
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-        .getChildFile("Sonicator/plugin-spike");
+        .getChildFile("Sonicator/plugin-smoke");
 }
 
 class SmokeApp final : public juce::JUCEApplication, private juce::Timer
 {
 public:
-    const juce::String getApplicationName() override { return "Sonicator Spike Smoke"; }
+    const juce::String getApplicationName() override { return "SONICATOR Plugin Smoke"; }
     const juce::String getApplicationVersion() override { return "0.1.0"; }
     bool moreThanOneInstanceAllowed() override { return true; }
     void anotherInstanceStarted(const juce::String&) override {}
@@ -32,7 +34,7 @@ public:
 
     void initialise(const juce::String&) override
     {
-        processor = std::make_unique<sonicator::spike::SpikeProcessor>();
+        processor = std::make_unique<sonicator::plugin::PluginProcessor>();
         editor.reset(processor->createEditor());
         if (editor != nullptr)
             editor->setVisible(true);
@@ -65,10 +67,10 @@ private:
     // the panel must live inside the editor, and changing the theme must keep it open.
     void checkEmbeddedSettings()
     {
-        if (std::getenv("SONICATOR_SPIKE_SETTINGS") == nullptr || editor == nullptr)
+        if (std::getenv("SONICATOR_PLUGIN_SETTINGS") == nullptr || editor == nullptr)
             return;
         auto* main = editor->getNumChildComponents() > 0 ? editor->getChildComponent(0) : nullptr;
-        const auto log = spikeFolder().getChildFile("settings.log");
+        const auto log = smokeFolder().getChildFile("settings.log");
         log.deleteFile();
         if (main == nullptr)
         {
@@ -95,12 +97,29 @@ private:
         log.appendText(juce::String("topLevelIsEditor=")
             + (panel->getTopLevelComponent() == (juce::Component*) editor.get() ? "yes" : "no") + "\n");
         log.appendText(juce::String("visible=") + (panel->isVisible() ? "yes" : "no") + "\n");
-        if (auto* theme = dynamic_cast<juce::ComboBox*>(panel->findChildWithID("settingsTheme")))
+        // The Studio settings layout puts the theme box inside a viewport, not among direct children.
+        std::function<juce::Component*(juce::Component&)> findById =
+            [&findById](juce::Component& root) -> juce::Component*
         {
+            const auto id = root.getComponentID();
+            if (id == "settingsTheme") return &root;
+            for (int i = 0; i < root.getNumChildComponents(); ++i)
+                if (auto* found = findById(*root.getChildComponent(i))) return found;
+            return nullptr;
+        };
+        if (auto* theme = dynamic_cast<juce::ComboBox*>(findById(*panel)))
+        {
+            // The smoke runs against the owner's live settings, so put the theme back afterwards.
+            const auto before = sonicator::SettingsStore(processor->settingsFile()).load();
             theme->setSelectedId(2, juce::sendNotificationSync);
             const auto stillThere = overlay->findChildWithID("settingsPanel") != nullptr;
             log.appendText(juce::String("themeApplied=") + (theme->getSelectedId() == 2 ? "yes" : "no")
                 + " panelAfterTheme=" + (stillThere ? "open" : "closed") + "\n");
+            sonicator::SettingsStore(processor->settingsFile()).update(
+                [before](sonicator::AppSettings& saved)
+                {
+                    saved.theme = before.theme;
+                });
         }
         else
         {
@@ -111,7 +130,7 @@ private:
 
     void benchmarkSelections()
     {
-        const auto requested = std::getenv("SONICATOR_SPIKE_SELECT");
+        const auto requested = std::getenv("SONICATOR_PLUGIN_SELECT");
         if (requested == nullptr || editor == nullptr)
             return;
         const auto count = juce::jlimit(0, 200, std::atoi(requested));
@@ -121,7 +140,7 @@ private:
         for (int i = 0; i < editor->getNumChildComponents() && library == nullptr; ++i)
             if (auto* child = editor->getChildComponent(i))
                 library = dynamic_cast<sonicator::FileListPanel*>(child->findChildWithID("library"));
-        const auto log = spikeFolder().getChildFile("selection.log");
+        const auto log = smokeFolder().getChildFile("selection.log");
         log.deleteFile();
         if (library == nullptr)
         {
@@ -143,7 +162,7 @@ private:
         log.appendText("done\n");
     }
 
-    std::unique_ptr<sonicator::spike::SpikeProcessor> processor;
+    std::unique_ptr<sonicator::plugin::PluginProcessor> processor;
     std::unique_ptr<juce::AudioProcessorEditor> editor;
     bool selectionDone = false;
 };

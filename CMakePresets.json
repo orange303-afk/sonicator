@@ -36,6 +36,16 @@
       }
     },
     {
+      "name": "plugin-universal",
+      "displayName": "Plugin universal (arm64;x86_64)",
+      "inherits": "universal",
+      "binaryDir": "$env{HOME}/Library/Caches/sonicator-build/plugin-universal",
+      "cacheVariables": {
+        "SONICATOR_BUILD_PLUGIN": "ON",
+        "BUILD_TESTING": "OFF"
+      }
+    },
+    {
       "name": "ci-macos-debug",
       "displayName": "CI macOS Debug",
       "inherits": "base",
@@ -62,6 +72,7 @@
     { "name": "debug", "configurePreset": "debug", "jobs": 6 },
     { "name": "release", "configurePreset": "release", "jobs": 6 },
     { "name": "universal", "configurePreset": "universal", "jobs": 6 },
+    { "name": "plugin-universal", "configurePreset": "plugin-universal", "jobs": 6 },
     { "name": "ci-macos-debug", "configurePreset": "ci-macos-debug", "jobs": 6 },
     { "name": "ci-macos-release", "configurePreset": "ci-macos-release", "jobs": 6 },
     { "name": "ci-windows", "configurePreset": "ci-windows", "configuration": "Debug", "jobs": 6 }
