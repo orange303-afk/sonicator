@@ -71,6 +71,9 @@ public:
     // is cleared or holds more than one sample, so no stale waveform or audio remains.
     void clearSource();
     SampleAudioPtr discSampleAudio() const { return discAudioRef; }
+    // The state the Play/Pause caption follows. Tests assert the engine directly: the caption is
+    // refreshed by the 30 Hz panel timer, so it can lag one tick behind the transport.
+    bool transportPlaying() const { return engine.isPlaying(); }
     // Restores preview toggles and their engine state. Does not notify onSettingsChanged.
     void applyPersistedSettings(const AppSettings&);
     // Settings -> Editing. Kept separate so a theme change does not reapply every preview toggle.

@@ -42,6 +42,13 @@ Notes:
 - A Release-only flake was found here: `Changing image sample stops old playback before the new decode
   completes` waited a fixed 60 ms for the transport to start and failed on the slower runner. The wait
   is now bounded and condition-driven, and the assertion itself is unchanged.
+- The same test then failed on both macOS jobs at `TestDiscBrowserService.cpp:246` (`Pause == "Play"`):
+  after the selection changed it allowed one fixed 100 ms for the caption. The Play/Pause caption is a
+  30 Hz mirror of `AudioEngine::isPlaying()`, while the stop itself is synchronous in
+  `DiscBrowserPanel::selectEntry` → `onSelectionBegin`. The test now asserts the contract directly —
+  the engine is silent immediately after `selectedRowsChanged`, with no messages pumped — and waits
+  separately, through `pumpUntil`, for the caption and for the failed decode to update the filter.
+  `PreviewPanel::transportPlaying()` and the `previewPlay` component ID exist for that assertion.
 - The CI suite runs 657 cases; four real-library tests skip because Reason and Ableton packs are not
   installed on the runners, which is why the CI assertion count is lower than a local run on a machine
   that has them.

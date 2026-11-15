@@ -245,6 +245,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     waveform.onExternalDragRequested = [this] { beginExternalDrag(); };
     waveform.onContextMenu = [this](juce::Point<int> position) { showWaveformMenu(position); };
     play.onClick = [this] { togglePlayback(); };
+    play.setComponentID("previewPlay");
     stop.onClick = [this] { engine.stop(); };
     loop.onClick = [this]
     {

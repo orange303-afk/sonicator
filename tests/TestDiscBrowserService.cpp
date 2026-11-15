@@ -218,8 +218,7 @@ TEST_CASE("Changing image sample stops old playback before the new decode comple
     REQUIRE(browser->getNumRows() == 2);
     auto* preview = dynamic_cast<PreviewPanel*>(app.findChildWithID("preview")); REQUIRE(preview != nullptr);
     browser->selectedRowsChanged(0);
-    for (int i = 0; i < 100 && ! preview->discSampleAudio(); ++i)
-        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+    REQUIRE(pumpUntil([&] { return preview->discSampleAudio() != nullptr; }));
     REQUIRE(preview->discSampleAudio() != nullptr);
     auto* stop = [&]() -> juce::Button* {
         for (auto* child : preview->getChildren())
@@ -227,39 +226,34 @@ TEST_CASE("Changing image sample stops old playback before the new decode comple
         return nullptr;
     }();
     REQUIRE(stop != nullptr);
-    // The transport label is driven by engine.isPlaying(), not by the selection label. A loaded CI
-    // machine can take longer than one fixed slice to start the transport, so wait for the state
-    // change itself, bounded.
-    const auto findPlay = [&]() -> juce::Button*
-    {
-        for (auto* child : preview->getChildren())
-            if (auto* button = dynamic_cast<juce::Button*>(child); button && button->getButtonText() == "Pause")
-                return button;
-        return nullptr;
-    };
-    for (int i = 0; i < 100 && findPlay() == nullptr; ++i)
-        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
-    auto* play = findPlay();
-    REQUIRE(play != nullptr);
+    // The transport caption follows engine.isPlaying(); a loaded CI machine can take longer than
+    // one fixed slice to start the transport, so wait for the state itself, bounded.
+    REQUIRE(pumpUntil([&] { return preview->transportPlaying(); }));
+    auto* transport = dynamic_cast<juce::Button*>(findDescendantWithID(*preview, "previewPlay"));
+    REQUIRE(transport != nullptr);
+    REQUIRE(pumpUntil([&] { return transport->getButtonText() == "Pause"; }));
+    // The contract in the test's name: the previous sample is already silent when the selection
+    // changes, before the failed decode of the new one can report anything. Stopping is
+    // synchronous, so this asks the engine without pumping a single message; the caption is only
+    // a 30 Hz mirror of that state and is waited for separately below.
     browser->selectedRowsChanged(1);
-    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
-    REQUIRE(play->getButtonText() == "Play");
-    // A failed decode becomes hidden immediately; disabling the filter restores the row.
+    REQUIRE_FALSE(preview->transportPlaying());
+    INFO("engine playing=" << (preview->transportPlaying() ? "yes" : "no")
+                           << " caption=" << transport->getButtonText());
+    REQUIRE(pumpUntil([&] { return transport->getButtonText() == "Play"; }, 5000));
+    // A failed decode becomes hidden once its result arrives; the caption update above says
+    // nothing about the decode, so wait for the row itself instead of assuming it is done.
     auto* toggle = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("hideEmpty")); REQUIRE(toggle != nullptr);
     toggle->setToggleState(true, juce::dontSendNotification); toggle->onClick();
-    REQUIRE(browser->getNumRows() == 1);
+    REQUIRE(pumpUntil([&] { return browser->getNumRows() == 1; }));
     toggle->setToggleState(false, juce::dontSendNotification); toggle->onClick();
     REQUIRE(browser->getNumRows() == 2);
     toggle->setToggleState(true, juce::dontSendNotification); toggle->onClick();
     folders->onFolder(t.dir.getFullPathName());
     folders->onFolder(image.getFullPathName()); // fresh parse: the bad file has not been tried yet
-    for (int i = 0; i < 100 && browser->getNumRows() == 0; ++i)
-        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
-    REQUIRE(browser->getNumRows() == 2);
+    REQUIRE(pumpUntil([&] { return browser->getNumRows() == 2; }));
     browser->selectRow(1);
-    for (int i = 0; i < 100 && browser->getNumRows() == 2; ++i)
-        juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
-    REQUIRE(browser->getNumRows() == 1); // decode failure updates the enabled filter immediately
+    REQUIRE(pumpUntil([&] { return browser->getNumRows() == 1; })); // decode failure updates the filter
 }
 
 TEST_CASE("Image open and close stop the previous preview immediately", "[disc-service][ui][selection-filter]")
