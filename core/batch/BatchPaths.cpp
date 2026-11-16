@@ -1,6 +1,10 @@
 #include "BatchPaths.h"
 
 #if JUCE_WINDOWS
+ // windows.h defines min/max as macros unless NOMINMAX is set; this file uses std::max.
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
  #include <windows.h>
 #else
  #include <climits>
