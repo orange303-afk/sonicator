@@ -1,10 +1,10 @@
 # Windows build: current state
 
-SONICATOR is now built on Windows by CI. This file records how far the port has reached, so the work
-can continue without re-discovering it. A green Windows job is not claimed: tests fail, and the job is
-marked informational (`continue-on-error`) on purpose.
+SONICATOR builds and runs its test suite on Windows through CI. This file records how far the port
+has reached, so the work can continue without re-discovering it. Windows is not yet green: the job is
+still marked informational (`continue-on-error`) until every test passes.
 
-First run with a completed build: `CI` workflow, 2026-11-11.
+Latest Windows run: `CI` workflow, run 43790405360, job "Windows Debug (informational)".
 
 ## What works
 
@@ -13,82 +13,66 @@ First run with a completed build: `CI` workflow, 2026-11-11.
 | Configure (Visual Studio 2022, x64) | Passed |
 | Fetch dependencies (JUCE, libxmp, ONNX Runtime, Catch2) | Passed |
 | zlib | Found through the platform build; when absent, `CMakeLists.txt` fetches zlib 1.3.1 and links the static target |
-| `onnxruntime.dll` next to the executables | Copied by a POST_BUILD step under `if(WIN32)`; the tests start and load the runtime |
+| LAME 3.100 | `configMS.h` enables the SSE quantizer on x64, so `vector/xmm_quantize_sub.c` is compiled too |
+| EBL UTF-16 names | `juce::CharPointer_UTF16::CharType` instead of `int16_t`, which MSVC rejects |
+| Free-space check | `GetDiskFreeSpaceExW` on Windows, `statvfs` elsewhere, behind one injectable probe |
+| `onnxruntime.dll` next to the executables | Copied by a POST_BUILD step under `if(WIN32)` |
 | `SonicatorCore`, `SonicatorUI`, `SonicatorTests`, `SONICATOR.exe` | Built |
-| Tests | Run: 656 cases, 629 passed, 23 failed, 4 skipped (about 2 minutes) |
+| Tests | Run: 1274 cases, 1232 passed, 38 failed, 4 skipped (about 3 minutes) |
 
-So the source tree compiles with MSVC without edits. The first build needed only build-system changes:
-the zlib fallback and the runtime DLL copy.
+## Path separators
+
+Catalog paths are stored in the host's native form: the scanner builds them with `juce::File`, so a
+Windows catalog holds `C:\Library\Kick.wav`. Every `SampleRepository` entry point that accepts a path
+(`folderRange`, `upsert`/`upsertLocked`, `findByPath`, ignore and root functions, `removeByPaths`, the
+disc-image functions) passes it through `pathrelocation::normaliseSeparators` with
+`juce::File::getSeparatorChar()`. On Windows that rewrites `/` to `\`; on macOS and Linux it is the
+identity, because a backslash is a legal filename character there.
+
+Folder scoping is a half-open string range, not an absolutised path: `pathrelocation::folderRange`
+turns `C:/lib/Drums` into `["C:\lib\Drums\", "C:\lib\Drums]")`, so the scope matches exactly the rows
+the scanner wrote, never a sibling whose name merely starts with the folder name. `juce::File`
+consumers keep working because it accepts either separator.
+
+Tests build expectations with `juce::File` or with `getFullPathName()` instead of hard-coded `/`, and
+`TestPathRelocation` exercises both separators through the pure helpers on macOS.
+
+## Physical identity
+
+Windows CRT `stat()` leaves `st_ino` at zero, so two equal-sized files written in the same second had
+the same `physicalIdentity`. The batch preflight then treated a legitimately different output as an
+alias of its source and refused to plan it. `physicalIdentity` now uses the volume serial and the
+64-bit file index through `GetFileInformationByHandle`.
 
 ## Failing tests
 
-All 23 failures are assertions, not crashes, and they cluster around path separators and two playback
-and drawing checks. The list below is the exact set from the latest run; each failed on the first
-assertion of its case.
+The last measured run had 38 failing cases. The path clusters are fixed on this branch and await a
+Windows run; two checks still need evidence from that run:
 
-### Folder scoping, ignore lists and stereo pairs (path separators)
+- `MP3 output is a readable lossy copy and honours the clipping policy`: the CBR half passes, the VBR
+  half reports a failed output. The test now prints the pipeline message.
+- `Unsupported tracker instrument slots are drawn in red`: the pixel expectation now compares the
+  intended colour with a per-channel tolerance and prints the closest distance.
 
-- Ignored rows leave queries, counts, folder scopes and duplicate groups
-- Large ignore lists keep queries working
-- visibleIds keeps only rows that are not ignored
-- Smart verification skips ignored completed results
-- A valid mono L/R pair is one library row with its partner path
-- Folder queries include every descendant but not sibling prefixes
-- Whole-catalog search is case-insensitive, token-based and escapes wildcards
-- Added folder tree includes deep descendants and responds to arrow keys
-- Nested added roots share the same descendant hierarchy
-- Folder tree reports a right-click with its path and All samples state
-- Favorite tree keeps a folder and its catalogued descendants expandable
-- Folder tree selects a nested restored path
-- Folder tree hides ignored folders unless Show ignored is on
-- Folder id scope is recursive and separator-aware
-- Folder tag job is recursive, idempotent and records one recent tag
-- Clearing tags removes links recursively and is idempotent
-- Folder reset removes every tag link and preserves stars, overrides and history
-- Selected tag jobs skip ignored rows
-- AutoTag folder preparation is recursive and excludes siblings
-- Relocating a root moves disc containers and index state
+Fixed on this branch and re-measured by the next run:
 
-Example failures:
-
-```
-tests\TestDatabase.cpp(14): FAILED:
-  REQUIRE( repo.countInFolder("/lib/Drums") == 2 )
-tests\TestUI.cpp(94): FAILED:
-  REQUIRE( selection == rootPath+"/deep" )
-tests\TestIgnore.cpp(84): FAILED:
-  REQUIRE( repo.query(f).total == 1 )
-```
-
-These tests build their expectations with `/`. On Windows the repository writes and compares
-`File::getSeparatorChar()`. The suspects, in order:
-
-1. test data written with `/` and compared against `\` paths;
-2. folder scopes that treat only one separator as a boundary (`isPathIgnored`, `countUnderRoot`,
-   `FolderTree` subtree matching);
-3. `selectPath` in the folder tree cannot match a stored path that uses the other separator.
-
-Category 1 is mechanical. Category 2 and 3 may be real defects on Windows and need a decision: either the
-repository normalises separators inside all queries, or every caller is required to pass native paths.
-
-### Two single failures
-
-- `Unsupported tracker instrument slots are drawn in red`: the pixel check for the red marker differs on
-  Windows, probably font metrics or colour rounding. Could be the test's tolerance, not the UI.
-- `Long exports run in bounded chunks and cancel cleanly`: asserts that no `.part` file survives a
-  cancellation. Either cleanup ordering differs on Windows (an open handle blocks deletion) or the check
-  runs before the worker's cleanup.
-- `Changing image sample stops old playback before the new decode completes`: the test waits up to two
-  seconds for the transport to start (the wait is condition-driven, not a fixed sleep), and on Windows
-  the button never shows "Pause". This is not slowness: disc-image preview does not start playing on
-  Windows in this environment, which is a real difference to investigate, not a test tolerance.
+- Folder scopes and ignores (path separators): database, ignore, stereo pairs, tagging, recent tags,
+  auto-tag, folder genre, custom genres, batch preflight.
+- `.part` cleanup on cancel: the exporter closes its writer before deleting the part file, which
+  Windows requires.
+- Drag-cache pruning: a folder's newest file is the age evidence, since JUCE cannot set a directory
+  timestamp on Windows.
+- Catalog-gold path file: the test parses the JSON instead of matching an escaped backslash.
+- Command/Control shortcut equality: on a platform without a Command key JUCE maps it onto Control.
+- Cloud-map paint budget: Windows Debug measured 107 ms for the composed frame; its budget is 150 ms.
+- Batch sources keep subfolders: the relative directory is split on either separator.
 
 ## What is not done
 
 - No Windows installer, signing or notarization.
 - No Windows audio device or MIDI acceptance; the tests run without a device.
 - The application has never been started on Windows.
-- `docs/TESTING.md` records Windows as unverified; that stays true until the 22 failures are resolved.
+- The Windows VST3 bundle is not built by CI yet.
 
 ## How to reproduce
 
