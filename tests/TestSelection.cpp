@@ -513,13 +513,14 @@ TEST_CASE("Loop export warning stays visible until Loop is disabled", "[selectio
     wave->onExternalDragRequested();
     auto* status = dynamic_cast<juce::Label*>(preview.findChildWithID("selectionStatus"));
     REQUIRE(status != nullptr);
-    CHECK(status->getText() == juce::String::fromUTF8("Отключите луп"));
-    juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
-    CHECK(status->getText() == juce::String::fromUTF8("Отключите луп"));
+    const auto warning = juce::String::fromUTF8("Отключите луп");
+    CHECK(status->getText() == warning);
+    // The caption is a timer mirror of the transport state; a loaded CI runner can miss the
+    // window this used to sleep through, so wait for the state instead of a fixed slice.
+    CHECK_FALSE(pumpUntil([&] { return status->getText() != warning; }, 200));
     loop->setToggleState(false, juce::dontSendNotification);
     loop->onClick();
-    juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
-    CHECK(status->getText() != juce::String::fromUTF8("Отключите луп"));
+    REQUIRE(pumpUntil([&] { return status->getText() != warning; }));
 }
 TEST_CASE("An armed loop edge resizes while the body moves", "[selection][waveform][live]")
 {
