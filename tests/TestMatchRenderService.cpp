@@ -140,6 +140,9 @@ TEST_CASE ("Cancel and renderer exceptions leave the service alive", "[plugin-ma
     service.cancel();
     REQUIRE (service.waitUntilFinished (3000));
     CHECK (service.poll().status == MatchRenderService::Status::cancelled);
+    // The fake renderer waits on its own gate; without releasing it B queues behind A and the
+    // next wait can time out. Cancel does not interrupt that wait.
+    harness.releaseA();
 
     harness.throwOnB = true;
     service.submit (requestFor ("B"));

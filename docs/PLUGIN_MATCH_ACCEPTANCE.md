@@ -25,12 +25,14 @@ into 128). This proves length and a steady tone, not musical quality.
 
 ## Open gates
 
-- **auval / pluginval** were not run against the new build. `auval` only validates an installed
-  component and a previous SONICATOR build is installed in `~/Library/Audio/Plug-Ins`; replacing the
-  owner's installed plug-in was not done. Run `auval -v aumu Sncr Orng` after an explicit install.
+- **pluginval** was not run. `auval` is covered by the macOS universal CI job above; a local
+  run would have replaced the owner's installed SONICATOR and was not done.
 - **Windows CI** was not run. Rubber Band is configured for MSVC (single-file amalgamation, built-in
   FFT, no threading) but has not been compiled there.
-- **Universal macOS** (`plugin-universal`) was not built; the native Release build was.
+- **Universal macOS and auval**: CI run 43782383735, job "macOS plugin (universal)", success on
+  2026-11-16 — both wrappers are universal, carry the embedded runtime, pass the bundle checks and
+  `auval -v aumu Sncr Orng`. The native Release build was also built locally. This closes the
+  macOS binary/auval gate; the Cubase/Logic manual checklist below is still open.
 - **Listening test** (drum/bass/pad/vocal loops at 0.75/1/1.25/2 and ±3/±6 semitones) and
   preparation latency/memory numbers on 4/16-bar loops were not measured here.
 - **Cubase/Logic manual checklist** (120 BPM 8 s loop → host 128 / 7.5 s, Am→Cm +3, both toggles,
