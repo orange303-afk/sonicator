@@ -93,8 +93,10 @@ TEST_CASE("Cloud view hit test respects the current filter", "[cloud][view]")
 
     int64_t activated = 0;
     view.onActivate = [&](int64_t id) { activated = id; };
-    view.activatePointForTest(index); // dimmed points are not clickable
-    REQUIRE(activated == 0);
+    // A dimmed point is still a file: clicking it must open it, even though it does not match the
+    // filter. The filter changes visibility, not what the user may inspect.
+    view.activatePointForTest(index);
+    REQUIRE(activated == 104);
     view.activatePointForTest(0);
     REQUIRE(activated == 100);
 }
@@ -262,6 +264,15 @@ TEST_CASE("The map builds from a real catalog inside the window", "[ui][cloud]")
         if (panel->layout().points[i].sampleId == ids[3]) index = i;
     panel->activatePointForTest(index);
     REQUIRE(preview->loadedFilePath() == files[3]);
+
+    // With a sample selected, hovering another point must not start the hover voice; the preview
+    // owns the listening now.
+    const auto other = index == 0 ? size_t(1) : size_t(0);
+    const auto otherScreen = panel->worldToScreen(panel->layout().points[other].x,
+                                                  panel->layout().points[other].y);
+    panel->hoverForTest({ (int) otherScreen.x, (int) otherScreen.y });
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
+    REQUIRE_FALSE(engine.hover().isPlaying());
 
     app.showCloudView(false);
     REQUIRE_FALSE(panel->isVisible());

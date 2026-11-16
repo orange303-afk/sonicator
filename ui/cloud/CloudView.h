@@ -106,14 +106,10 @@ private:
     void rebuildColours();
     void rebuildLayers();
     void rebuildPointLayer();
-    // A soft tag-colour field under the points, built once per layout at low resolution. It is the
-    // gradient between tags: with no island discs this is what makes the cloud one shape.
-    void rebuildField();
     void rebuildLabels();
     float introAlpha() const;
     juce::Point<float> ambientSway() const;
     float pointDrift(size_t index, bool vertical) const;
-    void drawField(juce::Graphics&, juce::Point<float> sway, float opacity) const;
     void drawLayer(juce::Graphics&, const juce::Image&, juce::Point<float> sway) const;
     void drawPointsLive(juce::Graphics&, const std::vector<size_t>& visible, bool matching,
                         juce::Point<float> sway, bool useLens, bool withDrift) const;
@@ -142,12 +138,10 @@ private:
     bool visibleValid = false;
     // Static world-space layers: the map is redrawn only when it changes, so panning and zooming
     // blit an image instead of re-rasterising 35k points.
-    juce::Image pointLayer, fieldImage, frameCache;
+    juce::Image pointLayer, frameCache;
     Camera frameCamera;
     float frameFilterBlend = -1.0f;
     bool frameValid = false;
-    juce::Rectangle<float> fieldBounds;
-    float fieldScale = 1.0f;
     float layerScale = 1.0f;
     // Label text and measured width are fixed for a layout; measuring them every frame costs more
     // than drawing the map.
@@ -168,7 +162,6 @@ private:
     size_t pressedPoint = CloudIndex::none;
     bool draggedOut = false;
     int64_t selectedSample = 0;
-    float glow = 0.0f;
     bool hoverAudio = true;
     bool dragging = false;
     juce::Point<float> dragStart;

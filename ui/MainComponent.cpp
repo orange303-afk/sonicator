@@ -1436,6 +1436,13 @@ void MainComponent::cloudHover(int64_t sampleId)
     if (! playable) caption += separator + "no audio position";
     cloudPanel->setLabel(sampleId, caption);
 
+    // A selected sample owns the listening: hovering other points must not start a second voice.
+    if (selectedSampleId != 0)
+    {
+        engine.hover().stop();
+        return;
+    }
+
     const juce::File file(record->filePath);
     if (! playable || ! file.existsAsFile() || engine.isPlaying())
     {

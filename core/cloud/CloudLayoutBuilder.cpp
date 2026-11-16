@@ -411,7 +411,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
                     const auto phase3 = hashUnit(tagId, 12) * twoPi;
                     const auto envelope = 1.0 - 0.10 * (0.5 + 0.5 * std::cos(2.0 * theta + phase2))
                                               - 0.06 * (0.5 + 0.5 * std::cos(3.0 * theta + phase3));
-                    const auto radius = envelope * std::tanh(1.15 * disc);
+                    const auto radius = envelope * disc; // the square-to-disc map already gives a unit disc
                     cloudOffset.x = ux / disc * radius;
                     cloudOffset.y = uy / disc * radius;
                 }

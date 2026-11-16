@@ -10,9 +10,9 @@ struct CloudLayoutOptions
     float islandRadiusScale = 1.15f;   // area grows with the file count, so Dubtechno cannot eat the map
     // Islands are packed so their circles touch and overlap a little: the map reads as one cloud
     // with colour gradients at the seams, not as separate discs. Share of the smaller radius.
-    float islandOverlap = 0.22f;
+    float islandOverlap = 0.28f;
     float islandGap = 0.0f;           // extra spacing after the overlap, normally zero
-    float pointSpread = 0.72f;        // share of the island radius the acoustic projection may use
+    float pointSpread = 0.92f;        // share of the island radius the acoustic projection may use
     float multiTagSpread = 0.7f;      // a bridge point stays inside the narrower of its islands
     float v2Spread = 0.4f;            // cap for the 84-value refinement displacement
     float refinementAlpha = 0.35f;
