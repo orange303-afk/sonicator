@@ -29,9 +29,7 @@ try {
     $VsWhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
     $Vs = & $VsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     Check-NativeExit 'vswhere'
-    $Crt = Get-ChildItem "$Vs/VC/Redist/MSVC/*/x64/Microsoft.VC143.CRT" -Directory |
-        Sort-Object FullName -Descending | Select-Object -First 1
-    if (!$Crt) { throw 'MSVC x64 redistributable CRT not found' }
+    $Crt = & "$PSScriptRoot/find-crt.ps1" -VisualStudioRoot $Vs
     foreach ($Destination in @("$Stage/app", "$Stage/vst3/Contents/x86_64-win")) {
         Copy-Item "$($Crt.FullName)/*.dll" $Destination
     }

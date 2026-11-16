@@ -28,7 +28,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: build/_deps
-          key: macos-installer-deps-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
+          key: macos-installer-deps-v2-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
       - name: Packaging behavior tests
         run: python3 -m unittest discover -s packaging/tests -v
       - name: Build universal payloads
@@ -54,6 +54,7 @@ jobs:
           sudo installer -pkg "$PKG" -target / -dumplog
           # A runtime hidden in the build tree cannot rescue a broken installed bundle.
           mv build/_deps/onnxruntime-src/lib build/_deps/onnxruntime-src/lib-unavailable
+          trap 'mv build/_deps/onnxruntime-src/lib-unavailable build/_deps/onnxruntime-src/lib' EXIT
           APP=/Applications/SONICATOR.app
           VST3=/Library/Audio/Plug-Ins/VST3/SONICATOR.vst3
           AU=/Library/Audio/Plug-Ins/Components/SONICATOR.component
@@ -110,13 +111,38 @@ jobs:
           path: build/_deps
           key: windows-installer-deps-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
       - name: Packaging behavior tests
-        run: python -m unittest discover -s packaging/tests -v
+        run: |
+          python -m unittest discover -s packaging/tests -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./packaging/tests/test-crt.ps1
       - name: Configure and build Release app and VST3
         run: |
-          cmake --preset release-windows-installer
+          cmake --preset release-windows-installer -DBUILD_TESTING=ON
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build --preset release-windows-installer
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build --config Release --target SonicatorTests -j 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: ONNX runtime loading positive and negative controls
+        run: |
+          $Tests = (Resolve-Path build/tests/Release/SonicatorTests.exe).Path
+          $Runtime = Join-Path (Split-Path $Tests) onnxruntime.dll
+          Push-Location $env:RUNNER_TEMP
+          try {
+            Move-Item $Runtime "$Runtime.disabled"
+            try {
+              & $Tests 'OnnxAudioClassifier lifecycle, error handling and classification'
+              if ($LASTEXITCODE -eq 0) { throw 'ONNX test unexpectedly passed without its bundled runtime' }
+            } finally { Move-Item "$Runtime.disabled" $Runtime }
+            & $Tests 'OnnxAudioClassifier lifecycle, error handling and classification'
+            if ($LASTEXITCODE -ne 0) { throw 'Bundled ONNX runtime test failed' }
+          } finally { Pop-Location }
+      - name: Full Windows suite (diagnostic; known port failures)
+        continue-on-error: true
+        run: |
+          New-Item -ItemType Directory -Force validation | Out-Null
+          & build/tests/Release/SonicatorTests.exe --reporter compact *> validation/full-suite.log
+          exit $LASTEXITCODE
       - name: Package and collect matching sources
         run: |
           ./packaging/windows/build-msi.ps1 -BuildDir build -OutputDir dist

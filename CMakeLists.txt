@@ -251,7 +251,10 @@ juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/icon-glossy-chevron-1024.png")
 target_sources(Sonicator PRIVATE app/Main.cpp)
 target_link_libraries(Sonicator PRIVATE SonicatorUI)
-set_target_properties(Sonicator PROPERTIES BUILD_RPATH "${onnxruntime_SOURCE_DIR}/lib")
+if(APPLE)
+    set_target_properties(Sonicator PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path/../Frameworks")
+endif()
 if(WIN32)
     # BUILD_RPATH has no effect on Windows; the runtime DLL must sit next to the executable.
     add_custom_command(TARGET Sonicator POST_BUILD

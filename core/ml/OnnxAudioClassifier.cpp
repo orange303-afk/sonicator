@@ -1,13 +1,67 @@
 #include "OnnxAudioClassifier.h"
 #include "MelSpectrogram.h"
+#if JUCE_WINDOWS
+// A plugin is loaded by an unrelated host executable. Do not import ONNX by basename:
+// Windows LoadLibrary's dependency search does not include the plugin's directory.
+#define ORT_API_MANUAL_INIT
+#endif
 #include <onnxruntime_cxx_api.h>
 #include <algorithm>
 #include <cmath>
 #include <mutex>
 #include <string>
 #include <vector>
+#if JUCE_WINDOWS
+#include <windows.h>
+#include <filesystem>
+#include <stdexcept>
+#endif
 
 namespace sonicator {
+
+namespace {
+void ensureOnnxRuntimeLoaded()
+{
+#if JUCE_WINDOWS
+    struct Runtime
+    {
+        HMODULE module = nullptr;
+        Runtime()
+        {
+            static const int imageAnchor = 0;
+            HMODULE image = nullptr;
+            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                   reinterpret_cast<LPCWSTR>(&imageAnchor), &image))
+                throw std::runtime_error("Cannot locate SONICATOR module for ONNX Runtime");
+            std::vector<wchar_t> path(32768);
+            const auto length = GetModuleFileNameW(image, path.data(), static_cast<DWORD>(path.size()));
+            if (length == 0 || length >= path.size())
+                throw std::runtime_error("Cannot read SONICATOR module path");
+            const auto runtimePath = std::filesystem::path(path.data()).parent_path() / L"onnxruntime.dll";
+            module = LoadLibraryExW(runtimePath.c_str(), nullptr,
+                                   LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+            if (module == nullptr)
+                throw std::runtime_error("Cannot load bundled ONNX Runtime");
+            using GetApiBase = const OrtApiBase* (ORT_API_CALL*)();
+            const auto getApiBase = reinterpret_cast<GetApiBase>(GetProcAddress(module, "OrtGetApiBase"));
+            const auto* api = getApiBase != nullptr ? getApiBase()->GetApi(ORT_API_VERSION) : nullptr;
+            if (api == nullptr)
+            {
+                FreeLibrary(module);
+                module = nullptr;
+                throw std::runtime_error("Bundled ONNX Runtime API version mismatch");
+            }
+            Ort::InitApi(api);
+        }
+        ~Runtime() { if (module != nullptr) FreeLibrary(module); }
+    };
+    // Thread-safe initialization, before any Ort::Env/Session. Retain the DLL while its API
+    // pointers are in use, without changing the host's PATH or DLL-directory policy.
+    static const Runtime runtime;
+    juce::ignoreUnused(runtime);
+#endif
+}
+}
 
 struct OnnxAudioClassifier::Impl {
     Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "SonicatorClassifier"};
@@ -21,7 +75,7 @@ struct OnnxAudioClassifier::Impl {
 };
 
 OnnxAudioClassifier::OnnxAudioClassifier()
-    : impl(std::make_unique<Impl>())
+    : impl((ensureOnnxRuntimeLoaded(), std::make_unique<Impl>()))
 {
 }
 

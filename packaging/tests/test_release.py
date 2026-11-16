@@ -28,12 +28,15 @@ class MacRuntimeTests(unittest.TestCase):
             library = source / "libonnxruntime.dylib"
             subprocess.run(["clang", "-arch", "arm64", "-arch", "x86_64", "-dynamiclib", str(source / "lib.c"),
                             "-install_name", "@rpath/libonnxruntime.dylib", "-o", str(library)], check=True)
-            subprocess.run(["clang", "-arch", "arm64", "-arch", "x86_64", "-Wl,-headerpad_max_install_names", str(source / "main.c"), str(library),
+            subprocess.run(["clang", "-arch", "arm64", "-arch", "x86_64", "-Wl,-headerpad_max_install_names",
+                            "-Wl,-rpath," + str(source), str(source / "main.c"), str(library),
                             "-o", str(executable)], check=True)
             (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "Test"}))
             result = subprocess.run(["sh", str(ROOT / "cmake/EmbedMacRuntime.sh"),
                                      str(bundle), str(library), "Test"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            load_commands = subprocess.check_output(["otool", "-l", str(executable)], text=True)
+            self.assertNotIn(str(source), load_commands, "Build-tree rpath retained ahead of embedded runtime")
             library.unlink()
             self.assertTrue((bundle / "Contents/Frameworks/libonnxruntime.dylib").is_file())
             loaded = subprocess.run([str(executable)], capture_output=True, text=True)

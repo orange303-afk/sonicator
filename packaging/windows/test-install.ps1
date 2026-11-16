@@ -56,7 +56,11 @@ try {
             }
         }
     }
-    & $Pluginval --strictness-level 10 --skip-gui-tests --output-dir $LogDir --validate $Plugin
+    # The host is outside the plugin directory; no build path or CWD can rescue DLL loading.
+    Push-Location $env:RUNNER_TEMP
+    try {
+        & $Pluginval --strictness-level 10 --skip-gui-tests --output-dir $LogDir --validate $Plugin
+    } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw 'Installed VST3 validation failed' }
     Invoke-Msi -Arguments @('/fvomus', "`"$Msi`"")
     Assert-Features $true $true

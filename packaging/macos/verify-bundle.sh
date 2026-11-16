@@ -12,6 +12,12 @@ for file in "$binary" "$runtime"; do
     architectures="$(/usr/bin/lipo -archs "$file")"
     echo "$architectures" | grep -qw arm64
     echo "$architectures" | grep -qw x86_64
+    /usr/bin/otool -l "$file" | sed -n 's/^[[:space:]]*path \(.*\) (offset.*/\1/p' | while IFS= read -r path; do
+        case "$path" in
+            '@loader_path/../Frameworks'|'@loader_path') ;;
+            *) echo "Non-relocatable rpath: $path ($file)" >&2; exit 1 ;;
+        esac
+    done
     # All non-system absolute dependencies must have been embedded before packaging.
     # Universal otool emits a separate filename header for each architecture.
     /usr/bin/otool -L "$file" | sed -n 's/^[[:space:]]*\(.*\) (compatibility version.*/\1/p' | while IFS= read -r dependency; do

@@ -54,7 +54,11 @@
       "name": "release-windows-installer",
       "displayName": "Installer Windows x64 Release",
       "inherits": "ci-windows",
-      "cacheVariables": { "SONICATOR_BUILD_PLUGIN": "ON", "BUILD_TESTING": "OFF" }
+      "cacheVariables": {
+        "SONICATOR_BUILD_PLUGIN": "ON",
+        "BUILD_TESTING": "OFF",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+      }
     },
     {
       "name": "ci-macos-debug",
