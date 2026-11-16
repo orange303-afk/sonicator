@@ -80,13 +80,18 @@ required; successful MSI creation is not installation success. macOS in this run
 
 Run `43957871104` (`674237d`) proved the launch-condition fix: the MSI installed, both features
 were present with their runtimes, the installed application opened a window and exited 0, and the
-test fixture profile produced catalog/settings/export files. The run then failed after pluginval
-had printed `SUCCESS` for the installed VST3 — its process still returned a non-zero code about
-16 s later. The Windows console/log shows no `*** FAILED` and no failing test, so this is not
-evidence of a test failure; the raw exit code and any Windows crash events were not captured in
-that run. The lifecycle script now records the raw process exit code and stderr for both the
-installed and the build-tree plugin, plus recent Windows Error Reporting entries and crash dumps,
-so the next run distinguishes a plugin crash from a harness-level exit.
+test fixture profile produced catalog/settings/export files. The run then failed on our own check,
+not on pluginval: the log ended with `SUCCESS` and no `*** FAILED`, but the script compared
+`$LASTEXITCODE`, which PowerShell never sets for processes started with `Start-Process`. The
+lifecycle script now reads the raw process exit code and stderr from `Start-Process -PassThru`.
+
+Run `43961940936` (`afbe366`): **macOS SUCCESS** and the whole Windows lifecycle **passed** —
+install, installed window start/close, pluginval strictness 10 for the installed and build-tree
+VST3 (both exit 0), repair, 0.1.1 major upgrade, per-feature installs, uninstall, and unchanged
+catalog/settings/export hashes. That run then failed only on the new ONNX control: the Catch2
+filter was the literal test name, whose comma Catch2 splits into two specs that match nothing, so
+the negative control was vacuous. The control now uses a wildcard filter and requires the negative
+run to be non-zero without `All tests passed` and the positive run to be zero with it.
 
 - Full suite after Windows portability corrections and final packaging tests.
 - Fresh-source-commit installer/source archive pair and final checksums.

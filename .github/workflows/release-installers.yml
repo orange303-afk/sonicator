@@ -157,16 +157,29 @@ jobs:
         run: |
           $Tests = (Resolve-Path build/tests/Release/SonicatorTests.exe).Path
           $Runtime = Join-Path (Split-Path $Tests) onnxruntime.dll
+          New-Item -ItemType Directory -Force validation | Out-Null
+          # Wildcards: a literal test name contains a comma, which Catch2 would split into
+          # several specs and match nothing (a vacuous negative control).
+          $Filter = '*OnnxAudioClassifier*'
           Push-Location $env:RUNNER_TEMP
           try {
             Move-Item $Runtime "$Runtime.disabled"
             try {
-              & $Tests 'OnnxAudioClassifier lifecycle, error handling and classification'
-              if ($LASTEXITCODE -eq 0) { throw 'ONNX test unexpectedly passed without its bundled runtime' }
+              & $Tests $Filter *> (Join-Path $env:GITHUB_WORKSPACE 'validation/onnx-without-runtime.log')
+              $Negative = $LASTEXITCODE
             } finally { Move-Item "$Runtime.disabled" $Runtime }
-            & $Tests 'OnnxAudioClassifier lifecycle, error handling and classification'
-            if ($LASTEXITCODE -ne 0) { throw 'Bundled ONNX runtime test failed' }
+            & $Tests $Filter *> (Join-Path $env:GITHUB_WORKSPACE 'validation/onnx-with-runtime.log')
+            $Positive = $LASTEXITCODE
           } finally { Pop-Location }
+          $NegativeText = Get-Content validation/onnx-without-runtime.log -Raw
+          $PositiveText = Get-Content validation/onnx-with-runtime.log -Raw
+          Write-Host "negative exit $Negative, positive exit $Positive"
+          if ($Negative -eq 0 -or $NegativeText.Contains('All tests passed')) {
+            throw 'ONNX test unexpectedly passed without its bundled runtime'
+          }
+          if ($Positive -ne 0 -or -not $PositiveText.Contains('All tests passed')) {
+            throw 'Bundled ONNX runtime positive control failed'
+          }
       - name: Full Windows suite (diagnostic; known port failures)
         continue-on-error: true
         run: |
