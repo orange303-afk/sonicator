@@ -4,6 +4,7 @@
 #include "core/audio/SonicatorFormats.h"
 #include "core/export/AudioExporter.h"
 #include <lame.h>
+#include <array>
 #include <cstring>
 #include <vector>
 
@@ -162,6 +163,21 @@ EncodedAudio encodeMp3ToTemporary(const juce::File& temporary, const EncodeSetti
     {
         lame_close(lame);
         return fail(ErrorCode::encode_failed, "The MP3 file cannot be finalised");
+    }
+    // LAME reserves a dummy frame for the Xing/Info tag - after the ID3v2 tag it wrote at the
+    // start - but only fills it when the caller asks. Without the tag, a decoder has to estimate
+    // a VBR stream's length (Windows reported 26496 samples for this 2 s file). Overwrite the
+    // reserved frame now, then restore the write position.
+    {
+        std::array<unsigned char, 4096> tag {};
+        const auto tagSize = lame_get_lametag_frame(lame, tag.data(), tag.size());
+        const auto tagOffset = (juce::int64) lame_get_id3v2_tag(lame, nullptr, 0);
+        if (tagSize > 0 && tagSize <= tag.size() && output != nullptr && tagOffset >= 0)
+        {
+            const auto end = output->getPosition();
+            if (output->setPosition(tagOffset) && output->write(tag.data(), tagSize))
+                output->setPosition(end);
+        }
     }
     lame_close(lame);
     output.reset();

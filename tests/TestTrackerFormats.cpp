@@ -670,9 +670,21 @@ TEST_CASE("Unsupported tracker instrument slots are drawn in red", "[tracker][ui
     AudioEngine engine(false); PreviewPanel preview(engine, t.dir.getChildFile("cache"));
     REQUIRE(preview.loadFile(file, false));
     REQUIRE(engine.trackerSlots().front().fmInstrument);
+    auto* box = dynamic_cast<juce::ComboBox*>(preview.findChildWithID("trackerSample"));
+    REQUIRE(box != nullptr);
+    // Find the row that shows this slot instead of assuming the song entry is present.
+    const int slotId = engine.trackerSlots().front().slot + 2;
+    int row = -1;
+    for (int i = 0; i < box->getNumItems(); ++i)
+        if (box->getItemId(i) == slotId) { row = i; break; }
+    INFO("rows=" << preview.containerSourceList().getListBoxModel()->getNumRows()
+         << " items=" << box->getNumItems() << " slotId=" << slotId << " row=" << row
+         << " hasSong=" << engine.trackerHasSong()
+         << " text='" << (row >= 0 ? box->getItemText(row) : juce::String()) << "'");
+    REQUIRE(row >= 0);
     juce::Image image(juce::Image::RGB, 240, 30, true);
     juce::Graphics g(image);
-    preview.containerSourceList().getListBoxModel()->paintListBoxItem(1, g, 240, 30, false);
+    preview.containerSourceList().getListBoxModel()->paintListBoxItem(row, g, 240, 30, false);
     const auto intended = juce::Colour(0xffe05a5a);
     int closest = 255 * 3;
     for (int y = 0; y < image.getHeight(); ++y)

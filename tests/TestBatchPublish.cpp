@@ -91,6 +91,23 @@ std::vector<unsigned char> asciiBytes(const juce::String& text)
     return out;
 }
 
+// Reads the frame count from a Xing/Info header. LAME reserves that frame at the start; a
+// streaming encoder that never writes it back leaves the placeholder count at zero, which makes
+// decoders estimate the length instead of reading it.
+int tagFrameCount(const juce::File& file, const char* fourCC)
+{
+    juce::MemoryBlock block;
+    if (! file.loadFileAsData(block)) return -1;
+    const auto* begin = static_cast<const unsigned char*>(block.getData());
+    const auto* end = begin + block.getSize();
+    const unsigned char needle[4] { (unsigned char) fourCC[0], (unsigned char) fourCC[1],
+                                    (unsigned char) fourCC[2], (unsigned char) fourCC[3] };
+    const auto* found = std::search(begin, end, needle, needle + 4);
+    if (found == end || found + 12 > end) return -1;
+    return (int) (((unsigned int) found[8] << 24) | ((unsigned int) found[9] << 16)
+                | ((unsigned int) found[10] << 8) | found[11]);
+}
+
 std::vector<unsigned char> utf8Bytes(const juce::String& text)
 {
     const auto* data = reinterpret_cast<const unsigned char*>(text.toRawUTF8());
@@ -437,6 +454,7 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
     REQUIRE(juce::SHA256(source).toHexString() == hash);
     REQUIRE(result.target.getSize() > 8000);
     REQUIRE(result.target.getSize() < 120000);
+    REQUIRE(tagFrameCount(result.target, "Info") > 0);
 
     juce::AudioFormatManager formats;
     registerSonicatorFormats(formats);
@@ -464,6 +482,7 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
                                       vbrRecipe, ConflictPolicy::rename, protection);
     INFO(vbrResult.message);
     REQUIRE(vbrResult.state == OutputState::completed);
+    REQUIRE(tagFrameCount(vbrResult.target, "Xing") > 0);
     std::unique_ptr<juce::AudioFormatReader> vbrReader(formats.createReaderFor(vbrResult.target));
     REQUIRE(vbrReader != nullptr);
     REQUIRE(std::abs(vbrReader->lengthInSamples - 88200) <= 2 * 1152 + 4410);
