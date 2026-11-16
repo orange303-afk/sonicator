@@ -70,11 +70,32 @@ try {
         }
     }
     # The host is outside the plugin directory; no build path or CWD can rescue DLL loading.
-    Push-Location $env:RUNNER_TEMP
-    try {
-        & $Pluginval --strictness-level 10 --skip-gui-tests --output-dir $LogDir --validate $Plugin
-    } finally { Pop-Location }
-    if ($LASTEXITCODE -ne 0) { throw 'Installed VST3 validation failed' }
+    # Start-Process reports the raw process exit code and stderr, unlike $LASTEXITCODE.
+    function Invoke-Pluginval([string]$PluginPath, [string]$Label) {
+        $Slug = $Label -replace '[^A-Za-z0-9]+', '-'
+        $Out = "$LogDir/pluginval-$Slug.out.txt"
+        $Err = "$LogDir/pluginval-$Slug.err.txt"
+        $Process = Start-Process $Pluginval -NoNewWindow -Wait -PassThru `
+            -WorkingDirectory $env:RUNNER_TEMP `
+            -RedirectStandardOutput $Out -RedirectStandardError $Err `
+            -ArgumentList @('--strictness-level', '10', '--skip-gui-tests',
+                            '--output-dir', "`"$LogDir`"", '--validate', "`"$PluginPath`"")
+        Get-Content $Out -Tail 4 | Write-Host
+        if ((Test-Path $Err) -and (Get-Item $Err).Length -gt 0) { Get-Content $Err -Tail 20 | Write-Host }
+        Write-Host "pluginval [$Label] exit code: $($Process.ExitCode)"
+        return $Process.ExitCode
+    }
+    $InstalledCode = Invoke-Pluginval $Plugin 'installed VST3'
+    $BuiltCode = Invoke-Pluginval (Resolve-Path 'build/plugin/SonicatorPlugin_artefacts/Release/VST3/SONICATOR.vst3').Path 'build-tree VST3'
+    & $Pluginval --version | Write-Host
+    Get-ChildItem "$env:LOCALAPPDATA/CrashDumps" -ErrorAction SilentlyContinue |
+        Select-Object Name, Length, LastWriteTime | Out-String | Write-Host
+    Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-20) } -ErrorAction SilentlyContinue |
+        Where-Object { $_.ProviderName -match 'Application Error|Windows Error Reporting|Application Hang' } |
+        Select-Object ProviderName, TimeCreated, Message | Out-String | Write-Host
+    if ($InstalledCode -ne 0 -or $BuiltCode -ne 0) {
+        throw "Installed VST3 validation exit $InstalledCode; build-tree VST3 exit $BuiltCode"
+    }
     Invoke-Msi -Arguments @('/fvomus', "`"$Msi`"")
     Assert-Features $true $true
     Assert-UserData

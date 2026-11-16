@@ -78,6 +78,16 @@ documented by Microsoft as deliberately compatibility-limited. The gate now uses
 and allows `Installed` so maintenance/uninstall are not blocked. Actual installation rerun remains
 required; successful MSI creation is not installation success. macOS in this run passed again.
 
+Run `43957871104` (`674237d`) proved the launch-condition fix: the MSI installed, both features
+were present with their runtimes, the installed application opened a window and exited 0, and the
+test fixture profile produced catalog/settings/export files. The run then failed after pluginval
+had printed `SUCCESS` for the installed VST3 — its process still returned a non-zero code about
+16 s later. The Windows console/log shows no `*** FAILED` and no failing test, so this is not
+evidence of a test failure; the raw exit code and any Windows crash events were not captured in
+that run. The lifecycle script now records the raw process exit code and stderr for both the
+installed and the build-tree plugin, plus recent Windows Error Reporting entries and crash dumps,
+so the next run distinguishes a plugin crash from a harness-level exit.
+
 - Full suite after Windows portability corrections and final packaging tests.
 - Fresh-source-commit installer/source archive pair and final checksums.
 - New arm64 AU execution (Intel CI does not prove it); Intel installed-app/AU/reinstall gates passed.
