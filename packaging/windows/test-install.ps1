@@ -29,6 +29,16 @@ $ActiveMsi = $Msi
 try {
     Invoke-Msi -Arguments @('/i', "`"$Msi`"")
     Assert-Features $true $true
+    # This smoke test is about installation, not answering the first-launch consent dialog.
+    # Windows WM_CLOSE is correctly ignored while another modal component is active.
+    # Seed a fresh disposable profile with sharing OFF, never an owner's existing settings.
+    if (Test-Path "$Library/settings.json") { throw 'Expected a fresh disposable application profile' }
+    New-Item -ItemType Directory -Force $Library | Out-Null
+    $ConsentVersion = [int][regex]::Match((Get-Content "$PSScriptRoot/../../core/settings/AppSettings.h" -Raw),
+        'currentContributionConsentVersion\s*=\s*(\d+)').Groups[1].Value
+    if ($ConsentVersion -le 0) { throw 'Cannot determine consent version for fixture profile' }
+    $Settings = @{ contributionConsentVersion = $ConsentVersion; contributeTrainingData = $false } | ConvertTo-Json
+    [IO.File]::WriteAllText("$Library/settings.json", $Settings)
     # A real window proves exe and dependency loading; this is not audio-device/DAW acceptance.
     $Process = Start-Process $App -PassThru
     $Ready = $false

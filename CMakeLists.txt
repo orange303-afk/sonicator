@@ -3,6 +3,12 @@ project(Sonicator VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(SONICATOR_MSVC_COMPILER_JOBS "1" CACHE STRING "MSVC compiler processes per project")
+if(MSVC AND SONICATOR_MSVC_COMPILER_JOBS GREATER 1)
+    # MSBuild /m parallelizes projects, not translation units. Bound compiler parallelism
+    # explicitly; release presets serialize projects to avoid multiplying that limit.
+    add_compile_options("/MP${SONICATOR_MSVC_COMPILER_JOBS}")
+endif()
 if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()

@@ -51,11 +51,28 @@ The next Windows CI run, not this macOS result, must confirm MSVC compilation.
   attempts", with arm64 capacity notices. Packaging CI now targets documented `macos-15-intel`;
   it still builds universal and validates native x86_64. arm64 AU execution is explicitly pending.
 
+- Run **43943920763**, source `2a6745faf4cab0a9a2dabb1a77e995221d566c25`: macOS job
+  **SUCCESS** on Intel. The PKG installed, all payloads passed architecture/signature/attribute
+  checks, installed application started and quit with build-tree ONNX unavailable, both VST3 and
+  AU passed pluginval strictness 10, `auval` reported **AU VALIDATION SUCCEEDED**, and reinstall
+  preserved real catalog/settings and synthetic exported-media hashes. Downloaded artifacts to
+  `dist/ci-macOS/`; installer and source-archive SHA256 checks both passed locally.
+- In that same run Windows **application, VST3 and VST3 manifest built successfully**. The full
+  test executable then failed compilation on two POSIX `chmod` calls in a directory-mode test.
+  That test now explicitly skips on Windows: POSIX mode bits are not a Windows ACL denial test.
+  Windows ACL-denied destination acceptance remains separate, not claimed by that skip.
+- Windows compilation parallelism is now bounded per project (2 compiler processes by default
+  for release; 4 on CI only if at least 12 GiB RAM), with serialized MSBuild projects. Diagnostic
+  full-suite compilation runs after installer lifecycle checks to expose packaging failures first.
+- Windows installed-app smoke fixture explicitly opts out of contribution sharing in a fresh
+  disposable settings profile. This avoids mistaking expected first-launch modal consent for
+  failure to close the application; it never overwrites an existing profile.
+
 ## Pending evidence (do not infer success)
 
 - Full suite after Windows portability corrections and final packaging tests.
 - Fresh-source-commit installer/source archive pair and final checksums.
-- New workflow's installed macOS app, AU validation in both slices and reinstall checks.
+- New arm64 AU execution (Intel CI does not prove it); Intel installed-app/AU/reinstall gates passed.
 - Successful Windows Release build, MSI compilation, installed-window/pluginval/lifecycle checks.
 - Full Windows suite failures listed in `WINDOWS_PORT.md` remain unresolved by this packaging task.
 - Manual macOS/Windows DAW playback/drag/Match acceptance and unsigned-installer approval UX

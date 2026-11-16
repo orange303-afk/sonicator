@@ -75,10 +75,17 @@ ONNX and redistributable MSVC CRT DLLs are shipped app-locally in both loading d
 There is no global VC-redist installation custom action. Unsigned Windows installers/binaries
 may prompt SmartScreen; no trust/reputation bypass is attempted.
 
+The release preset serializes MSBuild projects and sets `SONICATOR_MSVC_COMPILER_JOBS=2` for
+parallel translation-unit compilation. CI selects 4 workers only with at least 12 GiB RAM.
+Other presets retain their original compiler-parallelism behavior.
+
 Never run `packaging/windows/test-install.ps1` on a working user's installation. It is guarded
 for a disposable GitHub runner, where it exercises installed app window creation, pluginval,
 repair, a higher-version upgrade fixture, feature selections and uninstall, while checking
 catalog/settings/export hashes. The temporary 0.1.1 MSI is a **test fixture**, not a release.
+The disposable startup profile explicitly opts out of contribution sharing, avoiding the
+first-launch consent modal during the shutdown test. It refuses to overwrite an existing
+profile; interacting with the first-launch dialog is separate manual acceptance.
 
 ## Validation and CI
 

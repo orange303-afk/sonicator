@@ -509,8 +509,11 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
 }
 
 TEST_CASE("An unwritable destination fails without touching the source or old output",
-          "[batch][batch-publish]")
+           "[batch][batch-publish]")
 {
+#if JUCE_WINDOWS
+    SKIP("POSIX directory mode bits do not implement Windows ACL write denial");
+#else
     TestDirectory t;
     const auto source = floatWav(t.dir.getChildFile("Source/ro.wav"), { 0.2f, -0.2f });
     const auto hash = juce::SHA256(source).toHexString();
@@ -533,4 +536,5 @@ TEST_CASE("An unwritable destination fails without touching the source or old ou
     REQUIRE(result.state == OutputState::failed);
     REQUIRE(juce::SHA256(source).toHexString() == hash);
     REQUIRE(juce::SHA256(target).toHexString() == oldHash);
+#endif
 }
