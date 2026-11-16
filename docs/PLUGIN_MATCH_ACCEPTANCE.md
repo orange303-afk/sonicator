@@ -11,8 +11,8 @@ host checklist has passed.
 
 | Check | Command | Result |
 |---|---|---|
-| Debug, whole suite | `cmake --build --preset debug --target SonicatorTests` then `~/Library/Caches/sonicator-build/debug/tests/SonicatorTests` | exit 0, 1275 test cases, 272454 assertions |
-| Release, whole suite | `cmake --build --preset release --target SonicatorTests` then `~/Library/Caches/sonicator-build/release/tests/SonicatorTests` | exit 0, 1275 test cases, 272456 assertions |
+| Debug, whole suite | `cmake --build --preset debug --target SonicatorTests` then `~/Library/Caches/sonicator-build/debug/tests/SonicatorTests` | exit 0, 1279 test cases, 272515 assertions |
+| Release, whole suite | `cmake --build --preset release --target SonicatorTests` then `~/Library/Caches/sonicator-build/release/tests/SonicatorTests` | exit 0, 1279 test cases, 272517 assertions |
 | Match subset, Release | `…/release/tests/SonicatorTests '[plugin-match]'` | exit 0, 61 test cases, 1836 assertions |
 | Existing plugin suite | `…/debug/tests/SonicatorTests '[plugin]'` | exit 0, 25 test cases, 324 assertions |
 | Preview editing suite | `…/debug/tests/SonicatorTests '[ui][edit]'` | exit 0, 15 test cases, 62 assertions |
@@ -25,8 +25,12 @@ into 128). This proves length and a steady tone, not musical quality.
 
 ## Open gates
 
-- **pluginval** was not run. `auval` is covered by the macOS universal CI job above; a local
-  run would have replaced the owner's installed SONICATOR and was not done.
+- **pluginval**, strictness 10, `--skip-gui-tests` (the harness runs headless; the editor is covered
+  by the UI tests): universal VST3 and AU both reported `SUCCESS` on 2026-11-16. The binaries were
+  rebuilt from the branch HEAD with `plugin-universal`, `lipo -archs` reported `x86_64 arm64`, and
+  `codesign --verify --deep --strict` passed. GUI tests in pluginval were not run.
+- **auval**: covered by the universal CI job above. A local run would replace the owner's installed
+  SONICATOR and was not done.
 - **Windows CI** was not run. Rubber Band is configured for MSVC (single-file amalgamation, built-in
   FFT, no threading) but has not been compiled there.
 - **Universal macOS and auval**: CI run 43782383735, job "macOS plugin (universal)", success on
