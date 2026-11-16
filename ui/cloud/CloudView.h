@@ -60,7 +60,6 @@ public:
     void activatePointForTest(size_t index) { activate(index); }
     float lensStrengthForTest() const { return lensStrength; }
     float introProgressForTest() const { return introAlpha(); }
-    float filterBlendForTest() const { return filterBlend; }
     // The displacement the lens gives one point, in screen pixels. The point's own coordinates and
     // the hit test never move.
     juce::Point<float> lensOffsetForTest(size_t index) const;
@@ -129,7 +128,6 @@ private:
     CloudIndex index;
     std::map<uint32_t, std::vector<size_t>> byColour; // built once per layout, keeps setColour rare
     std::vector<bool> matches;
-    float filterBlend = 0.0f;
     std::map<int64_t, juce::String> labels;
     std::vector<size_t> visibleScratch;
     // The visible set is recomputed only when the camera (not a hover) changes.
@@ -140,7 +138,6 @@ private:
     // blit an image instead of re-rasterising 35k points.
     juce::Image pointLayer, frameCache;
     Camera frameCamera;
-    float frameFilterBlend = -1.0f;
     bool frameValid = false;
     float layerScale = 1.0f;
     // Label text and measured width are fixed for a layout; measuring them every frame costs more

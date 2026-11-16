@@ -80,9 +80,13 @@ void CloudView::setLayout(CloudLayout layout)
     repaint();
 }
 
-void CloudView::setFilter(std::vector<bool> newMatches)
+void CloudView::setFilter(std::vector<bool>)
 {
-    matches = std::move(newMatches);
+    // The map is the whole tagged library. The list's search/folder/tag filter belongs to the
+    // list; applying it here left a handful of bright points on a dark field, which read as a
+    // broken map. All points keep the same brightness.
+    if (matches.empty()) return;
+    matches.clear();
     frameValid = false;
     repaint();
     if (isShowing()) updateTimerRate();
@@ -333,7 +337,7 @@ void CloudView::rebuildPointLayer()
             const auto& point = current.points[i];
             const auto x = (point.x - current.bounds.getX()) * layerScale;
             const auto y = (point.y - current.bounds.getY()) * layerScale;
-            path.addRectangle(x - size * 0.5f, y - size * 0.5f, size, size);
+            path.addEllipse(x - size * 0.5f, y - size * 0.5f, size, size);
         }
         if (path.isEmpty()) continue;
         g.setColour(juce::Colour(colour));
@@ -457,8 +461,8 @@ void CloudView::drawPointsLive(juce::Graphics& g, const std::vector<size_t>& vis
                 continue;
             }
         }
-        paths[point.colour].addRectangle(screen.x - pointSize * 0.5f, screen.y - pointSize * 0.5f,
-                                         pointSize, pointSize);
+        paths[point.colour].addEllipse(screen.x - pointSize * 0.5f, screen.y - pointSize * 0.5f,
+                                       pointSize, pointSize);
     }
     for (const auto& [colour, path] : paths)
     {
@@ -468,8 +472,8 @@ void CloudView::drawPointsLive(juce::Graphics& g, const std::vector<size_t>& vis
     for (const auto& entry : lensPoints)
     {
         g.setColour(entry.colour);
-        g.fillRect(entry.position.x - entry.size * 0.5f, entry.position.y - entry.size * 0.5f,
-                   entry.size, entry.size);
+        g.fillEllipse(entry.position.x - entry.size * 0.5f, entry.position.y - entry.size * 0.5f,
+                      entry.size, entry.size);
     }
 }
 
@@ -535,7 +539,7 @@ void CloudView::drawLens(juce::Graphics& g, const std::vector<size_t>& visible, 
 {
     if (lensStrength <= 0.01f || ! hasLensTarget) return;
     const auto centre = lensPos + sway;
-    const auto live = visible.size() <= livePointThreshold;
+    const auto live = visible.size() <= livePointThreshold || (float) viewScale > layerScale * 1.25f;
     if (! live)
     {
         const int radius = (int) std::ceil(lensRadius);
@@ -563,8 +567,8 @@ void CloudView::drawLens(juce::Graphics& g, const std::vector<size_t>& visible, 
             auto colour = juce::Colour(point.colour);
             colour = colour.withAlpha(filtered && ! visiblePoint ? 0.30f : 1.0f);
             pg.setColour(colour);
-            pg.fillRect(displaced.x - (float) rect.getX() - size * 0.5f,
-                        displaced.y - (float) rect.getY() - size * 0.5f, size, size);
+            pg.fillEllipse(displaced.x - (float) rect.getX() - size * 0.5f,
+                           displaced.y - (float) rect.getY() - size * 0.5f, size, size);
         }
         applyLensMask(lensPatch, lensCentreLocal);
         g.setOpacity(introAlpha());
@@ -578,7 +582,7 @@ void CloudView::ensureFrameCache(const std::vector<size_t>& visible)
     const Camera camera { viewScale, viewPan };
     const auto width = juce::jmax(1, getWidth());
     const auto height = juce::jmax(1, getHeight());
-    if (frameValid && frameCamera == camera && std::abs(frameFilterBlend - filterBlend) < 0.003f
+    if (frameValid && frameCamera == camera
         && frameCache.getWidth() == width && frameCache.getHeight() == height)
         return;
     frameCache = juce::Image(juce::Image::RGB, width, height, true);
@@ -586,10 +590,8 @@ void CloudView::ensureFrameCache(const std::vector<size_t>& visible)
     g.fillAll(theme::background);
     if (! matches.empty())
     {
-        // The whole map stays as context; only the matching files are drawn at full strength.
-        g.setOpacity(1.0f - 0.88f * filterBlend);
-        drawLayer(g, pointLayer, {});
-        g.setOpacity(1.0f);
+        // A filter hides the other points; it does not dim them. Everything on the map keeps the
+        // same brightness.
         drawPointsLive(g, visible, true, {}, false, false);
     }
     else if (visible.size() <= livePointThreshold)
@@ -601,7 +603,6 @@ void CloudView::ensureFrameCache(const std::vector<size_t>& visible)
         drawLayer(g, pointLayer, {});
     }
     frameCamera = camera;
-    frameFilterBlend = filterBlend;
     frameValid = true;
 }
 
@@ -627,23 +628,13 @@ void CloudView::paint(juce::Graphics& g)
     const auto sway = ambientSway();
     const auto intro = introAlpha();
     const bool filtered = ! matches.empty();
-    const bool live = visible.size() <= livePointThreshold;
+    const bool live = visible.size() <= livePointThreshold || (float) viewScale > layerScale * 1.25f;
     if (live)
     {
         // Close up, the points are drawn live: they can drift with the ambient motion and the lens
         // can displace them without a patch.
-        if (filtered)
-        {
-            g.setOpacity(intro * (1.0f - 0.88f * filterBlend));
-            drawPointsLive(g, visible, false, sway, true, true);
-            g.setOpacity(intro);
-            drawPointsLive(g, visible, true, sway, true, true);
-        }
-        else
-        {
-            g.setOpacity(intro);
-            drawPointsLive(g, visible, true, sway, true, true);
-        }
+        g.setOpacity(intro);
+        drawPointsLive(g, visible, true, sway, true, true);
         g.setOpacity(1.0f);
     }
     else
@@ -750,10 +741,6 @@ void CloudView::advance(double milliseconds)
         }
     }
 
-    const auto targetBlend = matches.empty() ? 0.0f : 1.0f;
-    if (std::abs(filterBlend - targetBlend) > 0.002f) filterBlend += (targetBlend - filterBlend) * 0.2f;
-    else filterBlend = targetBlend;
-
     const auto lensWanted = hasLensTarget ? 1.0f : 0.0f;
     const auto lensStep = 1.0f - std::pow(0.82f, step / 16.6667f);
     if (std::abs(lensStrength - lensWanted) > 0.002f) lensStrength += (lensWanted - lensStrength) * lensStep;
@@ -778,8 +765,7 @@ void CloudView::updateTimerRate()
         currentTimerHz = 0;
         return;
     }
-    const bool fast = animating || hasLensTarget || lensStrength > 0.01f
-        || std::abs(filterBlend - (matches.empty() ? 0.0f : 1.0f)) > 0.002f;
+    const bool fast = animating || hasLensTarget || lensStrength > 0.01f;
     const auto wanted = fast ? 60 : 30;
     if (wanted != currentTimerHz)
     {

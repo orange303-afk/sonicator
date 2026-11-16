@@ -1375,30 +1375,12 @@ void MainComponent::updateCloudMatches()
 {
     if (cloudPanel == nullptr || ! cloudPanel->hasLayout() || readRepo == nullptr) return;
     const auto& points = cloudPanel->layout().points;
-    // Hide empty and Show ignored change almost nothing on a map of tagged, analysed files; a
-    // narrowing filter is a query, and only those are worth running on every keystroke.
-    const bool filtered = filter.text.isNotEmpty() || filter.folder.isNotEmpty()
-        || ! filter.includeTags.empty() || ! filter.excludeTags.empty()
-        || filter.starredOnly || filter.hideDuplicates || filter.duplicateHash.isNotEmpty();
-    if (! filtered)
-    {
-        cloudPanel->setFilter({});
-        cloudPanel->setNotice({});
-        cloudMatches.clear();
-        countLabel.setText(juce::String((int) points.size()) + " tagged files on the map", juce::dontSendNotification);
-        return;
-    }
-    std::unordered_set<int64_t> ids;
-    for (auto id : readRepo->queryIds(filter)) ids.insert(id);
-    std::vector<bool> matches(points.size(), false);
-    for (size_t i = 0; i < points.size(); ++i) matches[i] = ids.count(points[i].sampleId) > 0;
-    cloudPanel->setFilter(matches);
-    cloudMatches = std::move(matches);
-    const auto total = (int) points.size();
-    int matching = 0;
-    for (bool match : cloudMatches) matching += match ? 1 : 0;
-    cloudPanel->setNotice(matching == 0 ? "Nothing matches the filter" : juce::String());
-    countLabel.setText(juce::String(total) + " tagged files on the map  |  " + juce::String(matching) + " matching",
+    // The map is the whole tagged library; the list's filter is for the list. Running a narrowing
+    // query here only left a handful of points on a dark field, which read as a broken map.
+    cloudPanel->setFilter({});
+    cloudPanel->setNotice({});
+    cloudMatches.clear();
+    countLabel.setText(juce::String((int) points.size()) + " tagged files on the map",
                        juce::dontSendNotification);
 }
 

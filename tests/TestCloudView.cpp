@@ -75,7 +75,7 @@ TEST_CASE("Zoom keeps the world point under the cursor", "[cloud][view]")
     REQUIRE(after.y == Catch::Approx(before.y).margin(1.0f));
 }
 
-TEST_CASE("Cloud view hit test respects the current filter", "[cloud][view]")
+TEST_CASE("Cloud view hit test always activates a point", "[cloud][view]")
 {
     CloudView view;
     view.setSize(800, 600);
@@ -89,12 +89,11 @@ TEST_CASE("Cloud view hit test respects the current filter", "[cloud][view]")
     std::vector<bool> matches(view.layout().points.size(), false);
     matches[0] = true;
     view.setFilter(matches);
-    REQUIRE_FALSE(view.isPointVisible(index));
+    // The cloud is the whole tagged library; the list filter must not hide or dim its points.
+    REQUIRE(view.isPointVisible(index));
 
     int64_t activated = 0;
     view.onActivate = [&](int64_t id) { activated = id; };
-    // A dimmed point is still a file: clicking it must open it, even though it does not match the
-    // filter. The filter changes visibility, not what the user may inspect.
     view.activatePointForTest(index);
     REQUIRE(activated == 104);
     view.activatePointForTest(0);
@@ -310,21 +309,21 @@ TEST_CASE("The hover lens eases in and out and never moves the hit test", "[clou
     REQUIRE(view.lensStrengthForTest() < 0.02f);
 }
 
-TEST_CASE("A filter fades instead of snapping", "[cloud][view]")
+TEST_CASE("The list filter never reflows or empties the cloud", "[cloud][view]")
 {
     CloudView view;
     view.setSize(800, 600);
     view.setLayout(gridLayout());
     for (int i = 0; i < 120; ++i) view.onFrameForTest();
+    const auto before = view.worldToScreen(300, 300);
     std::vector<bool> matches(view.layout().points.size(), false);
     matches[0] = true;
     view.setFilter(matches);
-    REQUIRE(view.filterBlendForTest() < 0.5f);
-    for (int i = 0; i < 40; ++i) view.onFrameForTest();
-    REQUIRE(view.filterBlendForTest() > 0.95f);
-    view.setFilter({});
-    for (int i = 0; i < 40; ++i) view.onFrameForTest();
-    REQUIRE(view.filterBlendForTest() < 0.05f);
+    REQUIRE(view.isPointVisible(1));
+    REQUIRE(view.isPointVisible(0));
+    const auto after = view.worldToScreen(300, 300);
+    REQUIRE(after.x == Catch::Approx(before.x).margin(0.001f));
+    REQUIRE(after.y == Catch::Approx(before.y).margin(0.001f));
 }
 
 TEST_CASE("A new layout fades the cloud in", "[cloud][view]")

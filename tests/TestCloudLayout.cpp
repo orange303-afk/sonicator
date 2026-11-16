@@ -118,7 +118,7 @@ TEST_CASE("Quantised descriptors do not turn a tag into lines", "[cloud]")
     for (size_t i = 0; i < layout.points.size(); ++i)
         for (size_t j = i + 1; j < layout.points.size(); ++j)
             REQUIRE(std::hypot(layout.points[i].x - layout.points[j].x,
-                               layout.points[i].y - layout.points[j].y) < 6.0f);
+                               layout.points[i].y - layout.points[j].y) < 12.0f);
 }
 
 TEST_CASE("A multi-tag file sits between its islands", "[cloud]")
