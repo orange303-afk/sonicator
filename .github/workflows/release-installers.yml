@@ -40,6 +40,7 @@ jobs:
       - name: Package and collect matching sources
         run: |
           sh packaging/macos/build-pkg.sh build dist
+          sh packaging/tests/test-macos-pkg.sh dist/SONICATOR-0.1.0-macOS-universal.pkg
           python3 packaging/make-source-bundle.py build dist
           git rev-parse HEAD > dist/source-commit.txt
       - name: Download pinned pluginval

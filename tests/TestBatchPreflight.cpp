@@ -303,6 +303,17 @@ TEST_CASE("Frame and byte estimates are checked and the 4 GiB container limit is
     REQUIRE_FALSE(isWarningCode(ErrorCode::insufficient_space));
 }
 
+TEST_CASE("Free-space preflight supports Unicode and not-yet-created destination folders",
+          "[batch][batch-paths]")
+{
+    TestDirectory t;
+    const auto folder = t.dir.getChildFile(juce::String::fromUTF8("Папка назначения"));
+    REQUIRE(folder.createDirectory().wasOk());
+    REQUIRE(freeBytesFor(folder) > 0);
+    REQUIRE(freeBytesFor(folder.getChildFile("not-created/nested")) > 0);
+    REQUIRE(unsafeDestinationReason(folder, folder.getChildFile("nested/out.wav")).isEmpty());
+}
+
 TEST_CASE("Replace never targets a skipped input or loses a same-stem sibling",
           "[batch][batch-paths]")
 {

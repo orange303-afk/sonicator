@@ -11,6 +11,23 @@ using ebltest::makeEbl;
 using ebltest::monoOptions;
 using ebltest::stereoOptions;
 
+TEST_CASE("EBL UTF-16LE names preserve Cyrillic and surrogate pairs", "[ebl]")
+{
+    auto bytes = makeEbl(monoOptions());
+    constexpr size_t nameOffset = 98 + 14;
+    for (size_t n = 0; n < 64; ++n) bytes[nameOffset + n] = std::byte { 0 };
+    // Hand-encoded UTF-16LE for space + Б + U+1F3B5 + space, independent of wchar_t size.
+    const uint16_t name[] { 0x0020, 0x0411, 0xd83c, 0xdfb5, 0x0020 };
+    for (size_t n = 0; n < std::size(name); ++n)
+    {
+        bytes[nameOffset + n * 2] = (std::byte) (name[n] & 0xff);
+        bytes[nameOffset + n * 2 + 1] = (std::byte) (name[n] >> 8);
+    }
+    const auto result = sonicator::parseEbl(bytes);
+    REQUIRE(result.ok());
+    CHECK(result.sample->name == juce::String::fromUTF8("Б🎵"));
+}
+
 TEST_CASE("EBL mono with an 8-byte pad and a loop", "[ebl]")
 {
     auto o = monoOptions();

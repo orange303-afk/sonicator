@@ -1,8 +1,12 @@
 #include "BatchPaths.h"
+#if JUCE_WINDOWS
+#include <filesystem>
+#else
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <unistd.h>
 #include <climits>
+#endif
 
 namespace sonicator::batch
 {
@@ -24,9 +28,16 @@ juce::File nearestExistingAncestor(juce::File file)
 
 juce::File canonical(const juce::File& file)
 {
+#if JUCE_WINDOWS
+    std::error_code error;
+    const auto path = std::filesystem::canonical(
+        std::filesystem::path(file.getFullPathName().toWideCharPointer()), error);
+    return error ? file : juce::File(juce::String(path.c_str()));
+#else
     char buffer[PATH_MAX] {};
     if (realpath(file.getFullPathName().toRawUTF8(), buffer) == nullptr) return file;
     return juce::File(juce::String::fromUTF8(buffer));
+#endif
 }
 
 bool within(const juce::File& parent, const juce::File& child)
@@ -93,9 +104,13 @@ juce::String unsafeDestinationReason(const juce::File& destinationFolder, const 
 int64_t freeBytesFor(const juce::File& folder)
 {
     const auto existing = nearestExistingAncestor(folder);
+#if JUCE_WINDOWS
+    return existing.getBytesFreeOnVolume();
+#else
     struct statvfs info {};
     if (statvfs(existing.getFullPathName().toRawUTF8(), &info) != 0) return -1;
     return (int64_t) info.f_bavail * (int64_t) info.f_frsize;
+#endif
 }
 
 PathReserver::PathReserver(const std::vector<juce::String>& protectedIdentities,

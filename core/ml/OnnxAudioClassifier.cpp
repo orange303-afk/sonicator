@@ -12,6 +12,9 @@
 #include <string>
 #include <vector>
 #if JUCE_WINDOWS
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <filesystem>
 #include <stdexcept>

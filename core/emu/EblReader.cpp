@@ -48,13 +48,13 @@ bool hasMagic(std::span<const std::byte> bytes, size_t offset, const char* magic
 // The UTF-16LE name is space-padded and NUL-padded; both ends are trimmed.
 juce::String decodeName(const std::byte* raw)
 {
-    std::array<int16_t, 33> units {};
+    std::array<juce::CharPointer_UTF16::CharType, 33> units {};
     size_t n = 0;
     for (; n < 32; ++n)
     {
         const auto unit = le16(raw + 2 * n);
         if (unit == 0) break;
-        units[n] = (int16_t) unit;
+        units[n] = (juce::CharPointer_UTF16::CharType) unit;
     }
     units[n] = 0;
     return juce::String(juce::CharPointer_UTF16(units.data())).trim();
