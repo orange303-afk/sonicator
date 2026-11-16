@@ -65,7 +65,13 @@ TEST_CASE("Command and Control stay distinct", "[commands][bindings]")
     REQUIRE(command != control);
     const auto commandKey = keyPressFromShortcutKey(command);
     const auto controlKey = keyPressFromShortcutKey(control);
+#if JUCE_MAC
     REQUIRE(commandKey != controlKey);
+#else
+    // Where the platform has no Command key JUCE maps the Command modifier onto Control, so the
+    // two stored shortcuts are one physical chord. The stored booleans still stay distinct above.
+    REQUIRE(commandKey == controlKey);
+#endif
 }
 
 TEST_CASE("Conflicts only exist inside overlapping scopes", "[commands][bindings]")

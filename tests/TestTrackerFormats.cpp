@@ -673,15 +673,21 @@ TEST_CASE("Unsupported tracker instrument slots are drawn in red", "[tracker][ui
     juce::Image image(juce::Image::RGB, 240, 30, true);
     juce::Graphics g(image);
     preview.containerSourceList().getListBoxModel()->paintListBoxItem(1, g, 240, 30, false);
-    bool red = false;
+    const auto intended = juce::Colour(0xffe05a5a);
+    int closest = 255 * 3;
     for (int y = 0; y < image.getHeight(); ++y)
         for (int x = 0; x < image.getWidth(); ++x)
         {
             const auto pixel = image.getPixelAt(x, y);
-            if (pixel.getRed() > 100 && pixel.getRed() > pixel.getGreen() * 1.3
-                && pixel.getRed() > pixel.getBlue() * 1.3) red = true;
+            closest = juce::jmin(closest,
+                juce::jmax(std::abs((int) pixel.getRed() - (int) intended.getRed()),
+                           std::abs((int) pixel.getGreen() - (int) intended.getGreen()),
+                           std::abs((int) pixel.getBlue() - (int) intended.getBlue())));
         }
-    REQUIRE(red);
+    INFO("the closest pixel to the red marker differs by " << closest);
+    // The marker must reach the intended colour. A per-channel tolerance keeps font hinting and
+    // subpixel antialiasing from deciding the result while a colour change still fails.
+    REQUIRE(closest <= 24);
 }
 
 TEST_CASE("SampleVoicePlayer keeps a two-second release and refuses a 129th voice",

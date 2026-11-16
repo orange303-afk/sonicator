@@ -131,7 +131,16 @@ TEST_CASE("catalog gold keeps confirmed rows only and never writes a path", "[fe
     auto pathLines = juce::StringArray::fromLines(paths.loadFileAsString());
     pathLines.removeEmptyStrings();
     REQUIRE(pathLines.size() == 2);
-    REQUIRE(paths.loadFileAsString().contains(first.getFullPathName()));
+    // JSON escapes the Windows separator as a double backslash, so compare the parsed value.
+    bool sawFirstPath = false;
+    for (const auto& line : pathLines)
+    {
+        const auto parsed = juce::JSON::parse(line);
+        REQUIRE(parsed.isObject());
+        if (juce::File(parsed.getProperty("path", juce::var()).toString()) == first)
+            sawFirstPath = true;
+    }
+    REQUIRE(sawFirstPath);
 }
 
 namespace {

@@ -462,6 +462,7 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
     vbrPlan.mp3VbrQuality = 2;
     auto vbrResult = renderAndPublish(preparedFor(source, vbrRecipe), vbrPlan, snapshot,
                                       vbrRecipe, ConflictPolicy::rename, protection);
+    INFO(vbrResult.message);
     REQUIRE(vbrResult.state == OutputState::completed);
     std::unique_ptr<juce::AudioFormatReader> vbrReader(formats.createReaderFor(vbrResult.target));
     REQUIRE(vbrReader != nullptr);
