@@ -258,7 +258,7 @@ TEST_CASE("An unsupported format is returned unchanged", "[bpm][drag]")
     REQUIRE(error.isEmpty());
 }
 
-TEST_CASE("The drag cache prunes old siblings", "[bpm][drag]")
+TEST_CASE("The drag cache prunes folders whose newest file is old", "[bpm][drag]")
 {
     TestDirectory t;
     const auto cache = t.dir.getChildFile("drag");
@@ -266,7 +266,14 @@ TEST_CASE("The drag cache prunes old siblings", "[bpm][drag]")
     const auto old = cache.getChildFile("old");
     keep.createDirectory();
     old.createDirectory();
-    old.setLastModificationTime(juce::Time::getCurrentTime() - juce::RelativeTime::days(30));
+    // A folder's own timestamp cannot be set on Windows: JUCE opens it without
+    // FILE_FLAG_BACKUP_SEMANTICS, so the write fails. The files inside are the age evidence both
+    // platforms can express, and a real cache folder's newest file is what says it is stale.
+    const auto stale = old.getChildFile("stale.wav");
+    REQUIRE(stale.replaceWithText("x"));
+    REQUIRE(stale.setLastModificationTime(juce::Time::getCurrentTime() - juce::RelativeTime::days(30)));
+    const auto fresh = keep.getChildFile("fresh.wav");
+    REQUIRE(fresh.replaceWithText("x"));
     pruneDragCache(cache, keep, 7);
     REQUIRE(keep.isDirectory());
     REQUIRE_FALSE(old.isDirectory());

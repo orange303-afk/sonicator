@@ -1,5 +1,11 @@
 #include "BatchTypes.h"
 #include <sys/stat.h>
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#endif
 
 namespace sonicator::batch
 {
@@ -371,11 +377,31 @@ juce::String sourceFingerprint(const SourceSnapshot& source) { return source.ide
 
 juce::String physicalIdentity(const juce::File& file)
 {
+#if JUCE_WINDOWS
+    // The CRT's stat() leaves st_ino at zero on Windows, so two equal-sized files written in the
+    // same second looked like one physical file and a batch refused to write the second one next
+    // to the first. The volume serial and the 64-bit file index are the real identity.
+    const auto handle = CreateFileW(file.getFullPathName().toWideCharPointer(), 0,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return file.getFullPathName();
+    BY_HANDLE_FILE_INFORMATION info {};
+    const bool ok = GetFileInformationByHandle(handle, &info) != 0;
+    CloseHandle(handle);
+    if (! ok) return file.getFullPathName();
+    const auto index = ((juce::int64) info.nFileIndexHigh << 32) | (juce::int64) info.nFileIndexLow;
+    const auto size = ((juce::int64) info.nFileSizeHigh << 32) | (juce::int64) info.nFileSizeLow;
+    const auto modified = ((juce::int64) info.ftLastWriteTime.dwHighDateTime << 32)
+                        | (juce::int64) info.ftLastWriteTime.dwLowDateTime;
+    return juce::String((juce::int64) info.dwVolumeSerialNumber) + ":" + juce::String(index)
+        + ":" + juce::String(size) + ":" + juce::String(modified);
+#else
     struct stat info {};
     if (stat(file.getFullPathName().toRawUTF8(), &info) != 0) return file.getFullPathName();
     return juce::String((juce::int64) info.st_dev) + ":" + juce::String((juce::int64) info.st_ino)
         + ":" + juce::String((juce::int64) info.st_size) + ":"
         + juce::String((juce::int64) info.st_mtime);
+#endif
 }
 
 bool checkedFrameMath(int64_t frames, int inRate, int outRate, int64_t& out)

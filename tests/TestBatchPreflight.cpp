@@ -95,7 +95,7 @@ TEST_CASE("A batch folder snapshot is recursive, ignores table state and never p
     REQUIRE(prepared.ok);
     REQUIRE(prepared.batch.sources.size() == 1);
     REQUIRE(prepared.batch.sources[0].path == a);
-    REQUIRE(prepared.batch.sources[0].root == lib.getFullPathName());
+    REQUIRE(juce::File(prepared.batch.sources[0].root) == lib);
     REQUIRE(prepared.batch.skipped.size() == 1);
     REQUIRE(prepared.batch.skipped[0].code == ErrorCode::unsupported_source);
 
@@ -210,6 +210,9 @@ TEST_CASE("Rename, skip and replace never put an output on top of a source",
 
     request.conflicts = ConflictPolicy::skip;
     prepared = prepareBatch(repo, request, {});
+    const auto issueText = prepared.issues.empty() ? juce::String("none")
+                                                   : prepared.issues.front().message;
+    INFO(issueText.toStdString());
     REQUIRE(prepared.ok);
     REQUIRE(prepared.batch.outputs[0].skipExisting);
     REQUIRE(prepared.batch.outputs[0].target == existing);
@@ -298,9 +301,24 @@ TEST_CASE("Frame and byte estimates are checked and the 4 GiB container limit is
     REQUIRE(outputByteEstimate(3000000000LL, 2, 24) > containerByteLimit);
     REQUIRE_FALSE(checkedFrameMath(9000000000000000000LL, 44100, 192000, out));
     REQUIRE(outputByteEstimate(44100, 2, 24) > 44100 * 2 * 3);
-    REQUIRE(physicalIdentity(juce::File("/definitely/missing/file.wav")).contains("/"));
+    REQUIRE(physicalIdentity(juce::File("/definitely/missing/file.wav"))
+                .contains(juce::File::getSeparatorString()));
     REQUIRE(isWarningCode(ErrorCode::unknown_free_space));
     REQUIRE_FALSE(isWarningCode(ErrorCode::insufficient_space));
+}
+
+TEST_CASE("Distinct equal-sized files have distinct physical identities", "[batch][batch-paths]")
+{
+    TestDirectory t;
+    const auto a = t.wave("same-a.wav", 440.0);
+    const auto b = t.wave("same-b.wav", 440.0);
+    REQUIRE(a.getSize() == b.getSize());
+    // Windows CRT stat() reports no inode, so the volume serial and file index must carry identity.
+    CHECK(physicalIdentity(a) != physicalIdentity(b));
+    CHECK(physicalIdentity(a) == physicalIdentity(a));
+    // A path that cannot be inspected is its own identity, and stays usable for protection.
+    const auto missing = t.dir.getChildFile("missing.wav");
+    CHECK(physicalIdentity(missing) == missing.getFullPathName());
 }
 
 TEST_CASE("Free-space reporting probes the nearest existing ancestor and survives an unknown value",

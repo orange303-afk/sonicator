@@ -91,6 +91,20 @@ bool canMaterialiseWithMetadata(const juce::File& source)
         || extension == ".w64";
 }
 
+namespace
+{
+// A cache folder's own timestamp is not portable evidence: JUCE cannot set a directory's mtime on
+// Windows. The newest file inside says when the folder was last useful, and an empty folder falls
+// back to its own timestamp.
+juce::int64 lastCacheActivity(const juce::File& folder)
+{
+    juce::int64 newest = 0;
+    for (const auto& file : folder.findChildFiles(juce::File::findFiles, true))
+        newest = juce::jmax(newest, file.getLastModificationTime().toMilliseconds());
+    return newest != 0 ? newest : folder.getLastModificationTime().toMilliseconds();
+}
+} // namespace
+
 void pruneDragCache(const juce::File& cacheDir, const juce::File& keep, const int maxAgeDays)
 {
     if (! cacheDir.isDirectory()) return;
@@ -100,7 +114,7 @@ void pruneDragCache(const juce::File& cacheDir, const juce::File& keep, const in
     for (const auto& folder : folders)
     {
         if (folder == keep) continue;
-        if (folder.getLastModificationTime().toMilliseconds() < cutoff)
+        if (lastCacheActivity(folder) < cutoff)
             folder.deleteRecursively();
     }
 }
