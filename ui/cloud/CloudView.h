@@ -170,6 +170,7 @@ private:
     float labelAlpha = 0.0f;
     juce::uint32 lastMotionMs = 0;
     float lensStrength = 0.0f;
+    float hoverGlow = 0.0f;
     juce::Point<float> lensPos, lensTarget;
     bool hasLensTarget = false;
     int currentTimerHz = 0;

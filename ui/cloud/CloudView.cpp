@@ -606,6 +606,14 @@ void CloudView::paintDynamic(juce::Graphics& g, juce::Point<float> sway)
         auto screen = worldToScreen(point.x, point.y) + sway;
         screen += lensOffsetForScreen(screen);
         // Caption above the point, kept inside the panel.
+        // A small, soft halo around the point under the cursor. The big glow stays reserved for
+        // the selected sample.
+        const auto colour = juce::Colour(point.colour);
+        juce::ColourGradient halo(colour.withAlpha(0.38f * hoverGlow), screen.x, screen.y,
+                                  colour.withAlpha(0.0f), screen.x + 12.0f, screen.y, true);
+        g.setGradientFill(halo);
+        g.fillEllipse(screen.x - 12.0f, screen.y - 12.0f, 24.0f, 24.0f);
+
         auto found = labels.find(point.sampleId);
         const auto text = found != labels.end() ? found->second : "#" + juce::String(point.sampleId);
         g.setFont(studio::captionFont());
@@ -682,6 +690,10 @@ void CloudView::advance(double milliseconds)
     if (hasLensTarget) lensPos += (lensTarget - lensPos) * lensStep;
     if (lensStrength < 0.002f) lensStrength = 0.0f;
 
+    const auto glowTarget = hovered == CloudIndex::none ? 0.0f : 1.0f;
+    if (std::abs(hoverGlow - glowTarget) > 0.01f) hoverGlow += (glowTarget - hoverGlow) * 0.25f;
+    else hoverGlow = glowTarget;
+
     const auto settled = juce::Time::getMillisecondCounter() - lastMotionMs > 120;
     const auto targetLabel = settled ? 1.0f : 0.0f;
     if (std::abs(labelAlpha - targetLabel) > 0.01f) labelAlpha += (targetLabel - labelAlpha) * 0.2f;
@@ -699,7 +711,8 @@ void CloudView::updateTimerRate()
         currentTimerHz = 0;
         return;
     }
-    const bool fast = animating || hasLensTarget || lensStrength > 0.01f;
+    const bool fast = animating || hasLensTarget || lensStrength > 0.01f
+        || std::abs(hoverGlow - (hovered == CloudIndex::none ? 0.0f : 1.0f)) > 0.01f;
     const auto wanted = fast ? 60 : 30;
     if (wanted != currentTimerHz)
     {
