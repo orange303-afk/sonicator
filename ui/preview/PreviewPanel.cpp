@@ -38,12 +38,9 @@ void PreviewPanel::paintListBoxItem(int row, juce::Graphics& g, int width, int h
     {
         const int slotIndex = trackerBox.getItemId(row) - 2;
         if (slotIndex >= 0 && slotIndex < (int) engine.trackerSlots().size())
-        {
-            const auto& slot = engine.trackerSlots()[(size_t) slotIndex];
-            unavailable = slot.fmInstrument || slot.error.isNotEmpty();
-        }
+            unavailable = trackerSlotUnavailable(engine.trackerSlots()[(size_t) slotIndex]);
     }
-    g.setColour(unavailable ? juce::Colour(0xffe05a5a) : theme::text);
+    g.setColour(unavailable ? unavailableSourceColour() : theme::text);
     g.setFont(juce::FontOptions(tracker ? juce::Font::getDefaultMonospacedFontName() : juce::Font::getDefaultSansSerifFontName(),
                                 12.0f, row == 0 ? juce::Font::bold : juce::Font::plain));
     g.drawText(text, 8, 0, width - 16, height, juce::Justification::centredLeft, ! tracker);

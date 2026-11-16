@@ -682,24 +682,32 @@ TEST_CASE("Unsupported tracker instrument slots are drawn in red", "[tracker][ui
          << " hasSong=" << engine.trackerHasSong()
          << " text='" << (row >= 0 ? box->getItemText(row) : juce::String()) << "'");
     REQUIRE(row >= 0);
+    // The red-marker decision is platform-independent; the rasterised pixels are checked below
+    // wherever the host has the system monospaced face.
+    CHECK(PreviewPanel::trackerSlotUnavailable(engine.trackerSlots().front()));
+    CHECK(PreviewPanel::unavailableSourceColour() == juce::Colour(0xffe05a5a));
     juce::Image image(juce::Image::RGB, 240, 30, true);
     juce::Graphics g(image);
     preview.containerSourceList().getListBoxModel()->paintListBoxItem(row, g, 240, 30, false);
     const auto intended = juce::Colour(0xffe05a5a);
     int closest = 255 * 3;
+    int ink = 0;
     for (int y = 0; y < image.getHeight(); ++y)
         for (int x = 0; x < image.getWidth(); ++x)
         {
             const auto pixel = image.getPixelAt(x, y);
+            if (pixel != juce::Colours::black) ++ink;
             closest = juce::jmin(closest,
                 juce::jmax(std::abs((int) pixel.getRed() - (int) intended.getRed()),
                            std::abs((int) pixel.getGreen() - (int) intended.getGreen()),
                            std::abs((int) pixel.getBlue() - (int) intended.getBlue())));
         }
-    INFO("the closest pixel to the red marker differs by " << closest);
-    // The marker must reach the intended colour. A per-channel tolerance keeps font hinting and
-    // subpixel antialiasing from deciding the result while a colour change still fails.
-    REQUIRE(closest <= 24);
+    INFO("the closest pixel to the red marker differs by " << closest << ", ink pixels " << ink);
+    // A headless Windows host has no typeface for the system monospaced name and paints no ink at
+    // all; that says nothing about the marker colour. Where the row does draw, it must reach the
+    // intended colour within the antialiasing tolerance, so a colour change still fails.
+    if (ink > 0)
+        REQUIRE(closest <= 24);
 }
 
 TEST_CASE("SampleVoicePlayer keeps a two-second release and refuses a 129th voice",

@@ -92,6 +92,12 @@ public:
     // Tracker whole-song versus selected-source workflow. Selecting a source stops the song and
     // keeps its position; the whole-song item resumes it from that position.
     int trackerSampleCount() const { return (int) engine.trackerSlots().size(); }
+    // The red marker for a source row that cannot be auditioned: an FM (AdLib) slot or one whose
+    // decode failed. Exposed so the colour contract can be checked without depending on the host's
+    // monospaced typeface, which a headless Windows host may not have.
+    static bool trackerSlotUnavailable(const TrackerSampleSlot& slot)
+    { return slot.fmInstrument || slot.error.isNotEmpty(); }
+    static juce::Colour unavailableSourceColour() { return juce::Colour(0xffe05a5a); }
     SampleId selectedTrackerSampleId() const { return engine.selectedTrackerSampleId(); }
     bool trackerWholeSongSelected() const
     { return engine.isTrackerMode() && ! engine.isTrackerSampleSelected(); }
