@@ -186,11 +186,8 @@ jobs:
       - name: Build
         run: cmake --build --preset ci-windows
 
-      - name: Test (diagnostic, verbose)
-        timeout-minutes: 12
-        shell: pwsh
-        run: |
-          & .\build\tests\Debug\SonicatorTests.exe --verbosity high --durations yes
+      - name: Test
+        run: ctest --preset ci-windows
 
       - name: Test log
         if: failure()

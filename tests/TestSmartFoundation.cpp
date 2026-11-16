@@ -279,7 +279,11 @@ TEST_CASE("A real schema 6 database gains current schema columns in place", "[sm
 {
     auto file = juce::File::getSpecialLocation(juce::File::tempDirectory)
         .getNonexistentChildFile("sonicator-foundation-v6", ".sqlite");
+    // The catalog stores host-native separators, so a fixture row written with '/' must be spelled
+    // the same way or findByPath cannot see it on Windows.
+    const auto legacyPath = nativePath("/lib/old.wav");
     rawExec(file,
+        juce::String(
         "CREATE TABLE samples (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE,"
         " name TEXT NOT NULL, hash TEXT NOT NULL, format TEXT NOT NULL, error TEXT NOT NULL,"
         " size INTEGER, modified INTEGER, analyzed INTEGER, duration REAL, rate REAL, bits INTEGER,"
@@ -315,7 +319,8 @@ TEST_CASE("A real schema 6 database gains current schema columns in place", "[sm
         " VALUES(7,128,1,'resolved',0,'minor','resolved');"
         "INSERT INTO smart_overrides(sample_id,field,cleared,text_value,numeric_value)"
         " VALUES(7,'bpm',0,'',126);"
-        "PRAGMA user_version=6;");
+        "PRAGMA user_version=6;")
+        .replace("'/lib/old.wav'", "'" + legacyPath + "'").toRawUTF8());
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
         REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 19);

@@ -46,7 +46,7 @@ TEST_CASE("Repository persists Unicode paths, metrics, and upserts without losin
         Database db(file); SampleRepository repo(db); repo.createTables();
         auto r = repo.findByPath(juce::String::fromUTF8("/тест/音/🎵.wav"));
         REQUIRE(r.has_value());
-        REQUIRE(r->filePath.toStdString() == "/тест/音/🎵.wav");
+        REQUIRE(r->filePath == nativePath(juce::String::fromUTF8("/тест/音/🎵.wav")));
         REQUIRE(r->id == id);
         REQUIRE(r->duration == Catch::Approx(2.5));
         REQUIRE(r->spectralRolloff == Catch::Approx(1234));
@@ -118,7 +118,7 @@ TEST_CASE("Path stream walks by primary key and marks missing in batches", "[dat
     REQUIRE(first[0].id < first[1].id);
     auto second = repo.pathsAfterId(first.back().id, 2);
     REQUIRE(second.size() == 1);
-    REQUIRE(second[0].path == "/x/b.wav");
+    REQUIRE(second[0].path == nativePath("/x/b.wav"));
     repo.setMissing({idA, idB});
     REQUIRE(repo.findByPath("/x/a.wav")->missing);
     REQUIRE(repo.findByPath("/x/b.wav")->missing);

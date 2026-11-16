@@ -91,14 +91,14 @@ TEST_CASE("Added folder tree includes deep descendants and responds to arrow key
     REQUIRE(tree->keyPressed(juce::KeyPress(juce::KeyPress::rightKey)));
     REQUIRE(audio->isOpen()); REQUIRE(audio->getNumSubItems() == 1);
     auto* deep = audio->getSubItem(0); deep->setSelected(true,true);
-    REQUIRE(selection == rootPath+"/deep");
+    REQUIRE(selection == nativePath(rootPath + "/deep"));
     REQUIRE(tree->keyPressed(juce::KeyPress(juce::KeyPress::rightKey)));
     REQUIRE(deep->isOpen()); REQUIRE(deep->getNumSubItems() == 1);
     REQUIRE(tree->keyPressed(juce::KeyPress(juce::KeyPress::leftKey)));
     REQUIRE_FALSE(deep->isOpen());
     folders.refresh(repo);
     REQUIRE(tree->getSelectedItem(0) != nullptr);
-    REQUIRE(tree->getSelectedItem(0)->getUniqueName() == rootPath+"/deep");
+    REQUIRE(tree->getSelectedItem(0)->getUniqueName() == nativePath(rootPath + "/deep"));
 }
 TEST_CASE("Nested added roots share the same descendant hierarchy", "[ui][folders]")
 {
@@ -110,7 +110,7 @@ TEST_CASE("Nested added roots share the same descendant hierarchy", "[ui][folder
     REQUIRE(tree->getRootItem()->getNumSubItems() == 2);
     auto* nested = tree->getRootItem()->getSubItem(1); nested->setOpen(true);
     REQUIRE(nested->getNumSubItems() == 1);
-    REQUIRE(nested->getSubItem(0)->getUniqueName() == path+"/Drums/deep");
+    REQUIRE(nested->getSubItem(0)->getUniqueName() == nativePath(path + "/Drums/deep"));
 }
 TEST_CASE("Refreshing a selected row does not trigger preview again", "[ui][regression]")
 {
@@ -436,7 +436,7 @@ TEST_CASE("Folder tree reports a right-click with its path and All samples state
     drums->itemClicked(click);
     REQUIRE(requests == 1);
     REQUIRE_FALSE(requestedAll);
-    REQUIRE(requestedPath == rootPath + "/Drums");
+    REQUIRE(requestedPath == nativePath(rootPath + "/Drums"));
     REQUIRE(drums->isSelected());
     root->itemClicked(click);
     REQUIRE(requests == 2);
@@ -492,29 +492,29 @@ TEST_CASE("Favorite tree keeps a folder and its catalogued descendants expandabl
         r.fileName = juce::File(r.filePath).getFileName(); repo.upsert(r);
     };
     add("Drums/kick.wav"); add("Drums/deep/more/snare.wav"); add("Bass/bass.wav");
-    FolderTree favorites; favorites.refresh(repo, { rootPath + "/Drums" }, false);
+    FolderTree favorites; favorites.refresh(repo, { nativePath(rootPath + "/Drums") }, false);
     auto* tree = dynamic_cast<juce::TreeView*>(favorites.getChildComponent(0)); REQUIRE(tree != nullptr);
     auto* root = tree->getRootItem(); REQUIRE(root != nullptr);
     REQUIRE(root->getNumSubItems() == 1);
     auto* drums = root->getSubItem(0); REQUIRE(drums != nullptr);
-    REQUIRE(drums->getUniqueName() == rootPath + "/Drums");
+    REQUIRE(drums->getUniqueName() == nativePath(rootPath + "/Drums"));
     REQUIRE(drums->mightContainSubItems());
     juce::String selected; favorites.onFolder = [&](juce::String path) { selected = path; };
     drums->setSelected(true, true);
-    REQUIRE(selected == rootPath + "/Drums");
+    REQUIRE(selected == nativePath(rootPath + "/Drums"));
     drums->setOpen(true);
     REQUIRE(drums->getNumSubItems() == 1);
     auto* deep = drums->getSubItem(0);
-    REQUIRE(deep->getUniqueName() == rootPath + "/Drums/deep");
+    REQUIRE(deep->getUniqueName() == nativePath(rootPath + "/Drums/deep"));
     deep->setOpen(true);
     REQUIRE(deep->getNumSubItems() == 1);
-    REQUIRE(deep->getSubItem(0)->getUniqueName() == rootPath + "/Drums/deep/more");
+    REQUIRE(deep->getSubItem(0)->getUniqueName() == nativePath(rootPath + "/Drums/deep/more"));
     // A missing favorite remains a root and does not fall back to another folder.
-    FolderTree missing; missing.refresh(repo, { rootPath + "/NotThere" }, false);
+    FolderTree missing; missing.refresh(repo, { nativePath(rootPath + "/NotThere") }, false);
     tree = dynamic_cast<juce::TreeView*>(missing.getChildComponent(0)); REQUIRE(tree != nullptr);
     root = tree->getRootItem(); REQUIRE(root != nullptr);
     REQUIRE(root->getNumSubItems() == 1);
-    REQUIRE(root->getSubItem(0)->getUniqueName() == rootPath + "/NotThere");
+    REQUIRE(root->getSubItem(0)->getUniqueName() == nativePath(rootPath + "/NotThere"));
 }
 TEST_CASE("Selecting a sample by id does not fire the row action", "[ui][session]")
 {
@@ -535,12 +535,12 @@ TEST_CASE("Folder tree selects a nested restored path", "[ui][session][folders]"
     const auto rootPath = t.dir.getChildFile("lib").getFullPathName(); repo.addRoot(rootPath);
     SampleRecord r; r.filePath = rootPath + "/Drums/deep/snare.wav"; r.fileName = "snare.wav"; repo.upsert(r);
     FolderTree folders; folders.refresh(repo);
-    const auto path = rootPath + "/Drums/deep";
+    const auto path = nativePath(rootPath + "/Drums/deep");
     REQUIRE(folders.selectPath(path));
     auto* tree = dynamic_cast<juce::TreeView*>(folders.getChildComponent(0)); REQUIRE(tree != nullptr);
     auto* selected = tree->getSelectedItem(0); REQUIRE(selected != nullptr);
     REQUIRE(selected->getUniqueName() == path);
-    REQUIRE_FALSE(folders.selectPath(rootPath + "/NotThere"));
+    REQUIRE_FALSE(folders.selectPath(nativePath(rootPath + "/NotThere")));
 }
 TEST_CASE("Preview can load the restored file without starting playback", "[ui][session][preview]")
 {
@@ -564,9 +564,9 @@ TEST_CASE("Folder tree hides ignored folders unless Show ignored is on", "[ui][f
     repo.ignorePath(root + "/hidden", true);
     FolderTree tree; tree.setBounds(0, 0, 300, 400); tree.resized();
     tree.refresh(repo, { root }, true, false);
-    REQUIRE_FALSE(tree.selectPath(root + "/hidden"));
+    REQUIRE_FALSE(tree.selectPath(nativePath(root + "/hidden")));
     tree.refresh(repo, { root }, true, true);
-    REQUIRE(tree.selectPath(root + "/hidden"));
+    REQUIRE(tree.selectPath(nativePath(root + "/hidden")));
 
     const auto onlyHidden = t.dir.getChildFile("lib2").getFullPathName();
     SampleRecord hiddenRoot; hiddenRoot.filePath = onlyHidden + "/x.wav"; hiddenRoot.fileName = "x.wav";

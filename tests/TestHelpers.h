@@ -1,8 +1,15 @@
 #pragma once
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "core/database/PathRelocation.h"
 #include <cmath>
 #include <vector>
+// The catalog stores host-native separators. Tests that write or read a catalog path with '/' build
+// their expectation the same way rather than assuming the POSIX spelling.
+inline juce::String nativePath(const juce::String& path)
+{
+    return sonicator::pathrelocation::normaliseSeparators(path, juce::File::getSeparatorChar());
+}
 // Recursive component-ID lookup: JUCE's own findChildWithID only searches direct children.
 inline juce::Component* findDescendantWithID(juce::Component& root, const juce::String& id)
 {
