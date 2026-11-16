@@ -68,6 +68,16 @@ The next Windows CI run, not this macOS result, must confirm MSVC compilation.
   disposable settings profile. This avoids mistaking expected first-launch modal consent for
   failure to close the application; it never overwrites an existing profile.
 
+Run `43968834627` (`8fff7ce`): **Windows fully SUCCESS** — install, installed window start/close,
+pluginval strictness 10 for installed and build-tree VST3, ONNX positive/negative controls, repair,
+0.1.1 major upgrade, per-feature installs, uninstall, unchanged catalog/settings/export hashes, and
+the diagnostic full suite. macOS in that run failed only at the installed-app quit step:
+`osascript` returned `-600` (Application isn't running) and, separately, the validation-log
+artifact upload hit a transient GitHub artifact-service timeout. The macOS run now seeds the same
+consent-suppressed disposable profile as Windows, launches through LaunchServices with a direct
+binary fallback, and judges quit by the process actually disappearing; validation logs are
+best-effort uploads while installer artifacts stay required.
+
 ## Pending evidence (do not infer success)
 
 Run `43953066975` (`c08e068`) built the Windows application/VST3 and both the real MSI and higher-

@@ -65,12 +65,38 @@ jobs:
             sh packaging/macos/verify-bundle.sh "$bundle"
             if xattr -r "$bundle" | grep -q com.apple.quarantine; then exit 1; fi
           done
-          "$APP/Contents/MacOS/SONICATOR" > validation/app.log 2>&1 &
-          APP_PID=$!
-          sleep 5
+          # Seed a fresh disposable profile with sharing OFF, so startup is not blocked by the
+          # first-launch consent alert. The alert itself is separate manual acceptance.
+          test ! -e "$HOME/Library/Sonicator/settings.json"
+          mkdir -p "$HOME/Library/Sonicator"
+          CONSENT="$(sed -n 's/.*currentContributionConsentVersion *= *\([0-9][0-9]*\).*/\1/p' core/settings/AppSettings.h)"
+          test -n "$CONSENT"
+          printf '{"contributionConsentVersion": %s, "contributeTrainingData": false}\n' "$CONSENT" \
+            > "$HOME/Library/Sonicator/settings.json"
+          if ! open -n "$APP"; then
+            echo 'LaunchServices open failed; launching the binary directly'
+            "$APP/Contents/MacOS/SONICATOR" > validation/app.log 2>&1 &
+          fi
+          APP_PID=''
+          for attempt in $(seq 1 30); do
+            APP_PID="$(pgrep -f "$APP/Contents/MacOS/SONICATOR" | head -1 || true)"
+            test -n "$APP_PID" && break
+            sleep 1
+          done
+          test -n "$APP_PID" || { echo 'installed application did not start'; exit 1; }
+          sleep 3
           kill -0 "$APP_PID"
-          osascript -e 'tell application id "com.sonicator.browser" to quit'
-          wait "$APP_PID"
+          osascript -e 'tell application id "com.sonicator.browser" to quit' \
+            || echo 'Apple Event quit returned an error; checking the process instead'
+          for attempt in $(seq 1 30); do
+            kill -0 "$APP_PID" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$APP_PID" 2>/dev/null; then
+            echo 'installed application did not quit'
+            kill -9 "$APP_PID" || true
+            exit 1
+          fi
           # Test real catalog/settings plus synthetic exported media remain unchanged.
           mkdir -p "$HOME/Library/Sonicator/exports"
           printf 'installer media sentinel' > "$HOME/Library/Sonicator/exports/installer-test.wav"
@@ -96,6 +122,9 @@ jobs:
           path: dist/
       - name: Validation logs
         if: always()
+        # Diagnostics only: a transient artifact-service outage must not turn a validated
+        # product into a red run. Installer artifacts above stay required.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: validation-macOS
@@ -192,6 +221,7 @@ jobs:
           path: dist/
       - name: Validation logs
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: validation-Windows
