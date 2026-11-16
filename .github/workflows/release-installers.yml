@@ -18,7 +18,9 @@ env:
 jobs:
   macos:
     name: macOS universal PKG
-    runs-on: macos-15
+    # arm64 hosted runners repeatedly failed acquisition under GitHub capacity constraints.
+    # Intel can build both slices and execute the x86_64 gate; arm64 AU remains explicit.
+    runs-on: macos-15-intel
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -78,8 +80,13 @@ jobs:
           PV="$RUNNER_TEMP/pluginval/pluginval.app/Contents/MacOS/pluginval"
           "$PV" --strictness-level 10 --skip-gui-tests --output-dir validation --validate "$VST3"
           "$PV" --strictness-level 10 --skip-gui-tests --output-dir validation --validate "$AU"
-          auval -v aumu Sncr Orng -strict > validation/auval-arm64.log 2>&1
-          arch -x86_64 auval -v aumu Sncr Orng -strict > validation/auval-x86_64.log 2>&1
+          NATIVE_ARCH="$(uname -m)"
+          auval -v aumu Sncr Orng -strict > "validation/auval-$NATIVE_ARCH.log" 2>&1
+          if test "$NATIVE_ARCH" = arm64; then
+            arch -x86_64 auval -v aumu Sncr Orng -strict > validation/auval-x86_64.log 2>&1
+          else
+            echo 'arm64 AU execution is pending on an Apple Silicon machine; not proven by this Intel runner.' > validation/arm64-au-pending.txt
+          fi
           sudo installer -pkg "$PKG" -target / -dumplog
           shasum -a 256 -c validation/user-data.sha256
       - name: Installer artifacts

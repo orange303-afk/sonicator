@@ -93,8 +93,11 @@ as successfully validated. Logs upload even when validation fails.
 
 The macOS runner installs the PKG into its disposable system, hides the build-tree ONNX library,
 opens the installed application, validates plugins with pluginval 1.0.4 strictness 10, validates
-both AU slices with auval, and reinstalls while checking user-data hashes. Rosetta is required
-for the x86_64 AU check. Both pluginval GUI tests and manual DAW/audio acceptance remain separate.
+the native AU slice with auval, and reinstalls while checking user-data hashes. It currently uses
+`macos-15-intel`: arm64 runner allocation repeatedly failed due to GitHub capacity constraints.
+The binary is still universal, but arm64 AU execution remains an explicit open gate. If moved
+back to arm64, the workflow also checks x86_64 through Rosetta. Both pluginval GUI tests and
+manual DAW/audio acceptance remain separate.
 
 The existing full Windows test suite has historical failures documented in WINDOWS_PORT.md.
 MSI smoke-test success must not be presented as proof those failures have been fixed.

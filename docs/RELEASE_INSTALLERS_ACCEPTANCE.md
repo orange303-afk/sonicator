@@ -42,6 +42,15 @@ Local portability-fix verification: rebuilt SonicatorTests successfully, then
 UTF-16 surrogate-pair and Unicode/free-space preflight cases. Packaging Python tests: **12/12**.
 The next Windows CI run, not this macOS result, must confirm MSVC compilation.
 
+- Run `43939467821`, source `1cce1f1`: Windows compilation cleared the previous three errors,
+  then application linking failed because upstream LAME's MSVC x64 config selects
+  `init_xrpow_core_sse` but its vector implementation was not in the target. Added that upstream
+  translation unit for MSVC only. Real Windows relinking remains to be checked.
+- The macOS job in this run **never acquired a runner**, rather than failing a code test.
+  Check-run annotation: "The job was not acquired by Runner of type hosted even after multiple
+  attempts", with arm64 capacity notices. Packaging CI now targets documented `macos-15-intel`;
+  it still builds universal and validates native x86_64. arm64 AU execution is explicitly pending.
+
 ## Pending evidence (do not infer success)
 
 - Full suite after Windows portability corrections and final packaging tests.

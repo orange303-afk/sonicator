@@ -117,6 +117,11 @@ add_library(lame_static STATIC
 target_include_directories(lame_static PUBLIC
     "${LAME_SOURCE}/libmp3lame" "${LAME_SOURCE}/include"
     PRIVATE "${CMAKE_BINARY_DIR}/lame-config")
+if(MSVC)
+    # Upstream configMS.h enables HAVE_XMMINTRIN_H on x64, so quantize.c references
+    # this intrinsic implementation. POSIX builds keep their configured scalar path.
+    target_sources(lame_static PRIVATE "${LAME_SOURCE}/libmp3lame/vector/xmm_quantize_sub.c")
+endif()
 # Upstream ships and tests the library with assertions off; the CBR quantizer has internal
 # invariants that assert under a Debug build even for ordinary audio.
 target_compile_definitions(lame_static PRIVATE HAVE_CONFIG_H=1 NDEBUG=1)
