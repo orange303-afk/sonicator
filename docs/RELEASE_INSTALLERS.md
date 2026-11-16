@@ -27,7 +27,9 @@ sh packaging/macos/build-pkg.sh "$HOME/Library/Caches/sonicator-build/plugin-uni
 python3 packaging/make-source-bundle.py "$HOME/Library/Caches/sonicator-build/plugin-universal" "$PWD/dist"
 ```
 
-Commit the matching sources before creating the source archive. Builders refuse to overwrite an
+Commit the matching sources before creating the source archive: the archive is taken from
+`git archive HEAD`, so uncommitted working-tree edits are never shipped as “matching source” and
+a Windows CRLF-normalized checkout cannot block packaging. Builders refuse to overwrite an
 existing artifact, and macOS staging stops if less than 8 GiB is available. Build/staging are kept
 outside iCloud; final installers go in ignored `dist/`. Python 3.11+ is needed by source-archive
 creation (developer tooling only). Product operation needs no Python.

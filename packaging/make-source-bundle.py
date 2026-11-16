@@ -11,9 +11,10 @@ repo = pathlib.Path(__file__).resolve().parents[1]
 build, output = (pathlib.Path(p).resolve() for p in sys.argv[1:])
 version = re.search(r"project\(Sonicator VERSION ([\d.]+)", (repo / "CMakeLists.txt").read_text())[1]
 commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
-dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=repo, text=True)
-if dirty.strip():
-    sys.exit("Commit source changes before making matching source archive")
+# Archive exactly the committed tree. A dirty or line-ending-normalized working copy must
+# never replace the source that produced the binaries, nor abort packaging (Windows CRLF).
+committed = subprocess.run(["git", "archive", "--format=tar", "HEAD"], cwd=repo,
+                           check=True, capture_output=True).stdout
 sources = {name: build / "_deps" / f"{name}-src" for name in
            ("juce", "libxmp", "libsamplerate", "rubberband", "onnxruntime")}
 sources["lame"] = build / "lame-src"
@@ -27,7 +28,6 @@ output.mkdir(parents=True, exist_ok=True)
 archive_path = output / f"SONICATOR-{version}-sources.tar.gz"
 if archive_path.exists():
     sys.exit(f"Refusing to overwrite {archive_path}")
-tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=repo).decode().split("\0")
 
 
 def exclude_git(info):
@@ -61,9 +61,10 @@ replace libraries/rebuild. Ad-hoc macOS signatures are generated locally.
 ONNX source (MIT) is at https://github.com/microsoft/onnxruntime/tree/v1.20.1 .
 """
 with tarfile.open(archive_path, "w:gz") as archive:
-    for name in tracked:
-        if name:
-            archive.add(repo / name, arcname="source/" + name, recursive=False)
+    with tarfile.open(fileobj=io.BytesIO(committed), mode="r:") as source:
+        for member in source.getmembers():
+            member.name = "source/" + member.name
+            archive.addfile(member, source.extractfile(member) if member.isfile() else None)
     for name, path in sources.items():
         archive.add(path, arcname="dependencies/" + name, filter=exclude_git)
     data = instructions.encode()
