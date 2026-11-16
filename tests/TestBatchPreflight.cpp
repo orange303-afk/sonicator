@@ -303,6 +303,27 @@ TEST_CASE("Frame and byte estimates are checked and the 4 GiB container limit is
     REQUIRE_FALSE(isWarningCode(ErrorCode::insufficient_space));
 }
 
+TEST_CASE("Free-space reporting probes the nearest existing ancestor and survives an unknown value",
+          "[batch][batch-paths]")
+{
+    TestDirectory t;
+    const auto missing = t.dir.getChildFile("not-created-yet").getChildFile("deeper");
+    juce::File probed;
+    const auto fake = freeBytesFor(missing, [&probed] (const juce::File& existing)
+    {
+        probed = existing;
+        return (int64_t) 12345;
+    });
+    CHECK(fake == 12345);
+    CHECK(probed == t.dir);
+
+    const auto unknown = freeBytesFor(missing, [] (const juce::File&) { return (int64_t) -1; });
+    CHECK(unknown == -1);
+
+    // The platform probe still answers for an existing folder on every supported host.
+    CHECK(freeBytesFor(t.dir) > 0);
+}
+
 TEST_CASE("Replace never targets a skipped input or loses a same-stem sibling",
           "[batch][batch-paths]")
 {

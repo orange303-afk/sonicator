@@ -523,6 +523,11 @@ TEST_CASE("An unwritable destination fails without touching the source or old ou
     const auto target = folder.getChildFile("ro processed.wav");
     target.replaceWithText("old");
     const auto oldHash = juce::SHA256(target).toHexString();
+#if JUCE_WINDOWS
+    // Windows has no chmod. A folder's read-only attribute does not stop new files being written,
+    // so this check cannot be expressed there; the guarded Unix case still proves the contract.
+    SUCCEED("a read-only destination folder is a POSIX-only precondition");
+#else
     REQUIRE(::chmod(folder.getFullPathName().toRawUTF8(), 0500) == 0);
     Recipe recipe;
     recipe.outputs = { OutputPreset { Format::wav, Encoding::int16, 5 } };
@@ -533,4 +538,5 @@ TEST_CASE("An unwritable destination fails without touching the source or old ou
     REQUIRE(result.state == OutputState::failed);
     REQUIRE(juce::SHA256(source).toHexString() == hash);
     REQUIRE(juce::SHA256(target).toHexString() == oldHash);
+#endif
 }

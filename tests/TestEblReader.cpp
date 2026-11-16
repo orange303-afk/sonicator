@@ -27,6 +27,15 @@ TEST_CASE("EBL mono with an 8-byte pad and a loop", "[ebl]")
     CHECK(r.sample->loop->end == 6);
 }
 
+TEST_CASE("EBL decodes a non-ASCII UTF-16 name through a portable pointer type", "[ebl]")
+{
+    auto o = monoOptions();
+    o.name = juce::String::fromUTF8("Grosse Trommel \xc3\xbc");
+    auto r = sonicator::parseEbl(makeEbl(o));
+    REQUIRE(r.ok());
+    CHECK(r.sample->name == juce::String::fromUTF8("Grosse Trommel \xc3\xbc"));
+}
+
 TEST_CASE("EBL mono with a 4-byte pad and no loop runs to the end of the file", "[ebl]")
 {
     auto o = monoOptions();

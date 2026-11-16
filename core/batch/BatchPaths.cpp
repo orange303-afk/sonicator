@@ -1,8 +1,12 @@
 #include "BatchPaths.h"
-#include <sys/stat.h>
-#include <sys/statvfs.h>
-#include <unistd.h>
-#include <climits>
+
+#if JUCE_WINDOWS
+ #include <windows.h>
+#else
+ #include <climits>
+ #include <sys/statvfs.h>
+ #include <unistd.h>
+#endif
 
 namespace sonicator::batch
 {
@@ -24,16 +28,41 @@ juce::File nearestExistingAncestor(juce::File file)
 
 juce::File canonical(const juce::File& file)
 {
+#if JUCE_WINDOWS
+    // Windows has no realpath. getFullPathName already makes the path absolute and native;
+    // symbolic-link components are rejected separately by hasSymlinkComponent.
+    return juce::File(file.getFullPathName());
+#else
     char buffer[PATH_MAX] {};
     if (realpath(file.getFullPathName().toRawUTF8(), buffer) == nullptr) return file;
     return juce::File(juce::String::fromUTF8(buffer));
+#endif
 }
 
 bool within(const juce::File& parent, const juce::File& child)
 {
-    const auto p = parent.getFullPathName().replaceCharacter('\\', '/');
-    const auto c = child.getFullPathName().replaceCharacter('\\', '/');
+    // Compare one separator spelling; Windows paths are also case-insensitive.
+    auto p = parent.getFullPathName().replaceCharacter('\\', '/');
+    auto c = child.getFullPathName().replaceCharacter('\\', '/');
+#if JUCE_WINDOWS
+    p = p.toLowerCase();
+    c = c.toLowerCase();
+#endif
     return c == p || c.startsWith(p + "/");
+}
+
+int64_t platformFreeBytes(const juce::File& existing)
+{
+#if JUCE_WINDOWS
+    ULARGE_INTEGER available {};
+    if (GetDiskFreeSpaceExW(existing.getFullPathName().toWideCharPointer(), &available, nullptr, nullptr) == 0)
+        return -1;
+    return (int64_t) available.QuadPart;
+#else
+    struct statvfs info {};
+    if (statvfs(existing.getFullPathName().toRawUTF8(), &info) != 0) return -1;
+    return (int64_t) info.f_bavail * (int64_t) info.f_frsize;
+#endif
 }
 } // namespace
 
@@ -90,12 +119,11 @@ juce::String unsafeDestinationReason(const juce::File& destinationFolder, const 
     return {};
 }
 
-int64_t freeBytesFor(const juce::File& folder)
+int64_t freeBytesFor(const juce::File& folder, const FreeSpaceProbe& probe)
 {
     const auto existing = nearestExistingAncestor(folder);
-    struct statvfs info {};
-    if (statvfs(existing.getFullPathName().toRawUTF8(), &info) != 0) return -1;
-    return (int64_t) info.f_bavail * (int64_t) info.f_frsize;
+    if (probe) return probe(existing);
+    return platformFreeBytes(existing);
 }
 
 PathReserver::PathReserver(const std::vector<juce::String>& protectedIdentities,

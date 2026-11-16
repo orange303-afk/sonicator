@@ -1,5 +1,6 @@
 #pragma once
 #include "BatchTypes.h"
+#include <functional>
 #include <set>
 
 namespace sonicator::batch
@@ -38,8 +39,11 @@ juce::File partTarget(const juce::File& planTarget, const juce::String& sourceSt
                       int count);
 // Empty on success; otherwise a user-facing reason.
 juce::String unsafeDestinationReason(const juce::File& destinationFolder, const juce::File& target);
-// -1 when the platform cannot report free space for the nearest existing ancestor.
-int64_t freeBytesFor(const juce::File& folder);
+// Reports bytes free on the volume that holds `folder`, probing its nearest existing ancestor.
+// -1 when the platform cannot report free space. An empty `probe` uses the platform query; tests
+// pass a probe to fake a full or unknown volume without filling a real disk.
+using FreeSpaceProbe = std::function<int64_t (const juce::File& existingAncestor)>;
+int64_t freeBytesFor(const juce::File& folder, const FreeSpaceProbe& probe = {});
 // True when the path itself or any existing ancestor is a symbolic link.
 bool hasSymlinkComponent(const juce::File& file);
 } // namespace sonicator::batch
