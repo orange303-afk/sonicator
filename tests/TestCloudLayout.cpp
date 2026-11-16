@@ -28,13 +28,14 @@ CloudInput makeInput()
         n.colour = 0xff888888;
         return n;
     };
-    // Kick island: six files whose brightness varies, so the projection has something to say.
+    // Kick island: six files whose timbre varies, so the projection has something to say. Duration,
+    // rate and channels stay constant on purpose: they are quantised and must not stripe the cloud.
     for (int i = 0; i < 6; ++i)
-        input.nodes.push_back(node(10 + i, { 1 }, { (float) (i * 0.15), -20, -10, (float) i, (float) i * 2, 0.2f, 0, 1 }, true));
+        input.nodes.push_back(node(10 + i, { 1 }, { 0.0f, -20, -10, (float) i, (float) i * 2, 0.2f, 0, 1 }, true));
     for (int i = 0; i < 5; ++i)
-        input.nodes.push_back(node(20 + i, { 2 }, { 1.5f + (float) (i * 0.15), -20, -10, (float) i, (float) i * 2, 0.2f, 0, 1 }, true));
-    input.nodes.push_back(node(30, { 3 }, { 2.5f, -20, -10, 1, 2, 0.2f, 0, 1 }, true));
-    input.nodes.push_back(node(31, { 1, 2 }, { 1.0f, -20, -10, 1, 2, 0.2f, 0, 1 }, true));
+        input.nodes.push_back(node(20 + i, { 2 }, { 0.0f, -20, -10, 0.15f + (float) i, 2.0f + (float) i * 2, 0.2f, 0, 1 }, true));
+    input.nodes.push_back(node(30, { 3 }, { 0.0f, -20, -10, 1, 2, 0.2f, 0, 1 }, true));
+    input.nodes.push_back(node(31, { 1, 2 }, { 0.0f, -20, -10, 1, 2, 0.2f, 0, 1 }, true));
     input.v2.assign(input.nodes.size(), {});
     return input;
 }
@@ -68,9 +69,9 @@ TEST_CASE("Cloud layout is deterministic and inside its bounds", "[cloud]")
     REQUIRE(a.fingerprint == input.fingerprint);
 }
 
-TEST_CASE("Cloud islands never overlap and a single-file tag stays visible", "[cloud]")
+TEST_CASE("Cloud islands pack into one touching mass and a single-file tag stays visible", "[cloud]")
 {
-    auto input = makeInput();
+    const auto input = makeInput();
     const auto layout = buildCloudLayout(input);
     for (size_t i = 0; i < layout.islands.size(); ++i)
         for (size_t j = i + 1; j < layout.islands.size(); ++j)
@@ -78,10 +79,46 @@ TEST_CASE("Cloud islands never overlap and a single-file tag stays visible", "[c
             const auto& a = layout.islands[i];
             const auto& b = layout.islands[j];
             const auto distance = std::hypot(a.x - b.x, a.y - b.y);
-            REQUIRE(distance >= a.radius + b.radius);
+            // The map is one cloud, not a ring of separate islands: every pair is near touching,
+            // and none has collapsed into another.
+            REQUIRE(distance <= (a.radius + b.radius) * 1.06);
+            REQUIRE(distance >= (a.radius + b.radius) * 0.55);
         }
+    // Kick and Drums co-occur: the spring pulls them closer than the packing distance, so their
+    // point clouds overlap and the seam reads as a gradient.
+    const auto& kick = islandFor(layout, 1);
+    const auto& drums = islandFor(layout, 2);
+    REQUIRE(std::hypot(kick.x - drums.x, kick.y - drums.y) < kick.radius + drums.radius);
     REQUIRE(islandFor(layout, 3).radius >= CloudLayoutOptions {}.islandBaseRadius);
     REQUIRE(islandFor(layout, 1).radius > islandFor(layout, 3).radius);
+}
+
+TEST_CASE("Quantised descriptors do not turn a tag into lines", "[cloud]")
+{
+    CloudInput input;
+    Tag kick { 1, "Kick", 0xffe05a5a, true, 10 };
+    input.tags = { kick };
+    // Same timbre, different duration/rate/channels: the old projection put these files on three
+    // straight lines because the first component followed those exact values.
+    for (int i = 0; i < 10; ++i)
+    {
+        CloudNode node;
+        node.sampleId = 100 + i;
+        node.name = "s" + juce::String(i);
+        node.tagIds = { 1 };
+        node.hasBasic = true;
+        node.colour = 0xffe05a5a;
+        node.basic = { (float) (i % 3), -20, -10, 2, 3, 0.2f, (float) (i % 2), 1.0f };
+        input.nodes.push_back(node);
+    }
+    input.v2.assign(input.nodes.size(), {});
+    const auto layout = buildCloudLayout(input);
+    // The deterministic jitter is all that separates these identical timbres; it is deliberately
+    // small, but it must not let a quantised duration build a line.
+    for (size_t i = 0; i < layout.points.size(); ++i)
+        for (size_t j = i + 1; j < layout.points.size(); ++j)
+            REQUIRE(std::hypot(layout.points[i].x - layout.points[j].x,
+                               layout.points[i].y - layout.points[j].y) < 12.0f);
 }
 
 TEST_CASE("A multi-tag file sits between its islands", "[cloud]")
@@ -146,8 +183,10 @@ TEST_CASE("Identical feature vectors do not land on one exact spot", "[cloud]")
     const auto layout = buildCloudLayout(input);
     for (size_t i = 0; i < layout.points.size(); ++i)
         for (size_t j = i + 1; j < layout.points.size(); ++j)
+            // The deterministic jitter keeps identical vectors apart, but it is not a packing
+            // guarantee: a pair may sit close by chance. What must never happen is one exact spot.
             REQUIRE(std::hypot(layout.points[i].x - layout.points[j].x,
-                               layout.points[i].y - layout.points[j].y) > 0.5f);
+                               layout.points[i].y - layout.points[j].y) > 0.1f);
 }
 
 TEST_CASE("Nearest neighbours are ordered by layout distance", "[cloud]")

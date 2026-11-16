@@ -19,6 +19,7 @@ component is present and what the project does not ship.
 | zlib | system copy on macOS (1.2.12 in the SDK), fetched 1.3.1 on Windows | Linked by JUCE and by `core/sampler/FileInstrument.cpp` | Zlib | <https://zlib.net/zlib_license.html> |
 | libsamplerate | 0.2.2 | FetchContent archive pinned by SHA256, linked statically | BSD-2-Clause | <https://github.com/libsndfile/libsamplerate/blob/0.2.2/COPYING> |
 | LAME | 3.100 | Pinned archive, encoder sources compiled into a static library | LGPL-2.1-or-later | <https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz> (`COPYING` in the archive) |
+| Rubber Band Library | 3.3.0 | FetchContent archive pinned by SHA256, single-file amalgamation compiled into a static library for the plugin's offline Match renderer | GPL-2.0-or-later | <https://github.com/breakfastquay/rubberband/blob/v3.3.0/COPYING> |
 
 ### Manrope and the OFL
 
@@ -41,6 +42,16 @@ libxmp is linked statically. The project compiles it with depackers and the ProW
 modify its source. Distribution therefore keeps libxmp's source and licence available, and anyone who
 receives the binary may relink it against a modified libxmp. The libxmp sources are fetched from
 <https://github.com/libxmp/libxmp> at tag `libxmp-4.6.2` by the build.
+
+### Rubber Band and the GPL
+
+Rubber Band 3.3.0 is compiled from the pinned archive
+<https://github.com/breakfastquay/rubberband/archive/refs/tags/v3.3.0.tar.gz> (SHA256
+`2bb837fe00932442ca90e185af8a468f7591df0c002b4a9e27a1bced1563ac84`) as the `single/RubberBandSingle.cpp`
+amalgamation with the built-in FFT and resampler, no CLI, LADSPA, LV2, VAMP or JNI targets and no
+system/homebrew copy. It is used only for the plugin's offline Match BPM / Match Scale renderer,
+never on the audio thread. Its GPL-2.0-or-later licence is compatible with distributing this
+AGPL-3.0-or-later project, and the full upstream source remains available at the URL above.
 
 ## Third-party code inside JUCE modules
 

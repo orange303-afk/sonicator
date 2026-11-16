@@ -75,6 +75,9 @@ public:
     // Alt+click on a tag in the TAGS cell: remove that tag from that sample.
     std::function<void(int64_t sampleId, int64_t tagId)> onTagAltClicked;
     std::function<void(juce::String)> onDragMessage;
+    // The plug-in's Match owns the drag while it is on. Returning true means this callback
+    // handled the gesture (started a prepared drag or explained why it cannot start).
+    std::function<bool (const std::vector<SampleRecord>&, juce::Component*)> onMatchedDrag;
 private:
     struct TagHit
     {

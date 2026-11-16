@@ -109,6 +109,25 @@ double quantile(std::vector<double> values, double q)
     return values[lower] * (1.0 - t) + values[upper] * t;
 }
 
+// SplitMix64 finaliser. The map never uses a random generator: the jitter that breaks identical
+// acoustic vectors is a pure function of the sample id, so two runs still agree bit for bit.
+uint64_t mixHash(uint64_t x)
+{
+    x ^= x >> 30;
+    x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27;
+    x *= 0x94d049bb133111ebULL;
+    x ^= x >> 31;
+    return x;
+}
+
+// Deterministic hash in [0, 1] from a sample id and a salt.
+double hashUnit(int64_t sampleId, uint64_t salt)
+{
+    const auto bits = mixHash((uint64_t) sampleId ^ (salt * 0x9e3779b97f4a7c15ULL));
+    return (double) (bits & 0xffffffULL) / (double) 0xffffffULL;
+}
+
 struct Draft
 {
     int64_t tagId = 0;
@@ -142,8 +161,12 @@ void layoutIslands(std::vector<Draft>& islands, const std::vector<std::vector<do
                 auto dy = islands[j].y - islands[i].y;
                 auto d = std::max(length(dx, dy), 1e-6);
                 const auto w = weights[i][j];
-                const auto touching = islands[i].radius + islands[j].radius + opt.islandGap;
-                const auto desired = touching * (w > 0 ? 1.0 - 0.45 * w : 1.35);
+                // Every pair is pulled towards touching, so the map closes into one mass instead of
+                // a ring of round islands. Co-occurring tags are pulled a little closer still, and
+                // their point clouds mix at the seam.
+                const auto touching = (islands[i].radius + islands[j].radius) * (1.0 - opt.islandOverlap)
+                                          + opt.islandGap;
+                const auto desired = touching * (w > 0 ? 1.0 - 0.25 * w : 1.0);
                 const auto force = std::clamp(0.35 * (d - desired), -80.0, 80.0);
                 const auto ux = dx / d, uy = dy / d;
                 move[i].x += ux * force;
@@ -157,8 +180,8 @@ void layoutIslands(std::vector<Draft>& islands, const std::vector<std::vector<do
             islands[i].y += move[i].y * step;
         }
     }
-    // The spring pass settles the structure; this pass guarantees the promise the UI makes — no
-    // island overlaps another, so a click always lands on the tag the user sees.
+    // The spring pass settles the structure; this pass keeps every pair at the promised distance:
+    // touching or slightly overlapping, never collapsed into one spot.
     for (int pass = 0; pass < opt.separationIterations; ++pass)
     {
         bool moved = false;
@@ -168,7 +191,8 @@ void layoutIslands(std::vector<Draft>& islands, const std::vector<std::vector<do
                 auto dx = islands[j].x - islands[i].x;
                 auto dy = islands[j].y - islands[i].y;
                 auto d = std::max(length(dx, dy), 1e-6);
-                const auto minimum = islands[i].radius + islands[j].radius + opt.islandGap;
+                const auto minimum = (islands[i].radius + islands[j].radius) * (1.0 - opt.islandOverlap)
+                                         + opt.islandGap;
                 if (d >= minimum) continue;
                 const auto push = (minimum - d) * 0.5 + 0.5;
                 const auto ux = dx / d, uy = dy / d;
@@ -245,8 +269,10 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
         island.y += shiftY;
     }
 
-    // Base acoustic projection: eight universal descriptors, z-scored by median and IQR so one
-    // very long pad cannot flatten the axes. Files without descriptors stay at their island centre.
+    // Base acoustic projection: five timbre descriptors only. Duration, sample rate and channel
+    // count are quantised (thousands of files share exactly 1.0 s), and projecting them turned the
+    // map into straight lines: they stay out of the picture. Z-scored by median and IQR so one very
+    // long pad cannot flatten the axes.
     std::vector<size_t> basicRows;
     for (size_t i = 0; i < input.nodes.size(); ++i)
     {
@@ -260,9 +286,9 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
     for (auto index : basicRows)
     {
         const auto& b = input.nodes[index].basic;
-        basic.push_back({ b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7] });
+        basic.push_back({ b[1], b[2], b[3], b[4], b[5] });
     }
-    for (size_t dim = 0; dim < 8; ++dim)
+    for (size_t dim = 0; dim < 5; ++dim)
     {
         std::vector<double> column;
         column.reserve(basic.size());
@@ -282,7 +308,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
         for (size_t i = 0; i < basic.size(); ++i)
         {
             Vec2 value;
-            for (size_t d = 0; d < 8; ++d)
+            for (size_t d = 0; d < 5; ++d)
             {
                 value.x += basic[i][d] * basicComponents[0][d];
                 value.y += basic[i][d] * basicComponents[1][d];
@@ -324,7 +350,10 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
     auto unit = [](double v, double low, double high)
     {
         if (high - low < 1e-9) return 0.0;
-        return std::clamp(2.0 * (v - low) / (high - low) - 1.0, -1.0, 1.0);
+        // Soft saturation instead of a hard clamp: the files outside the 2-98 percentile used to
+        // pile up on the border and draw a bright square around every island.
+        const auto t = 2.0 * (v - low) / (high - low) - 1.0;
+        return std::tanh(1.35 * t) / std::tanh(1.35);
     };
 
     layout.points.resize(input.nodes.size());
@@ -357,12 +386,43 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
             ? Vec2 { unit(raw[i].x, span.lowX, span.highX), unit(raw[i].y, span.lowY, span.highY) }
             : Vec2 {};
         const auto spread = radius * (node.tagIds.size() > 1 ? opt.pointSpread * opt.multiTagSpread : opt.pointSpread);
+        // The projection fills a square, which reads as a box with hard corners. Compress it
+        // radially and give the rim a couple of low harmonics from the tag id: the island becomes
+        // a cloud with an organic edge instead of a rectangle or a disc.
+        Vec2 cloudOffset = offset;
+        if (islandIndex >= 0)
+        {
+            const auto distance = length(cloudOffset.x, cloudOffset.y);
+            if (distance > 1e-9)
+            {
+                constexpr double twoPi = 6.283185307179586;
+                // The projection fills a square. Map it to a disc first (the standard elliptical grid
+                // mapping), then soften the rim with two low harmonics from the tag id: the island
+                // becomes a cloud, never a rectangle with a bright border.
+                const auto sx = cloudOffset.x, sy = cloudOffset.y;
+                const auto ux = sx * std::sqrt(std::max(0.0, 1.0 - 0.5 * sy * sy));
+                const auto uy = sy * std::sqrt(std::max(0.0, 1.0 - 0.5 * sx * sx));
+                const auto disc = length(ux, uy);
+                if (disc > 1e-9)
+                {
+                    const auto theta = std::atan2(uy, ux);
+                    const auto tagId = islands[(size_t) islandIndex].tagId;
+                    const auto phase2 = hashUnit(tagId, 11) * twoPi;
+                    const auto phase3 = hashUnit(tagId, 12) * twoPi;
+                    const auto envelope = 1.0 - 0.10 * (0.5 + 0.5 * std::cos(2.0 * theta + phase2))
+                                              - 0.06 * (0.5 + 0.5 * std::cos(3.0 * theta + phase3));
+                    const auto radius = envelope * disc; // the square-to-disc map already gives a unit disc
+                    cloudOffset.x = ux / disc * radius;
+                    cloudOffset.y = uy / disc * radius;
+                }
+            }
+        }
         auto& point = layout.points[i];
         point.sampleId = node.sampleId;
         point.colour = node.colour;
         point.islandIndex = islandIndex;
-        point.x = (float) (anchorX + offset.x * spread);
-        point.y = (float) (anchorY + offset.y * spread);
+        point.x = (float) (anchorX + cloudOffset.x * spread);
+        point.y = (float) (anchorY + cloudOffset.y * spread);
         if (node.hasBasic) point.flags |= cloudHasBasic;
         if (node.hasV2) point.flags |= cloudHasV2;
         if (node.tagIds.size() > 1) point.flags |= cloudMultiTag;
@@ -494,22 +554,83 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
         }
     }
 
-    // Two files with identical vectors land on the same spot; a deterministic spiral keeps both
-    // visible and clickable without a random jitter that would break reproducibility.
+    // Deterministic jitter, after the acoustic refinement so it cannot be pulled back onto a line:
+    // files that share a vector or a rounded duration would otherwise sit on exact stripes. The
+    // amplitude is a small share of the radius, so the neighbourhood a listener hears is unchanged.
+    if (opt.cloudDither > 0.0f)
+        for (size_t i = 0; i < layout.points.size(); ++i)
+        {
+            const auto& node = input.nodes[i];
+            if (! node.hasBasic) continue;
+            double radius = opt.islandBaseRadius;
+            for (auto tagId : node.tagIds)
+            {
+                auto found = islandByTag.find(tagId);
+                if (found != islandByTag.end()) radius = std::min(radius, islands[found->second].radius);
+            }
+            const auto amplitude = (double) opt.cloudDither * radius;
+            auto& p = layout.points[i];
+            p.x += (float) ((hashUnit(node.sampleId, 1) * 2.0 - 1.0) * amplitude);
+            p.y += (float) ((hashUnit(node.sampleId, 2) * 2.0 - 1.0) * amplitude);
+        }
+
+    // Quantised descriptors and identical vectors both leave visible structure behind in the
+    // projection: bands of files that share a duration, or one exact spot. A tiny deterministic
+    // jitter, hashed from the sample id, turns those into cloud texture without moving a point
+    // far enough to change its neighbours.
+    if (opt.cloudDither > 0)
     {
+        for (size_t i = 0; i < layout.points.size(); ++i)
+        {
+            const auto& node = input.nodes[i];
+            if (! node.hasBasic || node.tagIds.empty()) continue;
+            double radius = opt.islandBaseRadius;
+            for (auto tagId : node.tagIds)
+            {
+                auto found = islandByTag.find(tagId);
+                if (found != islandByTag.end()) radius = std::min(radius, islands[found->second].radius);
+            }
+            const auto amount = (double) opt.cloudDither * radius;
+            auto& p = layout.points[i];
+            p.x += (float) ((hashUnit(node.sampleId, 1) * 2.0 - 1.0) * amount);
+            p.y += (float) ((hashUnit(node.sampleId, 2) * 2.0 - 1.0) * amount);
+        }
+    }
+
+    // Two files with identical vectors would land on the same spot; a deterministic spiral keeps
+    // both visible and clickable. The check runs on the final coordinates, after the jitter, and
+    // pushes a clashing point a fraction of a pixel along the golden angle until it is clear.
+    {
+        constexpr float cell = 1.0f;
+        constexpr float minimumDistance = 0.9f;
         std::map<std::pair<int, int>, std::vector<size_t>> occupied;
         for (size_t i = 0; i < layout.points.size(); ++i)
         {
             auto& p = layout.points[i];
-            auto key = std::pair<int, int> { (int) std::lround(p.x * 2.0f), (int) std::lround(p.y * 2.0f) };
-            auto& bucket = occupied[key];
-            if (bucket.empty()) { bucket.push_back(i); continue; }
-            const auto n = (double) bucket.size();
-            const auto angle = n * goldenAngle;
-            const auto distance = 0.9 * std::sqrt(n);
-            p.x += (float) (std::cos(angle) * distance);
-            p.y += (float) (std::sin(angle) * distance);
-            bucket.push_back(i);
+            for (int attempt = 0; attempt < 8; ++attempt)
+            {
+                const auto cx = (int) std::floor(p.x / cell);
+                const auto cy = (int) std::floor(p.y / cell);
+                bool clash = false;
+                for (int ox = -1; ox <= 1 && ! clash; ++ox)
+                    for (int oy = -1; oy <= 1 && ! clash; ++oy)
+                    {
+                        auto found = occupied.find({ cx + ox, cy + oy });
+                        if (found == occupied.end()) continue;
+                        for (auto other : found->second)
+                            if (std::hypot(layout.points[other].x - p.x,
+                                           layout.points[other].y - p.y) < minimumDistance)
+                            {
+                                clash = true;
+                                break;
+                            }
+                    }
+                if (! clash) break;
+                const auto angle = (double) attempt * goldenAngle;
+                p.x += (float) (std::cos(angle) * minimumDistance);
+                p.y += (float) (std::sin(angle) * minimumDistance);
+            }
+            occupied[{ (int) std::floor(p.x / cell), (int) std::floor(p.y / cell) }].push_back(i);
         }
     }
 

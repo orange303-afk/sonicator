@@ -23,6 +23,9 @@
 #include "core/batch/BatchSources.h"
 #include "core/batch/BatchPreviewService.h"
 #include "core/settings/AppSettings.h"
+#include "core/match/MatchPreferences.h"
+#include "core/match/MatchTypes.h"
+#include "plugin/HostTempoSnapshot.h"
 #include "core/contribute/ContributionUploader.h"
 #include "ui/commands/CommandRegistry.h"
 #include "ui/commands/ShortcutBindings.h"
@@ -145,6 +148,16 @@ public:
     bool catalogIsOpen() const { return readRepo != nullptr; }
     juce::String catalogError() const { return catalogOpenError; }
     float interfaceScale() const { return appSettings.scalePercent / 100.0f; }
+    // Plugin-only Match BPM / Match Scale. The processor owns the intent and the tempo snapshot;
+    // this window owns the catalog lookup that turns a selected file into effective metadata.
+    void setPluginMatchContext(std::function<PluginMatchPreferences()> getPreferences,
+                               std::function<void (const PluginMatchPreferences&)> setPreferences,
+                               std::function<plugin::HostTempoValue()> hostTempo);
+    void applyPluginMatchPreferences(const PluginMatchPreferences&);
+    bool matchControlsVisible() const;
+    // Shared Match drag entry point for a library row and a cloud point. Returns true when the
+    // gesture was handled by Match, false when the ordinary drag path should run.
+    bool beginMatchedDrag(const std::vector<SampleRecord>&, juce::Component* source);
     // The plugin scales its component tree, never JUCE's process-wide Desktop (the DAW).
     std::function<void(float)> onInterfaceScaleChanged;
     // Rebuilds the library and favorites trees off the message thread and installs the result.
@@ -216,6 +229,8 @@ private:
     juce::Label stageLabel;
     std::unique_ptr<Database> readDb, writeDb;
     std::unique_ptr<SampleRepository> readRepo, writeRepo;
+    std::optional<MatchSource> buildMatchSource(const juce::File&, int64_t& sourceSize,
+                                                int64_t& sourceModified);
     // Declared after the repositories so it stops before they are destroyed.
     std::unique_ptr<FolderIndexRunner> folderIndexRunner;
     FolderIndex lastFolderIndex;

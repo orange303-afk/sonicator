@@ -222,7 +222,11 @@ void MidiSampler::render(juce::AudioBuffer<float>& out,int start,int count,const
 }
 void PreviewOutput::prepareToPlay(int blockSize,double rate)
 {
-    transport.prepareToPlay(blockSize,rate); sampler.prepare(rate); sf2.prepare(rate); rex.prepare(rate); audition.prepare(rate); external.prepare(rate);
+    transport.prepareToPlay(blockSize,rate);
+    // A prepared Match transport is a second AudioTransportSource; without its own prepare its
+    // resampler runs with a zero buffer on the first Play.
+    if (matchedTransport != nullptr) matchedTransport->prepareToPlay(blockSize,rate);
+    sampler.prepare(rate); sf2.prepare(rate); rex.prepare(rate); audition.prepare(rate); external.prepare(rate);
     tracker.prepare(rate); sampleVoices.prepare(rate); if (hover != nullptr) hover->prepare(rate);
     messages.ensureSize(65536);
     midiBuffer.setSize(2,juce::jmax(1,blockSize));
@@ -241,6 +245,10 @@ void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         for (int channel = 1; channel <= 16; ++channel)
             messages.addEvent(juce::MidiMessage::allSoundOff(channel),0);
     }
+    // Playback is served by the prepared Match transport while it owns the output; MIDI still
+    // comes from the untouched original sampler/container.
+    auto& activeTransport = (matchedActive != nullptr && matchedActive->load() && matchedTransport != nullptr)
+        ? *matchedTransport : transport;
     const bool midiEnabled = midi.load();
     if (midiEnabled)
     {
@@ -249,7 +257,7 @@ void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             const auto msg = meta.getMessage();
             if (msg.isNoteOn() && msg.getVelocity() > 0)
             {
-                if (transport.isPlaying()) transport.stop();
+                if (activeTransport.isPlaying()) activeTransport.stop();
                 break;
             }
         }
@@ -278,7 +286,7 @@ void PreviewOutput::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         }
         else
         {
-            transport.getNextAudioBlock({info.buffer,info.startSample+offset,count});
+            activeTransport.getNextAudioBlock({info.buffer,info.startSample+offset,count});
             if (kitEnabled) sf2.render(midiBuffer,0,count,messages);
             else if (externalEnabled) external.render(midiBuffer,0,count,messages);
             // REX mixes whole-loop audition internally, so boost only its MIDI voices there.

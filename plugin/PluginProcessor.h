@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "core/audio/AudioEngine.h"
+#include "plugin/HostTempoSnapshot.h"
 #include "plugin/PluginState.h"
 
 namespace sonicator::plugin
@@ -30,6 +31,11 @@ public:
     void updateWindowSize(int width, int height);
     // Seed a fresh editor from shared preferences, but never replace its own/host-restored size.
     void initialiseWindowSize(int width, int height);
+    // The user's match intent is part of the project state but not a host restore, so it does not
+    // move stateGeneration(); an open editor must not treat its own toggle as a project reload.
+    void setMatchPreferences(const PluginMatchPreferences&);
+    // The latest tempo the host published, with its validity and revision. Safe from any thread.
+    HostTempoValue hostTempo() const { return hostTempoSnapshot.read(); }
 
     // The engine lives in the processor so preview audio and host MIDI survive editor closes.
     sonicator::AudioEngine& engine() { return hostEngine; }
@@ -56,6 +62,7 @@ public:
 
 private:
     sonicator::AudioEngine hostEngine { false };
+    HostTempoSnapshot hostTempoSnapshot;
     // Hosts that show both the parameter list and generic controls need a tree; the browser has
     // no automatable parameters yet.
     juce::AudioProcessorValueTreeState parameters { *this, nullptr, "Parameters", {} };

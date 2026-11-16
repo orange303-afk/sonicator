@@ -42,6 +42,16 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
         main = std::make_unique<MainComponent>(database, false, initial, settingsFile,
                                                &processor.engine(), true, std::move(session));
         main->setComponentID("pluginMain");
+        // The match intent belongs to this project and the host tempo to this instance; the
+        // window only turns a selected catalog file into effective metadata.
+        main->setPluginMatchContext(
+            [this] { return processor.pluginState().match; },
+            [this] (const PluginMatchPreferences& preferences)
+            {
+                processor.setMatchPreferences (preferences);
+            },
+            [this] { return processor.hostTempo(); });
+        main->applyPluginMatchPreferences (saved.match);
         if (main->catalogIsOpen())
         {
             main->onInterfaceScaleChanged = [this](float scale) { applyInterfaceScale(scale); };
@@ -124,7 +134,10 @@ void PluginEditor::timerCallback()
     stateGenerationAtOpen = current;
     const auto saved = processor.pluginState();
     if (main != nullptr)
+    {
         main->applySessionSelection(saved.lastFolder, saved.lastSamplePath);
+        main->applyPluginMatchPreferences(saved.match);
+    }
     const int width = juce::jlimit(PluginState::minimumWidth, PluginState::maximumWidth,
                                    saved.windowWidth);
     const int height = juce::jlimit(PluginState::minimumHeight, PluginState::maximumHeight,

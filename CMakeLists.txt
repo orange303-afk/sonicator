@@ -146,6 +146,16 @@ if("${SONICATOR_BUILD_TESTING_SAVED}" STREQUAL "")
 else()
     set(BUILD_TESTING ${SONICATOR_BUILD_TESTING_SAVED} CACHE BOOL "" FORCE)
 endif()
+# The VST3/AU plugin and the tests need the Match renderer and its DSP dependency; a plain
+# application build does not compile that code path at all.
+option(SONICATOR_BUILD_PLUGIN "Build the VST3/AU plugin" OFF)
+set(SONICATOR_ENABLE_MATCH OFF)
+if(SONICATOR_BUILD_PLUGIN OR BUILD_TESTING)
+    set(SONICATOR_ENABLE_MATCH ON)
+endif()
+if(SONICATOR_ENABLE_MATCH)
+    include(cmake/RubberBand.cmake)
+endif()
 # libxmp enables verbose stderr tracing through -DDEBUG in Debug builds. Keep the library silent:
 # its diagnostics are development noise for an application and would otherwise dominate tests.
 if(NOT MSVC)
@@ -199,14 +209,20 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
     core/smart/TapTempo.cpp
     core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp
-    core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp core/cloud/CloudCache.cpp core/cloud/CloudBuildService.cpp)
+    core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp core/cloud/CloudCache.cpp core/cloud/CloudBuildService.cpp
+    core/match/MatchPolicy.cpp core/match/SourceMetadata.cpp core/match/MatchRenderService.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
-    JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
+    JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0
+    SONICATOR_ENABLE_MATCH=$<BOOL:${SONICATOR_ENABLE_MATCH}>)
 target_link_libraries(SonicatorCore PUBLIC
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib
     SampleRate::samplerate lame_static)
+if(SONICATOR_ENABLE_MATCH)
+    target_sources(SonicatorCore PRIVATE core/match/OfflineMatchRenderer.cpp)
+    target_link_libraries(SonicatorCore PUBLIC sonicator_rubberband)
+endif()
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png
     resources/fonts/Manrope-Regular.ttf
@@ -215,7 +231,7 @@ juce_add_binary_data(SonicatorAssets SOURCES
     resources/fonts/Manrope-Bold.ttf
     resources/ml/global_prototypes.json
     resources/ml/global_model.json)
-add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/shell/AppFonts.cpp ui/shell/WrappedText.cpp ui/analysis/AnalysisCard.cpp ui/analysis/KeyBpmBlock.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/shell/StudioControls.cpp ui/shell/PanelLayout.cpp ui/shell/PanelSplitter.cpp ui/commands/CommandRegistry.cpp ui/commands/ShortcutBindings.cpp ui/commands/CommandRouter.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/shell/DialogSurface.cpp ui/settings/SettingsPanel.cpp ui/settings/HotkeysPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp ui/batch/BatchProcessingDialog.cpp ui/cloud/CloudIndex.cpp ui/cloud/CloudView.cpp)
+add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/shell/AppFonts.cpp ui/shell/WrappedText.cpp ui/analysis/AnalysisCard.cpp ui/analysis/KeyBpmBlock.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/PluginMatchControls.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/shell/StudioControls.cpp ui/shell/PanelLayout.cpp ui/shell/PanelSplitter.cpp ui/commands/CommandRegistry.cpp ui/commands/ShortcutBindings.cpp ui/commands/CommandRouter.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/shell/DialogSurface.cpp ui/settings/SettingsPanel.cpp ui/settings/HotkeysPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp ui/batch/BatchProcessingDialog.cpp ui/cloud/CloudIndex.cpp ui/cloud/CloudView.cpp)
 if(APPLE)
     target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.mm)
 else()
@@ -227,8 +243,6 @@ option(SONICATOR_BUILD_TRAINING_TOOLS "Build the training feature extraction too
 if(SONICATOR_BUILD_TRAINING_TOOLS)
     add_subdirectory(tools/sonicator-features)
 endif()
-# The VST3/AU plugin: off by default, no effect on the application build.
-option(SONICATOR_BUILD_PLUGIN "Build the VST3/AU plugin" OFF)
 if(SONICATOR_BUILD_PLUGIN)
     add_subdirectory(plugin)
 endif()

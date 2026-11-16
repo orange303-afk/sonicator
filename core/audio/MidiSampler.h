@@ -84,9 +84,11 @@ class PreviewOutput final : public juce::AudioSource
 public:
     PreviewOutput(juce::AudioTransportSource& t,MidiSampler& s,Sf2KitSampler& f,Rex2SlicePlayer& r,
                   SampleAudition& a,ExternalKitSampler& e,TrackerSongRenderer& ts,
-                  SampleVoicePlayer& sv,HoverAudition* h = nullptr)
+                  SampleVoicePlayer& sv,HoverAudition* h = nullptr,
+                  juce::AudioTransportSource* matched = nullptr,
+                  std::atomic<bool>* matchedEnabled = nullptr)
         : transport(t),sampler(s),sf2(f),rex(r),audition(a),external(e),tracker(ts),sampleVoices(sv),
-          hover(h) {}
+          hover(h),matchedTransport(matched),matchedActive(matchedEnabled) {}
     void prepareToPlay(int,double) override;
     void releaseResources() override { transport.releaseResources(); }
     void getNextAudioBlock(const juce::AudioSourceChannelInfo&) override;
@@ -110,6 +112,10 @@ private:
     TrackerSongRenderer& tracker;
     SampleVoicePlayer& sampleVoices;
     HoverAudition* hover;
+    // The prepared Match result is its own transport. The original MIDI sampler and container
+    // stay loaded, so a NoteOn plays the untouched source and never a double-shifted copy.
+    juce::AudioTransportSource* matchedTransport = nullptr;
+    std::atomic<bool>* matchedActive = nullptr;
     juce::MidiBuffer messages;
     juce::AudioBuffer<float> midiBuffer;
 };

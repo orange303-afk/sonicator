@@ -146,15 +146,25 @@ public:
     void setSkipSilence(bool enabled) { skipSilence = enabled; sampler.skipSilence = enabled; }
     bool isSkipSilence() const { return skipSilence; }
     bool isPlaying() const { if (trackerMode) return trackerSampleChosen ? sf2Audition.isPlaying() : trackerSong.isPlaying();
+                             if (matchedActive.load()) return matchedSource.isPlaying();
                              return auditionMode() ? sf2Audition.isPlaying() : rexMode ? rexSampler.auditionPlaying() : source.isPlaying(); }
     bool isLooping() const { return looping; }
     float getVolume() const { return source.getGain(); }
     double position() const { if (trackerMode) return trackerSampleChosen ? sf2Audition.position() : trackerSong.position();
+                              if (matchedActive.load()) return matchedSource.getCurrentPosition();
                               return auditionMode() ? sf2Audition.position() : rexMode ? rexSampler.auditionSeconds() : source.getCurrentPosition(); }
     double length() const { if (trackerMode) return trackerSampleChosen ? sf2Audition.length() : trackerSong.length();
+                            if (matchedActive.load()) return matchedSource.getLengthInSeconds();
                             return auditionMode() ? sf2Audition.length() : rexMode ? rexSampler.lengthSeconds() : source.getLengthInSeconds(); }
     juce::String error() const { return lastError; }
     juce::AudioTransportSource& transport() { return source; }
+    // The prepared Match result is a second, independent transport. It never replaces the
+    // original reader, MIDI sampler, REX slices or container state, so stopping Match returns
+    // to exactly the source the user selected. Message thread only.
+    bool setMatchedTransport(const juce::File& preparedFile);
+    void clearMatchedTransport();
+    bool hasMatchedTransport() const { return matchedActive.load(); }
+    juce::File matchedTransportFile() const { return matchedFile; }
     juce::AudioDeviceManager& deviceManager() { return devices; }
     // Host mode: a plugin processor owns the audio path instead of an AudioDeviceManager. The
     // engine never opens a device; startHostAudio() is called from prepareToPlay() and
@@ -188,8 +198,18 @@ private:
     juce::AudioFormatManager formats;
     juce::AudioDeviceManager devices;
     juce::TimeSliceThread readAhead { "Preview read-ahead" };
+    juce::TimeSliceThread matchReadAhead { "Matched preview read-ahead" };
     std::unique_ptr<PreviewReaderSource> reader;
     juce::AudioTransportSource source;
+    std::unique_ptr<PreviewReaderSource> matchReader;
+    juce::AudioTransportSource matchedSource;
+    std::atomic<bool> matchedActive { false };
+    juce::File matchedFile;
+    bool matchedAttached = false;
+    double matchedRate = 44100.0;
+    bool stopMatchedTransport();
+    void attachMatched();
+    void prepareMatchedTransport();
     MidiSampler sampler;
     Sf2KitSampler sf2Sampler;
     Sf2Bank sf2Bank;
@@ -218,7 +238,7 @@ private:
     bool discMode = false;
     SampleAudioPtr discSample;
     juce::uint64 discGenerationValue = 0;
-    PreviewOutput output {source,sampler,sf2Sampler,rexSampler,sf2Audition,externalSampler,trackerSong,sampleVoices,&hoverAudition};
+    PreviewOutput output {source,sampler,sf2Sampler,rexSampler,sf2Audition,externalSampler,trackerSong,sampleVoices,&hoverAudition,&matchedSource,&matchedActive};
     juce::AudioSourcePlayer player;
     void attach();
     // Drops the ordinary-file transport before another preview kind takes over. Without it a long
