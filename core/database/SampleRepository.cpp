@@ -54,9 +54,15 @@ constexpr StandardTag schema9Tags[] = {
 };
 std::pair<juce::String,juce::String> folderRange(const juce::String& folder)
 {
-    auto prefix = juce::File(folder).getFullPathName();
-    if (! prefix.endsWithChar(juce::File::getSeparatorChar())) prefix += juce::File::getSeparatorString();
-    return {prefix, prefix.dropLastCharacters(1) + juce::String::charToString(juce::File::getSeparatorChar()+1)};
+    // String range, not an absolutised path: rows are compared as stored, so a caller that passes
+    // either separator spelling must bound exactly the entries written by the scanner.
+    return pathrelocation::folderRange(folder, juce::File::getSeparatorChar());
+}
+// Every repository entry point that accepts a catalog path stores and compares the host's native
+// separator form. On POSIX this is the identity: a backslash is a legal filename character.
+juce::String nativeCatalogPath(juce::String path)
+{
+    return pathrelocation::normaliseSeparators(path, juce::File::getSeparatorChar());
 }
 // Mono files whose names differ only by an L/R marker in the same folder share this key.
 std::pair<juce::String,int> makePairKey(const SampleRecord& record)
@@ -65,7 +71,7 @@ std::pair<juce::String,int> makePairKey(const SampleRecord& record)
     if (record.numChannels != 1 || record.sampleRate <= 0) return { {}, 0 };
     const auto name = parseStereoName(record.fileName);
     if (name.side == 0 || name.base.isEmpty()) return { {}, 0 };
-    const auto folder = juce::File(record.filePath).getParentDirectory().getFullPathName();
+    const auto folder = juce::File(nativeCatalogPath(record.filePath)).getParentDirectory().getFullPathName();
     return { folder + "\n" + name.base.toLowerCase(), name.side };
 }
 juce::String escapeLike(const juce::String& value)
@@ -554,10 +560,11 @@ void SampleRepository::removeByPaths(const juce::StringArray& paths)
         for (const auto& path : paths)
         {
             if (path.isEmpty()) continue;
-            deleteSample.reset(); deleteSample.text(1, path); deleteSample.step();
-            deleteContents.reset(); deleteContents.text(1, path); deleteContents.step();
-            deleteState.reset(); deleteState.text(1, path); deleteState.step();
-            deleteIgnore.reset(); deleteIgnore.text(1, path); deleteIgnore.step();
+            const auto native = nativeCatalogPath(path);
+            deleteSample.reset(); deleteSample.text(1, native); deleteSample.step();
+            deleteContents.reset(); deleteContents.text(1, native); deleteContents.step();
+            deleteState.reset(); deleteState.text(1, native); deleteState.step();
+            deleteIgnore.reset(); deleteIgnore.text(1, native); deleteIgnore.step();
         }
         detail::exec(db.handle, "COMMIT;");
     }
@@ -930,8 +937,10 @@ int64_t SampleRepository::upsertLocked(const SampleRecord& r,
                                        const std::vector<IgnoredPath>* cachedIgnores)
 {
     const auto entries = cachedIgnores != nullptr ? *cachedIgnores : ignoredPathsLocked();
-    const bool ignored = isPathIgnored(r.filePath, entries)
-        || (r.containerPath.isNotEmpty() && isPathIgnored(r.containerPath, entries));
+    const auto filePath = nativeCatalogPath(r.filePath);
+    const auto containerPath = nativeCatalogPath(r.containerPath);
+    const bool ignored = isPathIgnored(filePath, entries)
+        || (containerPath.isNotEmpty() && isPathIgnored(containerPath, entries));
     const auto [pairKey, pairSide] = makePairKey(r);
     detail::Statement s(db.handle,
         "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred,compatibility,ignored,pair_key,pair_side,container_path,disc_entry,disc_parent,disc_partner,disc_path)"
@@ -944,22 +953,22 @@ int64_t SampleRepository::upsertLocked(const SampleRecord& r,
         "pair_key=excluded.pair_key,pair_side=excluded.pair_side,container_path=excluded.container_path,"
         "disc_entry=excluded.disc_entry,disc_parent=excluded.disc_parent,"
         "disc_partner=excluded.disc_partner,disc_path=excluded.disc_path RETURNING id");
-    s.text(1,r.filePath); s.text(2,r.fileName); s.text(3,r.fileHash); s.text(4,r.format); s.text(5,r.error);
+    s.text(1,filePath); s.text(2,r.fileName); s.text(3,r.fileHash); s.text(4,r.format); s.text(5,r.error);
     s.integer(6,r.fileSize); s.integer(7,r.dateModified); s.integer(8,r.dateAnalyzed);
     s.real(9,r.duration); s.real(10,r.sampleRate); s.integer(11,r.bitsPerSample); s.integer(12,r.numChannels);
     s.integer(13,r.version); s.real(14,r.peakLevel); s.real(15,r.rmsLevel); s.real(16,r.spectralCentroid);
     s.real(17,r.spectralRolloff); s.real(18,r.spectralFlatness); s.integer(19,r.missing ? 1 : 0);
-    s.text(20,searchKey(r.fileName,r.filePath)); s.integer(21,r.starred ? 1 : 0);
+    s.text(20,searchKey(r.fileName,filePath)); s.integer(21,r.starred ? 1 : 0);
     s.integer(22,(int) r.compatibility); s.integer(23, ignored ? 1 : 0);
     s.text(24, pairKey); s.integer(25, pairSide);
-    s.text(26, r.containerPath); s.text(27, r.discEntry); s.text(28, r.discParent);
+    s.text(26, containerPath); s.text(27, r.discEntry); s.text(28, r.discParent);
     s.text(29, r.discPartner); s.text(30, r.discPath);
     if (! s.step()) throw std::runtime_error("Insert did not return a sample ID");
     const auto id = s.integer(0);
     // Reanalysed audio makes the derived smart result stale; candidates, overrides and the last
     // completed values are kept and the next smart run rebuilds them. The row is not deleted, so
     // the UI can still show the previous value as stale instead of pretending it was never known.
-    if (r.containerPath.isEmpty())
+    if (containerPath.isEmpty())
     {
         detail::Statement invalidate(db.handle,
             "UPDATE smart_results SET pipeline_state='stale', updated_at=? WHERE sample_id=?");
@@ -977,7 +986,7 @@ std::optional<SampleRecord> SampleRepository::findByPath(const juce::String& pat
 {
     std::lock_guard lock(db.mutex);
     auto sql = "SELECT " + juce::String(columns) + " FROM samples WHERE path=?";
-    detail::Statement s(db.handle, sql.toRawUTF8()); s.text(1,path);
+    detail::Statement s(db.handle, sql.toRawUTF8()); s.text(1,nativeCatalogPath(path));
     return s.step() ? std::optional<SampleRecord>(read(s)) : std::nullopt;
 }
 std::vector<SampleRecord> SampleRepository::page(int limit, int offset) const
@@ -1018,31 +1027,32 @@ std::vector<IgnoredPath> SampleRepository::ignoredPaths() const
 bool SampleRepository::isIgnored(const juce::String& path) const
 {
     std::lock_guard lock(db.mutex);
-    return isPathIgnored(path, ignoredPathsLocked());
+    return isPathIgnored(nativeCatalogPath(path), ignoredPathsLocked());
 }
 bool SampleRepository::hasExactIgnore(const juce::String& path) const
 {
     std::lock_guard lock(db.mutex);
     detail::Statement s(db.handle, "SELECT 1 FROM ignored_paths WHERE path=?");
-    s.text(1, path);
+    s.text(1, nativeCatalogPath(path));
     return s.step();
 }
 void SampleRepository::ignorePath(const juce::String& path, bool folder)
 {
     if (path.isEmpty()) return;
+    const auto native = nativeCatalogPath(path);
     std::lock_guard lock(db.mutex);
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
     try
     {
         detail::Statement s(db.handle,
             "INSERT OR REPLACE INTO ignored_paths(path,is_folder,created_at) VALUES(?,?,?)");
-        s.text(1, path);
+        s.text(1, native);
         s.integer(2, folder ? 1 : 0);
         s.integer(3, juce::Time::currentTimeMillis());
         s.step();
         if (folder)
         {
-            auto [lower, upper] = folderRange(path);
+            auto [lower, upper] = folderRange(native);
             detail::Statement u(db.handle, "UPDATE samples SET ignored=1 WHERE path>=? AND path<?");
             u.text(1, lower); u.text(2, upper); u.step();
         }
@@ -1050,7 +1060,7 @@ void SampleRepository::ignorePath(const juce::String& path, bool folder)
         {
             // Ignoring a disc image hides the samples it contains as well.
             detail::Statement u(db.handle, "UPDATE samples SET ignored=1 WHERE path=? OR container_path=?");
-            u.text(1, path); u.text(2, path); u.step();
+            u.text(1, native); u.text(2, native); u.step();
         }
         detail::exec(db.handle, "COMMIT;");
     }
@@ -1062,16 +1072,17 @@ void SampleRepository::ignorePath(const juce::String& path, bool folder)
 }
 void SampleRepository::unignorePathLocked(const juce::String& path)
 {
+    const auto native = nativeCatalogPath(path);
     bool folder = false;
     {
         detail::Statement s(db.handle, "SELECT is_folder FROM ignored_paths WHERE path=?");
-        s.text(1, path);
+        s.text(1, native);
         if (! s.step()) return;
         folder = s.integer(0) != 0;
     }
     {
         detail::Statement d(db.handle, "DELETE FROM ignored_paths WHERE path=?");
-        d.text(1, path); d.step();
+        d.text(1, native); d.step();
     }
     // A row may still be covered by another entry (an exact file inside an ignored folder, or
     // a nested folder), so recompute the cached flag from the remaining table.
@@ -1079,7 +1090,7 @@ void SampleRepository::unignorePathLocked(const juce::String& path)
     std::unique_ptr<detail::Statement> select;
     if (folder)
     {
-        auto [lower, upper] = folderRange(path);
+        auto [lower, upper] = folderRange(native);
         select = std::make_unique<detail::Statement>(db.handle,
             "SELECT id,path,container_path FROM samples WHERE path>=? AND path<?");
         select->text(1, lower); select->text(2, upper);
@@ -1088,7 +1099,7 @@ void SampleRepository::unignorePathLocked(const juce::String& path)
     {
         select = std::make_unique<detail::Statement>(db.handle,
             "SELECT id,path,container_path FROM samples WHERE path=? OR container_path=?");
-        select->text(1, path); select->text(2, path);
+        select->text(1, native); select->text(2, native);
     }
     detail::Statement update(db.handle, "UPDATE samples SET ignored=? WHERE id=?");
     while (select->step())
@@ -1139,21 +1150,22 @@ int SampleRepository::ignorePaths(const std::vector<juce::String>& paths, bool f
         for (const auto& path : paths)
         {
             if (path.isEmpty()) continue;
+            const auto native = nativeCatalogPath(path);
             s.reset();
-            s.text(1, path);
+            s.text(1, native);
             s.integer(2, folder ? 1 : 0);
             s.integer(3, now);
             s.step();
             if (folder)
             {
-                auto [lower, upper] = folderRange(path);
+                auto [lower, upper] = folderRange(native);
                 uFolder->reset();
                 uFolder->text(1, lower); uFolder->text(2, upper); uFolder->step();
             }
             else
             {
                 uFile->reset();
-                uFile->text(1, path); uFile->text(2, path); uFile->step();
+                uFile->text(1, native); uFile->text(2, native); uFile->step();
             }
             ++changed;
         }
@@ -1192,7 +1204,7 @@ int SampleRepository::unignorePaths(const std::vector<juce::String>& paths)
 int SampleRepository::unignoreCoveringFolders(const juce::String& path)
 {
     if (path.isEmpty()) return 0;
-    const juce::File folder(path);
+    const juce::File folder(nativeCatalogPath(path));
     std::lock_guard lock(db.mutex);
     juce::StringArray targets;
     for (const auto& entry : ignoredPathsLocked())
@@ -1436,13 +1448,14 @@ int SampleRepository::countHash(const juce::String& hash) const
 void SampleRepository::addRoot(const juce::String& path)
 {
     std::lock_guard lock(db.mutex);
-    detail::Statement s(db.handle,"INSERT OR IGNORE INTO roots(path) VALUES(?)"); s.text(1,path); s.step();
+    detail::Statement s(db.handle,"INSERT OR IGNORE INTO roots(path) VALUES(?)");
+    s.text(1,nativeCatalogPath(path)); s.step();
 }
 FolderRemoval SampleRepository::removeFolder(const juce::String& folder)
 {
     FolderRemoval outcome;
     if (folder.trim().isEmpty()) return outcome;
-    const auto canonical = pathrelocation::trimTrailingSeparators(juce::File(folder).getFullPathName());
+    const auto canonical = pathrelocation::trimTrailingSeparators(nativeCatalogPath(folder));
     if (canonical.isEmpty()) return outcome;
     std::lock_guard lock(db.mutex);
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
@@ -1529,7 +1542,7 @@ std::vector<juce::String> SampleRepository::discPathsLocked(const juce::String& 
 {
     std::vector<juce::String> out;
     detail::Statement s(db.handle, "SELECT path FROM samples WHERE container_path=? ORDER BY path");
-    s.text(1, imagePath);
+    s.text(1, nativeCatalogPath(imagePath));
     while (s.step()) out.push_back(s.text(0));
     return out;
 }
@@ -1538,7 +1551,7 @@ std::optional<DiscIndexState> SampleRepository::discIndexState(const juce::Strin
     std::lock_guard lock(db.mutex);
     detail::Statement s(db.handle,
         "SELECT image_size,image_modified,entry_count FROM disc_index WHERE image_path=?");
-    s.text(1, imagePath);
+    s.text(1, nativeCatalogPath(imagePath));
     if (! s.step()) return std::nullopt;
     return DiscIndexState{ s.integer(0), s.integer(1), s.integer(2) };
 }
@@ -1547,13 +1560,14 @@ void SampleRepository::replaceDiscContents(const juce::String& imagePath, int64_
                                            bool removeMissing)
 {
     if (imagePath.isEmpty()) return;
+    const auto image = nativeCatalogPath(imagePath);
     std::lock_guard lock(db.mutex);
     detail::exec(db.handle, "BEGIN IMMEDIATE;");
     try
     {
-        const auto existing = discPathsLocked(imagePath);
+        const auto existing = discPathsLocked(image);
         std::set<juce::String> wanted;
-        for (const auto& row : rows) wanted.insert(row.filePath);
+        for (const auto& row : rows) wanted.insert(nativeCatalogPath(row.filePath));
         detail::Statement remove(db.handle, "DELETE FROM samples WHERE path=?");
         if (removeMissing)
             for (const auto& path : existing)
@@ -1566,7 +1580,7 @@ void SampleRepository::replaceDiscContents(const juce::String& imagePath, int64_
             " VALUES(?,?,?,?,?) ON CONFLICT(image_path) DO UPDATE SET"
             " image_size=excluded.image_size,image_modified=excluded.image_modified,"
             " entry_count=excluded.entry_count,indexed_at=excluded.indexed_at");
-        state.text(1, imagePath); state.integer(2, imageSize); state.integer(3, imageModified);
+        state.text(1, image); state.integer(2, imageSize); state.integer(3, imageModified);
         state.integer(4, (int64_t) rows.size()); state.integer(5, juce::Time::currentTimeMillis());
         state.step();
         detail::exec(db.handle, "COMMIT;");
@@ -1585,9 +1599,9 @@ void SampleRepository::deleteDiscContents(const juce::String& imagePath)
     try
     {
         detail::Statement remove(db.handle, "DELETE FROM samples WHERE container_path=?");
-        remove.text(1, imagePath); remove.step();
+        remove.text(1, nativeCatalogPath(imagePath)); remove.step();
         detail::Statement state(db.handle, "DELETE FROM disc_index WHERE image_path=?");
-        state.text(1, imagePath); state.step();
+        state.text(1, nativeCatalogPath(imagePath)); state.step();
         detail::exec(db.handle, "COMMIT;");
     }
     catch (...)
@@ -1601,7 +1615,7 @@ void SampleRepository::invalidateDiscState(const juce::String& imagePath)
     if (imagePath.isEmpty()) return;
     std::lock_guard lock(db.mutex);
     detail::Statement remove(db.handle, "DELETE FROM disc_index WHERE image_path=?");
-    remove.text(1, imagePath); remove.step();
+    remove.text(1, nativeCatalogPath(imagePath)); remove.step();
 }
 int SampleRepository::pruneDiscContents()
 {

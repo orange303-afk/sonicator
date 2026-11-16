@@ -30,6 +30,39 @@ TEST_CASE("Path relocation is separator-aware in both directions", "[relocation]
     REQUIRE(trimTrailingSeparators("/") == "/");
 }
 
+TEST_CASE("Catalog path normalisation and the folder range use the chosen separator",
+          "[relocation][paths][folders]")
+{
+    // A Windows path written with forward slashes is stored in its native form.
+    REQUIRE(normaliseSeparators("C:/Samples/Drums/Kick.wav", '\\')
+            == "C:\\Samples\\Drums\\Kick.wav");
+    // A POSIX separator leaves backslashes alone: they are legal filename characters there.
+    REQUIRE(normaliseSeparators("C:\\Samples\\Drums", '/') == "C:\\Samples\\Drums");
+    REQUIRE(normaliseSeparators("/Users/me/Drums", '/') == "/Users/me/Drums");
+
+    const auto windows = folderRange("C:/Samples/Drums", '\\');
+    CHECK(windows.first == "C:\\Samples\\Drums\\");
+    CHECK(windows.second == "C:\\Samples\\Drums]");
+    const auto inRange = [] (const juce::String& path, const std::pair<juce::String, juce::String>& range)
+    {
+        return path.compare(range.first) >= 0 && path.compare(range.second) < 0;
+    };
+    CHECK(inRange("C:\\Samples\\Drums\\Kick.wav", windows));
+    CHECK_FALSE(inRange("C:\\Samples\\Drums2\\Kick.wav", windows));
+    CHECK_FALSE(inRange("C:\\Samples\\Drums", windows)); // the folder alone is not a descendant
+
+    const auto posix = folderRange("/Users/me/Drums", '/');
+    CHECK(posix.first == "/Users/me/Drums/");
+    CHECK(posix.second == "/Users/me/Drums0");
+    CHECK(inRange("/Users/me/Drums/deep/Kick.wav", posix));
+    CHECK_FALSE(inRange("/Users/me/Drums2/Kick.wav", posix));
+
+    // A volume root keeps its single separator and still bounds everything below it.
+    const auto root = folderRange("C:\\", '\\');
+    CHECK(root.first == "C:\\");
+    CHECK(inRange("C:\\a.wav", root));
+}
+
 TEST_CASE("Root relocation moves ignore entries with the catalog", "[relocate][ignore]")
 {
     TestDirectory t;

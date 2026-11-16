@@ -35,6 +35,19 @@ juce::String withSeparator(const juce::String& root, juce::juce_wchar separator)
     return trimmed + juce::String::charToString(separator);
 }
 
+juce::String normaliseSeparators(const juce::String& path, juce::juce_wchar separator)
+{
+    if (separator != '\\') return path;
+    return path.replaceCharacter('/', separator);
+}
+
+std::pair<juce::String, juce::String> folderRange(const juce::String& folder,
+                                                  juce::juce_wchar separator)
+{
+    const auto prefix = withSeparator(normaliseSeparators(folder, separator), separator);
+    return { prefix, prefix.dropLastCharacters(1) + juce::String::charToString(separator + 1) };
+}
+
 bool isUnder(const juce::String& path, const juce::String& root)
 {
     const auto r = canonical(trimTrailingSeparators(root));

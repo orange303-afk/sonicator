@@ -127,7 +127,9 @@ SourceProbe probeSource(const juce::File& file, int64_t sampleId, const juce::St
     snapshot.path = file;
     snapshot.root = root;
     snapshot.relativeDir = relativeToRoot(path, layoutBase);
-    if (const auto slash = snapshot.relativeDir.lastIndexOfChar('/'); slash >= 0)
+    const auto slash = juce::jmax(snapshot.relativeDir.lastIndexOfChar('/'),
+                                  snapshot.relativeDir.lastIndexOfChar('\\'));
+    if (slash >= 0)
         snapshot.relativeDir = snapshot.relativeDir.substring(0, slash);
     else
         snapshot.relativeDir.clear();
