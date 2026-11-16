@@ -70,6 +70,14 @@ The next Windows CI run, not this macOS result, must confirm MSVC compilation.
 
 ## Pending evidence (do not infer success)
 
+Run `43953066975` (`c08e068`) built the Windows application/VST3 and both the real MSI and higher-
+version upgrade fixture successfully. The first install failed at `LaunchConditions` (1603):
+MSI's compatibility properties reported `VersionNT64=603`, `WindowsBuild=9600`. Those values are
+documented by Microsoft as deliberately compatibility-limited. The gate now uses a secure
+64-bit registry search for `CurrentBuildNumber`, as recommended in WiX's launch-condition docs,
+and allows `Installed` so maintenance/uninstall are not blocked. Actual installation rerun remains
+required; successful MSI creation is not installation success. macOS in this run passed again.
+
 - Full suite after Windows portability corrections and final packaging tests.
 - Fresh-source-commit installer/source archive pair and final checksums.
 - New arm64 AU execution (Intel CI does not prove it); Intel installed-app/AU/reinstall gates passed.

@@ -7,7 +7,14 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of SONICATOR is already installed."
                   AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"/>
     <MediaTemplate EmbedCab="yes"/>
-    <Launch Condition="VersionNT64 AND (WindowsBuild &gt;= 10240)"
+    <!-- MSI deliberately reports VersionNT=603 / WindowsBuild=9600 on newer Windows.
+         Query the real build, rather than rejecting supported Windows 10/11/Server. -->
+    <Property Id="WINDOWSBUILDNUMBER" Secure="yes">
+      <RegistrySearch Id="CurrentWindowsBuild" Root="HKLM"
+                      Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                      Name="CurrentBuildNumber" Type="raw" Bitness="always64"/>
+    </Property>
+    <Launch Condition="Installed OR (VersionNT64 AND WINDOWSBUILDNUMBER &gt;= 10240)"
             Message="SONICATOR requires 64-bit Windows 10 or later."/>
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="SONICATOR"/>

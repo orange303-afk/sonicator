@@ -17,7 +17,10 @@ function Invoke-Msi([string[]]$Arguments) {
     $script:Counter++
     $Log = "$LogDir/msi-$script:Counter.log"
     $Process = Start-Process msiexec.exe -ArgumentList ($Arguments + @('/qn', '/norestart', '/l*v', "`"$Log`"")) -PassThru -Wait
-    if ($Process.ExitCode -notin @(0, 3010)) { throw "msiexec failed $($Process.ExitCode); see $Log" }
+    if ($Process.ExitCode -notin @(0, 3010)) {
+        if (Test-Path $Log) { Get-Content $Log -Tail 60 | Write-Host }
+        throw "msiexec failed $($Process.ExitCode); see $Log"
+    }
 }
 function Assert-Features([bool]$Application, [bool]$Vst3) {
     if ((Test-Path $App) -ne $Application) { throw "Application selection mismatch ($Application)" }
