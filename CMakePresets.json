@@ -46,6 +46,17 @@
       }
     },
     {
+      "name": "release-macos-installer",
+      "displayName": "Installer macOS universal (reuse plugin-universal cache)",
+      "inherits": "plugin-universal"
+    },
+    {
+      "name": "release-windows-installer",
+      "displayName": "Installer Windows x64 Release",
+      "inherits": "ci-windows",
+      "cacheVariables": { "SONICATOR_BUILD_PLUGIN": "ON", "BUILD_TESTING": "OFF" }
+    },
+    {
       "name": "ci-macos-debug",
       "displayName": "CI macOS Debug",
       "inherits": "base",
@@ -69,6 +80,8 @@
     }
   ],
   "buildPresets": [
+    { "name": "release-macos-installer", "configurePreset": "release-macos-installer", "jobs": 4, "targets": ["Sonicator", "SonicatorPlugin_VST3", "SonicatorPlugin_AU"] },
+    { "name": "release-windows-installer", "configurePreset": "release-windows-installer", "configuration": "Release", "jobs": 4, "targets": ["Sonicator", "SonicatorPlugin_VST3"] },
     { "name": "debug", "configurePreset": "debug", "jobs": 6 },
     { "name": "release", "configurePreset": "release", "jobs": 6 },
     { "name": "universal", "configurePreset": "universal", "jobs": 6 },

@@ -20,6 +20,10 @@ owned by the application, not a second catalog.
 
 ## Build and install
 
+For selectable application + plugin release installers and unsigned macOS quarantine handling,
+see [RELEASE_INSTALLERS.md](RELEASE_INSTALLERS.md). Development build copying below is separate
+from packaging and never runs unless explicitly enabled.
+
 The targets are off by default and do not affect the application build.
 
 ```bash

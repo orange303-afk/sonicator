@@ -85,7 +85,9 @@ repository normalises separators inside all queries, or every caller is required
 
 ## What is not done
 
-- No Windows installer, signing or notarization.
+- Windows MSI packaging is now implemented; actual installer/build verification is tracked in
+  [RELEASE_INSTALLERS_ACCEPTANCE.md](RELEASE_INSTALLERS_ACCEPTANCE.md). No signing certificate
+  is assumed. Apple notarization does not apply to Windows.
 - No Windows audio device or MIDI acceptance; the tests run without a device.
 - The application has never been started on Windows.
 - `docs/TESTING.md` records Windows as unverified; that stays true until the 22 failures are resolved.

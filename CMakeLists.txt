@@ -260,11 +260,13 @@ if(WIN32)
         VERBATIM)
 endif()
 if(APPLE)
-    # The linker's signature covers only the Mach-O; seal the complete local app bundle.
-    # This is an ad-hoc development signature, not Developer ID signing/notarization.
+    # Ship the runtime inside the app, not at an absolute FetchContent build-tree path.
+    # Nested code is signed first; the complete bundle is then sealed ad-hoc.
     add_custom_command(TARGET Sonicator POST_BUILD
-        COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SignMacBundle.sh"
+        COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedMacRuntime.sh"
             "$<TARGET_BUNDLE_DIR:Sonicator>"
+            "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.dylib"
+            "$<TARGET_FILE_NAME:Sonicator>"
         VERBATIM)
 endif()
 include(CTest)

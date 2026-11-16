@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Matching source + pinned dependencies for rebuilding/relinking shipped binaries."""
+import io
+import pathlib
+import re
+import subprocess
+import sys
+import tarfile
+
+repo = pathlib.Path(__file__).resolve().parents[1]
+build, output = (pathlib.Path(p).resolve() for p in sys.argv[1:])
+version = re.search(r"project\(Sonicator VERSION ([\d.]+)", (repo / "CMakeLists.txt").read_text())[1]
+commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=repo, text=True)
+if dirty.strip():
+    sys.exit("Commit source changes before making matching source archive")
+sources = {name: build / "_deps" / f"{name}-src" for name in
+           ("juce", "libxmp", "libsamplerate", "rubberband", "onnxruntime")}
+sources["lame"] = build / "lame-src"
+zlib = build / "_deps/zlib-src"
+if zlib.is_dir():
+    sources["zlib"] = zlib
+for name, path in sources.items():
+    if not path.is_dir():
+        sys.exit(f"Missing pinned dependency source: {name}: {path}")
+output.mkdir(parents=True, exist_ok=True)
+archive_path = output / f"SONICATOR-{version}-sources.tar.gz"
+if archive_path.exists():
+    sys.exit(f"Refusing to overwrite {archive_path}")
+tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=repo).decode().split("\0")
+
+
+def exclude_git(info):
+    if ".git" in pathlib.PurePosixPath(info.name).parts or "__pycache__" in pathlib.PurePosixPath(info.name).parts:
+        return None
+    return info
+
+
+instructions = f"""# SONICATOR {version} source and relinking materials
+
+Source commit: {commit}
+
+`source/` contains the matching project. `dependencies/` contains pinned JUCE,
+libxmp, LAME, libsamplerate, Rubber Band sources and ONNX's MIT runtime package.
+Licences are preserved inside each dependency. No sample library is included.
+
+To rebuild/relink against modified LGPL libraries, edit dependencies/libxmp or
+dependencies/lame as desired, then use CMake >=3.22, C++20 and the normal platform
+SDK (Xcode Command Line Tools on macOS or Visual Studio 2022 C++ x64 on Windows).
+Copy dependencies/lame to <build>/lame-src before configure. Pass these CMake flags
+alongside -DSONICATOR_BUILD_PLUGIN=ON -DBUILD_TESTING=OFF and Release configuration:
+
+""" + "\n".join(f"-DFETCHCONTENT_SOURCE_DIR_{name.upper()}=<absolute-path>/dependencies/{name}"
+                   for name in sources if name != "lame") + """
+
+Build targets Sonicator and SonicatorPlugin_VST3; on macOS also SonicatorPlugin_AU.
+For macOS pass -DCMAKE_OSX_ARCHITECTURES=\"arm64;x86_64\". Use the package scripts
+under source/packaging to redistribute your modified builds under the applicable
+licences. No vendor signing key, authorization or paid service is needed to
+replace libraries/rebuild. Ad-hoc macOS signatures are generated locally.
+ONNX source (MIT) is at https://github.com/microsoft/onnxruntime/tree/v1.20.1 .
+"""
+with tarfile.open(archive_path, "w:gz") as archive:
+    for name in tracked:
+        if name:
+            archive.add(repo / name, arcname="source/" + name, recursive=False)
+    for name, path in sources.items():
+        archive.add(path, arcname="dependencies/" + name, filter=exclude_git)
+    data = instructions.encode()
+    info = tarfile.TarInfo("SOURCE_BUILD.md")
+    info.size = len(data)
+    archive.addfile(info, io.BytesIO(data))
+import hashlib
+digest = hashlib.file_digest(archive_path.open("rb"), "sha256").hexdigest()
+archive_path.with_suffix(archive_path.suffix + ".sha256").write_text(f"{digest}  {archive_path.name}\n")
+print(f"Created source/relink archive for {commit}: {archive_path}")

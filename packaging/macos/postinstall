@@ -1,0 +1,31 @@
+#!/bin/sh
+# Installer executes only the selected component's script, with its target volume in $3.
+set -eu
+fail() { echo "SONICATOR postinstall: $*" >&2; exit 1; }
+test "$#" -ge 3 || fail 'Missing installer target volume'
+component="$(cat "$(dirname "$0")/component")"
+case "$component" in
+    app) relative='Applications/SONICATOR.app'; identity='com.sonicator.browser' ;;
+    vst3) relative='Library/Audio/Plug-Ins/VST3/SONICATOR.vst3'; identity='com.sonicator.plugin' ;;
+    au) relative='Library/Audio/Plug-Ins/Components/SONICATOR.component'; identity='com.sonicator.plugin' ;;
+    *) fail 'Invalid component' ;;
+esac
+volume="${3%/}"
+case "$volume" in ''|/*) ;; *) fail 'Target volume must be absolute' ;; esac
+target="$volume/$relative"
+# Check every parent without resolving links: never follow an alias outside the target volume.
+rest="${target#/}"
+prefix=''
+while test -n "$rest"; do
+    segment="${rest%%/*}"
+    case "$segment" in ''|.|..) fail 'Invalid target path' ;; esac
+    prefix="$prefix/$segment"
+    test ! -L "$prefix" || fail "Symlink in installation path: $prefix"
+    case "$rest" in */*) rest="${rest#*/}" ;; *) rest='' ;; esac
+done
+test -d "$target" || fail "Selected payload is missing: $target"
+test -z "$(/usr/bin/find "$target" -type l -print)" || fail "Symlink inside payload: $target"
+actual="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$target/Contents/Info.plist")"
+test "$actual" = "$identity" || fail "Unexpected bundle identity: $actual"
+/usr/bin/xattr -dr com.apple.quarantine "$target" || fail "Cannot remove quarantine: $target"
+echo "SONICATOR: removed quarantine from $target"

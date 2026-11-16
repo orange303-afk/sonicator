@@ -4,3 +4,5 @@
 /services/training/out/
 .DS_Store
 /graphify-out/
+/dist/
+__pycache__/

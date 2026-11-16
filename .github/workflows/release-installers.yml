@@ -1,0 +1,148 @@
+name: Release installers (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [stage-release-installers]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-installers-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLUGINVAL_VERSION: v1.0.4
+
+jobs:
+  macos:
+    name: macOS universal PKG
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: macos-installer-deps-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
+      - name: Packaging behavior tests
+        run: python3 -m unittest discover -s packaging/tests -v
+      - name: Build universal payloads
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DBUILD_TESTING=OFF \
+            -DSONICATOR_BUILD_PLUGIN=ON
+          cmake --build build --target Sonicator SonicatorPlugin_VST3 SonicatorPlugin_AU -j 4
+      - name: Package and collect matching sources
+        run: |
+          sh packaging/macos/build-pkg.sh build dist
+          python3 packaging/make-source-bundle.py build dist
+          git rev-parse HEAD > dist/source-commit.txt
+      - name: Download pinned pluginval
+        run: |
+          curl -fL "https://github.com/Tracktion/pluginval/releases/download/$PLUGINVAL_VERSION/pluginval_macOS.zip" -o "$RUNNER_TEMP/pluginval.zip"
+          ditto -xk "$RUNNER_TEMP/pluginval.zip" "$RUNNER_TEMP/pluginval"
+      - name: Install, inspect, validate and reinstall on disposable runner
+        run: |
+          set -e
+          mkdir -p validation
+          PKG="$PWD/dist/SONICATOR-0.1.0-macOS-universal.pkg"
+          sudo installer -pkg "$PKG" -target / -dumplog
+          # A runtime hidden in the build tree cannot rescue a broken installed bundle.
+          mv build/_deps/onnxruntime-src/lib build/_deps/onnxruntime-src/lib-unavailable
+          APP=/Applications/SONICATOR.app
+          VST3=/Library/Audio/Plug-Ins/VST3/SONICATOR.vst3
+          AU=/Library/Audio/Plug-Ins/Components/SONICATOR.component
+          for bundle in "$APP" "$VST3" "$AU"; do
+            sh packaging/macos/verify-bundle.sh "$bundle"
+            if xattr -r "$bundle" | grep -q com.apple.quarantine; then exit 1; fi
+          done
+          "$APP/Contents/MacOS/SONICATOR" > validation/app.log 2>&1 &
+          APP_PID=$!
+          sleep 5
+          kill -0 "$APP_PID"
+          osascript -e 'tell application id "com.sonicator.browser" to quit'
+          wait "$APP_PID"
+          # Test real catalog/settings plus synthetic exported media remain unchanged.
+          mkdir -p "$HOME/Library/Sonicator/exports"
+          printf 'installer media sentinel' > "$HOME/Library/Sonicator/exports/installer-test.wav"
+          shasum -a 256 "$HOME/Library/Sonicator/sonicator.sqlite" \
+            "$HOME/Library/Sonicator/settings.json" \
+            "$HOME/Library/Sonicator/exports/installer-test.wav" > validation/user-data.sha256
+          PV="$RUNNER_TEMP/pluginval/pluginval.app/Contents/MacOS/pluginval"
+          "$PV" --strictness-level 10 --skip-gui-tests --output-dir validation --validate "$VST3"
+          "$PV" --strictness-level 10 --skip-gui-tests --output-dir validation --validate "$AU"
+          auval -v aumu Sncr Orng -strict > validation/auval-arm64.log 2>&1
+          arch -x86_64 auval -v aumu Sncr Orng -strict > validation/auval-x86_64.log 2>&1
+          sudo installer -pkg "$PKG" -target / -dumplog
+          shasum -a 256 -c validation/user-data.sha256
+      - name: Installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SONICATOR-macOS-universal
+          path: dist/
+      - name: Validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-macOS
+          path: validation/
+          if-no-files-found: ignore
+
+  windows:
+    name: Windows x64 MSI
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: windows-installer-deps-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
+      - name: Packaging behavior tests
+        run: python -m unittest discover -s packaging/tests -v
+      - name: Configure and build Release app and VST3
+        run: |
+          cmake --preset release-windows-installer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build --preset release-windows-installer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package and collect matching sources
+        run: |
+          ./packaging/windows/build-msi.ps1 -BuildDir build -OutputDir dist
+          python packaging/make-source-bundle.py build dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git rev-parse HEAD | Out-File -Encoding utf8 dist/source-commit.txt
+          ./packaging/windows/build-msi.ps1 -BuildDir build -OutputDir "$env:RUNNER_TEMP/upgrade" -VersionOverride 0.1.1
+      - name: Download pinned pluginval
+        run: |
+          Invoke-WebRequest "https://github.com/Tracktion/pluginval/releases/download/$env:PLUGINVAL_VERSION/pluginval_Windows.zip" -OutFile "$env:RUNNER_TEMP/pluginval.zip"
+          Expand-Archive "$env:RUNNER_TEMP/pluginval.zip" "$env:RUNNER_TEMP/pluginval"
+      - name: Installed application, VST3 and MSI lifecycle tests
+        run: |
+          $Pluginval = (Get-ChildItem "$env:RUNNER_TEMP/pluginval" -Recurse -Filter pluginval.exe | Select-Object -First 1).FullName
+          ./packaging/windows/test-install.ps1 -Msi dist/SONICATOR-0.1.0-Windows-x64.msi `
+            -UpgradeMsi "$env:RUNNER_TEMP/upgrade/SONICATOR-0.1.1-Windows-x64.msi" `
+            -Pluginval $Pluginval -LogDir validation
+      - name: Installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SONICATOR-Windows-x64
+          path: dist/
+      - name: Validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-Windows
+          path: validation/
+          if-no-files-found: ignore

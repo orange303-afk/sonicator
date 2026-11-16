@@ -2,6 +2,10 @@
 # application's own catalog. Built only with -DSONICATOR_BUILD_PLUGIN=ON.
 set(plugin_target SonicatorPlugin)
 set(plugin_dylib "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.dylib")
+set(plugin_formats VST3)
+if(APPLE)
+    list(APPEND plugin_formats AU)
+endif()
 set(plugin_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/PluginState.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/PluginProcessor.cpp"
@@ -14,7 +18,7 @@ juce_add_plugin(${plugin_target}
     BUNDLE_ID "com.sonicator.plugin"
     PLUGIN_MANUFACTURER_CODE Orng
     PLUGIN_CODE Sncr
-    FORMATS VST3 AU
+    FORMATS ${plugin_formats}
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
@@ -34,6 +38,15 @@ target_link_libraries(${plugin_target}
 target_compile_definitions(${plugin_target} PUBLIC JUCE_VST3_CAN_REPLACE_VST2=0)
 
 if(NOT APPLE)
+    if(WIN32)
+        # The VST3 manifest helper loads this module, so its runtime must exist first.
+        add_custom_command(TARGET ${plugin_target}_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll"
+                "$<TARGET_FILE_DIR:${plugin_target}_VST3>"
+            VERBATIM)
+        juce_enable_vst3_manifest_step(${plugin_target})
+    endif()
     return()
 endif()
 
