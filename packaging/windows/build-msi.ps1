@@ -53,8 +53,10 @@ try {
     $OutputDir = (Resolve-Path $OutputDir).Path
     $Msi = "$OutputDir/SONICATOR-$Version-Windows-x64.msi"
     if (Test-Path $Msi) { throw "Refusing to overwrite $Msi" }
+    # Debug symbols stay in staging: the release artifact ships the MSI and checksum only.
     & "$Tools/wix.exe" build -arch x64 -ext WixToolset.UI.wixext/5.0.2 -culture en-US `
         -d "Version=$Version" -d "LicenseRtf=$Stage/License.rtf" `
+        -pdb "$Stage/SONICATOR.wixpdb" `
         -o $Msi "$PSScriptRoot/Sonicator.wxs" "$Stage/Payload.wxs"
     Check-NativeExit 'MSI build'
     $Hash = (Get-FileHash $Msi -Algorithm SHA256).Hash.ToLowerInvariant()
