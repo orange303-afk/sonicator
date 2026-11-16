@@ -113,10 +113,8 @@ private:
     void drawPointsLive(juce::Graphics&, const std::vector<size_t>& visible, bool matching,
                         juce::Point<float> sway, bool useLens, bool withDrift) const;
     void drawLabels(juce::Graphics&, const std::vector<size_t>& visible, juce::Point<float> sway);
-    void drawLens(juce::Graphics&, const std::vector<size_t>& visible, juce::Point<float> sway);
     void ensureFrameCache(const std::vector<size_t>& visible);
     void paintDynamic(juce::Graphics&, juce::Point<float> sway);
-    void applyLensMask(juce::Image&, juce::Point<float> centre) const;
     float lensMask(float distance) const;
     juce::Point<float> lensOffsetForScreen(juce::Point<float> screen) const;
     void setHovered(size_t index);
@@ -174,7 +172,6 @@ private:
     float lensStrength = 0.0f;
     juce::Point<float> lensPos, lensTarget;
     bool hasLensTarget = false;
-    juce::Image lensPatch;
     int currentTimerHz = 0;
     juce::uint32 lastTimerMs = 0;
 

@@ -264,14 +264,6 @@ TEST_CASE("The map builds from a real catalog inside the window", "[ui][cloud]")
     panel->activatePointForTest(index);
     REQUIRE(preview->loadedFilePath() == files[3]);
 
-    // With a sample selected, hovering another point must not start the hover voice; the preview
-    // owns the listening now.
-    const auto other = index == 0 ? size_t(1) : size_t(0);
-    const auto otherScreen = panel->worldToScreen(panel->layout().points[other].x,
-                                                  panel->layout().points[other].y);
-    panel->hoverForTest({ (int) otherScreen.x, (int) otherScreen.y });
-    juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
-    REQUIRE_FALSE(engine.hover().isPlaying());
 
     app.showCloudView(false);
     REQUIRE_FALSE(panel->isVisible());

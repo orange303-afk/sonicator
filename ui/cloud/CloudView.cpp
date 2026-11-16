@@ -9,13 +9,13 @@ namespace sonicator::cloud
 {
 namespace
 {
-constexpr float pointSize = 4.0f;
+constexpr float pointSize = 2.4f;
 constexpr float margin = 28.0f;
 constexpr double minScale = 0.05;
 constexpr double maxScale = 40.0;
 constexpr size_t livePointThreshold = 1500; // above this, the composed frame is cached and blitted
-constexpr float lensRadius = 120.0f; // about twice the old area
-constexpr float lensPull = 1.05f;
+constexpr float lensRadius = 220.0f; // several times the old area
+constexpr float lensPull = 0.65f;
 constexpr float lensFeather = 0.7f;
 constexpr float introDurationMs = 650.0f;
 constexpr float swayAmplitude = 1.0f;
@@ -511,72 +511,6 @@ void CloudView::drawLabels(juce::Graphics& g, const std::vector<size_t>& visible
     }
 }
 
-void CloudView::applyLensMask(juce::Image& patch, juce::Point<float> centre) const
-{
-    juce::Image::BitmapData data(patch, juce::Image::BitmapData::readWrite);
-    for (int y = 0; y < patch.getHeight(); ++y)
-        for (int x = 0; x < patch.getWidth(); ++x)
-        {
-            const auto dx = (float) x + 0.5f - centre.x;
-            const auto dy = (float) y + 0.5f - centre.y;
-            const auto distance = std::sqrt(dx * dx + dy * dy);
-            float alpha = 0.0f;
-            if (distance < lensRadius)
-            {
-                // Full strength well inside, a long smooth fade to nothing at the rim.
-                // A long, very soft rim: the patch fades over 80 % of the radius, so the lens
-                // reads as a blur of the neighbourhood, not as a circle laid on the map.
-                const auto t = juce::jlimit(0.0f, 1.0f, (1.0f - distance / lensRadius) / 0.80f);
-                alpha = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
-            }
-            if (alpha >= 0.999f) continue;
-            auto* pixel = reinterpret_cast<juce::PixelARGB*>(data.getPixelPointer(x, y));
-            pixel->multiplyAlpha((int) (alpha * 255.0f));
-        }
-}
-
-void CloudView::drawLens(juce::Graphics& g, const std::vector<size_t>& visible, juce::Point<float> sway)
-{
-    if (lensStrength <= 0.01f || ! hasLensTarget) return;
-    const auto centre = lensPos + sway;
-    const auto live = visible.size() <= livePointThreshold || (float) viewScale > layerScale * 1.25f;
-    if (! live)
-    {
-        const int radius = (int) std::ceil(lensRadius);
-        auto rect = juce::Rectangle<int>((int) std::floor(centre.x) - radius, (int) std::floor(centre.y) - radius,
-                                         radius * 2 + 1, radius * 2 + 1)
-                        .getIntersection(getLocalBounds());
-        if (rect.isEmpty()) return;
-        lensPatch = juce::Image(juce::Image::ARGB, rect.getWidth(), rect.getHeight(), true);
-        juce::Graphics pg(lensPatch);
-        pg.fillAll(theme::background);
-        const auto lensCentreLocal = centre - juce::Point<float>((float) rect.getX(), (float) rect.getY());
-        const bool filtered = ! matches.empty();
-        for (auto i : visible)
-        {
-            const auto& point = current.points[i];
-            auto screen = worldToScreen(point.x, point.y) + sway;
-
-            const auto delta = screen - centre;
-            const auto distance = delta.getDistanceFromOrigin();
-            if (distance >= lensRadius) continue;
-            const auto mask = lensMask(distance);
-            const auto displaced = screen + delta * (lensPull * lensStrength * mask);
-            const auto size = pointSize * (1.0f + 0.5f * lensStrength * mask);
-            const auto visiblePoint = isPointVisible(i);
-            auto colour = juce::Colour(point.colour);
-            colour = colour.withAlpha(filtered && ! visiblePoint ? 0.30f : 1.0f);
-            pg.setColour(colour);
-            pg.fillEllipse(displaced.x - (float) rect.getX() - size * 0.5f,
-                           displaced.y - (float) rect.getY() - size * 0.5f, size, size);
-        }
-        applyLensMask(lensPatch, lensCentreLocal);
-        g.setOpacity(introAlpha());
-        g.drawImageAt(lensPatch, rect.getX(), rect.getY());
-        g.setOpacity(1.0f);
-    }
-}
-
 void CloudView::ensureFrameCache(const std::vector<size_t>& visible)
 {
     const Camera camera { viewScale, viewPan };
@@ -628,7 +562,8 @@ void CloudView::paint(juce::Graphics& g)
     const auto sway = ambientSway();
     const auto intro = introAlpha();
     const bool filtered = ! matches.empty();
-    const bool live = visible.size() <= livePointThreshold || (float) viewScale > layerScale * 1.25f;
+    const bool live = visible.size() <= livePointThreshold || (float) viewScale > layerScale * 1.25f
+        || lensStrength > 0.01f;
     if (live)
     {
         // Close up, the points are drawn live: they can drift with the ambient motion and the lens
@@ -646,7 +581,6 @@ void CloudView::paint(juce::Graphics& g)
         g.setOpacity(1.0f);
     }
     drawLabels(g, visible, sway);
-    drawLens(g, visible, sway);
     paintDynamic(g, sway);
 }
 
