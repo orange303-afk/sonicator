@@ -78,15 +78,67 @@ consent-suppressed disposable profile as Windows, launches through LaunchService
 binary fallback, and judges quit by the process actually disappearing; validation logs are
 best-effort uploads while installer artifacts stay required.
 
-## Pending evidence (do not infer success)
+Run `43975935813` (`0d307d5`): **both jobs SUCCESS**. This is the first fully green run.
 
-Run `43953066975` (`c08e068`) built the Windows application/VST3 and both the real MSI and higher-
+- macOS: PKG installed, payloads passed architecture/signature/quarantine checks, the installed
+  app started without the build-tree ONNX library and quit when asked, VST3 and AU passed
+  pluginval strictness 10, native `auval` reported success, reinstall preserved catalog/settings/
+  exported-media hashes.
+- Windows: MSI built, install, installed window start/close, pluginval for installed and build-tree
+  VST3, ONNX positive/negative controls, repair, 0.1.1 major upgrade, app-only and VST3-only
+  installs, uninstall, unchanged user data, and the diagnostic full suite.
+- Both jobs verified their own SHA256 files before upload. The Windows artifact no longer contains
+  the WiX debug database, and the source-archive checksum is LF-terminated so `shasum -c` accepts it.
+
+Downloaded artifacts (commit `0d307d5`):
+
+| File | Size | SHA256 |
+|---|---|---|
+| `dist/macOS/SONICATOR-0.1.0-macOS-universal.pkg` | 119914607 | verified by `shasum -c` |
+| `dist/macOS/SONICATOR-0.1.0-sources.tar.gz` | 80037190 | verified by `shasum -c` |
+| `dist/Windows/SONICATOR-0.1.0-Windows-x64.msi` | 23175924 | `11290b99…cca91e` |
+| `dist/Windows/SONICATOR-0.1.0-sources.tar.gz` | 131407872 | `2fe8e8ee…b9d76c7` |
+
+The macOS and Windows source archives share a filename but differ (each carries its own ONNX
+runtime package and, on Windows, zlib sources). Keep each next to its platform's installer.
+
+`sh packaging/tests/test-macos-pkg.sh dist/macOS/SONICATOR-0.1.0-macOS-universal.pkg` re-passes on
+the downloaded file: three independent choices, fixed install locations, universal ad-hoc
+signatures, bundled licences, and both packaged postinstall runs (quarantine removed, signatures
+and unrelated attributes intact).
+
+## Manual checks still open
+
+- Installer approval UX is untouched by automation on macOS: an unsigned, unnotarized PKG can be
+  blocked before its scripts run, and the first-launch consent dialog is human interaction.
+- arm64 AU execution (Intel CI validates x86_64 only).
+- Real DAW acceptance: Cubase/Logic/REAPER scan, preview, drag, Match BPM/Scale, reopen project.
+- Windows ACL-denied destination (the POSIX-only test skips on Windows), Windows audio device and
+  MIDI acceptance, and unsigned SmartScreen prompts.
+- The diagnostic Windows suite still reports its known port failures; see below.
+
+## Remaining gaps (not covered by that green run)
+
+- Diagnostic Windows suite: **1278 cases, 1236 passed, 37 failed, 5 skipped** (logs uploaded). These
+  are the pre-existing Windows port defects listed in `WINDOWS_PORT.md` (path separators, VBR MP3
+  expectations, one drawing check), not installer regressions. The step is `continue-on-error`, and
+  this is not a green Windows test suite.
+- arm64 AU execution is still unproven: the Intel runner validates only the native x86_64 slice.
+- Windows ACL-denied destinations are untested; the POSIX mode-bit test skips on Windows instead
+  of pretending `_chmod` denies writes.
+- Manual DAW acceptance: Cubase/Logic/REAPER scan, preview, drag, Match BPM/Scale, project reopen.
+- Windows audio device/MIDI acceptance and unsigned SmartScreen prompts.
+- No code signing/notarization: gates that depend on Developer ID or an Authenticode certificate
+  are out of scope for this unsigned release.
+
+## Run history
+
+Run `43953066975` (`c08e068`) created the Windows application/VST3 and both the real MSI and higher-
 version upgrade fixture successfully. The first install failed at `LaunchConditions` (1603):
 MSI's compatibility properties reported `VersionNT64=603`, `WindowsBuild=9600`. Those values are
 documented by Microsoft as deliberately compatibility-limited. The gate now uses a secure
 64-bit registry search for `CurrentBuildNumber`, as recommended in WiX's launch-condition docs,
-and allows `Installed` so maintenance/uninstall are not blocked. Actual installation rerun remains
-required; successful MSI creation is not installation success. macOS in this run passed again.
+and allows `Installed` so maintenance/uninstall are not blocked.
 
 Run `43957871104` (`674237d`) proved the launch-condition fix: the MSI installed, both features
 were present with their runtimes, the installed application opened a window and exited 0, and the
@@ -103,13 +155,9 @@ filter was the literal test name, whose comma Catch2 splits into two specs that 
 the negative control was vacuous. The control now uses a wildcard filter and requires the negative
 run to be non-zero without `All tests passed` and the positive run to be zero with it.
 
-- Full suite after Windows portability corrections and final packaging tests.
-- Fresh-source-commit installer/source archive pair and final checksums.
-- New arm64 AU execution (Intel CI does not prove it); Intel installed-app/AU/reinstall gates passed.
-- Successful Windows Release build, MSI compilation, installed-window/pluginval/lifecycle checks.
-- Full Windows suite failures listed in `WINDOWS_PORT.md` remain unresolved by this packaging task.
-- Manual macOS/Windows DAW playback/drag/Match acceptance and unsigned-installer approval UX
-  on a clean downloaded copy. An unsigned PKG can require manual approval before postinstall.
+Run `43968834627` (`8fff7ce`): Windows SUCCESS; macOS failed only at the installed-app quit step
+(`osascript -600` after the first-launch consent alert) plus a transient artifact-service timeout.
+The macOS job now seeds the consent-suppressed disposable profile and judges quit by process exit.
 
 ## Safety
 
