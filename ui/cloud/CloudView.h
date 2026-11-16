@@ -2,7 +2,6 @@
 #include "CloudIndex.h"
 #include "core/cloud/CloudModel.h"
 #include "ui/shell/StudioControls.h"
-#include "core/cloud/CloudModel.h"
 #include <functional>
 #include <map>
 
@@ -11,6 +10,11 @@ namespace sonicator::cloud
 // One component for the whole map: 35k points, no child component per point. The camera is a
 // scale and a pan, navigation is animated, and the frame is drawn in screen coordinates so a
 // point keeps the same size at every zoom level.
+//
+// The map is one cloud, not a ring of discs: islands are packed touching, there is no circle drawn
+// around a tag, and a soft colour field under the points carries the gradients between them. The
+// hover lens is a local magnifier: points near the cursor spread out, the rim fades through a
+// feathered mask, and nothing about the hit test or the selection moves.
 class CloudView final : public juce::Component, private juce::Timer
 {
 public:
@@ -31,6 +35,10 @@ public:
     // map itself is never replaced, so the context stays visible.
     void setNotice(const juce::String& text);
     void setHoverAudioEnabled(bool enabled) { hoverAudio = enabled; }
+    // Ambient motion (the slow sway and the breathing field) can be switched off; the camera and
+    // the hover lens keep working.
+    void setMotionEnabled(bool enabled) { motion = enabled; }
+    bool motionEnabled() const { return motion; }
 
     void fitAll();
     void zoomBy(float factor, juce::Point<float> screenPoint);
@@ -45,9 +53,17 @@ public:
     bool isPointVisible(size_t index) const;
 
     // Test seams: the mouse path without a synthesised MouseEvent.
-    void onFrameForTest() { timerCallback(); }
-    void hoverForTest(juce::Point<int> screen) { setHovered(pointAtScreen(screen)); }
+    void onFrameForTest() { advance(16.0); }
+    void hoverForTest(juce::Point<int> screen);
+    void pointerForTest(juce::Point<int> screen) { lensTarget = screen.toFloat(); hasLensTarget = true; }
+    void clearPointerForTest() { hasLensTarget = false; }
     void activatePointForTest(size_t index) { activate(index); }
+    float lensStrengthForTest() const { return lensStrength; }
+    float introProgressForTest() const { return introAlpha(); }
+    float filterBlendForTest() const { return filterBlend; }
+    // The displacement the lens gives one point, in screen pixels. The point's own coordinates and
+    // the hit test never move.
+    juce::Point<float> lensOffsetForTest(size_t index) const;
 
     std::function<void(int64_t)> onActivate;
     std::function<void(int64_t)> onHover;
@@ -61,6 +77,8 @@ public:
     void paint(juce::Graphics&) override;
     void resized() override;
     void lookAndFeelChanged() override;
+    void visibilityChanged() override;
+    void parentHierarchyChanged() override;
     void mouseMove(const juce::MouseEvent&) override;
     void mouseExit(const juce::MouseEvent&) override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -80,47 +98,64 @@ private:
         }
     };
     void timerCallback() override;
+    void advance(double dtMs);
     void animateTo(Camera target);
     void pushHistory();
     void applyCamera(const Camera&);
     Camera cameraForFit() const;
     void rebuildColours();
     void rebuildLayers();
-    void drawLayer(juce::Graphics&, const juce::Image&) const;
-    void drawPointsLive(juce::Graphics&, const std::vector<size_t>& visible, bool matching) const;
-    void paintStatic(juce::Graphics&);
-    void paintDynamic(juce::Graphics&);
+    void rebuildPointLayer();
+    // A soft tag-colour field under the points, built once per layout at low resolution. It is the
+    // gradient between tags: with no island discs this is what makes the cloud one shape.
+    void rebuildField();
+    void rebuildLabels();
+    float introAlpha() const;
+    juce::Point<float> ambientSway() const;
+    float pointDrift(size_t index, bool vertical) const;
+    void drawField(juce::Graphics&, juce::Point<float> sway, float opacity) const;
+    void drawLayer(juce::Graphics&, const juce::Image&, juce::Point<float> sway) const;
+    void drawPointsLive(juce::Graphics&, const std::vector<size_t>& visible, bool matching,
+                        juce::Point<float> sway, bool useLens, bool withDrift) const;
+    void drawLabels(juce::Graphics&, const std::vector<size_t>& visible, juce::Point<float> sway);
+    void drawLens(juce::Graphics&, const std::vector<size_t>& visible, juce::Point<float> sway);
+    void ensureFrameCache(const std::vector<size_t>& visible);
+    void paintDynamic(juce::Graphics&, juce::Point<float> sway);
+    void applyLensMask(juce::Image&, juce::Point<float> centre) const;
+    float lensMask(float distance) const;
+    juce::Point<float> lensOffsetForScreen(juce::Point<float> screen) const;
     void setHovered(size_t index);
+    void updateTimerRate();
     juce::Rectangle<float> worldViewport() const;
-    void drawPoint(juce::Graphics&, size_t index, juce::Point<float> position, float alpha);
-    void drawHover(juce::Graphics&);
     void activate(size_t index);
 
     CloudLayout current;
     CloudIndex index;
     std::map<uint32_t, std::vector<size_t>> byColour; // built once per layout, keeps setColour rare
     std::vector<bool> matches;
+    float filterBlend = 0.0f;
     std::map<int64_t, juce::String> labels;
     std::vector<size_t> visibleScratch;
-    // Static layers in world space: the map is redrawn only when it changes, so panning and
-    // zooming blit an image instead of re-rasterising 35k points and 46 tinted discs per frame.
-    juce::Image islandLayer, pointLayer, overviewLayer;
-    // The composed frame for the current camera. Hover and selection repaint against it instead of
-    // re-blitting the whole map, and the labels hide while the camera moves.
-    juce::Image frameCache;
+    // The visible set is recomputed only when the camera (not a hover) changes.
+    std::vector<size_t> visibleCache;
+    juce::Rectangle<float> visibleArea;
+    bool visibleValid = false;
+    // Static world-space layers: the map is redrawn only when it changes, so panning and zooming
+    // blit an image instead of re-rasterising 35k points.
+    juce::Image pointLayer, fieldImage, frameCache;
     Camera frameCamera;
+    float frameFilterBlend = -1.0f;
     bool frameValid = false;
-    juce::uint32 lastMotionMs = 0;
-    void ensureFrameCache();
-    bool frameIsCurrent() const;
+    juce::Rectangle<float> fieldBounds;
+    float fieldScale = 1.0f;
+    float layerScale = 1.0f;
     // Label text and measured width are fixed for a layout; measuring them every frame costs more
     // than drawing the map.
     std::vector<juce::String> islandLabels;
     std::vector<int> islandLabelWidths;
-    // Labels are shaped once per layout and blitted afterwards: 46 shaped texts per frame cost
-    // more than the whole map.
     std::vector<juce::Image> islandLabelImages;
-    float layerScale = 1.0f;
+    std::vector<size_t> labelOrder;
+    int selectedIndex = -1;
 
     int lastWidth = 0, lastHeight = 0;
     double viewScale = 1.0;
@@ -138,6 +173,20 @@ private:
     bool dragging = false;
     juce::Point<float> dragStart;
     juce::Point<double> dragOrigin;
+    juce::Point<int> lastMousePosition;
+
+    // Ambient motion and the hover lens.
+    bool motion = true;
+    double motionMs = 0.0;
+    double introElapsedMs = 0.0;
+    float labelAlpha = 0.0f;
+    juce::uint32 lastMotionMs = 0;
+    float lensStrength = 0.0f;
+    juce::Point<float> lensPos, lensTarget;
+    bool hasLensTarget = false;
+    juce::Image lensPatch;
+    int currentTimerHz = 0;
+    juce::uint32 lastTimerMs = 0;
 
     bool loading = false;
     juce::String loadingText;
@@ -146,4 +195,4 @@ private:
 
     studio::Chip backButton { "Back" }, fitButton { "Overview" };
 };
-}
+} // namespace sonicator::cloud

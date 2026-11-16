@@ -267,6 +267,66 @@ TEST_CASE("The map builds from a real catalog inside the window", "[ui][cloud]")
     REQUIRE_FALSE(panel->isVisible());
 }
 
+TEST_CASE("The hover lens eases in and out and never moves the hit test", "[cloud][view]")
+{
+    CloudView view;
+    view.setSize(800, 600);
+    view.setLayout(gridLayout());
+    for (int i = 0; i < 120; ++i) view.onFrameForTest();
+    const auto screen = view.worldToScreen(400, 400);
+    const auto index = view.pointAtScreen({ (int) screen.x, (int) screen.y });
+    REQUIRE(index != CloudIndex::none);
+    view.pointerForTest({ (int) screen.x, (int) screen.y });
+    view.hoverForTest({ (int) screen.x, (int) screen.y });
+    for (int i = 0; i < 40; ++i) view.onFrameForTest();
+    REQUIRE(view.lensStrengthForTest() > 0.9f);
+    // The lens is display only: the same point is under the cursor and the layout did not move.
+    REQUIRE(view.pointAtScreen({ (int) screen.x, (int) screen.y }) == index);
+    // The seam takes integer screen points, so the anchor may sit up to a pixel away.
+    REQUIRE(view.lensOffsetForTest(index).getDistanceFromOrigin() < 2.0f);
+    // A neighbour inside the lens is pushed away from the cursor.
+    size_t neighbour = CloudIndex::none;
+    for (size_t i = 0; i < view.layout().points.size(); ++i)
+    {
+        if (i == index) continue;
+        const auto s = view.worldToScreen(view.layout().points[i].x, view.layout().points[i].y);
+        if (s.getDistanceFrom(screen) < 60.0f) { neighbour = i; break; }
+    }
+    REQUIRE(neighbour != CloudIndex::none);
+    REQUIRE(view.lensOffsetForTest(neighbour).getDistanceFromOrigin() > 0.5f);
+    view.clearPointerForTest();
+    for (int i = 0; i < 60; ++i) view.onFrameForTest();
+    REQUIRE(view.lensStrengthForTest() < 0.02f);
+}
+
+TEST_CASE("A filter fades instead of snapping", "[cloud][view]")
+{
+    CloudView view;
+    view.setSize(800, 600);
+    view.setLayout(gridLayout());
+    for (int i = 0; i < 120; ++i) view.onFrameForTest();
+    std::vector<bool> matches(view.layout().points.size(), false);
+    matches[0] = true;
+    view.setFilter(matches);
+    REQUIRE(view.filterBlendForTest() < 0.5f);
+    for (int i = 0; i < 40; ++i) view.onFrameForTest();
+    REQUIRE(view.filterBlendForTest() > 0.95f);
+    view.setFilter({});
+    for (int i = 0; i < 40; ++i) view.onFrameForTest();
+    REQUIRE(view.filterBlendForTest() < 0.05f);
+}
+
+TEST_CASE("A new layout fades the cloud in", "[cloud][view]")
+{
+    CloudView view;
+    view.setSize(800, 600);
+    view.setLayout(gridLayout());
+    REQUIRE(view.introProgressForTest() < 0.2f);
+    for (int i = 0; i < 60; ++i) view.onFrameForTest();
+    REQUIRE(view.introProgressForTest() > 0.99f);
+}
+
+
 TEST_CASE("The view mode survives a settings round-trip", "[cloud][settings]")
 {
     TestDirectory t;

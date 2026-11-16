@@ -13,7 +13,31 @@ constexpr float pointSize = 2.6f;
 constexpr float margin = 28.0f;
 constexpr double minScale = 0.05;
 constexpr double maxScale = 40.0;
+constexpr size_t livePointThreshold = 1500; // above this, the composed frame is cached and blitted
+constexpr float lensRadius = 84.0f;
+constexpr float lensPull = 1.05f;
+constexpr float lensFeather = 0.7f;
+constexpr float fieldDarkOpacity = 0.21f;
+constexpr float fieldLightOpacity = 0.16f;
+constexpr float introDurationMs = 650.0f;
+constexpr float breatheAmplitude = 0.05f;
+constexpr float breatheHz = 0.09f;
+constexpr float swayAmplitude = 1.0f;
+constexpr float driftAmplitude = 0.6f;
+constexpr float driftHz = 0.14f;
+constexpr int fieldMaxDimension = 256;
+
+uint32_t hashBits(size_t index)
+{
+    auto x = (uint64_t) index + 0x9e3779b97f4a7c15ULL;
+    x ^= x >> 30;
+    x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27;
+    x *= 0x94d049bb133111ebULL;
+    x ^= x >> 31;
+    return (uint32_t) (x & 0xffffffu);
 }
+} // namespace
 
 CloudView::CloudView()
 {
@@ -38,18 +62,25 @@ void CloudView::setLayout(CloudLayout layout)
         && layout.points.size() == current.points.size();
     current = std::move(layout);
     index.build(current);
+    visibleValid = false;
+    frameValid = false;
     rebuildColours();
     rebuildLayers();
     hovered = CloudIndex::none;
-    frameValid = false;
+    selectedIndex = CloudIndex::none;
+    for (size_t i = 0; i < current.points.size(); ++i)
+        if (current.points[i].sampleId == selectedSample) { selectedIndex = i; break; }
     if (! sameFingerprint)
     {
         history.clear();
         viewScale = 1.0;
         viewPan = {};
+        introElapsedMs = 0.0f;
+        labelAlpha = 0.0f;
         animateTo(cameraForFit());
         backButton.setEnabled(false);
     }
+    if (isShowing()) updateTimerRate();
     repaint();
 }
 
@@ -58,6 +89,7 @@ void CloudView::setFilter(std::vector<bool> newMatches)
     matches = std::move(newMatches);
     frameValid = false;
     repaint();
+    if (isShowing()) updateTimerRate();
 }
 
 void CloudView::setLabel(int64_t sampleId, juce::String text)
@@ -69,6 +101,9 @@ void CloudView::setSelectedSample(int64_t sampleId)
 {
     if (selectedSample == sampleId) return;
     selectedSample = sampleId;
+    selectedIndex = CloudIndex::none;
+    for (size_t i = 0; i < current.points.size(); ++i)
+        if (current.points[i].sampleId == sampleId) { selectedIndex = i; break; }
     repaint();
 }
 
@@ -90,7 +125,6 @@ void CloudView::setNotice(const juce::String& text)
 {
     if (notice == text) return;
     notice = text;
-    frameValid = false; // the notice is painted into the cached frame's dynamic layer
     repaint();
 }
 
@@ -135,15 +169,45 @@ void CloudView::fitAll()
 void CloudView::lookAndFeelChanged()
 {
     // Tag label colours follow the theme; the shaped labels carry the old colour, so rebuild.
-    rebuildLayers();
+    rebuildLabels();
     frameValid = false;
     repaint();
+}
+
+void CloudView::visibilityChanged()
+{
+    if (isShowing())
+    {
+        lastTimerMs = juce::Time::getMillisecondCounter();
+        updateTimerRate();
+    }
+    else
+    {
+        stopTimer();
+        currentTimerHz = 0;
+        lastTimerMs = 0;
+    }
+}
+
+void CloudView::parentHierarchyChanged()
+{
+    if (isShowing())
+    {
+        if (! isTimerRunning()) lastTimerMs = juce::Time::getMillisecondCounter();
+        updateTimerRate();
+    }
+    else
+    {
+        stopTimer();
+        currentTimerHz = 0;
+    }
 }
 
 void CloudView::resized()
 {
     backButton.setBounds(getWidth() - 190, 10, 80, 26);
     fitButton.setBounds(getWidth() - 102, 10, 92, 26);
+    frameValid = false;
     frameValid = false;
     if (! current.valid()) return;
     if (lastWidth == 0 || lastHeight == 0)
@@ -175,7 +239,7 @@ void CloudView::animateTo(Camera camera)
     lastMotionMs = juce::Time::getMillisecondCounter();
     target = camera;
     animating = true;
-    startTimerHz(60);
+    updateTimerRate();
 }
 
 void CloudView::pushHistory()
@@ -246,23 +310,100 @@ void CloudView::rebuildColours()
 
 void CloudView::rebuildLayers()
 {
-    islandLayer = {};
+    rebuildPointLayer();
+    rebuildField();
+    rebuildLabels();
+}
+
+void CloudView::rebuildPointLayer()
+{
     pointLayer = {};
-    overviewLayer = {};
     if (! current.valid() || current.bounds.isEmpty()) return;
     constexpr float maxPixels = 1024.0f;
     layerScale = juce::jlimit(0.05f, 2.0f,
                               juce::jmin(maxPixels / current.bounds.getWidth(), maxPixels / current.bounds.getHeight()));
     const auto width = juce::jmax(1, (int) std::ceil(current.bounds.getWidth() * layerScale));
     const auto height = juce::jmax(1, (int) std::ceil(current.bounds.getHeight() * layerScale));
-    auto toLayer = [this](float x, float y)
+    pointLayer = juce::Image(juce::Image::ARGB, width, height, true);
+    juce::Graphics g(pointLayer);
+    const auto size = juce::jmax(1.6f, pointSize);
+    for (const auto& [colour, indices] : byColour)
     {
-        return juce::Point<float>((x - current.bounds.getX()) * layerScale, (y - current.bounds.getY()) * layerScale);
-    };
+        juce::Path path;
+        for (auto i : indices)
+        {
+            const auto& point = current.points[i];
+            const auto x = (point.x - current.bounds.getX()) * layerScale;
+            const auto y = (point.y - current.bounds.getY()) * layerScale;
+            path.addRectangle(x - size * 0.5f, y - size * 0.5f, size, size);
+        }
+        if (path.isEmpty()) continue;
+        g.setColour(juce::Colour(colour));
+        g.fillPath(path);
+    }
+}
 
+void CloudView::rebuildField()
+{
+    fieldImage = {};
+    if (! current.valid() || current.islands.empty() || current.bounds.isEmpty()) return;
+    const auto bounds = current.bounds;
+    fieldBounds = bounds;
+    fieldScale = juce::jlimit(0.02f, 2.0f,
+                              juce::jmin((float) fieldMaxDimension / bounds.getWidth(),
+                                         (float) fieldMaxDimension / bounds.getHeight()));
+    const auto width = juce::jmax(1, (int) std::ceil(bounds.getWidth() * fieldScale));
+    const auto height = juce::jmax(1, (int) std::ceil(bounds.getHeight() * fieldScale));
+    fieldImage = juce::Image(juce::Image::ARGB, width, height, true);
+
+    struct Node
+    {
+        float x = 0, y = 0, sigma = 1, weight = 0, r = 0, g = 0, b = 0;
+    };
+    std::vector<Node> nodes;
+    nodes.reserve(current.islands.size());
+    for (const auto& island : current.islands)
+    {
+        Node node;
+        node.x = island.x;
+        node.y = island.y;
+        node.sigma = juce::jmax(1.0f, island.radius * 0.95f);
+        node.weight = std::pow((double) juce::jmax(1, island.count), 0.35);
+        const auto colour = juce::Colour(island.colour);
+        node.r = colour.getFloatRed();
+        node.g = colour.getFloatGreen();
+        node.b = colour.getFloatBlue();
+        nodes.push_back(node);
+    }
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x)
+        {
+            const auto worldX = bounds.getX() + ((float) x + 0.5f) / fieldScale;
+            const auto worldY = bounds.getY() + ((float) y + 0.5f) / fieldScale;
+            float sr = 0, sg = 0, sb = 0, sw = 0;
+            for (const auto& node : nodes)
+            {
+                const auto dx = worldX - node.x, dy = worldY - node.y;
+                const auto w = (float) (node.weight
+                    * std::exp(-(dx * dx + dy * dy) / (2.0f * node.sigma * node.sigma)));
+                sr += node.r * w;
+                sg += node.g * w;
+                sb += node.b * w;
+                sw += w;
+            }
+            if (sw <= 1e-5f) continue;
+            const auto alpha = juce::jlimit(0.0f, 1.0f, 1.0f - std::exp(-sw / 14.0f));
+            fieldImage.setPixelAt(x, y, juce::Colour::fromFloatRGBA(sr / sw, sg / sw, sb / sw, alpha));
+        }
+}
+
+void CloudView::rebuildLabels()
+{
     islandLabels.clear();
     islandLabelWidths.clear();
     islandLabelImages.clear();
+    labelOrder.clear();
+    if (! current.valid()) return;
     islandLabels.reserve(current.islands.size());
     islandLabelWidths.reserve(current.islands.size());
     islandLabelImages.reserve(current.islands.size());
@@ -280,163 +421,277 @@ void CloudView::rebuildLayers()
         g.setFont(studio::captionFont());
         g.drawText(text, 0, 0, width, 14, juce::Justification::centred);
         islandLabelImages.push_back(std::move(label));
+        labelOrder.push_back(labelOrder.size());
     }
-
-    islandLayer = juce::Image(juce::Image::ARGB, width, height, true);
+    std::sort(labelOrder.begin(), labelOrder.end(), [this](size_t a, size_t b)
     {
-        juce::Graphics g(islandLayer);
-        for (const auto& island : current.islands)
-        {
-            const auto centre = toLayer(island.x, island.y);
-            const auto radius = island.radius * layerScale;
-            const auto colour = juce::Colour(island.colour);
-            g.setColour(colour.withAlpha(theme::isDark ? 0.07f : 0.06f));
-            g.fillEllipse(centre.x - radius, centre.y - radius, radius * 2, radius * 2);
-            g.setColour(colour.withAlpha(theme::isDark ? 0.28f : 0.33f));
-            g.drawEllipse(centre.x - radius, centre.y - radius, radius * 2, radius * 2, 1.0f);
-        }
-    }
-
-    pointLayer = juce::Image(juce::Image::ARGB, width, height, true);
-    {
-        juce::Graphics g(pointLayer);
-        const auto size = juce::jmax(1.6f, pointSize);
-        for (const auto& [colour, indices] : byColour)
-        {
-            juce::Path path;
-            for (auto i : indices)
-            {
-                const auto& point = current.points[i];
-                const auto position = toLayer(point.x, point.y);
-                path.addRectangle(position.x - size * 0.5f, position.y - size * 0.5f, size, size);
-            }
-            if (path.isEmpty()) continue;
-            g.setColour(juce::Colour(colour));
-            g.fillPath(path);
-        }
-    }
-    // One layer for the zoomed-out case: the whole map is a single scaled blit per frame instead
-    // of two, which is the difference between a squeezed and a comfortable 60 Hz frame.
-    // Opaque, with the panel colour underneath: composing two translucent layers into a
-    // transparent image would attenuate the island tint twice when the result is blitted.
-    overviewLayer = juce::Image(juce::Image::RGB, width, height, true);
-    {
-        juce::Graphics g(overviewLayer);
-        g.fillAll(theme::background);
-        g.drawImageAt(islandLayer, 0, 0);
-        g.drawImageAt(pointLayer, 0, 0);
-    }
+        return current.islands[a].radius > current.islands[b].radius;
+    });
 }
 
-void CloudView::ensureFrameCache()
-{
-    if (frameCache.isValid() && frameCache.getWidth() == getWidth() && frameCache.getHeight() == getHeight()) return;
-    // Opaque: the frame is always fully covered by the background fill, and blending into an
-    // alpha buffer makes every later draw in the composition read-modify-write.
-    frameCache = juce::Image(juce::Image::RGB, juce::jmax(1, getWidth()), juce::jmax(1, getHeight()), true);
-    frameValid = false;
-}
-
-bool CloudView::frameIsCurrent() const
-{
-    return frameValid && frameCamera == Camera { viewScale, viewPan };
-}
-
-void CloudView::drawLayer(juce::Graphics& g, const juce::Image& layer) const
+void CloudView::drawLayer(juce::Graphics& g, const juce::Image& layer, juce::Point<float> sway) const
 {
     if (! layer.isValid() || ! current.valid()) return;
     const auto factor = (float) viewScale / layerScale;
     const auto transform = juce::AffineTransform::scale(factor).translated(
-        current.bounds.getX() * (float) viewScale + (float) viewPan.x,
-        current.bounds.getY() * (float) viewScale + (float) viewPan.y);
+        current.bounds.getX() * (float) viewScale + (float) viewPan.x + sway.x,
+        current.bounds.getY() * (float) viewScale + (float) viewPan.y + sway.y);
     g.drawImageTransformed(layer, transform);
 }
 
-void CloudView::drawPointsLive(juce::Graphics& g, const std::vector<size_t>& visible, bool matching) const
+void CloudView::drawField(juce::Graphics& g, juce::Point<float> sway, float opacity) const
 {
-    std::map<uint32_t, std::vector<size_t>> buckets;
-    for (auto i : visible)
-        if (isPointVisible(i) == matching) buckets[current.points[i].colour].push_back(i);
-    for (const auto& [colour, indices] : buckets)
+    if (! fieldImage.isValid() || opacity <= 0.001f) return;
+    const auto factor = (float) viewScale / fieldScale;
+    const auto transform = juce::AffineTransform::scale(factor).translated(
+        fieldBounds.getX() * (float) viewScale + (float) viewPan.x + sway.x,
+        fieldBounds.getY() * (float) viewScale + (float) viewPan.y + sway.y);
+    g.setOpacity(juce::jlimit(0.0f, 1.0f, opacity));
+    g.drawImageTransformed(fieldImage, transform);
+    g.setOpacity(1.0f);
+}
+
+juce::Point<float> CloudView::ambientSway() const
+{
+    if (! motion) return {};
+    const auto t = (float) motionMs / 1000.0f;
+    constexpr auto twoPi = juce::MathConstants<float>::twoPi;
+    return { std::sin(t * twoPi * 0.060f) * swayAmplitude,
+             std::cos(t * twoPi * 0.047f + 1.7f) * swayAmplitude * 0.7f };
+}
+
+float CloudView::pointDrift(size_t index, bool vertical) const
+{
+    if (! motion) return 0.0f;
+    const auto phase = (float) hashBits(index) / 16777215.0f * juce::MathConstants<float>::twoPi;
+    const auto t = (float) motionMs / 1000.0f;
+    const auto wobble = std::sin(t * juce::MathConstants<float>::twoPi * driftHz + (vertical ? phase * 1.3f : phase));
+    return wobble * driftAmplitude;
+}
+
+float CloudView::lensMask(float distance) const
+{
+    if (distance >= lensRadius) return 0.0f;
+    const auto x = distance / lensRadius;
+    const auto falloff = juce::jmax(0.0f, 1.0f - x * x);
+    return std::pow(falloff, 1.0f + 3.0f * lensFeather);
+}
+
+juce::Point<float> CloudView::lensOffsetForScreen(juce::Point<float> screen) const
+{
+    if (lensStrength <= 0.002f) return {};
+    const auto delta = screen - lensPos;
+    const auto distance = delta.getDistanceFromOrigin();
+    const auto mask = lensMask(distance);
+    if (mask <= 0.0f || distance < 1e-3f) return {};
+    return delta * (lensPull * lensStrength * mask);
+}
+
+juce::Point<float> CloudView::lensOffsetForTest(size_t index) const
+{
+    if (index >= current.points.size()) return {};
+    const auto& point = current.points[index];
+    return lensOffsetForScreen(worldToScreen(point.x, point.y));
+}
+
+void CloudView::drawPointsLive(juce::Graphics& g, const std::vector<size_t>& visible, bool matching,
+                               juce::Point<float> sway, bool useLens, bool withDrift) const
+{
+    std::map<uint32_t, juce::Path> paths;
+    struct LensPoint
     {
-        juce::Path path;
-        for (auto i : indices)
+        juce::Point<float> position;
+        float size = pointSize;
+        juce::Colour colour;
+    };
+    std::vector<LensPoint> lensPoints;
+
+    for (auto i : visible)
+    {
+        if (isPointVisible(i) != matching) continue;
+        const auto& point = current.points[i];
+        auto screen = worldToScreen(point.x, point.y) + sway;
+        if (withDrift && motion)
+            screen += juce::Point<float>(pointDrift(i, false), pointDrift(i, true));
+        const auto colour = juce::Colour(point.colour).withAlpha(matching ? 1.0f : 0.12f);
+        if (useLens && lensStrength > 0.002f)
         {
-            const auto screen = worldToScreen(current.points[i].x, current.points[i].y);
-            path.addRectangle(screen.x - pointSize * 0.5f, screen.y - pointSize * 0.5f, pointSize, pointSize);
+            const auto delta = screen - lensPos;
+            const auto mask = lensMask(delta.getDistanceFromOrigin());
+            if (mask > 0.001f)
+            {
+                auto displaced = screen + delta * (lensPull * lensStrength * mask);
+                lensPoints.push_back({ displaced, pointSize * (1.0f + 0.5f * lensStrength * mask), colour });
+                continue;
+            }
         }
-        if (path.isEmpty()) continue;
+        paths[point.colour].addRectangle(screen.x - pointSize * 0.5f, screen.y - pointSize * 0.5f,
+                                         pointSize, pointSize);
+    }
+    for (const auto& [colour, path] : paths)
+    {
         g.setColour(juce::Colour(colour).withAlpha(matching ? 1.0f : 0.12f));
         g.fillPath(path);
     }
-}
-
-juce::Rectangle<float> CloudView::worldViewport() const
-{
-    const auto topLeft = screenToWorld({ 0, 0 });
-    const auto bottomRight = screenToWorld({ (float) getWidth(), (float) getHeight() });
-    return { topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y };
-}
-
-void CloudView::timerCallback()
-{
-    bool needsRepaint = false;
-    if (animating)
+    for (const auto& entry : lensPoints)
     {
-        Camera next { viewScale, viewPan };
-        const auto zoomStep = (target.scale - next.scale) * 0.25;
-        next.scale += zoomStep;
-        next.pan.x += (target.pan.x - next.pan.x) * 0.25;
-        next.pan.y += (target.pan.y - next.pan.y) * 0.25;
-        applyCamera(next);
-        const auto close = std::abs(target.scale - next.scale) < 0.002 && target.pan.getDistanceFrom(next.pan) < 0.15;
-        if (close)
+        g.setColour(entry.colour);
+        g.fillRect(entry.position.x - entry.size * 0.5f, entry.position.y - entry.size * 0.5f,
+                   entry.size, entry.size);
+    }
+}
+
+void CloudView::drawLabels(juce::Graphics& g, const std::vector<size_t>& visible, juce::Point<float> sway)
+{
+    if (labelAlpha <= 0.01f || islandLabelImages.empty()) return;
+    const bool crowded = visible.size() > livePointThreshold;
+    std::vector<juce::Rectangle<int>> placed;
+    int shown = 0;
+    g.setFont(studio::captionFont());
+    const auto opacity = labelAlpha * introAlpha();
+    for (auto islandIndex : labelOrder)
+    {
+        if (crowded && shown >= 10) break;
+        const auto& island = current.islands[islandIndex];
+        const auto centre = worldToScreen(island.x, island.y) + sway;
+        const auto radius = island.radius * (float) viewScale;
+        if (radius <= 18.0f) continue;
+        if (centre.x + radius < 0 || centre.y + radius < 0
+            || centre.x - radius > getWidth() || centre.y - radius > getHeight())
+            continue;
+        if (islandIndex >= islandLabels.size()) continue;
+        const auto width = islandLabelWidths[islandIndex];
+        const juce::Rectangle<int> box((int) (centre.x - width / 2), (int) (centre.y - radius - 16), width, 14);
+        bool collides = false;
+        for (const auto& other : placed)
+            if (other.intersects(box)) { collides = true; break; }
+        if (collides) continue;
+        placed.push_back(box);
+        ++shown;
+        g.setOpacity(opacity);
+        g.drawImageTransformed(islandLabelImages[islandIndex],
+                               juce::AffineTransform::scale(0.5f).translated((float) box.getX(), (float) box.getY()));
+        g.setOpacity(1.0f);
+    }
+}
+
+void CloudView::applyLensMask(juce::Image& patch, juce::Point<float> centre) const
+{
+    juce::Image::BitmapData data(patch, juce::Image::BitmapData::readWrite);
+    for (int y = 0; y < patch.getHeight(); ++y)
+        for (int x = 0; x < patch.getWidth(); ++x)
         {
-            applyCamera(target);
-            animating = false;
+            const auto dx = (float) x + 0.5f - centre.x;
+            const auto dy = (float) y + 0.5f - centre.y;
+            const auto distance = std::sqrt(dx * dx + dy * dy);
+            float alpha = 0.0f;
+            if (distance < lensRadius)
+            {
+                // Full strength well inside, a long smooth fade to nothing at the rim.
+                const auto t = juce::jlimit(0.0f, 1.0f, (1.0f - distance / lensRadius) / 0.45f);
+                alpha = t * t * (3.0f - 2.0f * t);
+            }
+            if (alpha >= 0.999f) continue;
+            auto* pixel = reinterpret_cast<juce::PixelARGB*>(data.getPixelPointer(x, y));
+            pixel->multiplyAlpha((int) (alpha * 255.0f));
         }
-        needsRepaint = true;
-    }
-    const auto wantedGlow = hovered == CloudIndex::none ? 0.0f : 1.0f;
-    if (std::abs(glow - wantedGlow) > 0.02f)
-    {
-        glow += (wantedGlow - glow) * 0.25f;
-        needsRepaint = true;
-    }
-    else glow = wantedGlow;
-    if (needsRepaint) repaint();
-    if (! animating && glow == wantedGlow
-        && juce::Time::getMillisecondCounter() - lastMotionMs > 150) stopTimer();
 }
 
-void CloudView::setHovered(size_t newHovered)
+void CloudView::drawLens(juce::Graphics& g, const std::vector<size_t>& visible, juce::Point<float> sway)
 {
-    if (newHovered == hovered) return;
-    hovered = newHovered;
-    if (hovered != CloudIndex::none)
+    if (lensStrength <= 0.01f || ! hasLensTarget) return;
+    const auto centre = lensPos + sway;
+    const auto live = visible.size() <= livePointThreshold;
+    if (! live)
     {
-        if (onHover) onHover(current.points[hovered].sampleId);
+        const int radius = (int) std::ceil(lensRadius);
+        auto rect = juce::Rectangle<int>((int) std::floor(centre.x) - radius, (int) std::floor(centre.y) - radius,
+                                         radius * 2 + 1, radius * 2 + 1)
+                        .getIntersection(getLocalBounds());
+        if (rect.isEmpty()) return;
+        lensPatch = juce::Image(juce::Image::ARGB, rect.getWidth(), rect.getHeight(), true);
+        juce::Graphics pg(lensPatch);
+        pg.fillAll(theme::background);
+        // The field under the patch, in the same place the screen shows it.
+        if (fieldImage.isValid())
+        {
+            const auto factor = (float) viewScale / fieldScale;
+            const auto transform = juce::AffineTransform::scale(factor).translated(
+                fieldBounds.getX() * (float) viewScale + (float) viewPan.x + sway.x - rect.getX(),
+                fieldBounds.getY() * (float) viewScale + (float) viewPan.y + sway.y - rect.getY());
+            pg.setOpacity(fieldDarkOpacity);
+            pg.drawImageTransformed(fieldImage, transform);
+            pg.setOpacity(1.0f);
+        }
+        const auto lensCentreLocal = centre - juce::Point<float>((float) rect.getX(), (float) rect.getY());
+        const bool filtered = ! matches.empty();
+        for (auto i : visible)
+        {
+            const auto& point = current.points[i];
+            auto screen = worldToScreen(point.x, point.y) + sway;
+
+            const auto delta = screen - centre;
+            const auto distance = delta.getDistanceFromOrigin();
+            if (distance >= lensRadius) continue;
+            const auto mask = lensMask(distance);
+            const auto displaced = screen + delta * (lensPull * lensStrength * mask);
+            const auto size = pointSize * (1.0f + 0.5f * lensStrength * mask);
+            const auto visiblePoint = isPointVisible(i);
+            auto colour = juce::Colour(point.colour);
+            colour = colour.withAlpha(filtered && ! visiblePoint ? 0.12f : 1.0f);
+            pg.setColour(colour);
+            pg.fillRect(displaced.x - (float) rect.getX() - size * 0.5f,
+                        displaced.y - (float) rect.getY() - size * 0.5f, size, size);
+        }
+        applyLensMask(lensPatch, lensCentreLocal);
+        g.setOpacity(introAlpha());
+        g.drawImageAt(lensPatch, rect.getX(), rect.getY());
+        g.setOpacity(1.0f);
     }
-    else if (onHoverEnd) onHoverEnd();
-    startTimerHz(60);
-    repaint();
+    // A very faint tint at the lens centre: it reads as depth, not as an island disc.
+    if (hovered != CloudIndex::none && hovered < current.points.size())
+    {
+        const auto colour = juce::Colour(current.points[hovered].colour);
+        const auto alpha = 0.05f * lensStrength;
+        juce::ColourGradient gradient(colour.withAlpha(alpha), centre.x, centre.y,
+                                      colour.withAlpha(0.0f), centre.x + lensRadius, centre.y, true);
+        g.setGradientFill(gradient);
+        g.fillEllipse(centre.x - lensRadius, centre.y - lensRadius, lensRadius * 2, lensRadius * 2);
+    }
 }
 
-void CloudView::drawPoint(juce::Graphics&, size_t, juce::Point<float>, float) {}
-
-
-void CloudView::drawHover(juce::Graphics& g)
+void CloudView::ensureFrameCache(const std::vector<size_t>& visible)
 {
-    if (hovered == CloudIndex::none) return;
-    const auto& point = current.points[hovered];
-    const auto screen = worldToScreen(point.x, point.y);
-    const auto colour = juce::Colour(point.colour);
-    g.setColour(colour.withAlpha(0.18f * glow));
-    g.fillEllipse(screen.x - 14, screen.y - 14, 28, 28);
-    g.setColour(colour.withAlpha(0.35f * glow));
-    g.fillEllipse(screen.x - 8, screen.y - 8, 16, 16);
-    g.setColour(colour);
-    g.fillEllipse(screen.x - 4, screen.y - 4, 8, 8);
+    const Camera camera { viewScale, viewPan };
+    const auto width = juce::jmax(1, getWidth());
+    const auto height = juce::jmax(1, getHeight());
+    if (frameValid && frameCamera == camera && std::abs(frameFilterBlend - filterBlend) < 0.003f
+        && frameCache.getWidth() == width && frameCache.getHeight() == height)
+        return;
+    frameCache = juce::Image(juce::Image::RGB, width, height, true);
+    juce::Graphics g(frameCache);
+    g.fillAll(theme::background);
+    const auto baseField = theme::isDark ? fieldDarkOpacity : fieldLightOpacity;
+    drawField(g, {}, baseField * 0.95f);
+    if (! matches.empty())
+    {
+        // The whole map stays as context; only the matching files are drawn at full strength.
+        g.setOpacity(1.0f - 0.88f * filterBlend);
+        drawLayer(g, pointLayer, {});
+        g.setOpacity(1.0f);
+        drawPointsLive(g, visible, true, {}, false, false);
+    }
+    else if (visible.size() <= livePointThreshold)
+    {
+        drawPointsLive(g, visible, true, {}, false, false);
+    }
+    else
+    {
+        drawLayer(g, pointLayer, {});
+    }
+    frameCamera = camera;
+    frameFilterBlend = filterBlend;
+    frameValid = true;
 }
 
 void CloudView::paint(juce::Graphics& g)
@@ -450,99 +705,81 @@ void CloudView::paint(juce::Graphics& g)
                    0, 0, getWidth(), getHeight(), juce::Justification::centred);
         return;
     }
-    ensureFrameCache();
-    if (! frameIsCurrent())
+    const auto area = worldViewport().expanded(4.0f / (float) viewScale);
+    if (! visibleValid || area != visibleArea)
     {
-        frameCache.clear(frameCache.getBounds(), theme::background);
-        juce::Graphics frame(frameCache);
-        paintStatic(frame);
-        frameCamera = Camera { viewScale, viewPan };
-        frameValid = true;
+        visibleCache = index.within(area);
+        visibleArea = area;
+        visibleValid = true;
     }
-    g.drawImageAt(frameCache, 0, 0);
-    paintDynamic(g);
-}
-
-void CloudView::paintStatic(juce::Graphics& g)
-{
-    // Islands and points are static world-space layers; the camera only changes how they are
-    // blitted. The map goes down first, the labels last so they are never covered.
-    const auto visible = index.within(worldViewport().expanded(4.0f / (float) viewScale));
-
+    const auto& visible = visibleCache;
+    const auto sway = ambientSway();
+    const auto intro = introAlpha();
     const bool filtered = ! matches.empty();
-    if (filtered)
+    const bool live = visible.size() <= livePointThreshold;
+    const auto baseField = theme::isDark ? fieldDarkOpacity : fieldLightOpacity;
+    const auto breathe01 = motion
+        ? 0.5f + 0.5f * std::sin(motionMs / 1000.0f * juce::MathConstants<float>::twoPi * breatheHz)
+        : 0.5f;
+
+    if (live)
     {
-        // The whole map stays as context; only the matching files are drawn at full strength.
-        drawLayer(g, islandLayer);
-        g.setOpacity(0.12f);
-        drawLayer(g, pointLayer);
+        // Close up, the points are drawn live: they can drift with the ambient motion and the lens
+        // can displace them without a patch.
+        drawField(g, sway, intro * baseField * (0.95f + 0.05f * breathe01));
+        if (filtered)
+        {
+            g.setOpacity(intro * (1.0f - 0.88f * filterBlend));
+            drawPointsLive(g, visible, false, sway, true, true);
+            g.setOpacity(intro);
+            drawPointsLive(g, visible, true, sway, true, true);
+        }
+        else
+        {
+            g.setOpacity(intro);
+            drawPointsLive(g, visible, true, sway, true, true);
+        }
         g.setOpacity(1.0f);
-        drawPointsLive(g, visible, true);
-    }
-    else if (visible.size() > 8000)
-    {
-        // Zoomed out, the composed layer is one blit; zoomed in, only a small part is on screen
-        // and the points are drawn live and crisp.
-        drawLayer(g, overviewLayer);
     }
     else
     {
-        drawLayer(g, islandLayer);
-        drawPointsLive(g, visible, true);
+        // The whole map is one cached frame. Ambient motion and the lens only blit over it.
+        ensureFrameCache(visible);
+        g.setOpacity(intro);
+        g.drawImageAt(frameCache, juce::roundToInt(sway.x), juce::roundToInt(sway.y));
+        g.setOpacity(1.0f);
+        drawField(g, sway, intro * baseField * 0.05f * breathe01);
     }
-    // Labels are placed largest island first and skipped when they would collide: a crowded middle
-    // then shows the big regions rather than a pile of unreadable text. Zooming in brings the rest.
-    std::vector<size_t> labelOrder(current.islands.size());
-    std::iota(labelOrder.begin(), labelOrder.end(), (size_t) 0);
-    std::sort(labelOrder.begin(), labelOrder.end(), [this](size_t a, size_t b)
-    {
-        return current.islands[a].radius > current.islands[b].radius;
-    });
-    std::vector<juce::Rectangle<int>> placed;
-    const auto settled = juce::Time::getMillisecondCounter() - lastMotionMs > 120;
-    g.setFont(studio::captionFont());
-    for (auto islandIndex : labelOrder)
-    {
-        if (! settled) break; // moving the camera does not need text; it returns on the next rest
-        const auto& island = current.islands[islandIndex];
-        const auto centre = worldToScreen(island.x, island.y);
-        const auto radius = island.radius * (float) viewScale;
-        if (radius <= 18.0f) continue;
-        if (centre.x + radius < 0 || centre.y + radius < 0 || centre.x - radius > getWidth() || centre.y - radius > getHeight())
-            continue;
-        if (islandIndex >= islandLabels.size()) continue;
-        const auto width = islandLabelWidths[islandIndex];
-        const juce::Rectangle<int> box((int) (centre.x - width / 2), (int) (centre.y - radius - 16), width, 14);
-        bool collides = false;
-        for (const auto& other : placed)
-            if (other.intersects(box)) { collides = true; break; }
-        if (collides) continue;
-        placed.push_back(box);
-        g.drawImageTransformed(islandLabelImages[islandIndex],
-                               juce::AffineTransform::scale(0.5f).translated((float) box.getX(), (float) box.getY()));
-    }
-
+    drawLabels(g, visible, sway);
+    drawLens(g, visible, sway);
+    paintDynamic(g, sway);
 }
 
-void CloudView::paintDynamic(juce::Graphics& g)
+void CloudView::paintDynamic(juce::Graphics& g, juce::Point<float> sway)
 {
-    if (selectedSample != 0)
-        for (const auto& point : current.points)
-            if (point.sampleId == selectedSample)
-            {
-                const auto screen = worldToScreen(point.x, point.y);
-                g.setColour(theme::accent);
-                g.drawEllipse(screen.x - 5, screen.y - 5, 10, 10, 1.4f);
-                break;
-            }
-
-    drawHover(g);
-
-    if (hovered != CloudIndex::none)
+    if (selectedIndex != CloudIndex::none && selectedSample != 0 && selectedIndex < current.points.size())
     {
-        // Caption above the point, kept inside the panel.
+        const auto& point = current.points[selectedIndex];
+        auto screen = worldToScreen(point.x, point.y) + sway;
+        screen += lensOffsetForScreen(screen);
+        g.setColour(theme::accent);
+        g.drawEllipse(screen.x - 5, screen.y - 5, 10, 10, 1.4f);
+    }
+
+    if (hovered != CloudIndex::none && hovered < current.points.size())
+    {
         const auto& point = current.points[hovered];
-        const auto screen = worldToScreen(point.x, point.y);
+        auto screen = worldToScreen(point.x, point.y) + sway;
+        screen += lensOffsetForScreen(screen);
+        const auto colour = juce::Colour(point.colour);
+        g.setColour(colour.withAlpha(0.18f * glow));
+        g.fillEllipse(screen.x - 14, screen.y - 14, 28, 28);
+        g.setColour(colour.withAlpha(0.35f * glow));
+        g.fillEllipse(screen.x - 8, screen.y - 8, 16, 16);
+        g.setColour(colour);
+        g.fillEllipse(screen.x - 4, screen.y - 4, 8, 8);
+
+        // Caption above the point, kept inside the panel.
         auto found = labels.find(point.sampleId);
         const auto text = found != labels.end() ? found->second : "#" + juce::String(point.sampleId);
         g.setFont(studio::captionFont());
@@ -575,15 +812,128 @@ void CloudView::paintDynamic(juce::Graphics& g)
     }
 }
 
+juce::Rectangle<float> CloudView::worldViewport() const
+{
+    const auto topLeft = screenToWorld({ 0, 0 });
+    const auto bottomRight = screenToWorld({ (float) getWidth(), (float) getHeight() });
+    return { topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y };
+}
+
+float CloudView::introAlpha() const
+{
+    if (! motion) return 1.0f;
+    const auto t = juce::jlimit(0.0f, 1.0f, (float) (introElapsedMs / (double) introDurationMs));
+    return 1.0f - std::pow(1.0f - t, 3.0f); // ease-out cubic
+}
+
+void CloudView::advance(double milliseconds)
+{
+    const auto step = (float) juce::jlimit(1.0, 60.0, milliseconds);
+    if (motion) motionMs += step;
+    if (introElapsedMs < introDurationMs) introElapsedMs = juce::jmin((double) introDurationMs, introElapsedMs + step);
+
+    if (animating)
+    {
+        const auto factor = 1.0 - std::pow(0.75, (double) step / 16.6667);
+        Camera next { viewScale, viewPan };
+        next.scale += (target.scale - next.scale) * factor;
+        next.pan.x += (target.pan.x - next.pan.x) * factor;
+        next.pan.y += (target.pan.y - next.pan.y) * factor;
+        applyCamera(next);
+        const auto close = std::abs(target.scale - next.scale) < 0.002
+            && target.pan.getDistanceFrom(next.pan) < 0.15;
+        if (close)
+        {
+            applyCamera(target);
+            animating = false;
+        }
+    }
+
+    const auto targetGlow = hovered == CloudIndex::none ? 0.0f : 1.0f;
+    if (std::abs(glow - targetGlow) > 0.01f) glow += (targetGlow - glow) * 0.25f;
+    else glow = targetGlow;
+
+    const auto targetBlend = matches.empty() ? 0.0f : 1.0f;
+    if (std::abs(filterBlend - targetBlend) > 0.002f) filterBlend += (targetBlend - filterBlend) * 0.2f;
+    else filterBlend = targetBlend;
+
+    const auto lensWanted = hasLensTarget ? 1.0f : 0.0f;
+    const auto lensStep = 1.0f - std::pow(0.82f, step / 16.6667f);
+    if (std::abs(lensStrength - lensWanted) > 0.002f) lensStrength += (lensWanted - lensStrength) * lensStep;
+    else lensStrength = lensWanted;
+    if (hasLensTarget) lensPos += (lensTarget - lensPos) * lensStep;
+    if (lensStrength < 0.002f) lensStrength = 0.0f;
+
+    const auto settled = juce::Time::getMillisecondCounter() - lastMotionMs > 120;
+    const auto targetLabel = settled ? 1.0f : 0.0f;
+    if (std::abs(labelAlpha - targetLabel) > 0.01f) labelAlpha += (targetLabel - labelAlpha) * 0.2f;
+    else labelAlpha = targetLabel;
+
+    repaint();
+    updateTimerRate();
+}
+
+void CloudView::updateTimerRate()
+{
+    if (! isShowing())
+    {
+        stopTimer();
+        currentTimerHz = 0;
+        return;
+    }
+    const bool fast = animating || hasLensTarget || lensStrength > 0.01f
+        || std::abs(glow - (hovered == CloudIndex::none ? 0.0f : 1.0f)) > 0.01f
+        || std::abs(filterBlend - (matches.empty() ? 0.0f : 1.0f)) > 0.002f;
+    const auto wanted = fast ? 60 : 30;
+    if (wanted != currentTimerHz)
+    {
+        startTimerHz(wanted);
+        currentTimerHz = wanted;
+    }
+}
+
+void CloudView::timerCallback()
+{
+    if (! isShowing())
+    {
+        stopTimer();
+        currentTimerHz = 0;
+        return;
+    }
+    const auto now = juce::Time::getMillisecondCounter();
+    const auto step = lastTimerMs == 0 ? 16.0 : (double) (now - lastTimerMs);
+    lastTimerMs = now;
+    advance(step);
+}
+
+void CloudView::setHovered(size_t newHovered)
+{
+    if (newHovered == hovered) return;
+    hovered = newHovered;
+    if (hovered != CloudIndex::none)
+    {
+        if (onHover) onHover(current.points[hovered].sampleId);
+    }
+    else if (onHoverEnd) onHoverEnd();
+    if (isShowing()) updateTimerRate();
+    repaint();
+}
+
 void CloudView::mouseMove(const juce::MouseEvent& event)
 {
     if (dragging) return;
+    lastMousePosition = event.getPosition();
+    lensTarget = event.position;
+    hasLensTarget = true;
     setHovered(pointAtScreen(event.getPosition()));
+    if (isShowing()) updateTimerRate();
 }
 
 void CloudView::mouseExit(const juce::MouseEvent&)
 {
+    hasLensTarget = false;
     setHovered(CloudIndex::none);
+    if (isShowing()) updateTimerRate();
 }
 
 void CloudView::mouseDown(const juce::MouseEvent& event)
@@ -615,6 +965,7 @@ void CloudView::mouseDrag(const juce::MouseEvent& event)
         const auto id = current.points[pressedPoint].sampleId;
         pressedPoint = CloudIndex::none;
         setHovered(CloudIndex::none);
+        hasLensTarget = false;
         if (onDragOut) draggedOut = onDragOut(id, this);
         if (draggedOut) return;
     }
@@ -624,6 +975,7 @@ void CloudView::mouseDrag(const juce::MouseEvent& event)
         dragging = true;
         pushHistory();
         setHovered(CloudIndex::none);
+        hasLensTarget = false;
     }
     viewPan = dragOrigin + juce::Point<double>(event.position.x - dragStart.x, event.position.y - dragStart.y);
     lastMotionMs = juce::Time::getMillisecondCounter();
@@ -642,7 +994,10 @@ void CloudView::mouseUp(const juce::MouseEvent& event)
     if (draggedOut) { draggedOut = false; dragging = false; pressedPoint = CloudIndex::none; return; }
     pressedPoint = CloudIndex::none;
     if (dragging) { dragging = false; return; }
+    lensTarget = event.position;
+    hasLensTarget = true;
     activate(pointAtScreen(event.getPosition()));
+    if (isShowing()) updateTimerRate();
 }
 
 void CloudView::mouseDoubleClick(const juce::MouseEvent& event)
@@ -664,7 +1019,17 @@ void CloudView::mouseDoubleClick(const juce::MouseEvent& event)
 void CloudView::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
 {
     if (! current.valid()) return;
+    lensTarget = event.position;
+    hasLensTarget = true;
     const auto factor = std::pow(1.25f, wheel.deltaY * (wheel.isReversed ? -1.0f : 1.0f) * 3.0f);
     zoomBy(factor, event.position);
+    if (isShowing()) updateTimerRate();
 }
+
+void CloudView::hoverForTest(juce::Point<int> screen)
+{
+    lensTarget = screen.toFloat();
+    hasLensTarget = true;
+    setHovered(pointAtScreen(screen));
 }
+} // namespace sonicator::cloud

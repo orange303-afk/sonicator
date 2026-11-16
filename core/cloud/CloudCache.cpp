@@ -6,7 +6,7 @@ namespace sonicator::cloud
 namespace
 {
 constexpr char magic[4] = { 'S', 'C', 'L', 'D' };
-constexpr int32_t formatVersion = 1;
+constexpr int32_t formatVersion = 2; // 2: the cloud became one packed field; version 1 layouts are stale
 }
 
 juce::File defaultCloudCacheFolder()
