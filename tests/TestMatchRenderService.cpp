@@ -185,3 +185,20 @@ TEST_CASE ("Host tempo changes are debounced to the last stable request",
     CHECK (seen.size() == 1);
     CHECK (seen.front() == "B");
 }
+
+TEST_CASE ("Re-planning a steady tempo does not restart the debounce window",
+           "[plugin-match][service]")
+{
+    RendererHarness harness;
+    harness.openA = true;
+    MatchRenderService service ([&] (const MatchRenderRequest& r, CancelCheck c)
+                               { return harness (r, std::move (c)); });
+    MatchRequestScheduler scheduler (service, 250);
+    scheduler.request (requestFor ("A"), 0);
+    scheduler.tick (100);
+    scheduler.request (requestFor ("A"), 200); // the timer saw the same key again
+    scheduler.tick (260);
+    REQUIRE (service.waitUntilFinished (3000));
+    CHECK (service.poll().key == "A");
+    CHECK (harness.keys().size() == 1);
+}

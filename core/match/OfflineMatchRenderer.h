@@ -21,6 +21,8 @@ struct MatchRenderRequest
     int64_t sourceModified = -1;
     // Test seam for an unwritable disk. Empty uses a normal file stream.
     std::function<std::unique_ptr<juce::OutputStream> (const juce::File&)> openStream;
+    // Test seam for a full disk. A negative value asks the volume itself.
+    int64_t availableBytes = -1;
 };
 
 struct MatchRenderResult

@@ -245,6 +245,18 @@ MatchRenderResult renderMatch (const MatchRenderRequest& request, CancelCheck ca
         result.error = "Cannot create matched output folder";
         return result;
     }
+    // PCM24 is three bytes per sample per channel. The partial file is renamed into place, not
+    // copied, so one output size plus a little slack is enough. A full disk must fail before the
+    // writer starts, not after a hundred megabytes were written.
+    const int64_t needed = request.plan.targetFrames * (int64_t) channels * 3 + 4 * 1024 * 1024;
+    const int64_t freeBytes = request.availableBytes >= 0
+        ? request.availableBytes
+        : request.outputFile.getParentDirectory().getBytesFreeOnVolume();
+    if (freeBytes >= 0 && freeBytes < needed)
+    {
+        result.error = "Not enough disk space for the matched WAV";
+        return result;
+    }
 
     // The partial keeps a .wav extension so the format manager can reopen it for validation.
     const auto partial = request.outputFile.getSiblingFile (

@@ -146,11 +146,51 @@ The plugin's library context menu labels the unavailable file-processing group *
 With Loop enabled, dragging a selection outside the editor displays “Отключите луп”; live movement
 and resizing of the loop inside the editor remain available. Turn Loop off to export the selection.
 
+## Match BPM / Match Scale
+
+Two independent toggles in the transport group, below Play/Stop: **Match BPM** and **Match Scale**.
+They exist only in the plug-in window, start off in a new project, and are saved per instance in the
+DAW project (plugin state v2). Old v1 projects load with both off; host tempo is never stored.
+
+- **Match BPM** reads the project tempo in `PluginProcessor::processBlock` through the JUCE playhead
+  and publishes one lock-free atomic value. A loop is stretched offline to `sourceBpm / hostBpm`
+  (allowed 0.5–2.0). Pitch is unchanged. One-shots and files without an explicit loop structure are
+  reported as not applicable instead of being guessed into a loop.
+- **Match Scale** transposes to a manually chosen tonic (12 notes) and mode (major/minor). The
+  interval is the shortest between tonics, −6…+6 semitones (tritone +6). A mode is never converted:
+  A minor → C major shows `Mode mismatch; cannot match scale`; choose C minor instead. A tonal
+  one-shot can be tuned to the chosen tonic from its pitch/root.
+- Both toggles together apply time and pitch in one offline render, so the length is computed once.
+- Rendering runs in one persistent background worker (latest request wins, 250 ms tempo debounce).
+  `Rubber Band 3.3.0` R3 offline is compiled in (`cmake/RubberBand.cmake`, built-in FFT/resampler).
+  Nothing on the audio thread reads files, SQLite or DSP.
+- The result is an immutable PCM24 WAV at the source rate under
+  `~/Library/Sonicator/exports/match/<key>/<stem>-match.wav`. It is project media: never cleaned
+  automatically, never overwritten. The key covers algorithm version, catalog identity, size/mtime,
+  metadata revision, frame range, format and both transforms; a partial file is never published and
+  two instances that ask for the same key share one validated file.
+- While a result is active the waveform shows the prepared WAV and its duration. The catalog identity
+  stays the original: tags, name and Analysis still belong to the selected row, and the temporary WAV
+  never becomes a row or `lastSamplePath`. Save/Normalize/edit commands are disabled with an
+  explanation until Match is off.
+- Preview and drag use the same file: the library row, cloud point and waveform (whole file or a
+  selection cropped from the prepared WAV) all resolve through one `resolveMatchedDrag` decision. A
+  pending or blocked result starts no OS drag; batch drag with Match on says `Select one sample for
+  Match`. Turning both toggles off restores the existing preview/drag path unchanged.
+- MIDI stays original: the prepared result is a separate transport in `AudioEngine`
+  (`setMatchedTransport`/`clearMatchedTransport`), so the original sampler, REX slices and container
+  remain loaded and a NoteOn plays the untouched source. A matched waveform selection never reaches
+  `setMidiSelection`.
+- Not in this stage: realtime warp/tempo ramps, DAW key autodetection, major↔minor conversion,
+  batch matched export, hover-map matching, and REX2/sampler-bank/tracker/disc matching (these are
+  refused explicitly rather than matching only their first decoded part).
+
 ## Limits
 
-- Match BPM and Match Scale are P2: both need time-stretch / pitch-shift and a decision about which
-  host tempo/key information is available. They are not part of this build.
-- Windows is not built; the port is tracked in `docs/WINDOWS_PORT.md`.
+- Windows is not built; the port is tracked in `docs/WINDOWS_PORT.md`. Rubber Band is configured
+  for MSVC in CMake but has not been compiled there yet.
+- REX2 loops, sampler banks, tracker songs and disc entries do not use Match in v1.
+- Manual Cubase/Logic acceptance is still open; see `docs/PLUGIN_MATCH_ACCEPTANCE.md`.
 - Signing is ad-hoc for local use; Developer ID signing and notarization are release work.
 
 ## Tests
@@ -166,7 +206,15 @@ and resizing of the loop inside the editor remain available. Turn Loop off to ex
 - restoring a project selection does not autoplay and does not write the application's session;
 - a state restored while the editor is open updates the visible selection and window size;
 - an embedded BPM/tag/genre prompt and tap tempo are drawn inside the editor;
-- scanning and file processing are disabled in the embedded window with an explanation.
+- scanning and file processing are disabled in the embedded window with an explanation;
+- Match: v1 state defaults, four flag combinations, malformed values, two independent instances;
+- host tempo publication from a fake playhead, invalid/missing tempo, release invalidation;
+- policy: 8 s at 120→128, Am→Cm, tritone, one-shot, mode mismatch, ratio bounds, overflow;
+- offline render: exact length, pitch within 5 cents, stereo coherence, silence, cache validation,
+  atomic no-clobber, failed write, changed source;
+- background service: latest-wins, cancel, exceptions, debounce, no stale Ready;
+- UI: controls absent in standalone, present at 880 px and 100/125%, restore without autoplay,
+  prepared waveform, read-only state, Stop during preparation, original MIDI transport retained.
 
 ## Manual host acceptance
 

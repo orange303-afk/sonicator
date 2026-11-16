@@ -209,6 +209,7 @@ void AudioEngine::play()
     if (matchedActive.load())
     {
         if (! matchReader) return;
+        if (! matchedAttached) attachMatched();
         if (matchedSource.hasStreamFinished() || startAtNextPlay)
             matchedSource.setPosition(0);
         startAtNextPlay = false;
@@ -729,7 +730,10 @@ void AudioEngine::pause()
         // Pause keeps the position. Without a running callback, rebuild instead of waiting.
         const auto positionBefore = matchedSource.getCurrentPosition();
         if (stopMatchedTransport() && matchReader != nullptr)
+        {
+            attachMatched();
             matchedSource.setPosition(positionBefore);
+        }
         return;
     }
     if (trackerMode)
@@ -751,6 +755,7 @@ void AudioEngine::stop()
     if (matchedActive.load())
     {
         stopMatchedTransport();
+        if (! matchedAttached) attachMatched();
         matchedSource.setPosition(0);
         startAtNextPlay = true;
         return;
@@ -792,13 +797,40 @@ void AudioEngine::seek(double seconds)
     if (rexMode) { rexSampler.seekAudition(juce::jlimit(0.0, length(), seconds)); return; }
     source.setPosition(juce::jlimit(0.0, length(), seconds)); startAtNextPlay = false;
 }
+void AudioEngine::prepareMatchedTransport()
+{
+    int block = 512;
+    if (hostMode) block = juce::jmax (1, hostBlockSize);
+    else if (deviceMode)
+    {
+        const auto setup = devices.getAudioDeviceSetup();
+        if (setup.bufferSize > 0) block = setup.bufferSize;
+    }
+    matchedSource.prepareToPlay (block, deviceSampleRate());
+}
+
+void AudioEngine::attachMatched()
+{
+    if (matchReader == nullptr) return;
+    const bool streaming = deviceMode || hostMode;
+    matchedSource.setSource (matchReader.get(), streaming ? 32768 : 0,
+                             streaming ? &matchReadAhead : nullptr, matchedRate);
+    matchedAttached = true;
+}
+
 bool AudioEngine::stopMatchedTransport()
 {
-    if (! hostMode && ! deviceMode) { matchedSource.setSource(nullptr); return true; }
+    if (! hostMode && ! deviceMode)
+    {
+        matchedSource.setSource(nullptr);
+        matchedAttached = false;
+        return true;
+    }
     const bool callbackAcknowledges = deviceMode
         || (hostMode && juce::Time::getMillisecondCounter() - lastHostBlockMs.load() < 250);
     if (callbackAcknowledges) { matchedSource.stop(); return false; }
     matchedSource.setSource(nullptr);
+    matchedAttached = false;
     return true;
 }
 
@@ -809,14 +841,17 @@ bool AudioEngine::setMatchedTransport(const juce::File& preparedFile)
     if (! decoded || decoded->lengthInSamples <= 0 || decoded->sampleRate <= 0.0)
         return false;
     // Stop the ordinary transport through the same lifecycle, then attach the prepared result.
-    const double matchedRate = decoded->sampleRate;
+    const double matchedRateIn = decoded->sampleRate;
     stopTransport();
     matchedActive.store(false);
     matchedSource.setSource(nullptr);
+    matchedAttached = false;
     matchReader = std::make_unique<PreviewReaderSource>(
         std::unique_ptr<juce::AudioFormatReader>(decoded.release()));
     matchReader->setLooping(false);
-    matchedSource.setSource(matchReader.get(), 32768, &matchReadAhead, matchedRate);
+    matchedRate = matchedRateIn;
+    prepareMatchedTransport();
+    attachMatched();
     matchedFile = preparedFile;
     startAtNextPlay = true;
     matchedActive.store(true);
@@ -830,6 +865,7 @@ void AudioEngine::clearMatchedTransport()
     matchedActive.store(false);
     matchedSource.setSource(nullptr);
     matchedSource.setPosition(0);
+    matchedAttached = false;
     matchReader.reset();
     matchedFile = juce::File();
     startAtNextPlay = true;

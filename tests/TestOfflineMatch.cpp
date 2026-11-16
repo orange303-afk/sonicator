@@ -276,6 +276,64 @@ TEST_CASE ("A failed write never publishes a partial file", "[plugin-match][rend
     CHECK_FALSE (output.existsAsFile());
 }
 
+namespace
+{
+class FailingWriteStream final : public juce::OutputStream
+{
+public:
+    explicit FailingWriteStream (const juce::File& file)
+        : stream (file.createOutputStream())
+    {
+    }
+    void flush() override { if (stream != nullptr) stream->flush(); }
+    bool setPosition (juce::int64 newPosition) override
+    {
+        return stream != nullptr && stream->setPosition (newPosition);
+    }
+    juce::int64 getPosition() override { return stream != nullptr ? stream->getPosition() : 0; }
+    bool write (const void* data, size_t size) override
+    {
+        if (stream == nullptr) return false;
+        if (written + (juce::int64) size > limit) return false;
+        if (! stream->write (data, size)) return false;
+        written += (juce::int64) size;
+        return true;
+    }
+private:
+    std::unique_ptr<juce::FileOutputStream> stream;
+    juce::int64 written = 0;
+    const juce::int64 limit = 4096;
+};
+} // namespace
+
+TEST_CASE ("A full disk fails before writing and a failed write never publishes",
+           "[plugin-match][render]")
+{
+    TestDirectory directory;
+    const auto sourceFile = writeTone (directory.dir.getChildFile ("full.wav"), 330.0, 2.0, 1);
+    auto source = makeSource (sourceFile);
+    source.sourceFrames = (int64_t) std::llround (2.0 * testRate);
+    const auto plan = resolveMatch (source, bpmOnly(), HostTempoValue { true, 120.0, 1 });
+
+    const auto noSpace = directory.dir.getChildFile ("no-space.wav");
+    auto request = makeRequest (sourceFile, noSpace, source, plan);
+    request.availableBytes = 1024;
+    const auto noSpaceResult = renderMatch (request);
+    CHECK_FALSE (noSpaceResult.success);
+    CHECK (noSpaceResult.error.contains ("disk space"));
+    CHECK_FALSE (noSpace.existsAsFile());
+
+    const auto failedWrite = directory.dir.getChildFile ("failed-write.wav");
+    auto writeRequest = makeRequest (sourceFile, failedWrite, source, plan);
+    writeRequest.openStream = [] (const juce::File& part) -> std::unique_ptr<juce::OutputStream>
+    {
+        return std::make_unique<FailingWriteStream> (part);
+    };
+    const auto writeResult = renderMatch (writeRequest);
+    CHECK_FALSE (writeResult.success);
+    CHECK_FALSE (failedWrite.existsAsFile());
+}
+
 TEST_CASE ("A source changed during preparation is never published", "[plugin-match][render]")
 {
     TestDirectory directory;

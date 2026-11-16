@@ -207,7 +207,6 @@ target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
 target_link_libraries(SonicatorCore PUBLIC sonicator_rubberband
-    
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib
     SampleRate::samplerate lame_static)
 juce_add_binary_data(SonicatorAssets SOURCES

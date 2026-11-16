@@ -6285,7 +6285,7 @@ bool MainComponent::beginMatchedDrag(const std::vector<SampleRecord>& records,
     const bool sameSource = records.size() == 1
         && juce::File(records.front().filePath) == preview.loadedFilePath();
     const auto decision = resolveMatchedDrag(matchOn, (int) records.size(), sameSource,
-                                              preview.matchedPreviewActive(),
+                                              preview.matchedPreviewIsCurrent(),
                                               preview.matchedPreviewFile(),
                                               preview.matchDragBlockMessage());
     if (decision.startsDrag())

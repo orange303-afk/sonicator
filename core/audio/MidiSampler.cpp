@@ -222,7 +222,11 @@ void MidiSampler::render(juce::AudioBuffer<float>& out,int start,int count,const
 }
 void PreviewOutput::prepareToPlay(int blockSize,double rate)
 {
-    transport.prepareToPlay(blockSize,rate); sampler.prepare(rate); sf2.prepare(rate); rex.prepare(rate); audition.prepare(rate); external.prepare(rate);
+    transport.prepareToPlay(blockSize,rate);
+    // A prepared Match transport is a second AudioTransportSource; without its own prepare its
+    // resampler runs with a zero buffer on the first Play.
+    if (matchedTransport != nullptr) matchedTransport->prepareToPlay(blockSize,rate);
+    sampler.prepare(rate); sf2.prepare(rate); rex.prepare(rate); audition.prepare(rate); external.prepare(rate);
     tracker.prepare(rate); sampleVoices.prepare(rate); if (hover != nullptr) hover->prepare(rate);
     messages.ensureSize(65536);
     midiBuffer.setSize(2,juce::jmax(1,blockSize));

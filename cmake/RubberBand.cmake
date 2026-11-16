@@ -1,5 +1,6 @@
-# Rubber Band Library (GPL-2.0-or-later), used only for the plug-in's offline Match BPM /
-# Match Scale renderer. The application build does not link it.
+# Rubber Band Library (GPL-2.0-or-later), used only by the plug-in's offline Match BPM /
+# Match Scale renderer. It is linked into SonicatorCore, so the application binary carries the
+# static library too, but no application code path calls it.
 #
 # Upstream has no CMake project. The single-file amalgamation is compiled as one translation unit
 # with an explicit configuration: the built-in FFT and resampler are used on every platform, so

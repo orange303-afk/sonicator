@@ -42,6 +42,13 @@ option requires for a combined work.
   statically. It provides the band-limited conversion used by Batch Processing. Examples, tests and
   install rules are off, so its test tree never joins Sonicator's ctest.
   - https://github.com/libsndfile/libsamplerate/blob/0.2.2/COPYING
+- Rubber Band **3.3.0**, **GPL-2.0-or-later**, fetched as a pinned archive
+  (`SHA256=2bb837fe00932442ca90e185af8a468f7591df0c002b4a9e27a1bced1563ac84`) and compiled as one
+  static translation unit from `single/RubberBandSingle.cpp` by `cmake/RubberBand.cmake`. Only the
+  plug-in's offline Match renderer uses it. The built-in FFT and resampler are selected on every
+  platform, threading is off (the renderer already owns a worker), and no CLI, LADSPA, LV2, VAMP or
+  JNI target is built. No system or Homebrew copy is picked up at build or run time.
+  - https://github.com/breakfastquay/rubberband/blob/v3.3.0/COPYING
 - Catch2 **3.7.1**, Boost Software License 1.0, test-only, fetched at configure time.
   - https://github.com/catchorg/Catch2/blob/v3.7.1/LICENSE.txt
 - libxmp **4.6.2** (`libxmp-4.6.2` tag), **LGPL-2.1-or-later**, fetched at configure time and linked

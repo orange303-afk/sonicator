@@ -160,6 +160,9 @@ MatchRequestScheduler::MatchRequestScheduler (MatchRenderService& owner, int deb
 
 void MatchRequestScheduler::request (MatchRenderRequest request, juce::uint64 nowMs)
 {
+    // The UI timer may re-plan a steady host tempo; the same key must not restart the debounce
+    // window, or a request in a running DAW would never settle.
+    if (hasPending && pending.has_value() && pending->key == request.key) return;
     pending = std::move (request);
     hasPending = true;
     blockedWaiting = false;

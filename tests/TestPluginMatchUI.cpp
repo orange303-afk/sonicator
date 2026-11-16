@@ -8,6 +8,7 @@
 #include "core/audio/SonicatorFormats.h"
 #include "TestHelpers.h"
 #include <cmath>
+#include <thread>
 
 using namespace sonicator;
 
@@ -46,8 +47,8 @@ struct PreviewMatchHarness
     PreviewPanel preview { engine, t.dir.getChildFile ("cache"), t.dir.getChildFile ("exports") };
     PluginMatchPreferences preferences;
     plugin::HostTempoValue tempo { true, 128.0, 1 };
-    juce::File sourceFile;
-    MatchSource source;
+    juce::File sourceFile, secondFile;
+    MatchSource source, secondSource;
 
     PreviewMatchHarness()
     {
@@ -68,13 +69,27 @@ struct PreviewMatchHarness
         context.getPreferences = [this] { return preferences; };
         context.setPreferences = [this] (const PluginMatchPreferences& next) { preferences = next; };
         context.hostTempo = [this] { return tempo; };
+        secondFile = writeLoop (t.dir.getChildFile ("second.wav"), 2.0);
+        secondSource = source;
+        secondSource.identity = "catalog:2:" + secondFile.getFullPathName();
+        secondSource.sourceFrames = (int64_t) std::llround (2.0 * 44100.0);
+        secondSource.metadataRevision = 4;
         context.sourceInfo = [this] (const juce::File& file, int64_t& size, int64_t& modified)
             -> std::optional<MatchSource>
         {
-            if (file != sourceFile) return std::nullopt;
-            size = sourceFile.getSize();
-            modified = sourceFile.getLastModificationTime().toMilliseconds();
-            return source;
+            if (file == sourceFile)
+            {
+                size = sourceFile.getSize();
+                modified = sourceFile.getLastModificationTime().toMilliseconds();
+                return source;
+            }
+            if (file == secondFile)
+            {
+                size = secondFile.getSize();
+                modified = secondFile.getLastModificationTime().toMilliseconds();
+                return secondSource;
+            }
+            return std::nullopt;
         };
         preview.setPluginMatchContext (std::move (context));
         preview.setSize (620, 420);
@@ -263,4 +278,163 @@ TEST_CASE ("A matched transport keeps the original source loaded for MIDI", "[pl
     engine.clearMatchedTransport();
     CHECK_FALSE (engine.hasMatchedTransport());
     CHECK (engine.length() == Catch::Approx (8.0).margin (0.01));
+}
+
+TEST_CASE ("A matched result renders audio at the host rate and survives a suspended stop",
+           "[plugin-match][engine][ui]")
+{
+    TestDirectory t;
+    const auto sourceFile = writeLoop (t.dir.getChildFile ("render-source.wav"), 2.0);
+    const auto prepared = writeLoop (t.dir.getChildFile ("render-prepared.wav"), 2.0);
+    AudioEngine engine (false);
+    REQUIRE (engine.loadFile (sourceFile));
+    REQUIRE (engine.setMatchedTransport (prepared));
+    engine.startHostAudio (48000.0, 512);
+    engine.play();
+    juce::AudioBuffer<float> buffer (2, 512);
+    juce::MidiBuffer midi;
+    float peak = 0.0f;
+    for (int i = 0; i < 60 && peak < 0.001f; ++i)
+    {
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        buffer.clear();
+        engine.processHostBlock (buffer, midi);
+        peak = juce::jmax (peak, buffer.getMagnitude (0, buffer.getNumSamples()));
+    }
+    CHECK (peak > 0.001f); // a prepared transport that is not prepared renders silence or crashes
+    CHECK (engine.length() == Catch::Approx (2.0).margin (0.02));
+
+    // A host that stopped sending blocks detaches the transport; a later Play must reattach it.
+    engine.stopHostAudio();
+    engine.stop();
+    engine.play();
+    engine.preparePreviewBlock (512);
+    peak = 0.0f;
+    for (int i = 0; i < 60 && peak < 0.001f; ++i)
+    {
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        buffer.clear();
+        engine.renderPreviewBlock (buffer, 512);
+        peak = juce::jmax (peak, buffer.getMagnitude (0, buffer.getNumSamples()));
+    }
+    CHECK (peak > 0.001f);
+}
+
+TEST_CASE ("Selecting another file invalidates the previous matched result",
+           "[plugin-match][ui][integration]")
+{
+    PreviewMatchHarness harness;
+    press (harness.toggle ("pluginMatchBpm"));
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    REQUIRE (harness.preview.matchedPreviewIsCurrent());
+    REQUIRE (harness.engine.length() == Catch::Approx (7.5).margin (0.01));
+
+    REQUIRE (harness.preview.loadFile (harness.secondFile, false));
+    CHECK_FALSE (harness.preview.matchedPreviewIsCurrent());
+    CHECK (harness.engine.length() == Catch::Approx (2.0).margin (0.02));
+
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    CHECK (harness.preview.matchedPreviewIsCurrent());
+    CHECK (harness.preview.waveformLength() == Catch::Approx (1.875).margin (0.01));
+    CHECK (harness.preview.matchedPreviewFile().getFileName().contains ("second"));
+}
+
+TEST_CASE ("A host tempo change settles after the debounce and does not stay Preparing",
+           "[plugin-match][ui][integration]")
+{
+    PreviewMatchHarness harness;
+    press (harness.toggle ("pluginMatchBpm"));
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    const auto now = (juce::uint64) juce::Time::getMillisecondCounter();
+    harness.tempo.bpm = 130.0;
+    ++harness.tempo.revision;
+    harness.preview.tickMatchForTest (now);
+    harness.preview.tickMatchForTest (now + 300);
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    CHECK (harness.preview.matchedPreviewIsCurrent());
+    CHECK (harness.preview.waveformLength() == Catch::Approx (8.0 * 120.0 / 130.0).margin (0.01));
+}
+
+TEST_CASE ("An invalid host tempo invalidates a Ready result", "[plugin-match][ui][integration]")
+{
+    PreviewMatchHarness harness;
+    press (harness.toggle ("pluginMatchBpm"));
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    REQUIRE (harness.preview.matchedPreviewIsCurrent());
+    harness.tempo.valid = false;
+    ++harness.tempo.revision;
+    const auto now = (juce::uint64) juce::Time::getMillisecondCounter();
+    harness.preview.tickMatchForTest (now);
+    harness.preview.tickMatchForTest (now + 300);
+    CHECK_FALSE (harness.preview.matchedPreviewIsCurrent());
+    CHECK_FALSE (harness.engine.hasMatchedTransport());
+    auto* status = dynamic_cast<juce::Label*> (findDescendantWithID (harness.preview, "pluginMatchStatus"));
+    REQUIRE (status != nullptr);
+    CHECK (status->getText().contains ("Host tempo unavailable"));
+    CHECK (harness.preview.matchPanel()->preferences().matchBpm); // intent is kept
+}
+
+TEST_CASE ("Restoring a project never starts prepared audio", "[plugin-match][ui][integration]")
+{
+    PreviewMatchHarness harness;
+    auto prefs = harness.preferences;
+    prefs.matchBpm = true;
+    harness.preview.applyPluginMatchPreferences (prefs);
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    CHECK (harness.preview.matchedPreviewIsCurrent());
+    CHECK_FALSE (harness.engine.isPlaying());
+}
+
+TEST_CASE ("The visible Stop button cancels Auto Preview during preparation",
+           "[plugin-match][ui][integration]")
+{
+    PreviewMatchHarness harness;
+    REQUIRE (harness.preview.autoPreviewEnabled());
+    press (harness.toggle ("pluginMatchBpm"));
+    auto* stop = findDescendantWithID (harness.preview, "previewStop");
+    REQUIRE (stop != nullptr);
+    auto* button = dynamic_cast<juce::Button*> (stop);
+    REQUIRE (button != nullptr);
+    if (button->onClick) button->onClick();
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    CHECK (harness.preview.matchedPreviewIsCurrent());
+    CHECK_FALSE (harness.engine.isPlaying());
+}
+
+TEST_CASE ("A new editor clears a matched transport left by the previous one",
+           "[plugin-match][ui][integration]")
+{
+    PreviewMatchHarness harness;
+    press (harness.toggle ("pluginMatchBpm"));
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    REQUIRE (harness.engine.hasMatchedTransport());
+
+    PreviewPanel second (harness.engine, harness.t.dir.getChildFile ("cache2"),
+                         harness.t.dir.getChildFile ("exports2"));
+    PluginMatchContext context;
+    context.getPreferences = [] { return PluginMatchPreferences {}; };
+    context.setPreferences = [] (const PluginMatchPreferences&) {};
+    context.hostTempo = [] { return plugin::HostTempoValue {}; };
+    context.sourceInfo = [] (const juce::File&, int64_t&, int64_t&) -> std::optional<MatchSource>
+    {
+        return std::nullopt;
+    };
+    second.setPluginMatchContext (std::move (context));
+    REQUIRE (second.loadFile (harness.secondFile, false));
+    CHECK_FALSE (harness.engine.hasMatchedTransport());
+    CHECK (harness.engine.length() == Catch::Approx (2.0).margin (0.02));
+}
+
+TEST_CASE ("A metadata revision change re-prepares the result", "[plugin-match][ui][integration]")
+{
+    PreviewMatchHarness harness;
+    press (harness.toggle ("pluginMatchBpm"));
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    const auto firstFile = harness.preview.matchedPreviewFile();
+    harness.source.metadataRevision = 9;
+    const auto now = (juce::uint64) juce::Time::getMillisecondCounter() + 2000;
+    harness.preview.tickMatchForTest (now);
+    REQUIRE (harness.preview.waitForMatchedPreview (8000));
+    CHECK (harness.preview.matchedPreviewIsCurrent());
+    CHECK (harness.preview.matchedPreviewFile() != firstFile);
 }

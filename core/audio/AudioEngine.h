@@ -205,7 +205,11 @@ private:
     juce::AudioTransportSource matchedSource;
     std::atomic<bool> matchedActive { false };
     juce::File matchedFile;
+    bool matchedAttached = false;
+    double matchedRate = 44100.0;
     bool stopMatchedTransport();
+    void attachMatched();
+    void prepareMatchedTransport();
     MidiSampler sampler;
     Sf2KitSampler sf2Sampler;
     Sf2Bank sf2Bank;

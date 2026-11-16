@@ -142,6 +142,10 @@ public:
     // Waits for the running preparation and applies it, as the panel timer would. Tests call it
     // directly instead of sleeping.
     bool waitForMatchedPreview(int timeoutMs);
+    // Runs the same Match part of the panel timer with a caller-supplied clock, so a test can
+    // exercise tempo debounce and invalidation without sleeping on the UI timer.
+    void tickMatchForTest(juce::uint64 nowMs) { tickMatch(nowMs); }
+    bool matchedPreviewIsCurrent() const;
     juce::File matchedPreviewFile() const { return matchPreparedFile; }
     PluginMatchControls* matchPanel() { return matchControls.get(); }
     int64_t editingSampleId = 0;
@@ -261,10 +265,15 @@ private:
     juce::File matchPreparedFile;
     juce::File matchFolder;
     int64_t matchSourceSize = 0, matchSourceModified = 0;
-    bool matchApplied = false, matchAutoPlayPending = false;
-    juce::uint64 lastTempoRevision = 0;
+    bool matchApplied = false, matchAutoPlayPending = false, suppressMatchAutoPlay = false;
+    juce::uint64 lastTempoRevision = 0, lastMatchIdentityCheckMs = 0;
+    // The snapshot the last plan used, so a value change (including becoming invalid) re-plans
+    // while a steady host tempo does not.
+    double matchTempoBpm = 0.0;
+    bool matchTempoValid = false;
     void commitMatchPreferences(const PluginMatchPreferences&);
-    void refreshMatch(bool debounceTempo);
+    void refreshMatch(bool debounceTempo, bool allowAutoPlay = true);
+    void tickMatch(juce::uint64 nowMs);
     void pollMatch();
     void clearMatchedPreview(bool restoreMidiSelection);
     void activateMatchedPreview(const MatchRenderService::State&);
