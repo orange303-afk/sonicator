@@ -202,3 +202,32 @@ TEST_CASE ("Re-planning a steady tempo does not restart the debounce window",
     CHECK (service.poll().key == "A");
     CHECK (harness.keys().size() == 1);
 }
+
+TEST_CASE ("A scheduler-blocked request keeps its key and reason", "[plugin-match][service]")
+{
+    RendererHarness harness;
+    MatchRenderService service ([&] (const MatchRenderRequest& r, CancelCheck c)
+                               { return harness (r, std::move (c)); });
+    MatchRequestScheduler scheduler (service, 250);
+    MatchPlan plan;
+    plan.action = MatchAction::blocked;
+    plan.reason = MatchBlockReason::modeMismatch;
+    scheduler.requestBlocked ("bad-key", plan, "Mode mismatch; cannot match scale");
+    const auto state = service.poll();
+    CHECK (state.status == MatchRenderService::Status::blocked);
+    CHECK (state.key == "bad-key");
+    CHECK (state.error == "Mode mismatch; cannot match scale");
+}
+
+TEST_CASE ("A request without a result key fails instead of staying Preparing",
+           "[plugin-match][service]")
+{
+    RendererHarness harness;
+    MatchRenderService service ([&] (const MatchRenderRequest& r, CancelCheck c)
+                               { return harness (r, std::move (c)); });
+    service.submit (requestFor (""));
+    REQUIRE (service.waitUntilFinished (3000));
+    const auto state = service.poll();
+    CHECK (state.status == MatchRenderService::Status::failed);
+    CHECK (state.error.contains ("no result key"));
+}

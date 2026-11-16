@@ -189,6 +189,8 @@ DAW project (plugin state v2). Old v1 projects load with both off; host tempo is
 
 - Windows is not built; the port is tracked in `docs/WINDOWS_PORT.md`. Rubber Band is configured
   for MSVC in CMake but has not been compiled there yet.
+- A plain application build (no plugin, no tests) sets `SONICATOR_ENABLE_MATCH=OFF`, so Rubber
+  Band is neither fetched nor linked and the Match controls are never created.
 - REX2 loops, sampler banks, tracker songs and disc entries do not use Match in v1.
 - Manual Cubase/Logic acceptance is still open; see `docs/PLUGIN_MATCH_ACCEPTANCE.md`.
 - Signing is ad-hoc for local use; Developer ID signing and notarization are release work.

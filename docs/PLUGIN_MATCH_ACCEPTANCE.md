@@ -11,11 +11,12 @@ host checklist has passed.
 
 | Check | Command | Result |
 |---|---|---|
-| Debug, whole suite | `cmake --build --preset debug --target SonicatorTests` then `~/Library/Caches/sonicator-build/debug/tests/SonicatorTests` | exit 0, 1271 test cases, 272414 assertions |
-| Release, whole suite | `cmake --build --preset release --target SonicatorTests` then `~/Library/Caches/sonicator-build/release/tests/SonicatorTests` | exit 0, 1271 test cases, 272418 assertions |
-| Match subset, Release | `…/release/tests/SonicatorTests '[plugin-match]'` | exit 0, 57 test cases, 1796 assertions |
+| Debug, whole suite | `cmake --build --preset debug --target SonicatorTests` then `~/Library/Caches/sonicator-build/debug/tests/SonicatorTests` | exit 0, 1275 test cases, 272454 assertions |
+| Release, whole suite | `cmake --build --preset release --target SonicatorTests` then `~/Library/Caches/sonicator-build/release/tests/SonicatorTests` | exit 0, 1275 test cases, 272456 assertions |
+| Match subset, Release | `…/release/tests/SonicatorTests '[plugin-match]'` | exit 0, 61 test cases, 1836 assertions |
 | Existing plugin suite | `…/debug/tests/SonicatorTests '[plugin]'` | exit 0, 25 test cases, 324 assertions |
 | Preview editing suite | `…/debug/tests/SonicatorTests '[ui][edit]'` | exit 0, 15 test cases, 62 assertions |
+| Standalone without plugin/tests | `cmake -S . -B ~/Library/Caches/sonicator-build/app-nomatch -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=OFF -DSONICATOR_BUILD_PLUGIN=OFF` then build `Sonicator` | exit 0; no Rubber Band fetched, Match code is not linked |
 | VST3 + AU build (native Release) | `cmake -S . -B ~/Library/Caches/sonicator-build/plugin-match -G Ninja -DCMAKE_BUILD_TYPE=Release -DSONICATOR_BUILD_PLUGIN=ON -DBUILD_TESTING=OFF` then build targets `SonicatorPlugin_VST3 SonicatorPlugin_AU` | exit 0; the VST3 manifest step loaded the built bundle |
 
 The Render tests use a 440 Hz sine and measure zero crossings: the 120→128 result is within 5 cents,
@@ -43,5 +44,11 @@ into 128). This proves length and a steady tone, not musical quality.
   Match`; they do not silently match only their first part.
 - Match Scale never changes major/minor; `Mode mismatch; cannot match scale` is the honest answer.
 - Match is per selected instance; batch drag with Match on is refused.
+- A corrupt file at a matched key is never deleted: the renderer publishes beside it as `-r1`,
+  `-r2`…; after eight corrupt names the UI reports the corruption and asks for a manual cleanup.
+- The ten-minute limit is a duration check, not a frame count, so a short high-rate file is not
+  refused by mistake.
+- A plain application build (`SONICATOR_ENABLE_MATCH=OFF`, i.e. no plugin and no tests) does not
+  fetch or compile Rubber Band and does not link the Match renderer.
 - Exports under `~/Library/Sonicator/exports/match/` are project media and are never cleaned
   automatically.

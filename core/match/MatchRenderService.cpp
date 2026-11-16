@@ -6,7 +6,14 @@ MatchRenderService::MatchRenderService (RenderFunction renderFunction)
     : renderer (renderFunction ? std::move (renderFunction) : RenderFunction (
         [] (const MatchRenderRequest& request, CancelCheck cancel)
         {
+#if SONICATOR_ENABLE_MATCH
             return renderMatch (request, std::move (cancel));
+#else
+            juce::ignoreUnused (request, cancel);
+            MatchRenderResult unavailable;
+            unavailable.error = "Match is not built into this application build";
+            return unavailable;
+#endif
         }))
 {
     worker = std::thread ([this] { run(); });
@@ -100,7 +107,19 @@ void MatchRenderService::run()
             job = std::move (pending);
             pending.reset();
         }
-        if (! job.has_value() || job->request.key.isEmpty()) continue;
+        if (! job.has_value()) continue;
+        if (job->request.key.isEmpty())
+        {
+            const std::lock_guard<std::mutex> lock (mutex);
+            if (job->generation == desiredGeneration.load (std::memory_order_acquire))
+            {
+                current.status = Status::failed;
+                current.generation = job->generation;
+                current.error = "Match request has no result key";
+                finished.notify_all();
+            }
+            continue;
+        }
         if (desiredGeneration.load (std::memory_order_acquire) != job->generation) continue;
 
         const auto generation = job->generation;
@@ -174,9 +193,11 @@ void MatchRequestScheduler::requestBlocked (juce::String key, MatchPlan plan, ju
     pending.reset();
     hasPending = false;
     blockedWaiting = true;
-    blockedKey = std::move (key);
+    // Keep copies for the scheduler and hand the originals to the service; moving both left the
+    // service's blocked State with an empty key and error.
+    blockedKey = key;
+    blockedReason = reason;
     blockedPlan = plan;
-    blockedReason = std::move (reason);
     service.submitBlocked (std::move (key), blockedPlan, std::move (reason));
 }
 

@@ -69,7 +69,6 @@ else()
         INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include"
     )
 endif()
-include(cmake/RubberBand.cmake)
 FetchContent_Declare(libxmp
     GIT_REPOSITORY https://github.com/libxmp/libxmp.git
     GIT_TAG libxmp-4.6.2 GIT_SHALLOW TRUE)
@@ -147,6 +146,16 @@ if("${SONICATOR_BUILD_TESTING_SAVED}" STREQUAL "")
 else()
     set(BUILD_TESTING ${SONICATOR_BUILD_TESTING_SAVED} CACHE BOOL "" FORCE)
 endif()
+# The VST3/AU plugin and the tests need the Match renderer and its DSP dependency; a plain
+# application build does not compile that code path at all.
+option(SONICATOR_BUILD_PLUGIN "Build the VST3/AU plugin" OFF)
+set(SONICATOR_ENABLE_MATCH OFF)
+if(SONICATOR_BUILD_PLUGIN OR BUILD_TESTING)
+    set(SONICATOR_ENABLE_MATCH ON)
+endif()
+if(SONICATOR_ENABLE_MATCH)
+    include(cmake/RubberBand.cmake)
+endif()
 # libxmp enables verbose stderr tracing through -DDEBUG in Debug builds. Keep the library silent:
 # its diagnostics are development noise for an application and would otherwise dominate tests.
 if(NOT MSVC)
@@ -201,14 +210,19 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/smart/TapTempo.cpp
     core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp
     core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp core/cloud/CloudCache.cpp core/cloud/CloudBuildService.cpp
-    core/match/MatchPolicy.cpp core/match/SourceMetadata.cpp core/match/OfflineMatchRenderer.cpp core/match/MatchRenderService.cpp)
+    core/match/MatchPolicy.cpp core/match/SourceMetadata.cpp core/match/MatchRenderService.cpp)
 target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} resources/sqlite)
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
-    JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0)
-target_link_libraries(SonicatorCore PUBLIC sonicator_rubberband
+    JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0
+    SONICATOR_ENABLE_MATCH=$<BOOL:${SONICATOR_ENABLE_MATCH}>)
+target_link_libraries(SonicatorCore PUBLIC
     juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib
     SampleRate::samplerate lame_static)
+if(SONICATOR_ENABLE_MATCH)
+    target_sources(SonicatorCore PRIVATE core/match/OfflineMatchRenderer.cpp)
+    target_link_libraries(SonicatorCore PUBLIC sonicator_rubberband)
+endif()
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png
     resources/fonts/Manrope-Regular.ttf
@@ -229,8 +243,6 @@ option(SONICATOR_BUILD_TRAINING_TOOLS "Build the training feature extraction too
 if(SONICATOR_BUILD_TRAINING_TOOLS)
     add_subdirectory(tools/sonicator-features)
 endif()
-# The VST3/AU plugin: off by default, no effect on the application build.
-option(SONICATOR_BUILD_PLUGIN "Build the VST3/AU plugin" OFF)
 if(SONICATOR_BUILD_PLUGIN)
     add_subdirectory(plugin)
 endif()

@@ -23,6 +23,8 @@ struct MatchRenderRequest
     std::function<std::unique_ptr<juce::OutputStream> (const juce::File&)> openStream;
     // Test seam for a full disk. A negative value asks the volume itself.
     int64_t availableBytes = -1;
+    // Test seam for the duration limit; production keeps ten minutes.
+    double maximumSeconds = 600.0;
 };
 
 struct MatchRenderResult
@@ -58,6 +60,14 @@ juce::String makeMatchResultKey (const MatchSource& source, const MatchPlan& pla
 // <root>/<key>/<stem>-match.wav, created by the renderer only.
 juce::File matchOutputFile (const juce::String& key, const juce::String& sourceStem,
                             const juce::File& root = {});
+
+// The first path under the key that is either absent or a valid WAV of this shape. A corrupt
+// file at the plain name is left in place (exports are project media) and the result is published
+// beside it as -r1, -r2...; an empty file is returned when every attempt is corrupt.
+juce::File findUsableMatchOutput (const juce::String& key, const juce::String& sourceStem,
+                                  const juce::File& root, int64_t expectedFrames,
+                                  double sampleRate, int channels,
+                                  juce::String* existingError = nullptr);
 
 // Reopens a published file and checks its format and frame count. Used before reusing a cached
 // result: a truncated or foreign file with the right name is not Ready.

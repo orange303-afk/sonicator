@@ -334,6 +334,50 @@ TEST_CASE ("A full disk fails before writing and a failed write never publishes"
     CHECK_FALSE (failedWrite.existsAsFile());
 }
 
+TEST_CASE ("A corrupt published file is bypassed without deleting it", "[plugin-match][render]")
+{
+    TestDirectory directory;
+    const auto root = directory.dir.getChildFile ("cache");
+    const juce::String key = "key";
+    const auto plain = matchOutputFile (key, "stem", root);
+    REQUIRE (plain.getParentDirectory().createDirectory());
+    plain.replaceWithText ("garbage");
+
+    const auto chosen = findUsableMatchOutput (key, "stem", root, 100, 44100.0, 1);
+    REQUIRE (chosen != juce::File());
+    CHECK (chosen != plain);
+    CHECK (chosen.getFileName().contains ("-r1"));
+    CHECK (plain.loadFileAsString() == "garbage"); // project media is never deleted
+
+    for (int attempt = 1; attempt < 8; ++attempt)
+    {
+        const auto file = plain.getSiblingFile ("stem-r" + juce::String (attempt) + "-match.wav");
+        file.replaceWithText ("garbage");
+    }
+    CHECK (findUsableMatchOutput (key, "stem", root, 100, 44100.0, 1) == juce::File());
+}
+
+TEST_CASE ("The duration limit is measured in seconds, not 44.1 kHz frames",
+           "[plugin-match][render]")
+{
+    TestDirectory directory;
+    const auto sourceFile = writeTone (directory.dir.getChildFile ("limit.wav"), 330.0, 2.0, 1);
+    auto source = makeSource (sourceFile);
+    source.sourceFrames = (int64_t) std::llround (2.0 * testRate);
+    const auto plan = resolveMatch (source, bpmOnly(), HostTempoValue { true, 120.0, 1 });
+
+    auto request = makeRequest (sourceFile, directory.dir.getChildFile ("limit-out.wav"), source, plan);
+    request.maximumSeconds = 1.0;
+    const auto refused = renderMatch (request);
+    CHECK_FALSE (refused.success);
+    CHECK (refused.error.contains ("duration limit"));
+
+    auto allowed = makeRequest (sourceFile, directory.dir.getChildFile ("limit-ok.wav"), source, plan);
+    const auto rendered = renderMatch (allowed);
+    INFO (rendered.error);
+    CHECK (rendered.success);
+}
+
 TEST_CASE ("A source changed during preparation is never published", "[plugin-match][render]")
 {
     TestDirectory directory;

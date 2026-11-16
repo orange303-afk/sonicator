@@ -17,8 +17,8 @@ namespace sonicator
 namespace
 {
 constexpr int64_t blockFrames = 8192;
-constexpr int64_t maximumSourceFrames = 44100 * 60 * 10 + 1; // ten minutes at 44.1 kHz
 constexpr int outputBits = 24;
+std::atomic<juce::uint64> partialCounter { 0 };
 
 juce::String failureText (const juce::String& text) { return text; }
 
@@ -126,6 +126,25 @@ juce::File matchOutputFile (const juce::String& key, const juce::String& sourceS
     return base.getChildFile (key).getChildFile (stem + "-match.wav");
 }
 
+juce::File findUsableMatchOutput (const juce::String& key, const juce::String& sourceStem,
+                                  const juce::File& root, int64_t expectedFrames,
+                                  double sampleRate, int channels, juce::String* existingError)
+{
+    for (int attempt = 0; attempt < 8; ++attempt)
+    {
+        auto stem = AudioExporter::sanitizeStem (sourceStem);
+        if (stem.isEmpty()) stem = "sample";
+        if (attempt > 0) stem += "-r" + juce::String (attempt);
+        const auto base = root == juce::File() ? matchExportRoot() : root;
+        const auto file = base.getChildFile (key).getChildFile (stem + "-match.wav");
+        if (! file.existsAsFile()) return file;
+        juce::String error;
+        if (validateMatchOutput (file, expectedFrames, sampleRate, channels, error)) return file;
+        if (existingError != nullptr) *existingError = error;
+    }
+    return {};
+}
+
 bool validateMatchOutput (const juce::File& file, int64_t expectedFrames, double sampleRate,
                           int channels, juce::String& error)
 {
@@ -201,9 +220,10 @@ MatchRenderResult renderMatch (const MatchRenderRequest& request, CancelCheck ca
         return result;
     }
     if (request.source.sourceFrames <= 0
-        || request.source.sourceFrames > maximumSourceFrames)
+        || (double) request.source.sourceFrames / sampleRate
+               > juce::jmax (0.0, request.maximumSeconds))
     {
-        result.error = "Source is longer than the ten minute Match limit";
+        result.error = "Source is longer than the Match duration limit";
         return result;
     }
     if (request.source.startFrame < 0
@@ -259,9 +279,12 @@ MatchRenderResult renderMatch (const MatchRenderRequest& request, CancelCheck ca
     }
 
     // The partial keeps a .wav extension so the format manager can reopen it for validation.
+    // The partial name must be unique per process and per thread: two workers that ask for the
+    // same key at the same tick must not write into one temporary file.
+    const auto unique = juce::String::toHexString (juce::Time::getHighResolutionTicks()) + "-"
+        + juce::String ((juce::uint64) ++partialCounter);
     const auto partial = request.outputFile.getSiblingFile (
-        request.outputFile.getFileNameWithoutExtension() + ".partial-"
-        + juce::String::toHexString (juce::Time::getHighResolutionTicks()) + ".wav");
+        request.outputFile.getFileNameWithoutExtension() + ".partial-" + unique + ".wav");
     std::unique_ptr<juce::OutputStream> stream;
     if (request.openStream)
         stream = request.openStream (partial);

@@ -1842,6 +1842,7 @@ void PreviewPanel::discardEdits()
 }
 
 
+#if SONICATOR_ENABLE_MATCH
 void PreviewPanel::setPluginMatchContext(PluginMatchContext context)
 {
     matchContext = std::move (context);
@@ -2031,11 +2032,22 @@ void PreviewPanel::refreshMatch(bool debounceTempo, bool allowAutoPlay)
         return;
     }
     const auto key = makeMatchResultKey (matchSource, matchPlan, size, modified);
-    const auto output = matchOutputFile (key, loadedFile.getFileNameWithoutExtension(), matchFolder);
+    // A corrupt file at the plain name is not overwritten; publish the result beside it.
+    const auto output = findUsableMatchOutput (key, loadedFile.getFileNameWithoutExtension(),
+                                               matchFolder, matchPlan.targetFrames,
+                                               matchSource.sampleRate, matchSource.channels);
     matchDesiredKey = key;
     if (matchActivatedKey == key && matchApplied && matchPreparedFile.existsAsFile())
     {
         matchControls->setStatus (matchStatusText());
+        return;
+    }
+    if (output == juce::File())
+    {
+        matchScheduler->cancel();
+        clearMatchedPreview (false);
+        matchBlockMessage = "Matched output is corrupt; remove the file under exports/match";
+        matchControls->setStatus (matchBlockMessage, true);
         return;
     }
     juce::String validationError;
@@ -2162,6 +2174,22 @@ bool PreviewPanel::matchedPreviewIsCurrent() const
 {
     return matchApplied && ! matchDesiredKey.isEmpty() && matchActivatedKey == matchDesiredKey;
 }
+
+#else
+// A plain application build has no host tempo and no Match renderer; the declarations stay so the
+// shared window compiles, but nothing is created or linked.
+void PreviewPanel::setPluginMatchContext(PluginMatchContext) {}
+void PreviewPanel::applyPluginMatchPreferences(const PluginMatchPreferences&) {}
+void PreviewPanel::commitMatchPreferences(const PluginMatchPreferences&) {}
+void PreviewPanel::tickMatch(juce::uint64) {}
+void PreviewPanel::refreshMatch(bool, bool) {}
+void PreviewPanel::pollMatch() {}
+void PreviewPanel::activateMatchedPreview(const MatchRenderService::State&) {}
+void PreviewPanel::clearMatchedPreview(bool) {}
+juce::String PreviewPanel::matchStatusText() const { return {}; }
+bool PreviewPanel::waitForMatchedPreview(int) { return false; }
+bool PreviewPanel::matchedPreviewIsCurrent() const { return false; }
+#endif
 
 void PreviewPanel::withUnsavedEditsConfirmed(std::function<void(bool)> done)
 {
