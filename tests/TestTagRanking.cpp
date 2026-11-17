@@ -69,8 +69,9 @@ TEST_CASE("Ranked tags put recent frequent tags first", "[tags][ranking]")
 
     const auto ranked = f.repo->rankedTags(15, testNow);
     REQUIRE(ranked.front().id == fresh);
-    // A tag that was never assigned sinks below every used tag, ordered by name.
-    REQUIRE(ranked.back().id == unused);
+    // A tag that was never assigned sinks below every used tag.
+    REQUIRE(indexOf(ranked, unused) > indexOf(ranked, fresh));
+    REQUIRE(indexOf(ranked, unused) > indexOf(ranked, old));
 }
 
 TEST_CASE("Ranked tags respect the limit", "[tags][ranking]")

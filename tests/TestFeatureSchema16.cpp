@@ -1,3 +1,4 @@
+#include "core/database/CatalogSchema.h"
 #include "core/database/SampleRepository.h"
 #include "TestHelpers.h"
 #include <catch2/catch_test_macros.hpp>
@@ -90,7 +91,7 @@ TEST_CASE("a schema-15 catalog gains the v2 columns without losing rows", "[data
         REQUIRE(rows[0].featureSchema == 1);
         REQUIRE(rows[0].featuresV2.empty());
     }
-    REQUIRE(userVersion(file) == 19);
+    REQUIRE(userVersion(file) == catalogSchemaVersion);
 }
 
 TEST_CASE("the contribution record carries both feature schemas", "[database][feedback]")

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "core/database/CatalogSchema.h"
 #include "core/database/SampleRepository.h"
 #include "core/smart/GenreContextExtractor.h"
 #include "ui/MainComponent.h"
@@ -137,7 +138,7 @@ TEST_CASE("Schema 18 migration backfills existing manual genres without automati
         const int version = sqlite3_column_int(statement, 0);
         sqlite3_finalize(statement);
         sqlite3_close(raw);
-        REQUIRE(version == 19);
+        REQUIRE(version == catalogSchemaVersion);
     }
     REQUIRE(upgraded.genreNames().contains("Legacy Genre"));
     REQUIRE_FALSE(upgraded.genreNames().contains("Unknown Placeholder"));

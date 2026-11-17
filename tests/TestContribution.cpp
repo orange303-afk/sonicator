@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include "core/contribute/ContributionUploader.h"
 #include "core/contribute/PlatformName.h"
+#include "core/database/CatalogSchema.h"
 #include "core/database/SampleRepository.h"
 #include "core/settings/AppSettings.h"
 #include "core/smart/SmartResolver.h"
@@ -331,7 +332,7 @@ TEST_CASE("Rows written before schema 14 count as legacy and are not contributed
     Database db(file);
     SampleRepository repo(db);
     repo.createTables();
-    CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 19);
+    CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == catalogSchemaVersion);
     CHECK(repo.allFeedback().size() == 1);            // legacy rows stay on disk
     CHECK(repo.contributionRecords(0, 10).empty());   // and out of the dataset
 }
@@ -434,7 +435,7 @@ TEST_CASE("Tag history starts at schema 15 but local prototypes keep old tags", 
         Database db(file);
         SampleRepository repo(db);
         repo.createTables();
-        CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 19);
+        CHECK(rawScalar(file, "SELECT user_version FROM pragma_user_version") == catalogSchemaVersion);
         REQUIRE(repo.allFeedback().size() == 1);
         CHECK(repo.allFeedback()[0].tags.contains("OldTag")); // local prototype still learns it
         const auto rows = repo.contributionRecords(0, 10);

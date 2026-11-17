@@ -182,7 +182,7 @@ void TaggingService::run()
             const int applied = state.applied;
             if (! clearing && applied > 0)
             {
-                try { repo.recordRecentTag(targetTag); }
+                try { repo.recordRecentTag(targetTag); repo.recordTagUse(targetTag); }
                 catch (...) {}
             }
             state.running = false;

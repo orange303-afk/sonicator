@@ -184,6 +184,13 @@ public:
     // the join and renamed tags keep their current name.
     void recordRecentTag(int64_t tagId);
     std::vector<Tag> recentTags(int limit = 5) const;
+    // Personal assignment counter, one row per tag. Explicit user assignments only: AutoTag and
+    // Reset tags never touch it, matching the recent-tag rule. The round tag menu ranks by it.
+    void recordTagUse(int64_t tagId, int64_t nowMs = -1);
+    // Tags ordered for the round menu: recent and frequent first. score = (use_count + 0.5) *
+    // 2^(-ageDays/30); tags with no recorded use score 0 and sort by name. nowMs is injectable so
+    // tests do not depend on the clock.
+    std::vector<Tag> rankedTags(int limit = 15, int64_t nowMs = -1) const;
     // Every catalogued sample inside a folder and its descendants. Separator-aware, independent
     // of search, tags, stars, duplicate filters and pagination. Empty folder means no scope.
     std::vector<int64_t> idsInFolder(const juce::String& folder, bool includeDiscContents = true) const;

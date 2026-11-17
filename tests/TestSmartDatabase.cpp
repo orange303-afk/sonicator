@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "core/database/CatalogSchema.h"
 #include "core/database/SampleRepository.h"
 #include "core/smart/SmartResolver.h"
 #include "TestHelpers.h"
@@ -47,7 +48,7 @@ TEST_CASE("Schema 5 catalogs upgrade to current schema with a backup and keep id
     rawExec(file, "PRAGMA user_version=5;");
     {
         Database db(file); SampleRepository repo(db); repo.createTables();
-        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == 19);
+        REQUIRE(rawScalar(file, "SELECT user_version FROM pragma_user_version") == catalogSchemaVersion);
         auto r = repo.findByPath("/lib/kick.wav");
         REQUIRE(r.has_value());
         REQUIRE(r->id == id);

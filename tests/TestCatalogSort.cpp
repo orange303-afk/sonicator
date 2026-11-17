@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include "core/database/CatalogSchema.h"
 #include "core/database/SampleRepository.h"
 #include "core/smart/SmartTypes.h"
 #include "TestHelpers.h"
@@ -254,7 +255,7 @@ TEST_CASE("Schema 17 upgrades in place and backfills the effective values", "[so
     REQUIRE(hasColumn(file, "samples", "eff_key_tonic"));
     REQUIRE(hasColumn(file, "samples", "eff_key_mode"));
     REQUIRE(hasColumn(file, "samples", "eff_genre"));
-    REQUIRE(rawScalar(file, "PRAGMA user_version") == 19);
+    REQUIRE(rawScalar(file, "PRAGMA user_version") == catalogSchemaVersion);
     const auto values = effectiveValues(file, id);
     REQUIRE(values.type == "'bass'");       // the manual override is the effective value
     REQUIRE(values.bpm == "128.0");

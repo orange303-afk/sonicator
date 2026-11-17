@@ -2619,6 +2619,7 @@ int MainComponent::assignTagAndRemember(const std::vector<int64_t>& sampleIds, i
     if (added > 0)
     {
         writeRepo->recordRecentTag(tagId);
+        writeRepo->recordTagUse(tagId);
         triggerAdaptiveLearning(visible);
     }
     return added;

@@ -9,6 +9,7 @@
 #include "PathRelocation.h"
 #include "SqliteHelpers.h"
 #include <algorithm>
+#include <cmath>
 #include <set>
 #include <variant>
 namespace sonicator {
@@ -623,6 +624,9 @@ void SampleRepository::createTables()
             "CREATE TABLE IF NOT EXISTS recent_tags ("
             "tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,"
             "used_at INTEGER NOT NULL, seq INTEGER NOT NULL) WITHOUT ROWID;"
+            "CREATE TABLE IF NOT EXISTS tag_usage ("
+            "tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,"
+            "use_count INTEGER NOT NULL DEFAULT 0, last_used_at INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;"
             "CREATE TABLE IF NOT EXISTS duplicates (sample_id INTEGER PRIMARY KEY REFERENCES samples(id) ON DELETE CASCADE,"
             "representative_id INTEGER NOT NULL, group_hash TEXT NOT NULL, group_size INTEGER NOT NULL,"
             "is_representative INTEGER NOT NULL DEFAULT 0);"
@@ -895,6 +899,14 @@ void SampleRepository::createTables()
                 insert.reset(); insert.text(1, tag.name);
                 insert.integer(2, (int64_t) tag.colour); insert.step();
             }
+        }
+        if (current < 20)
+        {
+            // An existing catalog inherits a usable starting order from its recent-tag history,
+            // so the first round menu is not alphabetical. A fresh catalog has no recent tags.
+            detail::exec(db.handle,
+                "INSERT OR IGNORE INTO tag_usage(tag_id,use_count,last_used_at)"
+                " SELECT tag_id, MAX(1, 6 - seq), used_at FROM recent_tags;");
         }
         {
             // Rows written before schema 13 have no id; give each one now, once.
@@ -2171,6 +2183,76 @@ std::vector<Tag> SampleRepository::recentTags(int limit) const
     s.integer(1, juce::jlimit(0, 5, limit));
     std::vector<Tag> out;
     while (s.step()) out.push_back(readTag(s, 0));
+    return out;
+}
+void SampleRepository::recordTagUse(int64_t tagId, int64_t nowMs)
+{
+    if (tagId <= 0) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement exists(db.handle, "SELECT 1 FROM tags WHERE id=?");
+        exists.integer(1, tagId);
+        if (! exists.step())
+        {
+            detail::exec(db.handle, "COMMIT;");
+            return;
+        }
+        detail::Statement insert(db.handle,
+            "INSERT INTO tag_usage(tag_id,use_count,last_used_at) VALUES(?,1,?)"
+            " ON CONFLICT(tag_id) DO UPDATE SET use_count=use_count+1,"
+            " last_used_at=excluded.last_used_at");
+        insert.integer(1, tagId);
+        insert.integer(2, nowMs > 0 ? nowMs : juce::Time::currentTimeMillis());
+        insert.step();
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
+std::vector<Tag> SampleRepository::rankedTags(int limit, int64_t nowMs) const
+{
+    struct Row { Tag tag; int useCount = 0; int64_t lastUsed = 0; double score = 0.0; };
+    std::vector<Row> rows;
+    {
+        std::lock_guard lock(db.mutex);
+        detail::Statement s(db.handle,
+            "SELECT t.id,t.name,t.colour,t.builtin,COUNT(st.sample_id),"
+            " COALESCE(u.use_count,0),COALESCE(u.last_used_at,0)"
+            " FROM tags t"
+            " LEFT JOIN sample_tags st ON st.tag_id=t.id"
+            " LEFT JOIN tag_usage u ON u.tag_id=t.id"
+            " GROUP BY t.id");
+        while (s.step())
+        {
+            Row row;
+            row.tag = readTag(s, 0, 4);
+            row.useCount = (int) s.integer(5);
+            row.lastUsed = s.integer(6);
+            rows.push_back(row);
+        }
+    }
+    const int64_t now = nowMs > 0 ? nowMs : juce::Time::currentTimeMillis();
+    for (auto& row : rows)
+    {
+        if (row.useCount <= 0 || row.lastUsed <= 0) { row.score = 0.0; continue; }
+        const double ageDays = (double) juce::jmax<int64_t>(0, now - row.lastUsed) / 86'400'000.0;
+        row.score = ((double) row.useCount + 0.5) * std::exp2(-ageDays / 30.0);
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b)
+    {
+        if (a.score != b.score) return a.score > b.score;
+        if (a.useCount != b.useCount) return a.useCount > b.useCount;
+        return a.tag.name.compareIgnoreCase(b.tag.name) < 0;
+    });
+    std::vector<Tag> out;
+    const int capped = limit > 0 ? juce::jmin(limit, (int) rows.size()) : (int) rows.size();
+    out.reserve((size_t) capped);
+    for (int i = 0; i < capped; ++i) out.push_back(rows[(size_t) i].tag);
     return out;
 }
 std::vector<PathEntry> SampleRepository::physicalPathsInFolder(const juce::String& folder, int limit) const
