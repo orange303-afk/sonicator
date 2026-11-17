@@ -116,7 +116,7 @@ Priority: optional
 Architecture: amd64
 Installed-Size: $installed_kb
 Maintainer: Ilya Orange <sonicator@sampledicer.pro>
-Depends: libc6 (>= $glibc_baseline), libasound2, libfreetype6, libx11-6, libxext6, libxrandr2, libxinerama1, libxcursor1, libgl1, libjack-jackd2-0 | pipewire-jack
+Depends: libc6 (>= $glibc_baseline), libasound2, libfreetype6, libfontconfig1, libx11-6, libxext6, libxrandr2, libxinerama1, libxcursor1, libxrender1, libxi6, libgl1, libjack-jackd2-0 | pipewire-jack
 Recommends: pipewire
 Description: Intelligent sample explorer for the local audio library
  SONICATOR indexes, analyses and plays a local sample collection, keeps tags,

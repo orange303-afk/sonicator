@@ -285,6 +285,11 @@ jobs:
           echo "Depends: $depends"
           echo "$depends" | grep -q libasound2
           echo "$depends" | grep -q 'libc6 (>= 2.35)'
+          # JUCE links these directly; a package that omits them installs and then fails to start
+          # on a minimal desktop.
+          for library in libfontconfig1 libxrender1 libxi6 libxrandr2 libxcursor1; do
+            echo "$depends" | grep -q "$library"
+          done
           listing="$(dpkg-deb -c "$deb")"
           echo "$listing" | grep -q 'usr/bin/SONICATOR'
           echo "$listing" | grep -q 'usr/lib/sonicator/libonnxruntime.so.1'

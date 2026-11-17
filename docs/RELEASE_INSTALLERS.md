@@ -111,8 +111,11 @@ produce a package above 2.35, so a build on a newer distribution fails loudly in
 Layout of both artifacts: `usr/bin/SONICATOR`, `usr/lib/sonicator/libonnxruntime.so` (resolved
 through `$ORIGIN/../lib/sonicator`), `usr/share/applications/sonicator.desktop`, hicolor icons at
 16–512 px and licences under `usr/share/doc/sonicator/Licenses`. The AppImage adds an `AppRun` that
-exports the runtime directory. The `.deb` declares `libasound2`, the X11/freetype/GL libraries and
-`libjack-jackd2-0 | pipewire-jack`, so either JACK implementation satisfies it.
+exports the runtime directory. The `.deb` declares `libc6 (>= 2.35)`, `libasound2`, the X11 libraries JUCE links (`libx11-6`,
+`libxext6`, `libxrandr2`, `libxinerama1`, `libxcursor1`, `libxrender1`, `libxi6`), `libfreetype6`,
+`libfontconfig1`, `libgl1` and `libjack-jackd2-0 | pipewire-jack`, so either JACK implementation
+satisfies it. The release job reads the produced package back and fails when a JUCE library is
+missing from that list.
 
 Install with `sudo apt install ./SONICATOR-<version>-Linux-amd64.deb`, or run the AppImage from any
 directory after `chmod +x`. Without FUSE the AppImage starts with `--appimage-extract-and-run`.
