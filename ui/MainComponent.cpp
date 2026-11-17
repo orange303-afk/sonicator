@@ -2815,7 +2815,11 @@ void MainComponent::showRoundTagMenuForFolder(const juce::String& folder, juce::
         status.setText(juce::String::fromUTF8(e.what()), juce::dontSendNotification);
         return;
     }
-    if (catalogued <= 0) return;
+    if (catalogued <= 0)
+    {
+        status.setText("No catalogued files below " + folder, juce::dontSendNotification);
+        return;
+    }
     const auto items = buildRoundItems(ranked, true, [](int64_t) { return false; });
     roundTagAnchorScreen = getScreenPosition() + anchor;
     const auto catalogPath = dbPath;

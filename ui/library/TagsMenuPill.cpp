@@ -48,6 +48,7 @@ void TagsMenuPill::paint(juce::Graphics& g)
 
 void TagsMenuPill::mouseEnter(const juce::MouseEvent&)
 {
+    if (centre != nullptr) *centre = getScreenBounds().getCentre();
     startTimer(200);
 }
 
