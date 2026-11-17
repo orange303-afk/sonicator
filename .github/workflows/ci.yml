@@ -241,6 +241,9 @@ jobs:
       - name: Configure
         run: cmake --preset ci-linux
 
+      - name: Packaging behavior tests
+        run: sh packaging/tests/test-linux-package.sh
+
       - name: Build
         run: cmake --build --preset ci-linux
 

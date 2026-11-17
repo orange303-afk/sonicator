@@ -236,3 +236,46 @@ jobs:
           name: validation-Windows
           path: validation/
           if-no-files-found: ignore
+
+  # The container is the release baseline, not a convenience: an AppImage carries no glibc, so a
+  # package built on a newer distribution would lock every user to that distribution.
+  linux:
+    name: Linux x86_64 (AppImage + deb)
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git ca-certificates curl python3 \
+            libasound2-dev libjack-jackd2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev \
+            libfreetype-dev libgl1-mesa-dev libglu1-mesa-dev xvfb
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: linux-installer-deps-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
+      - name: Packaging behavior tests
+        run: sh packaging/tests/test-linux-package.sh
+      - name: Configure and build Release
+        run: |
+          cmake --preset ci-linux
+          cmake --build --preset ci-linux
+      # About twenty test files open real windows, so the suite needs a display.
+      - name: Test under Xvfb
+        run: xvfb-run --auto-servernum ctest --preset ci-linux
+      - name: Package and collect matching sources
+        run: |
+          sh packaging/linux/build-packages.sh build dist
+          python3 packaging/make-source-bundle.py build dist
+          git rev-parse HEAD > dist/source-commit.txt
+          cd dist && for sum in *.sha256; do sha256sum -c "$sum"; done && ls -l
+      - name: Installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SONICATOR-Linux-x86_64
+          path: dist/
