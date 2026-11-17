@@ -255,6 +255,21 @@ jobs:
       - name: Test under Xvfb
         run: xvfb-run --auto-servernum ctest --preset ci-linux
 
+      # A binary that links but cannot open its window is not a port. The application must resolve
+      # every library and survive its first launch, which also creates and migrates the catalog.
+      - name: Start the application headless
+        run: |
+          set -e
+          if ldd build/Sonicator_artefacts/Release/SONICATOR | grep "not found"; then
+            echo "::error::the application has unresolved shared libraries"
+            exit 1
+          fi
+          xvfb-run --auto-servernum build/Sonicator_artefacts/Release/SONICATOR &
+          pid=$!
+          sleep 10
+          kill -0 "$pid"
+          kill "$pid" || true
+
       - name: Test log
         if: failure()
         uses: actions/upload-artifact@v4

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "core/contribute/ContributionUploader.h"
+#include "core/contribute/PlatformName.h"
 #include "core/database/SampleRepository.h"
 #include "core/settings/AppSettings.h"
 #include "core/smart/SmartResolver.h"
@@ -644,7 +645,7 @@ TEST_CASE("The reported platform name is one the intake accepts", "[contribute]"
     // training set. The value is compiled in, so the test pins the host to its own name.
     const auto name = platformName();
     CHECK(name.isNotEmpty());
-    CHECK(juce::StringArray({"mac", "win", "linux"}).contains(name));
+    CHECK((name == "mac" || name == "win" || name == "linux"));
    #if JUCE_LINUX
     CHECK(name == "linux");
    #elif JUCE_WINDOWS
