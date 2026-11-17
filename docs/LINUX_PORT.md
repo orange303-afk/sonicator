@@ -11,11 +11,26 @@ before any source change; CI runs afterwards use the `ci-linux` preset in the sa
 
 | Step | State |
 |---|---|
-| Configure (`ci-linux`, Ninja, Release, JACK) | Not measured yet |
-| Fetch dependencies (JUCE, ONNX Runtime linux-x64, libxmp, LAME, libsamplerate, Rubber Band, Catch2) | Not measured yet |
-| `SonicatorCore`, `SonicatorUI`, `SonicatorTests`, `SONICATOR` | Not measured yet |
-| `libonnxruntime.so` beside the binary, resolved with `$ORIGIN` | Not measured yet |
-| Full build time on the stand (4-core Celeron N4100) | Not measured yet |
+| Configure (`ci-linux`, Ninja, Release, JACK) | Passed in the `ubuntu:22.04` container after two fixes: the FreeType headers are `libfreetype6-dev` on jammy, and `DOWNLOAD_EXTRACT_TIMESTAMP` is a CMake 3.24 keyword that 3.22 reads as a second `URL_HASH` value |
+| Fetch dependencies (JUCE, ONNX Runtime linux-x64, libxmp, LAME, libsamplerate, Rubber Band, Catch2) | Passed |
+| `SonicatorCore`, `SonicatorUI`, `SONICATOR` | Built |
+| `SonicatorTests` | Built |
+| Packaging behavior tests (`packaging/tests/test-linux-package.sh`) | Passed |
+| Full build time on the stand (4-core Celeron N4100) | Not measured: the machine went offline mid-build |
+
+Source changes the port needed so far — every one a real defect, none a workaround:
+
+- `core/scanner/FileScanner.cpp`: `juce::InputStream` overrides returned `int64_t`, which is `long` on
+  glibc while JUCE returns `long long`. The type now comes from JUCE (`juce::int64`).
+- `core/dsp/AnalysisAudio.cpp`: `std::min({a, b, c})` mixed `int64_t` with `juce::int64`; the
+  template argument is explicit now.
+- `core/ableton/AbletonPacks.cpp`: the same mismatch between a declared AIFC length and
+  `getTotalLength()` in `juce::jmin`.
+- `tests/TestCloudBuild.cpp`: `RelativeTime::milliseconds(int64_t)` was ambiguous on glibc.
+- `core/contribute/PlatformName.cpp`: Linux used to report itself as `"mac"` to the contribution
+  intake; it now reports `"linux"`, and `services/contribute-worker` accepts it.
+- `CMakeLists.txt`: `JUCE_JACK` is not a CMake option — JUCE ignores it. JACK is compiled in with a
+  compile definition and linked explicitly; the runtime is resolved through `$ORIGIN`.
 
 ## Failing tests
 

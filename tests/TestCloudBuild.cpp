@@ -71,7 +71,7 @@ TEST_CASE("Cloud cache pruning keeps the newest files and never touches others",
     {
         auto f = t.dir.getChildFile(name);
         f.replaceWithText("x");
-        f.setLastModificationTime(juce::Time::getCurrentTime() - juce::RelativeTime::milliseconds((double) ageMs));
+        f.setLastModificationTime(juce::Time::getCurrentTime() - juce::RelativeTime::milliseconds((juce::int64) ageMs));
         return f;
     };
     const auto newest = make("layout-1.bin", 1000);
