@@ -25,9 +25,13 @@ in the build today; the manual states the limits where they matter.
 [User manual](docs/manual/sonicator-manual.pdf) · [Build](#build) · [Tests](#tests) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/BACKLOG.md)
 
 Sonicator is free, but you can support further development:
+
 https://ko-fi.com/ilyaorange
+
 https://ilyaorange.gumroad.com/
+
 https://boosty.to/ilyaorange
+
 
 ## What it does
 
