@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "core/contribute/ContributionUploader.h"
+#include "core/contribute/PlatformName.h"
 #include "core/database/SampleRepository.h"
 #include "core/settings/AppSettings.h"
 #include "core/smart/SmartResolver.h"
@@ -636,4 +637,20 @@ TEST_CASE("Live intake accepts a batch and deletes it", "[contribute][integratio
     const auto remove = transport.remove(
         "https://contribute.sampledicer.pro/v1/contributions/" + installId);
     CHECK(remove.status == 204);
+}
+
+TEST_CASE("The reported platform name is one the intake accepts", "[contribute]")
+{
+    // Linux builds used to claim "mac", which quietly wrote wrong platform data into the
+    // training set. The value is compiled in, so the test pins the host to its own name.
+    const auto name = platformName();
+    CHECK(name.isNotEmpty());
+    CHECK((name == "mac" || name == "win" || name == "linux"));
+   #if JUCE_LINUX
+    CHECK(name == "linux");
+   #elif JUCE_WINDOWS
+    CHECK(name == "win");
+   #elif JUCE_MAC
+    CHECK(name == "mac");
+   #endif
 }

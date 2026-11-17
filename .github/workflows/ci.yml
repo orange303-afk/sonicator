@@ -198,3 +198,83 @@ jobs:
             build/Testing/Temporary/LastTest.log
             build/Testing/Temporary/LastTestsFailed.log
           if-no-files-found: ignore
+
+  # Linux runs in the release baseline container: an AppImage carries no glibc, so the build host's
+  # glibc is the runtime floor for every user, and 22.04 keeps it at 2.35. The state this job reached
+  # while the port was being established is recorded in docs/LINUX_PORT.md.
+  linux:
+    name: Linux Release
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git ca-certificates \
+            libasound2-dev libjack-jackd2-dev ladspa-sdk \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev \
+            libxrender-dev libxi-dev libfreetype6-dev libfontconfig1-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libegl-dev \
+            xvfb
+
+      - name: Toolchain versions
+        run: |
+          cmake --version
+          ninja --version
+          g++ --version | head -1
+
+      # FetchContent sources dominate the first configure. The key follows the files that pin those
+      # versions, so a dependency bump re-downloads once instead of on every run.
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: linux-deps-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'CMakePresets.json', 'cmake/RubberBand.cmake') }}
+          restore-keys: |
+            linux-deps-
+
+      - name: Configure
+        run: cmake --preset ci-linux
+
+      - name: Packaging behavior tests
+        run: sh packaging/tests/test-linux-package.sh
+
+      - name: Build
+        # Keep going past the first failing target: a port surfaces several unrelated errors per
+        # round otherwise, and every round costs a full CI cycle.
+        run: cmake --build --preset ci-linux -- -k 0
+
+      # About twenty test files open real windows, so the suite needs a display. A container's
+      # /dev/shm is 64 MB, and the shared-memory image path runs out of it mid-suite with
+      # "X Error: BadAccess (MIT-SHM)"; without the extension JUCE draws through XPutImage.
+      - name: Test under Xvfb
+        run: xvfb-run --auto-servernum -s "-extension MIT-SHM" ctest --preset ci-linux
+
+      # A binary that links but cannot open its window is not a port. The application must resolve
+      # every library and survive its first launch, which also creates and migrates the catalog.
+      - name: Start the application headless
+        run: |
+          set -e
+          if ldd build/Sonicator_artefacts/Release/SONICATOR | grep "not found"; then
+            echo "::error::the application has unresolved shared libraries"
+            exit 1
+          fi
+          xvfb-run --auto-servernum -s "-extension MIT-SHM" build/Sonicator_artefacts/Release/SONICATOR &
+          pid=$!
+          sleep 10
+          kill -0 "$pid"
+          kill "$pid" || true
+
+      - name: Test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-linux
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
+          if-no-files-found: ignore

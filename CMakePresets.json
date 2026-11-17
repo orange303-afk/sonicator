@@ -82,6 +82,15 @@
       "architecture": { "value": "x64", "strategy": "set" },
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": { "BUILD_TESTING": "ON" }
+    },
+    {
+      "name": "ci-linux",
+      "displayName": "CI Linux x64 (Ninja, JACK enabled)",
+      "inherits": "base",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -93,7 +102,8 @@
     { "name": "plugin-universal", "configurePreset": "plugin-universal", "jobs": 6 },
     { "name": "ci-macos-debug", "configurePreset": "ci-macos-debug", "jobs": 6 },
     { "name": "ci-macos-release", "configurePreset": "ci-macos-release", "jobs": 6 },
-    { "name": "ci-windows", "configurePreset": "ci-windows", "configuration": "Debug", "jobs": 6 }
+    { "name": "ci-windows", "configurePreset": "ci-windows", "configuration": "Debug", "jobs": 6 },
+    { "name": "ci-linux", "configurePreset": "ci-linux", "jobs": 4 }
   ],
   "testPresets": [
     {
@@ -127,6 +137,12 @@
       "name": "ci-windows",
       "configurePreset": "ci-windows",
       "configuration": "Debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "timeout": 900 }
+    },
+    {
+      "name": "ci-linux",
+      "configurePreset": "ci-linux",
       "output": { "outputOnFailure": true },
       "execution": { "timeout": 900 }
     }

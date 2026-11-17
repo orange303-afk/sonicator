@@ -57,9 +57,9 @@ juce::String FileScanner::computeFileHash(const juce::File& f, CancelCheck cance
     {
     public:
         CheckedStream(juce::InputStream& s, CancelCheck c) : input(s), check(std::move(c)) {}
-        int64_t getTotalLength() override { return input.getTotalLength(); }
-        int64_t getPosition() override { return input.getPosition(); }
-        bool setPosition(int64_t p) override { return input.setPosition(p); }
+        juce::int64 getTotalLength() override { return input.getTotalLength(); }
+        juce::int64 getPosition() override { return input.getPosition(); }
+        bool setPosition(juce::int64 p) override { return input.setPosition(p); }
         bool isExhausted() override { return interrupted || input.isExhausted(); }
         int read(void* dest, int bytes) override
         {

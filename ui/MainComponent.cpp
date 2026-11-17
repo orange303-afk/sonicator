@@ -5563,11 +5563,8 @@ void MainComponent::startContribution()
         }
         return vocabulary;
     };
-   #if JUCE_WINDOWS
-    const juce::String osName = "win";
-   #else
-    const juce::String osName = "mac";
-   #endif
+    // The intake accepts exactly the three names platformName() can return.
+    const auto osName = contribute::platformName();
     contributionUploader = std::make_shared<contribute::Uploader>(
         std::make_unique<contribute::WebTransport>(), std::move(source), version(), osName);
     contributionScheduler = std::make_unique<contribute::Scheduler>(

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=SONICATOR
+GenericName=Sample Explorer
+Comment=Intelligent sample explorer for the local audio library
+Exec=SONICATOR
+Icon=sonicator
+Terminal=false
+Categories=AudioVideo;Audio;Utility;
+StartupWMClass=SONICATOR
+Keywords=sample;audio;library;creator;

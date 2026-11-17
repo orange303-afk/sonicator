@@ -20,7 +20,7 @@ AnalysisAudio readAnalysisAudio(const juce::File& file, const AnalysisAudioOptio
     }
     const int64_t byTime = (int64_t) std::llround(options.maxSeconds * reader->sampleRate);
     const int64_t byMemory = options.maxDecodedBytes / (4 * (int64_t) reader->numChannels);
-    const int64_t length = std::min({ reader->lengthInSamples, byTime, byMemory });
+    const int64_t length = std::min<int64_t>({ (int64_t) reader->lengthInSamples, byTime, byMemory });
     if (length <= 0) { out.error = "empty audio file"; return out; }
     out.buffer.setSize((int) reader->numChannels, (int) length);
     if (! reader->read(&out.buffer, 0, (int) length, 0, true, true))

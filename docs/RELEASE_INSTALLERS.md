@@ -31,7 +31,7 @@ Commit the matching sources before creating the source archive: the archive is t
 `git archive HEAD`, so uncommitted working-tree edits are never shipped as “matching source” and
 a Windows CRLF-normalized checkout cannot block packaging. Builders refuse to overwrite an
 existing artifact, and macOS staging stops if less than 8 GiB is available. Build/staging are kept
-outside iCloud; final installers go in ignored `dist/`. Python 3.11+ is needed by source-archive
+outside iCloud; final installers go in ignored `dist/`. Python 3.8+ is needed by source-archive
 creation (developer tooling only). Product operation needs no Python.
 
 Locations:
@@ -88,6 +88,41 @@ catalog/settings/export hashes. The temporary 0.1.1 MSI is a **test fixture**, n
 The disposable startup profile explicitly opts out of contribution sharing, avoiding the
 first-launch consent modal during the shutdown test. It refuses to overwrite an existing
 profile; interacting with the first-launch dialog is separate manual acceptance.
+
+## Linux
+
+```bash
+cmake --preset ci-linux
+cmake --build --preset ci-linux
+xvfb-run --auto-servernum ctest --preset ci-linux
+sh packaging/linux/build-packages.sh build dist
+python3 packaging/make-source-bundle.py build dist
+```
+
+Deliverables: `SONICATOR-<version>-Linux-x86_64.AppImage`,
+`SONICATOR-<version>-Linux-amd64.deb`, the matching sources archive and checksums.
+
+**The container is the release baseline.** An AppImage carries no glibc, so the glibc of the machine
+that builds it becomes the floor for every user. Release artifacts are therefore built inside
+`ubuntu:22.04` (glibc 2.35), which covers Ubuntu 22.04+, Debian 12+, Mint 21+ and Fedora 36+.
+`build-packages.sh` reads every `GLIBC_` symbol version from the shipped binaries and refuses to
+produce a package above 2.35, so a build on a newer distribution fails loudly instead of shipping.
+
+Layout of both artifacts: `usr/bin/SONICATOR`, `usr/lib/sonicator/libonnxruntime.so` (resolved
+through `$ORIGIN/../lib/sonicator`), `usr/share/applications/sonicator.desktop`, hicolor icons at
+16–512 px and licences under `usr/share/doc/sonicator/Licenses`. The AppImage adds an `AppRun` that
+exports the runtime directory. The `.deb` declares `libc6 (>= 2.35)`, `libasound2`, the X11 libraries JUCE links (`libx11-6`,
+`libxext6`, `libxrandr2`, `libxinerama1`, `libxcursor1`, `libxrender1`, `libxi6`), `libfreetype6`,
+`libfontconfig1`, `libgl1` and `libjack-jackd2-0 | pipewire-jack`, so either JACK implementation
+satisfies it. The release job reads the produced package back and fails when a JUCE library is
+missing from that list.
+
+Install with `sudo apt install ./SONICATOR-<version>-Linux-amd64.deb`, or run the AppImage from any
+directory after `chmod +x`. Without FUSE the AppImage starts with `--appimage-extract-and-run`.
+
+There is no signature, no distribution repository and no `libjack` bundled: the release notes say so.
+Upgrading is a new `.deb` install or a replaced AppImage; nothing touches the library, settings or
+exported audio. A VST3 plug-in for Linux is not part of this release.
 
 ## Validation and CI
 

@@ -37,7 +37,7 @@ bool isAbletonProtectedSample(const juce::File& file)
     if (input.read(header, 12) != 12) return false;
     if (std::memcmp(header, "FORM", 4) != 0 || std::memcmp(header + 8, "AIFC", 4) != 0) return false;
     const auto declared = 8 + (int64_t) be32(header + 4);
-    const auto end = juce::jmin(declared, input.getTotalLength());
+    const auto end = juce::jmin<juce::int64>((juce::int64) declared, input.getTotalLength());
     // A malformed AIFC must not turn discovery into a long seek loop over zero-size chunks.
     static constexpr int maxChunks = 1024;
     int visited = 0;

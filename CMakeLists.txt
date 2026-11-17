@@ -13,6 +13,12 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 include(FetchContent)
+# Extracted archives keep the archive's timestamp instead of the download time. The keyword that
+# does this arrived in CMake 3.24; the 3.22 that Ubuntu 22.04 ships (the release baseline) reads it
+# as a second URL_HASH value and fails the configure, so the policy is set instead of the keyword.
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 # zlib is used by JUCE and by the NKI reader. macOS and Linux ship it with the SDK; Windows does not,
 # so the build fetches the upstream archive there instead of requiring vcpkg or a manual install.
 find_package(ZLIB)
@@ -148,8 +154,7 @@ set(LIBSAMPLERATE_INSTALL OFF CACHE BOOL "" FORCE)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 FetchContent_Declare(libsamplerate
     URL "https://github.com/libsndfile/libsamplerate/archive/refs/tags/0.2.2.tar.gz"
-    URL_HASH SHA256=16e881487f184250deb4fcb60432d7556ab12cb58caea71ef23960aec6c0405a
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    URL_HASH SHA256=16e881487f184250deb4fcb60432d7556ab12cb58caea71ef23960aec6c0405a)
 FetchContent_MakeAvailable(libsamplerate)
 unset(CMAKE_POLICY_VERSION_MINIMUM)
 if("${SONICATOR_BUILD_TESTING_SAVED}" STREQUAL "")
@@ -215,7 +220,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/edit/NormalizeService.cpp
     core/batch/BatchTypes.cpp core/batch/BatchSources.cpp core/batch/BatchPaths.cpp core/batch/BatchPipeline.cpp core/batch/BatchSplit.cpp core/batch/BatchResampler.cpp core/batch/BatchQuantizer.cpp core/batch/BatchMetadata.cpp core/batch/BatchPublisher.cpp core/batch/BatchEncoder.cpp core/batch/BatchService.cpp core/batch/BatchPresetStore.cpp core/batch/BatchPreviewService.cpp
     core/indexing/CatalogFileSync.cpp
-    core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp
+    core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp core/contribute/PlatformName.cpp
     core/updates/UpdateCheck.cpp
     core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
     core/smart/TapTempo.cpp
@@ -233,6 +238,19 @@ target_link_libraries(SonicatorCore PUBLIC
 if(SONICATOR_ENABLE_MATCH)
     target_sources(SonicatorCore PRIVATE core/match/OfflineMatchRenderer.cpp)
     target_link_libraries(SonicatorCore PUBLIC sonicator_rubberband)
+endif()
+# Linux audio: ALSA is JUCE's default and always present; JACK is what the Linux audio world expects
+# beside it. Both backends are compiled into juce_audio_devices, so the definition has to reach the
+# target that compiles the module, and the client library has to be linked explicitly: JUCE's module
+# declaration names alsa only.
+if(UNIX AND NOT APPLE)
+    target_compile_definitions(SonicatorCore PUBLIC JUCE_JACK=1)
+    find_library(JACK_LIBRARY jack)
+    if(JACK_LIBRARY)
+        target_link_libraries(SonicatorCore PUBLIC ${JACK_LIBRARY})
+    else()
+        message(WARNING "libjack not found: the build will not offer a JACK device type")
+    endif()
 endif()
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png
@@ -272,6 +290,32 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll" "$<TARGET_FILE_DIR:Sonicator>"
         VERBATIM)
+endif()
+if(UNIX AND NOT APPLE)
+    # A packaged Linux build ships the runtime beside the binary; $ORIGIN is the loader's own
+    # directory, so nothing points into the build tree. The second entry is where a package keeps
+    # its own shared objects.
+    set_target_properties(Sonicator PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/sonicator")
+    # The archive names the runtime libonnxruntime.so.1.20.1 behind two symlinks, and its SONAME is
+    # libonnxruntime.so.1: the loader asks for that name, so the real file has to be there under it.
+    # Copying the unversioned symlink alone leaves the application unable to start.
+    file(REAL_PATH "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.so" ONNXRUNTIME_LINUX_REAL)
+    add_custom_command(TARGET Sonicator POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_LINUX_REAL}" "$<TARGET_FILE_DIR:Sonicator>/libonnxruntime.so.1"
+        COMMAND ${CMAKE_COMMAND} -E create_symlink libonnxruntime.so.1
+            "$<TARGET_FILE_DIR:Sonicator>/libonnxruntime.so"
+        VERBATIM)
+    if(EXISTS "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime_providers_shared.so")
+        # Loaded lazily by non-CPU execution providers; absent here means a clear library error
+        # rather than a silently missing backend.
+        add_custom_command(TARGET Sonicator POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime_providers_shared.so"
+                "$<TARGET_FILE_DIR:Sonicator>"
+            VERBATIM)
+    endif()
 endif()
 if(APPLE)
     # Ship the runtime inside the app, not at an absolute FetchContent build-tree path.

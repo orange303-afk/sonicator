@@ -119,6 +119,12 @@ describe("intake", () => {
     expect((await call("[]")).status).toBe(400);
   });
 
+  it("accepts linux beside mac and win, and nothing else", async () => {
+    expect((await call(batch({ os: "linux" }))).status).toBe(204);
+    expect((await call(batch({ os: "bsd" }))).status).toBe(400);
+    expect((await call(batch({ os: undefined }))).status).toBe(400);
+  });
+
   it("rate limits one address", async () => {
     const address = "192.0.2.77";
     const install = "6a1c0d24-8f3b-4e57-9a2d-7c5e1b9f3a48";

@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#if defined(__unix__) || defined(__APPLE__)
+ #include <unistd.h>
+#endif
 #include <catch2/catch_approx.hpp>
 #include "core/edit/AudioEditWriter.h"
 #include "TestHelpers.h"
@@ -68,6 +71,11 @@ TEST_CASE("Overwrite replaces a WAV atomically and keeps its format", "[edit][wr
 #if ! JUCE_WINDOWS
 TEST_CASE("A failed overwrite leaves the original byte-identical", "[edit][writer]")
 {
+   #if ! JUCE_WINDOWS
+    // Root bypasses directory mode bits, so a read-only folder denies nothing. CI containers run
+    // as root; the check still runs on a normal user account.
+    if (::geteuid() == 0) SKIP("running as root: directory mode bits deny nothing");
+   #endif
     TestDirectory t;
     juce::WavAudioFormat wav;
     const auto folder = t.dir.getChildFile("locked");

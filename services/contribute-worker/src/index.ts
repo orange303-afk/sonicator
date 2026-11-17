@@ -128,7 +128,7 @@ export function validateBatch(value: unknown): string | null {
   if (!isUuid(batch.installId)) return "installId is not a uuid";
   if (!isUuid(batch.batchId)) return "batchId is not a uuid";
   if (!isText(batch.appVersion)) return "appVersion";
-  if (batch.os !== "mac" && batch.os !== "win") return "os";
+  if (batch.os !== "mac" && batch.os !== "win" && batch.os !== "linux") return "os";
   if (typeof batch.sentAt !== "string" || Number.isNaN(Date.parse(batch.sentAt))) return "sentAt";
   if (!Array.isArray(batch.records) || batch.records.length === 0) return "records";
   if (batch.records.length > MAX_RECORDS) return "too many records";

@@ -29,6 +29,7 @@
 | macOS Debug | `macos-15` (arm64) | `cmake --preset ci-macos-debug`, build, `ctest` | yes |
 | macOS Release | `macos-15` (arm64) | same with `ci-macos-release` | yes |
 | Windows Debug | `windows-2022` | `cmake --preset ci-windows`, build, `ctest` | no (`continue-on-error`) |
+| Linux Release | `ubuntu-24.04` in an `ubuntu:22.04` container | `cmake --preset ci-linux`, build, `xvfb-run ctest --preset ci-linux` | no (`continue-on-error`) |
 
 Notes:
 
@@ -39,6 +40,9 @@ Notes:
 - On failure the job uploads `build/Testing/Temporary/LastTest.log`.
 - The Windows job builds the whole project and runs the suite, but 22 tests fail on Windows; the state
   is recorded in `docs/WINDOWS_PORT.md` and the job is informational until they are resolved.
+- The Linux job runs inside `ubuntu:22.04` because that container is the release baseline: an AppImage
+  carries no glibc, so a build on a newer distribution would lock users to it. About twenty test files
+  open windows, so the suite runs under `xvfb-run`. Its state is recorded in `docs/LINUX_PORT.md`.
 - A Release-only flake was found here: `Changing image sample stops old playback before the new decode
   completes` waited a fixed 60 ms for the transport to start and failed on the slower runner. The wait
   is now bounded and condition-driven, and the assertion itself is unchanged.

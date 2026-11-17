@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#if defined(__unix__) || defined(__APPLE__)
+ #include <unistd.h>
+#endif
 #include <catch2/catch_approx.hpp>
 #include "core/batch/BatchEncoder.h"
 #include "core/batch/BatchMetadata.h"
@@ -462,7 +465,12 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
     vbrPlan.mp3VbrQuality = 2;
     auto vbrResult = renderAndPublish(preparedFor(source, vbrRecipe), vbrPlan, snapshot,
                                       vbrRecipe, ConflictPolicy::rename, protection);
+    INFO(vbrResult.message);
+    INFO((int) vbrResult.code);
     REQUIRE(vbrResult.state == OutputState::completed);
+    // A VBR file must carry the finished Xing frame; without it every reader guesses the duration
+    // from the first frame and reports the wrong length.
+    REQUIRE(fileContains(vbrResult.target, asciiBytes("Xing")));
     std::unique_ptr<juce::AudioFormatReader> vbrReader(formats.createReaderFor(vbrResult.target));
     REQUIRE(vbrReader != nullptr);
     REQUIRE(std::abs(vbrReader->lengthInSamples - 88200) <= 2 * 1152 + 4410);
@@ -514,6 +522,7 @@ TEST_CASE("An unwritable destination fails without touching the source or old ou
 #if JUCE_WINDOWS
     SKIP("POSIX directory mode bits do not implement Windows ACL write denial");
 #else
+    if (::geteuid() == 0) SKIP("running as root: directory mode bits deny nothing");
     TestDirectory t;
     const auto source = floatWav(t.dir.getChildFile("Source/ro.wav"), { 0.2f, -0.2f });
     const auto hash = juce::SHA256(source).toHexString();
