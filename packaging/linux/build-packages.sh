@@ -50,7 +50,7 @@ glibc_ceiling() {
     objdump -T "$1" | sed -n 's/.*GLIBC_\([0-9][0-9.]*\).*/\1/p' | sort -V | tail -1
 }
 
-verify_binary() {
+verify_glibc() {
     binary="$1"
     name="$(basename "$binary")"
     ceiling="$(glibc_ceiling "$binary")"
@@ -58,14 +58,19 @@ verify_binary() {
         echo "$name needs glibc $ceiling, above the $glibc_baseline baseline" >&2
         exit 1
     fi
-    # The loader must look beside the binary, and never into the machine that built it.
-    readelf -d "$binary" | grep -q 'ORIGIN' || {
-        echo "$name has no \\\$ORIGIN rpath" >&2; exit 1; }
-    if readelf -d "$binary" | grep -E 'RPATH|RUNPATH' | grep -qE "$build|/home/|/Users/|/tmp/"; then
-        echo "$name has an absolute rpath" >&2
+    echo "verified $name (glibc $ceiling)"
+}
+
+# Only the application decides where its own libraries come from; the runtime is found through it.
+verify_app_rpath() {
+    if ! readelf -d "$1" | grep -q 'ORIGIN'; then
+        echo "SONICATOR has no \$ORIGIN rpath" >&2
         exit 1
     fi
-    echo "verified $name (glibc $ceiling)"
+    if readelf -d "$1" | grep -E 'RPATH|RUNPATH' | grep -qE "$build|/home/|/Users/|/tmp/"; then
+        echo "SONICATOR has an absolute rpath" >&2
+        exit 1
+    fi
 }
 
 stage_tree() {
