@@ -493,10 +493,12 @@ void MainComponent::registerCommands()
     {
         CommandSpec spec;
         spec.id = "library.addLastTag";
-        spec.name = "Add last tag";
+        spec.name = "Assign last used tag";
         spec.description = "Applies the last tag you assigned in this catalog to the selection";
         spec.scope = CommandScope::library;
         spec.category = "Tags";
+        spec.defaults = { juce::KeyPress('t', juce::ModifierKeys::commandModifier
+                                               | juce::ModifierKeys::shiftModifier, 0) };
         auto state = [this]() -> CommandState
         {
             if (library.getSelectedSamples().empty())
@@ -3458,6 +3460,16 @@ void MainComponent::showAutoTagDialog(AutoTagResult result)
         [safe = juce::Component::SafePointer<MainComponent>(this)]
         {
             if (safe != nullptr) safe->reloadLibrary();
+        },
+        [safe = juce::Component::SafePointer<MainComponent>(this)](const juce::File& file)
+        {
+            if (safe == nullptr) return;
+            if (safe->preview.loadFile(file, true) && ! safe->preview.transportPlaying())
+                safe->preview.playPause();
+        },
+        [safe = juce::Component::SafePointer<MainComponent>(this)]
+        {
+            if (safe != nullptr) safe->preview.stopPlayback();
         });
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned(dialog);

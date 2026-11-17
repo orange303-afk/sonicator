@@ -85,6 +85,10 @@ public:
     {
         if (columnId == 1) owner.toggleRow(row);
     }
+    void selectedRowsChanged(int lastRowSelected) override
+    {
+        owner.previewProposal(lastRowSelected);
+    }
     void sortOrderChanged(int newSortColumnId, bool isForwards) override
     {
         AutoTagDialog::sortProposals(owner.result.proposals, newSortColumnId, isForwards);
@@ -121,8 +125,11 @@ private:
     AutoTagDialog& owner;
 };
 AutoTagDialog::AutoTagDialog(AutoTagResult prepared, AutoTagService& s,
-                             std::function<void()> onApplied)
-    : result(std::move(prepared)), service(s), appliedCallback(std::move(onApplied))
+                             std::function<void()> onApplied,
+                             std::function<void(const juce::File&)> onPreview,
+                             std::function<void()> onStopPreview)
+    : result(std::move(prepared)), service(s), appliedCallback(std::move(onApplied)),
+      previewCallback(std::move(onPreview)), stopPreviewCallback(std::move(onStopPreview))
 {
     addAndMakeVisible(summary);
     addAndMakeVisible(selectedLabel);
@@ -188,6 +195,8 @@ AutoTagDialog::AutoTagDialog(AutoTagResult prepared, AutoTagService& s,
 AutoTagDialog::~AutoTagDialog()
 {
     stopTimer();
+    ++previewGeneration;
+    if (stopPreviewCallback) stopPreviewCallback();
     if (applying) service.cancel();
 }
 void AutoTagDialog::paint(juce::Graphics& g)
@@ -228,9 +237,24 @@ void AutoTagDialog::updateSelectionLabel()
         juce::dontSendNotification);
     apply.setEnabled(! applying && selected > 0);
 }
+void AutoTagDialog::previewProposal(int row)
+{
+    if (row < 0 || row >= (int) result.proposals.size() || ! previewCallback) return;
+    const auto file = juce::File(result.proposals[(size_t) row].filePath);
+    const int generation = ++previewGeneration;
+    juce::Component::SafePointer<AutoTagDialog> safe(this);
+    juce::Timer::callAfterDelay(180, [safe, generation, file]
+    {
+        if (safe == nullptr || safe->previewGeneration != generation) return;
+        if (file.existsAsFile() && safe->previewCallback) safe->previewCallback(file);
+    });
+}
+
 void AutoTagDialog::beginApply()
 {
     if (applying) return;
+    ++previewGeneration;
+    if (stopPreviewCallback) stopPreviewCallback();
     std::vector<AutoTagProposal> chosen;
     for (const auto& proposal : result.proposals)
         if (proposal.included && ! proposal.alreadyAssigned) chosen.push_back(proposal);

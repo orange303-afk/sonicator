@@ -130,14 +130,15 @@ TEST_CASE("AutoTag rejects stale or invalid evidence", "[autotag][rules]")
     changed.inputCurrent = false;
     REQUIRE(skipCode(changed) == "changed-file");
 }
-TEST_CASE("AutoTag excludes proposals that contradict a manual Type override", "[autotag][rules]")
+TEST_CASE("AutoTag prefers a manual Type override over the filename", "[autotag][rules]")
 {
     auto conflict = input("/lib/kick.wav");
     SmartOverride overrideValue; overrideValue.textValue = "Snare";
     conflict.typeOverride = overrideValue;
     const auto decision = AutoTagRules::evaluate(conflict, options());
-    REQUIRE_FALSE(decision.proposal.has_value());
-    REQUIRE(decision.skip->code == "override-conflict");
+    REQUIRE(decision.proposal.has_value());
+    REQUIRE(decision.proposal->canonicalType == "Snare");
+    REQUIRE(decision.proposal->rule == AutoTagRule::ManualType);
 
     auto agrees = input("/lib/kick.wav");
     SmartOverride matching; matching.textValue = "Kick";
@@ -153,6 +154,27 @@ TEST_CASE("AutoTag excludes proposals that contradict a manual Type override", "
     SmartOverride cleared; cleared.cleared = true;
     unknown.typeOverride = cleared;
     REQUIRE(skipCode(unknown) == "override-conflict");
+
+    // A manual Type with no AutoTag category is authoritative too: do not fall back to the name.
+    auto unsupported = input("/lib/kick.wav");
+    SmartOverride synth; synth.textValue = "Synth";
+    unsupported.typeOverride = synth;
+    REQUIRE(skipCode(unsupported) == "unsupported-type");
+}
+
+TEST_CASE("AutoTag prefers a resolved smart Type over the filename", "[autotag][rules]")
+{
+    auto smart = input("/lib/Tom_01.wav");
+    smart.result = resolved("percussion", "dsp_acoustic");
+    const auto decision = AutoTagRules::evaluate(smart, options());
+    REQUIRE(decision.proposal.has_value());
+    REQUIRE(decision.proposal->canonicalType == "Percussion");
+    REQUIRE(decision.proposal->rule == AutoTagRule::SmartType);
+
+    // A Type derived from the filename itself does not outrank the richer tokenizer.
+    auto fromName = input("/lib/Tom_01.wav");
+    fromName.result = resolved("percussion", "filename");
+    REQUIRE(proposalType(fromName) == "Tom");
 }
 TEST_CASE("AutoTag skips unsupported instrument classes and missing tags", "[autotag][rules]")
 {

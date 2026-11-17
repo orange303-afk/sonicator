@@ -10,7 +10,7 @@ The file context menu starts with up to five recently **assigned** tags, newest 
 assigns its tag to the whole current selection and never removes an assignment. Opening a menu, a
 no-op or a removal does not change the list. Renamed tags show their current name; a deleted tag
 drops out. With the round tag menu enabled those five rows are replaced by one **Tags** pill; the
-history still feeds the quick list when the feature is off and the **Add last tag** command.
+history still feeds the quick list when the feature is off and the **Assign last used tag** command.
 
 History lives in the catalog database, so it moves with the database and is isolated per catalog:
 
@@ -149,28 +149,36 @@ strings/violin/cello/viola. Cymbals are mapped to the existing broader Percussio
 
 ### Evidence
 
-Accepted evidence:
+Accepted evidence, strongest first:
 
+- a manual Type override;
+- a completed, resolved smart Type from a source other than the filename or folder name;
 - filename tokens;
 - valid stored Type candidates with a known source (WAV/AIFF metadata, ASD, RX2 and so on);
-- a completed, resolved smart Type result from a source other than the folder name.
+- a resolved acoustic class when nothing more specific exists.
+
+The Type column is the resolved decision, so it outranks the filename: a file `Tom_01.wav` whose
+Type says Percussion is proposed as Percussion. A Type that came from the filename itself does not
+outrank the tokenizer, which is richer: the same file with Type = Percussion sourced from its name
+becomes Tom. A manual Type override is the person's statement and becomes the proposal directly; a
+Type with no AutoTag category (*Synth*) skips the file instead of falling back to the name. Marking
+the Type unknown skips the type proposal but gear and genre tags may still be proposed.
 
 Stored filename-derived smart candidates are ignored because AutoTag parses the same filename with
 its own instrument-specific table; this keeps a broader legacy smart class such as Percussion from
 vetoing a specific Crash, Tom or Rim proposal. A folder or pack name is context only. It never
-establishes a type by itself and cannot veto a type stated by the filename or metadata. Candidates from an older extractor version, stale smart
-results, invalid candidates and changed files are not evidence. Two rows from one source are not
-independent confirmations; the engine looks for one unambiguous class, not a vote count.
+establishes a type by itself and cannot veto a type stated by the filename, metadata or Type.
+Candidates from an older extractor version, stale smart results, invalid candidates and changed
+files are not evidence. Two rows from one source are not independent confirmations; the engine
+looks for one unambiguous class, not a vote count.
 
-A manual Type override is never modified. A proposal that differs from it — or a manual
-unknown/not-applicable marker — is excluded from application by default and shown in the review
-list. Existing tags and assignments are never removed.
+Existing tags and assignments are never removed.
 
 Every proposal carries a rule id, a readable reason and a source, for example
-`filename token "snare"` or `stored metadata type "kick" from wav_smpl`. There are no confidence
-percentages. Competing or conflicting types produce a skip with an explanation.
+`filename token "snare"` or `manual Type override "kick"`. There are no confidence percentages.
+Competing or conflicting types produce a skip with an explanation.
 
-Rule set version: `autoTagRulesVersion = 1` in `core/tagging/AutoTagTypes.h`.
+Rule set version: `autoTagRulesVersion = 3` in `core/tagging/AutoTagTypes.h`.
 
 ### Review and application
 
@@ -181,7 +189,9 @@ virtualized table. Each new proposal can be excluded; already-assigned rows cann
 
 **Cancel** closes without writing. **Apply selected** writes only included, still-valid proposals.
 Before each batch it revalidates that the sample and tag still exist and that the file size/mtime
-matches the snapshotted value; changed or missing files are rejected and counted. Batches are 500
+matches the snapshotted value; changed or missing files are rejected and counted. Selecting a row
+in the proposal table auditions that file through the preview panel (a 180 ms settle), and closing
+the dialog or applying stops it. Batches are 500
 assignments; cancellation rolls back the unfinished batch and keeps completed batches. The result
 reports the actual applied and rejected counts.
 

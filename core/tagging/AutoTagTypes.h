@@ -6,9 +6,9 @@
 namespace sonicator {
 // Bump when a token, compound rule or evidence rule changes. A proposal prepared by an older
 // rule set must not be applied without preparing it again.
-inline constexpr int autoTagRulesVersion = 2;
+inline constexpr int autoTagRulesVersion = 3;
 
-enum class AutoTagRule { None, FilenameToken, FilenameCompound, MetadataType, SmartType, Gear, Genre, Structure, Folder };
+enum class AutoTagRule { None, FilenameToken, FilenameCompound, MetadataType, SmartType, ManualType, Gear, Genre, Structure, Folder };
 juce::String autoTagRuleKey(AutoTagRule);
 
 struct AutoTagProposal

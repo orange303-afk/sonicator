@@ -178,6 +178,7 @@ juce::String autoTagRuleKey(AutoTagRule rule)
         case AutoTagRule::FilenameCompound: return "filename-compound";
         case AutoTagRule::MetadataType: return "metadata-type";
         case AutoTagRule::SmartType: return "smart-type";
+        case AutoTagRule::ManualType: return "manual-type";
         case AutoTagRule::Gear: return "gear";
         case AutoTagRule::Genre: return "genre";
         case AutoTagRule::Structure: return "structure";
@@ -346,44 +347,85 @@ AutoTagDecision AutoTagRules::evaluate(const AutoTagInput& in, const AutoTagOpti
     const auto folderName = juce::File(in.filePath).getParentDirectory().getFileName();
     const auto folder = evidenceForTokens(splitTokens(folderName));
 
-    std::set<juce::String> evidenceClasses = filename.classes;
+    const bool manualUnknown = in.typeOverride.has_value()
+        && (in.typeOverride->cleared || in.typeOverride->notApplicable);
+    const bool hasManualType = in.typeOverride.has_value() && ! manualUnknown;
+    juce::String manualText, manualType;
+    if (hasManualType)
+    {
+        manualText = in.typeOverride->textValue;
+        const auto manualEvidence = evidenceForTokens(splitTokens(manualText));
+        if (manualEvidence.classes.size() == 1) manualType = *manualEvidence.classes.begin();
+        else if (! manualEvidence.compoundType.isEmpty()) manualType = manualEvidence.compoundType;
+        else manualType = canonicalFromAliases(manualText);
+    }
+
+    std::set<juce::String> evidenceClasses;
     AutoTagRule rule = AutoTagRule::FilenameToken;
     juce::String reason, source = "filename";
-    if (filename.compoundType.isNotEmpty())
+    bool typeIsPrimary = false;
+    if (hasManualType)
     {
-        reason = "filename compound " + quote(filename.compoundDetail);
-        rule = AutoTagRule::FilenameCompound;
-    }
-    else if (! filename.details.empty())
-        reason = "filename token " + quote(filename.details.front());
-    else if (! metadataClasses.empty())
-    {
-        evidenceClasses = metadataClasses;
-        rule = AutoTagRule::MetadataType;
-        source = metadataSource;
-        reason = "stored metadata type " + quote(metadataDetail) + " from " + metadataSource;
+        // A manual Type is the person's own statement; it wins over every other source and never
+        // turns into a conflict. Without a matching AutoTag category the honest answer is a skip.
+        if (manualType.isEmpty())
+            return skip(in, "unsupported-type",
+                        "the manual Type override " + quote(manualText)
+                            + " has no supported AutoTag category", { manualText });
+        evidenceClasses = { manualType };
+        rule = AutoTagRule::ManualType;
+        source = "manual";
+        reason = "manual Type override " + quote(manualText);
+        typeIsPrimary = true;
     }
     else if (! smartClasses.empty())
     {
+        // The Type column is the resolved decision, so it outranks the filename. A type whose own
+        // source is the filename is handled by the richer tokenizer below.
         evidenceClasses = smartClasses;
         rule = AutoTagRule::SmartType;
         source = smartSource;
         reason = "resolved smart type " + quote(smartDetail) + " from " + smartSource;
+        typeIsPrimary = true;
     }
-    else if (! acousticClasses.empty())
+    else
     {
-        evidenceClasses = acousticClasses;
-        rule = AutoTagRule::SmartType;
-        source = acousticSource;
-        reason = "acoustic classification " + quote(acousticDetail) + " from " + acousticSource;
+        evidenceClasses = filename.classes;
+        if (filename.compoundType.isNotEmpty())
+        {
+            reason = "filename compound " + quote(filename.compoundDetail);
+            rule = AutoTagRule::FilenameCompound;
+        }
+        else if (! filename.details.empty())
+            reason = "filename token " + quote(filename.details.front());
+        else if (! metadataClasses.empty())
+        {
+            evidenceClasses = metadataClasses;
+            rule = AutoTagRule::MetadataType;
+            source = metadataSource;
+            reason = "stored metadata type " + quote(metadataDetail) + " from " + metadataSource;
+        }
+        else if (! acousticClasses.empty())
+        {
+            evidenceClasses = acousticClasses;
+            rule = AutoTagRule::SmartType;
+            source = acousticSource;
+            reason = "acoustic classification " + quote(acousticDetail) + " from " + acousticSource;
+        }
     }
 
-    if (filename.classes.size() > 1)
-        return skip(in, "ambiguous-types", "the filename names more than one instrument",
-                    { joinClasses(filename.classes) });
-    if (filename.ambiguous808 && ! filename.classes.empty())
-        return skip(in, "ambiguous-types", "808 is not enough to choose between kick and bass",
-                    { "Bass", "Kick" });
+    if (! typeIsPrimary)
+    {
+        if (filename.classes.size() > 1)
+            return skip(in, "ambiguous-types", "the filename names more than one instrument",
+                        { joinClasses(filename.classes) });
+        if (filename.ambiguous808 && ! filename.classes.empty())
+            return skip(in, "ambiguous-types", "808 is not enough to choose between kick and bass",
+                        { "Bass", "Kick" });
+    }
+    if (manualUnknown && ! evidenceClasses.empty())
+        return skip(in, "override-conflict",
+                    "a manual Type override marks the type as unknown or not applicable");
 
     auto appendExtraTags = [&](AutoTagDecision& dec)
     {
@@ -470,22 +512,6 @@ AutoTagDecision AutoTagRules::evaluate(const AutoTagInput& in, const AutoTagOpti
             return skip(in, "conflicting-types", "evidence points at different instrument types",
                         { joinClasses(all) });
         const auto proposed = *evidenceClasses.begin();
-        if (in.typeOverride.has_value())
-        {
-            const auto& override = *in.typeOverride;
-            if (override.cleared || override.notApplicable)
-                return skip(in, "override-conflict",
-                            "a manual Type override marks the type as unknown or not applicable");
-            const auto manualEvidence = evidenceForTokens(splitTokens(override.textValue));
-            juce::String manual;
-            if (manualEvidence.classes.size() == 1) manual = *manualEvidence.classes.begin();
-            else if (! manualEvidence.compoundType.isEmpty()) manual = manualEvidence.compoundType;
-            if (manual.isEmpty() || manual != proposed)
-                return skip(in, "override-conflict",
-                            "the manual Type override " + quote(override.textValue)
-                                + " differs from the proposal " + quote(proposed),
-                            { proposed, manual.isNotEmpty() ? manual : override.textValue });
-        }
         const auto mapped = options.tagIds.find(proposed);
         if (mapped == options.tagIds.end() || mapped->second <= 0)
             return skip(in, "tag-missing", "the catalog has no tag named " + quote(proposed), { proposed });

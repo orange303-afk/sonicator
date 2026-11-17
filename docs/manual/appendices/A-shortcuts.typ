@@ -40,7 +40,7 @@ macOS uses Cmd.
     ("Normalize selected…", "Shift+Cmd+N", "Shift+Ctrl+N"),
     ("Settings", "Cmd+,", "Ctrl+,"),
     ("Focus search", "Cmd+F", "Ctrl+F"),
-    ("Add last tag", "—", "—"),
+    ("Assign last used tag", "⇧⌘T", "⇧⌘T"),
     ("Settings — Hotkeys", "—", "—"),
     ("Reset panel layout", "—", "—"),
     ("Reset folder panel width", "—", "—"),

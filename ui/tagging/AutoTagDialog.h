@@ -10,7 +10,9 @@ class AutoTagDialog final : public juce::Component, private juce::Timer
 {
 public:
     AutoTagDialog(AutoTagResult prepared, AutoTagService& service,
-                  std::function<void()> onApplied);
+                  std::function<void()> onApplied,
+                  std::function<void(const juce::File&)> onPreview = {},
+                  std::function<void()> onStopPreview = {});
     ~AutoTagDialog() override;
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -36,8 +38,12 @@ private:
     void toggleRow(int row);
     void beginApply();
     void finishApply();
+    void previewProposal(int row);
     void updateSelectionLabel();
     void closeDialog();
     void timerCallback() override;
+    std::function<void(const juce::File&)> previewCallback;
+    std::function<void()> stopPreviewCallback;
+    int previewGeneration = 0;
 };
 } // namespace sonicator

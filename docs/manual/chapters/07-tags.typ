@@ -5,7 +5,7 @@
   inthis: (
     [Create, rename, recolour and delete tags],
     [Assign tags to rows, folders and whole subtrees],
-    [Recent tags and Add last tag],
+    [Recent tags and Assign last used tag],
     [Filter by tag, combine with Starred, reset assignments],
     [Favorites],
   ),
@@ -35,7 +35,7 @@ The recent list is built from your explicit assignments only: the quick items, t
 *New tag* and *Tag folder*. AutoTag application deliberately does not touch it, so a bulk run cannot
 scramble the order. Opening a menu or removing a tag does not change it either.
 
-*Add last tag* (no default key) repeats the last tag you assigned to a selection. It is disabled when
+*Assign last used tag* (⇧⌘T) repeats the last tag you assigned to a selection. It is disabled when
 the selection is empty or no tag has been assigned yet.
 
 To remove one tag from one file, Alt-click its tag in the TAGS cell. To remove all assignments in a

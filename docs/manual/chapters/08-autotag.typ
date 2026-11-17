@@ -43,24 +43,30 @@ explanation rather than inventing a tag.
 
 #section("Evidence")
 
-AutoTag accepts:
+AutoTag accepts, in this order:
 
+- a manual Type override — the person's own statement wins and becomes the proposal;
+- a completed smart Type result whose evidence is not merely the filename (metadata, sidecars,
+  acoustic or adaptive classification);
 - an exact filename token from the table;
 - a valid stored Type candidate with a known source (WAV/AIFF metadata, ASD, RX2 and so on);
-- a completed smart Type result whose evidence is not merely the folder name.
+- an acoustic classification when nothing more specific exists.
 
-Stored filename-derived smart candidates are ignored because AutoTag parses the same name with its
-own instrument table. A folder or pack name is context only: it never establishes a type and cannot
-veto a type stated by the filename or metadata. Two rows from one source are not two confirmations;
-the engine looks for one unambiguous class, not a vote.
+Stored filename-derived smart types are ignored because AutoTag parses the same name with its own
+instrument table, which is richer: a file `Tom_01.wav` whose Type came from its name still becomes
+Tom. A folder or pack name is context only: it never establishes a type and cannot veto a type
+stated by the type, filename or metadata. Two rows from one source are not two confirmations; the
+engine looks for one unambiguous class, not a vote.
 
-A manual Type override is never modified. A proposal that differs from it is listed but excluded
-from application by default. Existing tags are never removed.
+A manual Type override is never modified. If it names a type outside AutoTag's categories — say
+*Synth* — the file is skipped with an explanation instead of falling back to the filename. Marking
+the Type unknown also skips the type proposal. Existing tags are never removed.
 
-Every proposal carries the rule and a readable reason, for example `filename token "snare"` or
-`stored metadata type "kick" from wav_smpl`. There are no confidence percentages.
+Every proposal carries the rule and a readable reason, for example `filename token "snare"`,
+`manual Type override "kick"` or `resolved smart type "kick" from wav_smpl`. There are no
+confidence percentages.
 
-#shot("/docs/manual/assets/autotag.png", [Figure 8.1 — The review dialog. Every proposal shows the file, the proposed tag, the reason and its state; the folder column is omitted here for width, but the real dialog shows it.], )
+#shot("/docs/manual/assets/autotag.png", [Figure 8.1 — The review dialog. Every proposal shows the file, the proposed tag, the reason and its state; selecting a row auditions that file. The folder column is omitted here for width, but the real dialog shows it.], )
 
 #section("Reviewing and applying")
 

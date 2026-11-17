@@ -66,7 +66,7 @@ disabled with the reason "No editable audio in the preview".
 | Id | Name | Scope | Default |
 |---|---|---|---|
 | `library.normalizeSelected` | Normalize selected… | library | ⇧⌘N |
-| `library.addLastTag` | Add last tag | library | — |
+| `library.addLastTag` | Assign last used tag | library | ⇧⌘T |
 | `library.roundTagMenu` | Round tag menu | library | ⌘T |
 | `folders.roundTagMenu` | Round tag menu for the folder | folders | ⌘T |
 | `app.settings` | Settings | app | ⌘, |
