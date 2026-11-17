@@ -163,6 +163,21 @@ EncodedAudio encodeMp3ToTemporary(const juce::File& temporary, const EncodeSetti
         lame_close(lame);
         return fail(ErrorCode::encode_failed, "The MP3 file cannot be finalised");
     }
+    // LAME writes a placeholder Xing/Info frame first and expects the caller to replace it with the
+    // finished tag, as its own frontend does. Without that, a VBR file carries no frame count and
+    // every reader — including this application's own — reports a duration guessed from the first
+    // frame instead of the real one.
+    const int tagSize = lame_get_lametag_frame(lame, mp3.data(), (int) mp3.size());
+    if (tagSize > 0)
+    {
+        const auto end = output->getPosition();
+        if (! output->setPosition(0) || ! output->write(mp3.data(), (size_t) tagSize)
+            || ! output->setPosition(end))
+        {
+            lame_close(lame);
+            return fail(ErrorCode::encode_failed, "The MP3 tag cannot be written");
+        }
+    }
     lame_close(lame);
     output.reset();
     if (frames != stream.frames())

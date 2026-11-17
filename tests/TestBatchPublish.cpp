@@ -466,6 +466,9 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
     INFO(vbrResult.message);
     INFO((int) vbrResult.code);
     REQUIRE(vbrResult.state == OutputState::completed);
+    // A VBR file must carry the finished Xing frame; without it every reader guesses the duration
+    // from the first frame and reports the wrong length.
+    REQUIRE(fileContains(vbrResult.target, asciiBytes("Xing")));
     std::unique_ptr<juce::AudioFormatReader> vbrReader(formats.createReaderFor(vbrResult.target));
     REQUIRE(vbrReader != nullptr);
     REQUIRE(std::abs(vbrReader->lengthInSamples - 88200) <= 2 * 1152 + 4410);
