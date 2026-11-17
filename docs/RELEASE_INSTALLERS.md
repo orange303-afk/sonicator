@@ -10,13 +10,16 @@ remaining limits are in [RELEASE_INSTALLERS_ACCEPTANCE.md](RELEASE_INSTALLERS_AC
   arm64 + x86_64, macOS 11 or newer.
 - `SONICATOR-0.1.0-Windows-x64.msi`: independently selectable application and VST3;
   64-bit Windows 10 or newer. AU is macOS-only.
-- `SONICATOR-0.1.0-sources.tar.gz`: matching project, pinned dependency sources, build and
-  LGPL relinking instructions. Distribute it alongside the corresponding installer.
-- SHA256 checksums and `source-commit.txt` in workflow artifacts.
+- `sonicator-manual.pdf`: the user manual.
 
-Windows and macOS source archives contain their own platform's ONNX runtime package (and
-Windows zlib sources where fetched). They have the same filename but platform-specific content;
-keep each with its platform's installer instead of overwriting one with the other.
+**A GitHub release publishes the installers and the manual, and nothing else.** Users download
+exactly one file for their system; checksums, per-build source archives and `source-commit.txt` stay
+in the workflow artifacts, and the AGPL source obligation is met by the public repository at the
+release tag, named in the release notes with the exact commit.
+
+Platform source archives, when someone needs one, contain their own platform's ONNX runtime package
+(and Windows zlib sources where fetched): the same filename with platform-specific content, so keep
+each next to the build it came from.
 
 ## macOS
 
@@ -99,9 +102,9 @@ sh packaging/linux/build-packages.sh build dist
 python3 packaging/make-source-bundle.py build dist
 ```
 
-Deliverables: `SONICATOR-<version>-Linux-x86_64.AppImage`,
-`SONICATOR-<version>-Linux-amd64.deb`, `SONICATOR-<version>-sources-Linux-x86_64.tar.gz` and
-checksums (`SHA256SUMS` plus a per-file `.sha256`).
+Deliverables: `SONICATOR-<version>-Linux-x86_64.AppImage` and
+`SONICATOR-<version>-Linux-amd64.deb`, published alone like the other platforms. The script also
+writes `SONICATOR-<version>-Linux.sha256` and CI keeps it with the build artifacts.
 
 Version 0.1.0 publishes these next to the stable macOS and Windows assets with an explicit
 in-development warning in the release notes: the package contents, the suite and the headless start
@@ -157,6 +160,7 @@ No installer writes/removes the catalog, preferences, user sample libraries, or
 ## Publication gate
 
 Before publication: review logs/hashes and matching source commit, complete clean-machine/DAW
-acceptance, settle outstanding Windows suite failures, and include matching sources and notices.
+acceptance, settle outstanding Windows suite failures, and confirm the release notes name the source
+tag and commit. Publish installers only: an asset list a user has to interpret loses downloads.
 Obtain explicit owner authorization to publish a release. Developer ID/notarization and Windows
 signing can be added later without changing plugin identities or installer UpgradeCode.

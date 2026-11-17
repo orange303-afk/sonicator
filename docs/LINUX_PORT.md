@@ -54,9 +54,10 @@ None. The four that failed during the port were fixed rather than tolerated:
 - No Linux audio-device or MIDI acceptance: the suite runs without a device under Xvfb.
 - Version 0.1.0 publishes the first Linux artifacts on GitHub as an **in-development preview**: the
   release notes say so, and no Linux claim is made at the level of the macOS and Windows packages.
-- First artifacts exist and verify: `SONICATOR-0.1.0-Linux-amd64.deb` (17 MB),
-  `SONICATOR-0.1.0-Linux-x86_64.AppImage` (20 MB) and the matching sources (72 MB), built by the
-  release workflow in `ubuntu:22.04`. The package carries `usr/bin/SONICATOR`,
+- First artifacts exist and verify: `SONICATOR-0.1.0-Linux-amd64.deb` (17 MB) and
+  `SONICATOR-0.1.0-Linux-x86_64.AppImage` (20 MB), built by the release workflow in `ubuntu:22.04`
+  and published with the 0.1.0 release. The source archive and checksums stay in the workflow
+  artifacts; the release carries installers only. The package carries `usr/bin/SONICATOR`,
   `usr/lib/sonicator/libonnxruntime.so.1` with its unversioned link, the desktop entry, hicolor icons
   and 1718 licence files; every `GLIBC_` symbol stays at or below 2.35 (the application) and 2.27
   (the runtime). The stand runs 24.04, so it can iterate but cannot produce release artifacts: the
