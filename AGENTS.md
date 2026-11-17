@@ -1,5 +1,10 @@
 # AI Assistant & Agent Guidelines for Sonicator
 
+## Language of public text
+Chat with the owner may be in Russian. Everything published on GitHub — release notes and titles,
+issues, pull requests, commit messages, workflow and step names, repository documentation — is
+written in English, the language of the project's public surface.
+
 ## Feature Backlog Source of Truth
 The external roadmap and feature backlog for Sonicator is maintained at:
 `~/Documents/orange303/Sonicator Features.md`
