@@ -49,12 +49,19 @@ None. The four that failed during the port were fixed rather than tolerated:
 
 ## What is not done
 
-- The `linux` job in `.github/workflows/ci.yml` is informational (`continue-on-error`) until the
-  suite is green.
+- The `linux` job in `.github/workflows/ci.yml` is required; it builds, runs the suite under Xvfb and
+  starts the application headless.
 - No Linux audio-device or MIDI acceptance: the suite runs without a device under Xvfb.
-- No Linux artifacts have been produced yet: `packaging/linux/build-packages.sh` refuses to package a
-  binary above the glibc 2.35 baseline, and the stand runs 24.04, so the first artifacts come from the
-  release workflow's `ubuntu:22.04` container.
+- First artifacts exist and verify: `SONICATOR-0.1.0-Linux-amd64.deb` (17 MB),
+  `SONICATOR-0.1.0-Linux-x86_64.AppImage` (20 MB) and the matching sources (72 MB), built by the
+  release workflow in `ubuntu:22.04`. The package carries `usr/bin/SONICATOR`,
+  `usr/lib/sonicator/libonnxruntime.so.1` with its unversioned link, the desktop entry, hicolor icons
+  and 1718 licence files; every `GLIBC_` symbol stays at or below 2.35 (the application) and 2.27
+  (the runtime). The stand runs 24.04, so it can iterate but cannot produce release artifacts: the
+  packager refuses anything above the baseline on purpose.
+- Owner acceptance is not run: `docs/LINUX_ACCEPTANCE.md` is empty by design until the stand is
+  usable. The stand has gone offline three times under load (while compiling and while running the
+  application), which looks like a power or thermal problem rather than software.
 - `docs/TESTING.md` keeps Linux as unverified until the suite is green and acceptance is recorded.
 
 ## How to reproduce
