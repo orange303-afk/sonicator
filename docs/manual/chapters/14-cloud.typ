@@ -11,8 +11,8 @@
   ),
 )[
 
-Switch with *List* / *Cloud* in the library toolbar. The choice is saved and restored on the next
-launch, separately for the standalone application and the plug-in.
+Switch with *List* / *Cloud* in the library toolbar. The choice is saved in `settings.json` and restored on the next
+launch.
 
 
 #section("What is on the map")
@@ -40,8 +40,8 @@ Playback has a 10 ms ramp and is silenced while the main preview is playing, so 
 over each other.
 
 Some points cannot be auditioned: REX2, EXS24, NKI, SF2, Akai and tracker files are not opened by
-the shared decoder used for hover. The caption says *no audio position* instead of pretending to
-play silence. Dragging, selecting and the context menu still work.
+the shared decoder used for hover, so hover is silent. Dragging, selecting and the context menu still
+work.
 
 #section("The camera")
 

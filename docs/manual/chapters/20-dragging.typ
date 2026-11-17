@@ -50,8 +50,9 @@ it would with any missing file in your sample folder.
 
 #section("Prepared drag cache")
 
-Some sources cannot be dragged as a file at all: an EBL sample, a disc entry, a synthesized tracker
-sample. For those, SONICATOR materialises a WAV in `exports/drag/` first. The file name includes a hash
+An EBL sample cannot be dragged as a file at all. SONICATOR materialises a WAV in `exports/drag/`
+first. Disc entries and tracker samples are different: a disc entry drags only as a waveform
+selection, and a tracker source is prepared by its *Drag sample* button; neither becomes a row path. The file name includes a hash
 of the source path, so dragging the same sample twice reuses one file and a project that referenced it
 keeps working when the application re-renders it.
 

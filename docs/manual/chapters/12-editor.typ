@@ -13,9 +13,10 @@
 
 #section("Which files can be edited")
 
-The editor works on the audio the preview holds: ordinary WAV, AIFF and FLAC files, and a selected
-source from an instrument, disc image or tracker. It holds at most two channels; a file with more
-than two channels is not editable and says so.
+The editor works on the audio the preview holds: any decodable file up to two channels, including
+MP3, OGG and VOC, and a selected source from an instrument, disc image or tracker. A file with more
+than two channels is not editable and says so. Only ordinary WAV, AIFF and FLAC can be overwritten in
+place; everything else saves a copy.
 
 REX2 loops, Reason patches, a tracker's *whole song* view and an instrument with no selected source
 are not editable. Their preview has no single editable buffer.
@@ -30,7 +31,7 @@ Silence require a selection. Trim silence always works on the file edges.
   widths: (1.5fr, 1fr, 2.6fr),
   rows: (
     ("Undo / Redo", "Cmd+Z / Shift+Cmd+Z", "Steps through the edit buffer."),
-    ("Delete region", "Backspace / Delete", "Removes the selected frames; the tail closes up."),
+    ("Delete region", "Backspace / Forward Delete", "Removes the selected frames; the tail closes up."),
     ("Crop to selection", "C", "Keeps only the selection."),
     ("Silence region", "S", "Writes zeros over the selection; length unchanged."),
     ("Reverse", "R", "Reverses the frames in the range."),
@@ -83,7 +84,7 @@ background and its catalog row keeps its id, tags and star.
 
 *Save copy* writes `<stem> edit.wav` next to the original — or `edit 2`, `edit 3` if taken — and never
 overwrites an existing file. For a source from an image, instrument or tracker the copy goes next to
-the container, or to the exports folder if that folder is not writable. Copies of non-WAV/AIFF/FLAC
+the container. Copies of non-WAV/AIFF/FLAC
 sources are written as WAV. The copy is added to the catalog and inherits the original's user tags and
 star; the preview switches to the copy.
 

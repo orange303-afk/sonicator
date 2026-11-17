@@ -50,8 +50,8 @@ runs one id query and then reloads blocks, not the whole catalog.
 
 #section("Hide empty")
 
-*Hide empty* hides files whose measured peak is below −60 dBFS (below 0.001), which covers digital
-silence and noise-floor files. The checkbox is saved between launches and preserved when you switch
+*Hide empty* hides files whose measured peak is below −60 dBFS (below 0.001), and also rows whose
+format this build cannot read. The checkbox is saved between launches and preserved when you switch
 catalogs. *Clear filters* turns it off and saves that choice.
 
 Metadata-only rows — RX2, SF2 and similar containers that were indexed without decoding — stay
@@ -61,7 +61,7 @@ visible even when they have no measured peak.
 
 The `DUPLICATES` column groups files that are byte-identical: the same full SHA-256 and the same
 size. `×2` means this file has one identical twin in the catalog. Right-click the row and choose
-*Show all copies* to replace the view with the whole group.
+*Show all N copies* to replace the view with the whole group.
 
 Grouping is deliberately strict. Two files that decode to the same audio but differ in container or
 metadata are not grouped. Grouping never deletes or moves anything; it is a way to see that a pack
@@ -90,11 +90,11 @@ Right-click a row (or a multi-row selection) for the actions that apply to files
 - *Star* / *Unstar* — the same as the star column, for the whole selection.
 - *Tag ▸* — assign one tag to the selection. The first entries are the five most recently assigned
   tags in this catalog.
-- *Type ▸*, *BPM ▸*, *Genre ▸* — manual corrections, including *Tap tempo*.
+- *Type ▸*, *BPM ▸*, *Genre ▸* — manual corrections, including *Tap BPM…*.
 - *Analyze selected*, *AutoTag selected…*, *Reset tags…*.
 - *Split by silence…*, *Extract samples…* — chapter 13.
 - *Ignore* — hides the path from the library without removing its rows.
-- *Show all copies* — only on a duplicate group.
+- *Show all N copies* — only on a duplicate group.
 
 Chapter 7 covers the tag actions, chapter 8 AutoTag, chapter 9 the metadata submenus. Chapter 21
 adds *Batch Processing…* to the same menu.

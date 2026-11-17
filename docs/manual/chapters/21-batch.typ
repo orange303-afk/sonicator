@@ -31,8 +31,8 @@ duplicated and reordered; they run in order on the current intermediate result a
     ("Trim silence", "−120…−6 dBFS, 0…1000 ms padding", "Keeps the first to last frame above the threshold, plus padding. All-silent input keeps its length."),
     ("Normalize", "−24…0 dBFS", "One sample-peak coefficient for all channels. Not LUFS and not true peak."),
     ("Gain", "−60…+24 dB", "One coefficient for all channels; 0 dB is an exact bypass."),
-    ("Fade in / out", "0…10 000 ms, Linear or Cosine", "Applied to the current boundaries. The last frame of a fade out is zero."),
-    ("Split by silence", "−120…−6 dBFS, 10…10 000 ms", "One Split per recipe. Steps before it run on the whole stream; steps after it run on every part."),
+    ("Fade in / out", "0…10 s, Linear or Cosine", "Applied to the current boundaries. The last frame of a fade out is zero."),
+    ("Split by silence", "−120…−6 dBFS, 10 ms…10 s", "One Split per recipe. Steps before it run on the whole stream; steps after it run on every part."),
   ),
 )
 
@@ -66,8 +66,9 @@ Names default to `<stem> processed.<ext>` next to each original, or in the chose
 preserving the path below the selected folder. A source that Split turns into several parts uses
 `<stem> part 001`, `part 002`, and so on; one part keeps the ordinary name.
 
-Existing outputs are renamed (`processed 2`, `processed 3`), skipped, or replaced — but a replace
-needs a confirmation that names the exact count and is only allowed when the old file is unchanged.
+The *Existing outputs* menu offers *Rename*, *Skip* and *Replace (confirmed)*. Rename produces
+`processed 2`, `processed 3`; Replace needs a confirmation that names the exact count and is only
+allowed when the old file is unchanged. Replace is unavailable with Split.
 No policy can replace an input, a hard-link alias or a symbolic-link target.
 
 #section("Preview")

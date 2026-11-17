@@ -299,7 +299,7 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
     library->selectRows({ 0, 1 });
     juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
     manual::captureArea(app, { juce::jmax(0, library->getX() - 24),
-                               juce::jmax(0, library->getY() - 46), 1000,
+                               juce::jmax(0, library->getY() - 46), 880,
                                library->getBottom() - library->getY() + 90 },
                         2, "tags.png");
     app.setTagFilters({}, {}, false);
@@ -355,10 +355,10 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
     panel.resized();
     panel.selectSection(SettingsSection::general);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
-    manual::captureArea(panel, { 0, 0, panel.getWidth(), 400 }, 2, "settings-general.png");
+    manual::captureArea(panel, { 0, 0, panel.getWidth(), 430 }, 2, "settings-general.png");
     panel.selectSection(SettingsSection::hotkeys);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
-    manual::captureArea(panel, { 0, 0, panel.getWidth(), 400 }, 2, "settings-hotkeys.png");
+    manual::captureArea(panel, { 0, 0, panel.getWidth(), 360 }, 2, "settings-hotkeys.png");
     panel.setLookAndFeel(nullptr);
 
     // Plate 12: the plugin window, rendered from the editor the host would open.
@@ -389,7 +389,7 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
 
         SplitDialog split({ shown }, settings, [](SplitOptions) { return true; });
         split.setLookAndFeel(&look);
-        split.setSize(560, 560);
+        split.setSize(560, 470);
         split.resized();
         juce::MessageManager::getInstance()->runDispatchLoopUntil(120);
         manual::capture(split, 2, "split.png");
@@ -397,7 +397,7 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
 
         ExtractDialog extract({ shown }, settings, [](ExtractOptions) { return true; });
         extract.setLookAndFeel(&look);
-        extract.setSize(560, 440);
+        extract.setSize(560, 380);
         extract.resized();
         juce::MessageManager::getInstance()->runDispatchLoopUntil(120);
         manual::capture(extract, 2, "extract.png");
@@ -417,7 +417,7 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
         REQUIRE(service.takeResult(result));
         AutoTagDialog autoTag(result, service, [] {});
         autoTag.setLookAndFeel(&look);
-        autoTag.setSize(980, 700);
+        autoTag.setSize(980, 760);
         autoTag.resized();
         // The folder column would print a temp path; the chapter discusses file, tag and reason.
         std::function<juce::TableListBox*(juce::Component&)> firstTable =

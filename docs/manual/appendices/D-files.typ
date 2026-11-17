@@ -16,7 +16,7 @@ on macOS.
     ("`backups/`", "Manual catalog copies.", "Only copies you no longer need."),
     ("`<catalog>.relocate-<timestamp>.sqlite`", "A pre-relocation backup beside the catalog.", "After a successful relocation, when you are sure."),
     ("`exports/`", "Selection WAVs and prepared drag audio.", "Only files no project or message references."),
-    ("`exports/drag/`", "Materialised WAVs for EBL, disc and tracker drags.", "Same rule: project media."),
+    ("`exports/drag/`", "Materialised WAVs for EBL drags.", "Same rule: project media."),
     ("`exports/match/<key>/`", "Matched BPM/Scale renders from the plug-in.", "Same rule: project media."),
     ("`cache/cloud/`", "At most two cloud-layout files.", "Yes — rebuilt on demand."),
     ("`batch-presets.json`", "Your batch chains and output settings.", "Yes — presets are lost."),

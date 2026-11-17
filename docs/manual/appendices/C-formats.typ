@@ -35,9 +35,10 @@ Four words are used throughout this book:
 
 #section("Editable sources")
 
-The waveform editor can change an ordinary WAV, AIFF or FLAC file, and a selected source from an
-instrument, disc image or tracker. It cannot change REX2 loops, Reason patches, a tracker's whole-song
-view, an instrument with no selected source, or a file with more than two channels.
+The waveform editor can change any decodable file up to two channels, including MP3, OGG and VOC, and
+a selected source from an instrument, disc image or tracker. It cannot change REX2 loops, Reason
+patches, a tracker's whole-song view, an instrument with no selected source, or a file with more than
+two channels.
 
 *Overwrite* is available only for ordinary WAV/AIFF/FLAC. Everything else saves a copy, and non-WAV
 sources save as WAV.

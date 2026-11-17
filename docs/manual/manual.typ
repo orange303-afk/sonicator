@@ -48,7 +48,7 @@
     ],
     [
       *Built* \
-      #build-date · Typst · Manrope
+      #build-date · Typst · Manrope · application main at 44aeeab
     ],
   )
   #v(14pt)
@@ -83,8 +83,8 @@ Keys are written as words in small boxes: #keys("Cmd", "S") on macOS, #keys("Ctr
 Windows. Where the platforms differ, both are given. The application uses Command on macOS and
 Control on Windows throughout; it never translates one into the other.
 
-The screenshots were taken on macOS in the dark theme. Windows uses the same controls in the same
-places; only the window frame and the key names differ.
+The screenshots were taken on macOS in the dark theme. The controls sit in the same places on
+Windows; the window frame, the key names and a few labels such as Finder/Explorer differ.
 
 #heading(level: 2, outlined: false)[Labels and paths]
 

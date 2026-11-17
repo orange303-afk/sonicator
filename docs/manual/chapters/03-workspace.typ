@@ -19,7 +19,7 @@ Settings pages and the Cloud view.
 
 The wordmark is inert. The search field is not: typing filters the library after a 250 ms pause,
 Enter applies immediately, Escape clears the query or closes the search history. Clicking the field
-opens the last ten searches applied in this catalog.
+opens the last ten searches applied in this installation.
 
 *Settings* on the right opens the panel described in chapter 23. In the DAW plug-in the same button
 opens a reduced Settings with the audio and catalog pages hidden.
@@ -36,9 +36,10 @@ The second row holds the filters: *Tags*, *Starred*, *Hide empty* and *Clear fil
 *Clear filters* turns off the tag, star and empty-file filters and saves that choice; it does not
 clear the search field.
 
-The scan buttons sit above the table: *+ Add folder*, *Rescan*, *New files*, *Reanalyze all* and
-*Smart metadata*. Chapter 4 explains when to use which. While a job runs, *Pause* and *Cancel*
-appear next to the progress line at the bottom of the window.
+The *LIBRARY* menu on the left of the toolbar holds the scan actions: *Add folder…*, *Rescan*,
+*Rescan and analyze new files*, *Reanalyze all* and *Smart metadata*, plus *Show ignored*. Chapter 4
+explains when to use which. While a job runs, *Pause* and *Cancel* appear next to the progress line at
+the bottom of the window.
 
 #plate("/docs/manual/assets/workspace.png", [Figure 3.1 — The workspace with a scanned library. The header holds search and Settings; the toolbar holds scans and filters; the table is the catalog; the Analysis panel describes the selection; the preview band plays it.])
 
@@ -49,7 +50,7 @@ catalogued files; *All samples* is a virtual node for the whole catalog. Selecti
 the library to that folder and every descendant. Left and Right collapse and expand the selected
 node.
 
-#shot("/docs/manual/assets/folder-tree.png", [Figure 3.2 — The folder tree. Roots are registered by *+ Add folder*; child folders appear when files in them are catalogued. The selected folder filters the table.], width: 28%)
+#shot("/docs/manual/assets/folder-tree.png", [Figure 3.2 — The folder tree. Roots are registered by *Add folder…* in the *LIBRARY* menu; child folders appear when files in them are catalogued. The selected folder filters the table.], width: 28%)
 
 *Favorites* is a separate tree below the divider. A folder added to Favorites stays listed even when
 another catalog is open; it is a shortcut across catalogs, not a place where files are copied. The
@@ -58,7 +59,7 @@ divider between the two trees can be dragged, and its height is remembered.
 #section("The library table")
 
 Each row is one catalogued file. The columns are the sample name, Type, BPM, Key, Genre, Format,
-Length, Rate, Channels, Tags, Duplicates and Status. Clicking a header sorts the whole result, not
+Length, Rate, CH, Tags, Duplicates and Status. Clicking a header sorts the whole result, not
 the current page; clicking again reverses it. Unknown values sort last in both directions.
 
 Selecting a row loads it into the preview. Cmd-click (Ctrl-click on Windows) toggles a row,
@@ -72,9 +73,9 @@ Right-click a row and choose *Show all copies* to reveal the group. Nothing is d
 
 #section("Analysis panel")
 
-The right panel describes the selected file. The Key/BPM block shows the two values people look for
-first; the card below lists measured features — length, rate, bit depth, peak, RMS, spectral
-centroid, rolloff and flatness — and the provenance of smart metadata. Chapter 9 explains the
+The right panel describes the selected file. The card lists measured features — length, rate, bit
+depth, peak, RMS, spectral centroid, rolloff and flatness — and the provenance of smart metadata.
+The Key/BPM block below it shows the two values people look for first. Chapter 9 explains the
 markers (`--`, `?`, `*`, `!`, `~`) and when a value is honestly unknown.
 
 #section("Panels and the compact layout")
@@ -92,11 +93,11 @@ the standalone application.
 
 #block(above: 12pt, below: 12pt, breakable: false)[
   #block(stroke: 0.6pt + rule, radius: 2pt, clip: true)[
-    #image("/docs/manual/assets/analysis-card.png", width: 70%)
+    #image("/docs/manual/assets/analysis-card.png", width: 42%)
   ]
   #v(6pt)
   #block(stroke: 0.6pt + rule, radius: 2pt, clip: true)[
-    #image("/docs/manual/assets/analysis-hero.png", width: 70%)
+    #image("/docs/manual/assets/analysis-hero.png", width: 42%)
   ]
   #v(4pt)
   #set text(size: 8.5pt, fill: muted)

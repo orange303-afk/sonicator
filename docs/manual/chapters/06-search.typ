@@ -12,9 +12,9 @@
 )[
 
 Typing filters after a 250 ms pause. Enter applies the query immediately; Escape clears it, or
-closes an open history menu. Clicking the field opens the last ten applied searches in this catalog;
-choosing one applies it. The history is stored in `settings.json`, so it survives a restart and does
-not travel with the catalog.
+closes an open history menu. Clicking the field opens the last ten applied searches, shared by every catalog;
+choosing one applies it. The history is stored in `settings.json`, so it survives a restart and is the
+same whichever catalog is open.
 
 
 #section("Plain words")
@@ -64,8 +64,8 @@ These prefixes ask smart metadata, not the file name:
   ),
 )
 
-A value the application could not resolve does not match these prefixes. That is intentional: an
-ambiguous tempo is not silently treated as one of its candidates.
+An ambiguous or conflicting value can still match these prefixes; the match uses the effective value
+and its state. It is not silently turned into a different value.
 
 #section("Quotes and exact words")
 

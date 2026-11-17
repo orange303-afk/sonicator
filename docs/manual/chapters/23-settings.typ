@@ -11,7 +11,7 @@
   ),
 )[
 
-#shot("/docs/manual/assets/settings-general.png", [Figure 23.1 — Settings → General. The catalog path is the shared database; the buttons below it move, open, relocate or back it up.], width: 100%)
+#shot("/docs/manual/assets/settings-general.png", [Figure 23.1 — Settings → General. The catalog path is the shared database; the buttons below it move, open, relocate or back it up. The path is shortened in this plate.], width: 100%)
 
 Settings opens from the header. The last used page is remembered. In the DAW plug-in the panel is
 embedded in the editor and the pages that need the application — audio devices, catalog switching —
@@ -71,8 +71,8 @@ microphone input. The plug-in has no device page at all: the host owns the devic
 
 #section("Hotkeys and Plugins")
 
-*Hotkeys* is the command browser described in chapter 24. *Plugins* lists the installed plug-in
-components and their status. Neither page changes what the library contains.
+*Hotkeys* is the command browser described in chapter 24. *Plugins* is a placeholder for user
+components and has no effect in this build. Neither page changes what the library contains.
 
 #section("Update check")
 
@@ -83,8 +83,8 @@ application never checks on its own, and a failed check changes nothing.
 
 #section("Contribute anonymous feedback")
 
-*Settings → General → Library → Contribute anonymous feedback to improve classification models* is off
-until you answer the question shown once at startup. While it is off, nothing is sent.
+*Settings → General → Privacy & data → Contribute anonymous feedback to improve classification
+models* is off until you answer the question shown once at startup. While it is off, nothing is sent.
 
 When it is on, a background request about once a day may carry:
 
@@ -110,7 +110,7 @@ characters.
 
 #section("REPORT")
 
-*Settings → REPORT* opens a pre-filled GitHub issue in your browser. It contains the version, the
+*Settings → About → REPORT* opens a pre-filled GitHub issue in your browser. It contains the version, the
 operating system, the last 60 log lines and, if the previous session crashed, its backtrace. Your home
 folder becomes `~`, the catalog path becomes `<catalog>` and your account name becomes `<user>`. File
 names stay, because a report without the failing file is rarely actionable. You read and edit the

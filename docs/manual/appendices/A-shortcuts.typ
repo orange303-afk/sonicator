@@ -14,7 +14,7 @@ macOS uses Cmd.
   rows: (
     ("Undo", "Cmd+Z", "Ctrl+Z"),
     ("Redo", "Shift+Cmd+Z", "Shift+Ctrl+Z"),
-    ("Delete region", "Backspace / Delete", "Backspace / Delete"),
+    ("Delete region", "Backspace / Forward Delete", "Backspace / Forward Delete"),
     ("Crop to selection", "C", "C"),
     ("Silence region", "S", "S"),
     ("Reverse", "R", "R"),

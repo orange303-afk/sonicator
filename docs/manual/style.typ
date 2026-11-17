@@ -19,12 +19,15 @@
     margin: (top: 22mm, bottom: 24mm, inside: 22mm, outside: 26mm),
     footer: context {
       set text(font: body-font, size: 7.5pt, fill: muted)
-      grid(
-        columns: (1fr, auto),
-        align: (left, right),
-        [SONICATOR · User manual],
-        counter(page).display(),
-      )
+      let n = counter(page).get().first()
+      place(top, line(length: 100%, stroke: 0.3pt + rule))
+      if calc.even(n) {
+        grid(columns: (auto, 1fr), align: (left, right),
+          counter(page).display(), [SONICATOR · User manual])
+      } else {
+        grid(columns: (1fr, auto), align: (left, right),
+          [SONICATOR · User manual], counter(page).display())
+      }
     },
   )
 

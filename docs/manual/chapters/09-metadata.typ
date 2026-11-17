@@ -6,7 +6,7 @@
     [Which values are smart, and which are measured],
     [The markers in the columns],
     [Correcting Type, BPM and Genre],
-    [Tap tempo and the learned prototype],
+    [Tap BPM and the learned prototype],
     [Why some values stay unknown],
   ),
 )[
@@ -56,8 +56,8 @@ A manual Type is never overwritten by AutoTag or by a later analysis. It is also
 
 #section("Correcting BPM")
 
-*BPM ▸* offers a value list, *Tap tempo* and *Clear*. Tap tempo opens a small dialog: tap Space in
-time, Return applies the average, Escape cancels. Values are limited to 20–400 BPM.
+*BPM ▸* offers *Set BPM…*, *Tap BPM…* and *Clear manual BPM*. Tap BPM opens a small dialog: tap
+Space in time, Return applies the average, Escape cancels. Values are limited to 20–300 BPM.
 
 A manual BPM wins over metadata and DSP. The automatic value remains visible in the stored result, so
 clearing the override brings it back. Half-time and double-time readings are marked ambiguous rather
@@ -65,7 +65,7 @@ than forced to one number.
 
 #section("Correcting Genre")
 
-*Genre ▸* assigns a genre, *Unknown*, *Not applicable* or a custom genre, and *Clear* removes the
+*Genre ▸* assigns a genre, *Unknown*, *+ Custom genre…*, and *Clear manual genre* removes the
 override. The Analysis panel names the source next to the value: manual, automatic or ambiguous. A
 genre typed by hand is stored in the catalog and can be used with `genre:` search. The Genre column
 is not a Type: genre is its own field.
@@ -89,8 +89,8 @@ Unknown is a valid result, not a failure:
 - A container may carry no tempo metadata, and the rhythm pass may refuse to guess.
 
 When the catalog shows `?`, the right move is usually a manual correction if you know the answer, or
-leaving it unknown. AutoTag and `type:` search deliberately do not treat an ambiguous value as a
-match.
+leaving it unknown. AutoTag and `type:` search use the effective value and report an ambiguous one as
+ambiguous rather than inventing a different answer.
 
 #section("What runs when")
 

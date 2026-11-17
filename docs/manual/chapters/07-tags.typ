@@ -7,7 +7,7 @@
     [Assign tags to rows, folders and whole subtrees],
     [Recent tags and Add last tag],
     [Filter by tag, combine with Starred, reset assignments],
-    [Favourite folders],
+    [Favorites],
   ),
 )[
 
@@ -52,7 +52,7 @@ actual number of new assignments.
 The *Tags* chip in the toolbar opens the tag filter. Include several tags to require all of them. The count line updates to the matching rows, and header sorting
 still sorts the whole filtered result.
 
-#plate("/docs/manual/assets/tags.png", [Figure 7.1 — A tag filter for *Kick* with two rows selected. The Analysis panel reports the one tag shared by the selection.])
+#plate("/docs/manual/assets/tags.png", [Figure 7.1 — A tag filter for *Kick* with two rows selected. Both rows show the shared tag in the TAGS column.])
 
 *Starred* is a separate filter and combines with the tag filter. Stars are a quick personal mark, not
 a tag: they do not appear in the tag menu and cannot be renamed.
@@ -70,15 +70,14 @@ files and recent-tag history are untouched.
 The work runs in the same background batches as *Tag folder* and can be cancelled; completed batches
 stay. A repeated reset is a no-op.
 
-#section("Favourite folders")
+#section("Favorites")
 
 The folder menu toggles *Add to favorites* / *Remove from favorites*. A folder already covered by a
-favourite shows a disabled *Already in favorites*. Adding a parent absorbs redundant child
-favourites.
+favorite shows a disabled *Already in favorites*. Adding a parent absorbs redundant child entries.
 
 Favorites appear in a second tree below the folder tree. Clicking a node filters the library and
 clears the normal tree's selection. A path that is no longer available stays listed but muted. The
-list is global: it survives catalog switches, and a favourite with no rows in the current catalog
+list is global: it survives catalog switches, and a favorite with no rows in the current catalog
 remains visible with nothing to show.
 
 ]

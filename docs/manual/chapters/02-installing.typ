@@ -21,7 +21,7 @@ each installer with the source archive for its platform.
   rows: (
     ("`SONICATOR-0.1.0-macOS-universal.pkg`", "macOS 11 or newer", "Application, VST3 and AU, arm64 and x86_64"),
     ("`SONICATOR-0.1.0-Windows-x64.msi`", "Windows 10 or newer, 64-bit", "Application and VST3 (AU is macOS-only)"),
-    ("`SONICATOR-0.1.0-sources.tar.gz`", "Both", "Project and pinned dependency sources"),
+    ("`SONICATOR-0.1.0-sources.tar.gz`", "One per platform", "Project and pinned dependency sources; the two archives share a name and differ in content"),
   ),
 )
 
@@ -104,7 +104,7 @@ which takes a consistent copy through SQLite's own API.
 #section("First launch and the first folder")
 
 The first window is empty: no catalog rows, one *All samples* node and a *Library* root. Click
-*+ Add folder* and choose a folder. One import registers that folder as a root and walks everything
+*LIBRARY → Add folder…* and choose a folder. One import registers that folder as a root and walks everything
 below it recursively.
 
 Indexing runs in the background. The toolbar shows the current file and a counter; *Pause*,
@@ -113,11 +113,11 @@ stored. On a first import of a large drive this can take a while — the applica
 header, hashes its bytes and measures it.
 
 #tip[
-  Add one root per logical library rather than one per album. A root is a unit for *Rescan*, *New
-  files* and *Tag folder*; a hundred tiny roots make those actions tedious.
+  Add one root per logical library rather than one per album. A root is a unit for *Rescan*, *Rescan and analyze new files* and *Tag folder*; a hundred tiny roots make those actions tedious.
 ]
 
-When the scan finishes, the table fills and the status line reads how many samples are loaded. That
-is enough for Part I. Chapter 4 explains the scan modes and what to do when a folder moves.
+When the scan finishes, the table fills and the status line reads how many samples are loaded. You
+now have an installed application, a catalog in the default location and one indexed root. Chapter 3
+walks the window; chapter 4 covers the other scan modes and what to do when a folder moves.
 
 ]

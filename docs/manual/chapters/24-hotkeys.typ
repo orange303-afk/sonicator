@@ -1,7 +1,7 @@
 #import "../style.typ": *
 
 #chapter(24, "Hotkeys and layout",
-  lead: [Every command has a stable identity, so a key can move without breaking a menu. This chapter covers rebinding, conflicts and the three panel dividers.],
+  lead: [Every registered command has a stable identity, so a key can move without breaking a menu; menu-only actions keep their own behaviour. This chapter covers rebinding, conflicts and the three panel dividers.],
   inthis: (
     [Rebinding a command],
     [When a key is already used],

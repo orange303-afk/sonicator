@@ -1,13 +1,13 @@
 #import "../style.typ": *
 
-#chapter(22, "The SONICATOR plugin",
+#chapter(22, "The SONICATOR plug-in",
   lead: [The same browser inside the DAW: one shared catalog, a read-only window, and two toggles that fit a loop to the project tempo or scale.],
   inthis: (
     [What the VST3 and AU versions are],
     [The shared catalog and the read-only rule],
     [Project state and window size],
     [Match BPM and Match Scale],
-    [What the plugin refuses to do],
+    [What the plug-in refuses to do],
   ),
 )[
 
@@ -25,7 +25,7 @@ category; audio comes from the host and the selected sample is auditioned throug
 #section("One catalog, read-only")
 
 The editor opens the catalog saved in the shared settings, or the default `sonicator.sqlite`. Tags,
-stars, genres, BPM, favourites and theme changed in the plug-in are visible in the application and the
+stars, genres, BPM, favorites and theme changed in the plug-in are visible in the application and the
 other way round. SQLite runs in WAL mode with a 5 s busy timeout, so short writes from both processes
 coexist.
 
@@ -42,7 +42,7 @@ smart analysis, AutoTag, Split, Extract, Normalize selected, Batch Processing, f
 switching and relocation. The toolbar and the library menu show a one-line explanation instead of a
 disabled button.
 
-#plate("/docs/manual/assets/plugin.png", [Figure 22.1 — The plugin window at 1400×820. Match BPM and Match Scale sit under the transport; the library is shared with the standalone application.])
+#plate("/docs/manual/assets/plugin.png", [Figure 22.1 — The plug-in window at 1400×820. Match BPM and Match Scale sit under the transport; the library is shared with the standalone application.])
 
 #section("Project state")
 

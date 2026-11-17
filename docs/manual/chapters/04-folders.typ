@@ -5,7 +5,7 @@
   inthis: (
     [Add a root and understand what a root is],
     [Pause, cancel and resume a scan],
-    [Rescan, New files, Reanalyze all, Smart metadata and Analyze selected],
+    [Rescan, Rescan and analyze new files, Reanalyze all, Smart metadata and Analyze selected],
     [Missing roots, error rows and Remove from library],
     [Folder actions, ignored paths and the packs SONICATOR registers itself],
   ),
@@ -13,11 +13,11 @@
 
 #section("Roots and folders")
 
-*+ Add folder* registers a folder as a root and indexes everything below it, recursively. The root
+*LIBRARY → Add folder…* registers a folder as a root and indexes everything below it, recursively. The root
 stays visible in the tree even when it is empty. Subfolders appear only when they contain catalogued
 files; an empty directory is not discovered.
 
-A root is the unit for several actions. *Rescan* walks that root, *New files* adds what is new below
+A root is the unit for several actions. *Rescan* walks that root, *Rescan and analyze new files* adds what is new below
 it, *Tag folder* applies a tag to everything catalogued below it. If you add one root per pack, those
 actions stay precise; if you add your whole drive as one root, they become broad.
 
@@ -55,14 +55,14 @@ The scan buttons look similar and do different things. Choose by what changed.
   widths: (1.2fr, 2.4fr, 1.8fr),
   rows: (
     ("*Rescan*", "Walks the registered roots; analyzes new, changed and previously failed files; skips unchanged analyzed files. Reconciles missing records.", "Files were added, edited or deleted inside an existing root."),
-    ("*New files*", "Walks the folders and analyzes only paths that are not in the catalog. Does not mark missing records or rebuild image contents.", "You only added files and want the fastest pass."),
+    ("*Rescan and analyze new files*", "Walks the folders and analyzes only paths that are not in the catalog. Does not mark missing records or rebuild image contents.", "You only added files and want the fastest pass."),
     ("*Reanalyze all*", "Recomputes every catalogued file after a stronger confirmation.", "After an analysis change, or to repair a damaged result."),
     ("*Smart metadata*", "Reads Type/BPM/Key/Genre candidates for missing, changed or old-version files, and runs the rhythm/tonal fallback when no metadata tempo exists.", "The smart columns are empty or stale; no audio analysis pass is needed."),
     ("*Analyze selected*", "Queues the chosen rows without stopping a running job.", "A handful of files failed or look wrong."),
   ),
 )
 
-*Rescan* and *Reanalyze all* ask for confirmation because they can take a long time. *New files* is
+*Rescan* and *Reanalyze all* ask for confirmation because they can take a long time. *Rescan and analyze new files* is
 additive: it deliberately does not reconcile missing files. If a file disappeared, only *Rescan*
 marks it missing.
 
@@ -77,9 +77,8 @@ cannot be decoded keeps an error status with the reason; *Rescan* retries failed
 deleted automatically.
 
 #tip[
-  Missing files are a warning, not a cleanup tool. If you really want rows gone, remove the folder
-  from the library (below), or delete the file and rescan — but a catalog with a few missing rows is
-  usually better than a catalog that forgot your tags.
+  Missing files are a warning, not a cleanup tool. Deleting the audio and rescanning does not remove
+  the row: it is marked Missing and keeps its tags. To remove rows, use *Remove from library…* below.
 ]
 
 #section("Remove from library")
@@ -87,7 +86,7 @@ deleted automatically.
 Right-click a folder in the sidebar and choose *Remove from library…*. This deletes that folder's
 catalog rows, tags and analysis — from the catalog, not from disk. The confirmation names the folder
 and explains the distinction. A removed folder also stays out of later scans, including a parent
-root's rescan, until you add it again with *+ Add folder*.
+root's rescan, until you add it again with *Add folder…*.
 
 Removing a root unregisters it. Removing a subfolder leaves the root registered and removes only that
 subtree.
@@ -103,6 +102,10 @@ The folder menu carries the actions that make sense for a subtree:
 - *Tag folder…* assigns one tag to the catalogued files below the folder, optionally including subfolders,
   after a confirmation that names the counts.
 - *AutoTag folder…* runs the reviewable AutoTag pass for the subtree (chapter 8).
+- *Rename folder…* changes the display name.
+- *Set genre…* assigns a genre to the folder scope.
+- *Reset tags…* removes the tag assignments below the folder (chapter 7).
+- *Batch Processing…* runs a batch on the folder (chapter 21).
 - *Add to favorites* pins the folder in the Favorites tree.
 
 *All samples* is virtual and has no folder menu: there is no implicit whole-catalog tag or scan.

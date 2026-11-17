@@ -16,9 +16,10 @@ formats, lengths, measured audio features, tags you assign, and metadata it can 
 
 The important word is *index*. The catalog is a database of what the files look like, not a copy of
 them. Browsing, searching, tagging, previewing and dragging never move, rename, rewrite or delete an
-original. The one exception is explicit and always confirmed: the waveform editor can save over a
-file, but only after you choose *Overwrite* in its save dialog. Everything else writes to SONICATOR's
-own folders.
+original. A few actions can write, and each one is explicit: the waveform editor saves over a file
+only after you choose *Overwrite* in its dialog; *Normalize selected* rewrites files after
+*Overwrite originals* or when *Always overwrite original files* is on; Split moves a source to the
+Trash only if you tick that option. Everything else writes to SONICATOR's own folders.
 
 #section("Files and the catalog")
 
@@ -45,9 +46,9 @@ The left column is the only place audio lives. The catalog records a path, a has
 and everything you add: tags, stars, metadata corrections, analysis results. Delete the catalog and
 your samples are still there; point the application at the same folders and it can index them again.
 
-Because the catalog stores paths, moving samples behind its back is the one thing that breaks the
-picture. Chapter 4 explains how a scan reconciles it and chapter 23 explains *Relocate folders…* for
-a library that has moved to another drive or computer.
+Because the catalog stores paths, moving samples behind its back breaks the picture: a rescan marks
+the old row Missing and adds a new row at the new path, but tags and stars stay with the old row.
+Moving a whole root is handled by *Relocate folders…* (chapter 23), which keeps them.
 
 #section("Works offline, with three visible exceptions")
 
@@ -59,8 +60,8 @@ no account. Three actions can use the network, and each is started by you:
   widths: (1.1fr, 1.1fr, 2.4fr),
   rows: (
     ("Check for updates", "Settings → About", "The application version, in the request header. No catalog, path or account data."),
-    ("Report a problem", "Settings → REPORT", "A prefilled GitHub issue: version, OS, the last log lines, a crash trace. It opens in your browser; you submit it."),
-    ("Contribute anonymous feedback", "Settings → Library", "Off by default. When on: coarse acoustic measurements, confirmed type/tags, key and tempo, an installation id — never audio, names, paths or hashes."),
+    ("Report a problem", "Settings → About → REPORT", "A prefilled GitHub issue: version, OS, the last log lines, a crash trace. It opens in your browser; you submit it."),
+    ("Contribute anonymous feedback", "Settings → General → Privacy & data", "Off by default. When on: coarse acoustic measurements, confirmed type/tags, key and tempo, an installation id — never audio, names, paths or hashes."),
   ),
 )
 
@@ -73,12 +74,13 @@ Being clear about the edges saves time:
 
 - It is not a sample manager that moves files into a pack structure. Folders stay where you put
   them; tags and stars live in the catalog.
-- It does not rewrite metadata in your files by browsing. Only the waveform editor can write audio,
-  and only through its save dialog.
+- It does not rewrite metadata in your files by browsing. Audio changes only through the editor's
+  save dialog, *Normalize selected*, or Split's optional move to Trash.
 - It is not a DAW and does not host plug-ins on a track. It produces file drags and prepared WAVs;
   the DAW does the recording.
-- It does not use machine learning to invent tags from audio. Smart metadata is rule- and
-  measurement-based and refuses to guess when evidence conflicts (chapter 9).
+- It does not let a model invent tags silently. Type evidence is ordered, disagreements are
+  reported as ambiguous, and a tag is assigned only by you or by a reviewed AutoTag run (chapters 8
+  and 9).
 - It does not watch folders in the background. New files are found by a scan you start (chapter 4).
 
 The rest of this part gets you installed and shows how the window is arranged. Part II turns a
