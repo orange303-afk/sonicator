@@ -72,7 +72,13 @@ with tarfile.open(archive_path, "w:gz") as archive:
     info.size = len(data)
     archive.addfile(info, io.BytesIO(data))
 import hashlib
-digest = hashlib.file_digest(archive_path.open("rb"), "sha256").hexdigest()
+# Chunked rather than hashlib.file_digest: the release container builds on the Python 3.10 that
+# Ubuntu 22.04 ships, and the digest is not worth a newer interpreter.
+hasher = hashlib.sha256()
+with archive_path.open("rb") as stream:
+    for chunk in iter(lambda: stream.read(1 << 20), b""):
+        hasher.update(chunk)
+digest = hasher.hexdigest()
 archive_path.with_suffix(archive_path.suffix + ".sha256").write_text(
     f"{digest}  {archive_path.name}\n", newline="\n")
 print(f"Created source/relink archive for {commit}: {archive_path}")

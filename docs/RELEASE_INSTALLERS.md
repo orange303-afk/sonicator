@@ -31,7 +31,7 @@ Commit the matching sources before creating the source archive: the archive is t
 `git archive HEAD`, so uncommitted working-tree edits are never shipped as “matching source” and
 a Windows CRLF-normalized checkout cannot block packaging. Builders refuse to overwrite an
 existing artifact, and macOS staging stops if less than 8 GiB is available. Build/staging are kept
-outside iCloud; final installers go in ignored `dist/`. Python 3.11+ is needed by source-archive
+outside iCloud; final installers go in ignored `dist/`. Python 3.8+ is needed by source-archive
 creation (developer tooling only). Product operation needs no Python.
 
 Locations:
