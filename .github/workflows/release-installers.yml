@@ -251,9 +251,10 @@ jobs:
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build git ca-certificates curl python3 \
-            libasound2-dev libjack-jackd2-dev \
+            libasound2-dev libjack-jackd2-dev ladspa-sdk \
             libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev \
-            libfreetype-dev libgl1-mesa-dev libglu1-mesa-dev xvfb
+            libxrender-dev libxi-dev libfreetype6-dev libfontconfig1-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libegl-dev xvfb
       - name: Cache fetched dependencies
         uses: actions/cache@v4
         with:

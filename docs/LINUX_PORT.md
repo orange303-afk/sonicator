@@ -41,6 +41,12 @@ on a current distro as well, and it is the acceptance machine. Dependencies:
 
 ```
 sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build git \
-  libasound2-dev libjack-jackd2-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev \
-  libxcursor-dev libxcomposite-dev libfreetype-dev libgl1-mesa-dev libglu1-mesa-dev xvfb pipewire-jack
+  libasound2-dev libjack-jackd2-dev ladspa-sdk \
+  libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev \
+  libxrender-dev libxi-dev libfreetype6-dev libfontconfig1-dev \
+  libgl1-mesa-dev libglu1-mesa-dev libegl-dev xvfb pipewire-jack
 ```
+
+Ubuntu 24.04 names the FreeType headers `libfreetype-dev` and pulls the rest through newer
+transitions; 22.04, the release baseline, needs `libfreetype6-dev`. A missing `ft2build.h` during
+configure means the FreeType headers are absent, not that JUCE is broken.

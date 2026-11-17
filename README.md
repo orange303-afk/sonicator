@@ -1,10 +1,10 @@
 # SONICATOR
 
-**Intelligent Sample Explorer — a local sample browser for macOS and Windows.**
+**Intelligent Sample Explorer — a local sample browser for macOS, Windows and Linux.**
 
 [![CI](https://github.com/orange303-afk/sonicator/actions/workflows/ci.yml/badge.svg)](https://github.com/orange303-afk/sonicator/actions/workflows/ci.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
-![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-lightgrey)
+![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 [![The SONICATOR workspace](docs/manual/assets/workspace.png)](docs/manual/assets/workspace.png)
 
@@ -58,7 +58,7 @@ Built for people who have a hundred thousand samples and no patience for a cloud
 
 ## Build
 
-Requirements: CMake >=3.22, Git, C++20 compiler, macOS Command Line Tools/Xcode or Visual Studio 2022 with Desktop C++ workload and Windows SDK.
+Requirements: CMake >=3.22, Git, C++20 compiler, macOS Command Line Tools/Xcode or Visual Studio 2022 with Desktop C++ workload and Windows SDK, or on Linux the JUCE system packages listed under [Linux](#linux).
 The first configure downloads pinned JUCE 9.0.5 and Catch2 3.7.1; subsequent application use is offline.
 SQLite 3.47.2 is bundled. See [dependency/licensing notes](docs/DEPENDENCIES.md) and the
 [third-party notices](THIRD_PARTY_NOTICES.md) before distribution.
@@ -90,6 +90,28 @@ Windows is built in CI, and its current state is recorded in `docs/WINDOWS_PORT.
 Visual Studio 2022 with the Desktop C++ workload; zlib is fetched automatically when the system has none,
 and the ONNX Runtime DLL is copied next to the executable by the build.
 
+### Linux
+
+Linux is built in CI, and its current state is recorded in `docs/LINUX_PORT.md`; owner acceptance is
+tracked in `docs/LINUX_ACCEPTANCE.md`. Releases are an AppImage and a `.deb` for x86_64, built inside
+`ubuntu:22.04` because an AppImage carries no glibc and the build host's glibc becomes every user's
+floor.
+
+```sh
+sudo apt install build-essential cmake ninja-build git \
+  libasound2-dev libjack-jackd2-dev ladspa-sdk \
+  libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev \
+  libxrender-dev libxi-dev libfreetype6-dev libfontconfig1-dev \
+  libgl1-mesa-dev libglu1-mesa-dev libegl-dev xvfb
+cmake --preset ci-linux
+cmake --build --preset ci-linux
+xvfb-run --auto-servernum ctest --preset ci-linux
+sh packaging/linux/build-packages.sh build dist
+```
+
+ALSA is the default device type; JACK and PipeWire's JACK layer are offered as well. About twenty test
+files open windows, so the suite needs a display — `xvfb-run` on a server.
+
 macOS builds receive a local ad-hoc bundle signature. This is not Developer ID signing, a Windows signature, an installer or a notarized release.
 
 ## Use
@@ -113,6 +135,7 @@ Database and bounded waveform cache live in JUCE's user application-data locatio
 
 - macOS: `~/Library/Sonicator/sonicator.sqlite` (JUCE `userApplicationDataDirectory`).
 - Windows: `%APPDATA%\Sonicator\sonicator.sqlite`.
+- Linux: `~/.config/Sonicator/sonicator.sqlite`.
 - Settings: `Sonicator/settings.json` in the same application-data location. It stores theme, scale, language, an optional catalog path, last window geometry, Hide empty and the last 10 searches. Click the search field to open history; Escape dismisses the menu. There is no separate History button.
 
 No original audio is changed, renamed or deleted. Duplicate copies remain distinct file-path records, identified by full SHA-256.
@@ -124,6 +147,7 @@ Waveform selection exports are new WAV files under `Sonicator/exports/` in the s
 
 - macOS: `~/Library/Sonicator/exports`.
 - Windows: `%APPDATA%\Sonicator\exports`.
+- Linux: `~/.config/Sonicator/exports`.
 
 The source sample rate and channel count are preserved; 16-bit sources stay 16-bit PCM, 24/32-bit integer sources become 24-bit PCM, float sources become 32-bit float, and compressed sources become 24-bit PCM. Exported files are not deleted automatically because a DAW project or a message may reference them, so the folder grows until you remove files manually. Source originals are opened read-only and are never moved by a drag.
 
@@ -134,7 +158,7 @@ bug report, feature request, or format/bank support (attach the smallest sample 
 Nothing is sent automatically; the report opens in your browser and you submit it.
 
 The application writes a rolling log to `~/Library/Logs/Sonicator/sonicator.log` (Windows:
-`%APPDATA%\Sonicator\logs\sonicator.log`), rotated at 2 MB into a single `sonicator.1.log`. A crash
+`%APPDATA%\Sonicator\logs\sonicator.log`, Linux: `~/.config/Sonicator/logs/sonicator.log`), rotated at 2 MB into a single `sonicator.1.log`. A crash
 writes `crash.txt` beside the log with the signal and a backtrace; the next report includes it. The
 report body shortens your home directory to `~` and the catalog path to `<catalog>`, but keeps file
 names from the log, because a report without the failing file is rarely actionable. Details:
@@ -198,6 +222,7 @@ ui/MainComponent.*           orchestration, inspector, device settings
 resources/sqlite/            official SQLite amalgamation
 resources/branding/          application icon and wordmark (originals included)
 cmake/                       macOS bundle signing
+packaging/                   macOS PKG, Windows MSI and Linux AppImage/deb packaging
 tests/                       core, audio-render, UI and integration tests
 docs/                        architecture, testing evidence and stage plans
 ```
@@ -254,7 +279,7 @@ The large-file test creates a sparse 1.2 GB WAV, decodes eight blocks and cancel
 - A catalog moved between computers needs **Relocate folders...** once per machine. It rewrites stored paths and does not copy audio. Folder structure inside each root must be preserved; a 200-path existence sample warns about a wrong choice, and the automatic `.relocate-<timestamp>.sqlite` backup is the recovery point.
 - WAV/AIFF physical audio-chunk boundaries are checked before analysis/preview; inaccurate outer RIFF/FORM sizes and appended ancillary metadata are tolerated when the actual audio payload is complete. Compressed-format integrity still depends on the decoder; this is not a forensic file-repair validator. RF64 extended tables for non-data chunks are not supported.
 - Read-ahead keeps decoding away from the real device callback. JUCE's transport/player use internal locks; this is a practical browser preview, not a formally lock-free realtime engine.
-- Windows, Intel macOS, physical listening/latency and release packaging still need platform/user verification. External file drag (library rows and selection WAVs) is verified on macOS only; Windows uses the same JUCE file-URL path and must be checked separately.
+- Windows, Intel macOS, Linux, physical listening/latency and release packaging still need platform/user verification. External file drag (library rows and selection WAVs) is verified on macOS only; Windows and Linux use the same JUCE file-URL path and must be checked separately. On Linux, **Copy** writes newline-separated paths rather than file references.
 - The VST3/AU plugin `SONICATOR` shares the application's live catalog and settings, keeps its selection and window size in the DAW project, and disables scanning and file processing inside the plugin. Host acceptance in Live 12, REAPER, Cubase 15 and Bitwig is still manual, and Match BPM / Match Scale are P2. See `docs/PLUGIN.md`.
 
 ## License
