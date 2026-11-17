@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "ui/MainComponent.h"
+#include "ui/library/RoundTagMenu.h"
 #include "ui/settings/SettingsPanel.h"
 #include "ui/split/SplitDialog.h"
 #include "ui/extract/ExtractDialog.h"
@@ -250,6 +251,7 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
     theme::apply(ThemeMode::Dark);
     AppSettings settings;
     settings.theme = ThemeMode::Dark;
+    settings.roundTagMenu = true;
 
     SonicatorLookAndFeel look;
     settings.scalePercent = 100;
@@ -303,6 +305,18 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
                                library->getBottom() - library->getY() + 90 },
                         2, "tags.png");
     app.setTagFilters({}, {}, false);
+
+    // Plate: the round tag menu over a three-row selection.
+    library->selectRows({ 0, 1, 2 });
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(250);
+    if (auto* ring = dynamic_cast<RoundTagMenu*>(findDescendantWithID(app, "roundTagMenu")))
+    {
+        ring->setAnimationDuration(0);
+        app.commandRegistry().invoke("library.roundTagMenu");
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(160);
+        manual::capture(app, 2, "round-tag-menu.png");
+        ring->close();
+    }
 
     // Plate 6: the Analysis card on a file with Key and BPM.
     library->selectRows({ 0 });
@@ -360,7 +374,7 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
     panel.resized();
     panel.selectSection(SettingsSection::general);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
-    manual::captureArea(panel, { 0, 0, panel.getWidth(), 430 }, 2, "settings-general.png");
+    manual::captureArea(panel, { 0, 0, panel.getWidth(), 600 }, 2, "settings-general.png");
     panel.selectSection(SettingsSection::hotkeys);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
     manual::captureArea(panel, { 0, 0, panel.getWidth(), 360 }, 2, "settings-hotkeys.png");

@@ -1,6 +1,6 @@
 # Tags, recent tags, folder actions and AutoTag
 
-This document describes the tagging stage implemented on schema 8. AutoTag is a rule engine over
+This document describes the tagging stage implemented on schema 20. AutoTag is a rule engine over
 the filename and stored metadata. It is not ML, cloud analysis or audio classification, and it
 never changes an original file.
 
@@ -9,7 +9,8 @@ never changes an original file.
 The file context menu starts with up to five recently **assigned** tags, newest first. A quick item
 assigns its tag to the whole current selection and never removes an assignment. Opening a menu, a
 no-op or a removal does not change the list. Renamed tags show their current name; a deleted tag
-drops out.
+drops out. With the round tag menu enabled those five rows are replaced by one **Tags** pill; the
+history still feeds the quick list when the feature is off and the **Add last tag** command.
 
 History lives in the catalog database, so it moves with the database and is isolated per catalog:
 
@@ -23,6 +24,38 @@ recent_tags(tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
 keeps five rows. Only explicit human assignments update it: quick items, the **Tag** submenu, **New
 tag**, and **Tag folder**. Bulk AutoTag deliberately does not touch it, so worker batch order cannot
 scramble the menu.
+
+## Round tag menu
+
+Settings → General → **TAGS** → **Round tag menu** turns the radial picker on. Off, the context
+menu and the tag list behave exactly as before. On, the row context menu starts with one **Tags**
+pill instead of the five recent rows and the **Tag** submenu; hovering the pill for 200 ms or
+clicking it closes the menu and grows the ring from the pill. Ctrl/Cmd+T opens the same ring for the
+selected rows or the folder tree selection. `Edit tags...` in the preview opens it for one file.
+
+The ring has two orbits of eight pills: the inner holds the eight highest-ranked tags, the outer the
+next seven plus **All tags…**, which opens the familiar list with ticks and **New tag...**. A pick
+assigns a tag; when every selected file already has it, the pick removes it, matching the old
+submenu. Folder picks only assign, through the usual confirmation and background batches.
+
+Ranking uses a personal counter, not corpus popularity:
+
+```sql
+tag_usage(tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
+          use_count INTEGER NOT NULL DEFAULT 0,
+          last_used_at INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID
+```
+
+Each explicit assignment increments `use_count` and sets `last_used_at` — the same call sites as
+`recent_tags`, so AutoTag and Reset never move it. Ordering is
+`(use_count + 0.5) * 2^(-ageDays / 30)`; never-used tags score zero and sort by name. An upgrade
+from schema 19 seeds the table once from `recent_tags` (oldest row has the heaviest weight), so an
+existing catalog opens with a sensible order.
+
+The overlay is a transparent full-window child: appearance 260 ms, proximity growth up to 1.26 at
+90 px, 13 px outward push, 180 ms smoothing, close 90 ms. It never moves the audio thread. Schema 20
+is a migration, so a plug-in build older than this one refuses the catalog with the usual "newer
+catalog" message until it is updated with the application.
 
 ## Reset tags
 
@@ -57,7 +90,8 @@ Right-clicking a folder in the sidebar offers:
   folder. It does not recompute SHA-256 or Phase 1 measured features, does not import files and does
   not change tags.
 - **Tag folder...** — confirms the path, inclusion of subfolders, catalogued file count, new
-  assignments and already-tagged count before writing. Repeating is idempotent.
+  assignments and already-tagged count before writing. Repeating is idempotent. With the round tag
+  menu enabled this item opens the ring and the same confirmation follows the pick.
 - **AutoTag folder...** — the same reviewable preview as selected-file AutoTag, for the subtree.
 
 **All samples** is a virtual node. It has no folder menu: there is no implicit whole-catalog Tag,

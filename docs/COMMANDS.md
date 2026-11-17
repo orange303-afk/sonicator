@@ -100,7 +100,7 @@ means extracting its menu branch into a single handler first.
 | Area | Actions |
 |---|---|
 | Library row | Star/unstar, Copy path, Show in Finder, Analyze selected, AutoTag selected, Reset tags, Split by silence, Extract samples, Ignore, Show all copies |
-| Tags | Tag ▸, New tag, Manage tags (colour/rename/delete), Remove tag |
+| Tags | Tag ▸, New tag, Manage tags (colour/rename/delete), Remove tag, Round tag menu (Ctrl/Cmd+T) |
 | Metadata | Type ▸ (standard, custom, reset), BPM ▸ (set, tap, clear), Genre ▸ (genre, Unknown, clear, custom) |
 | Library toolbar | New files, Rescan, Reanalyze all, Smart metadata, Add folder, Tags filter, Starred, Hide empty, Clear filters, page size, previous/next page |
 | Folder tree | Open in Finder, Favorite, Ignore, Rename, Scan, Smart metadata, AutoTag, Tag ▸, Reset tags, Remove from library |

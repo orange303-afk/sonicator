@@ -28,7 +28,8 @@ assignments; nothing is shared.
 
 Select one or more rows and use *Tag ▸*; the menu starts with the five most recently *assigned* tags
 in this catalog, newest first. Choosing one assigns it to the whole selection and never removes
-another tag.
+another tag. With the round tag menu enabled, a single *Tags* pill replaces those five rows and the
+submenu.
 
 The recent list is built from your explicit assignments only: the quick items, the *Tag* submenu,
 *New tag* and *Tag folder*. AutoTag application deliberately does not touch it, so a bulk run cannot
@@ -39,6 +40,25 @@ the selection is empty or no tag has been assigned yet.
 
 To remove one tag from one file, Alt-click its tag in the TAGS cell. To remove all assignments in a
 scope, use *Reset tags…*.
+
+#section("Round tag menu")
+
+Turn it on in *Settings → General → TAGS → Round tag menu*. With it off, the context menu and the
+tag list work exactly as before. With it on, the row context menu starts with one *Tags* pill
+instead of the five recent rows and the *Tag* submenu. Hovering the pill for a moment, or clicking
+it, closes the menu and the ring grows from the pill. Ctrl/Cmd+T opens the same ring for the
+selected rows or the selected folder, and *Edit tags...* opens it for one file.
+
+The inner ring holds the eight tags you reach for most, recent and frequent together; the outer
+ring holds the next seven plus *All tags…*, which opens the full list with its ticks and *New
+tag...*. A pick assigns the tag; when every selected file already has it, the pick removes it. A
+folder pick goes through the usual confirmation and background batches and only assigns.
+
+The order is personal: every explicit assignment counts, AutoTag and Reset do not. A tag used once
+today stands before a tag used ten times three months ago, and a tag you never used waits at the
+end, alphabetically.
+
+#plate("/docs/manual/assets/round-tag-menu.png", [Figure 7.1 — The round tag menu over a three-file selection. The inner ring holds the most used tags; *All tags…* opens the full list.])
 
 #section("Tag folder")
 
@@ -52,7 +72,7 @@ actual number of new assignments.
 The *Tags* chip in the toolbar opens the tag filter. Include several tags to require all of them. The count line updates to the matching rows, and header sorting
 still sorts the whole filtered result.
 
-#plate("/docs/manual/assets/tags.png", [Figure 7.1 — A tag filter for *Kick* with two rows selected. Both rows show the shared tag in the TAGS column.])
+#plate("/docs/manual/assets/tags.png", [Figure 7.2 — A tag filter for *Kick* with two rows selected. Both rows show the shared tag in the TAGS column.])
 
 *Starred* is a separate filter and combines with the tag filter. Stars are a quick personal mark, not
 a tag: they do not appear in the tag menu and cannot be renamed.
