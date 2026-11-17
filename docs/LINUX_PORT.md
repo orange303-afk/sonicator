@@ -19,6 +19,8 @@ before any source change; CI runs afterwards use the `ci-linux` preset in the sa
 | Full suite on the stand (Ubuntu 24.04, glibc 2.39) | **1283 cases: 1279 passed, 4 skipped, 0 failed**; 268315 assertions, 39 s |
 | Full suite in the release container (Ubuntu 22.04, root) | Same suite; two tests skip under root because directory mode bits deny nothing to it |
 | Full build time on the stand (4-core Celeron N4100) | 19 min 20 s from a warm configure |
+| Application starts headless | Window opens under Xvfb, the process survives, and `~/.config/Sonicator/sonicator.sqlite` is created on first launch |
+| Runtime loading | The archive's SONAME is `libonnxruntime.so.1`; the build now ships the real file under that name plus the unversioned symlink. Copying only the symlink made the application die with `libonnxruntime.so.1: cannot open shared object file` |
 
 Source changes the port needed so far — every one a real defect, none a workaround:
 

@@ -275,6 +275,23 @@ jobs:
           python3 packaging/make-source-bundle.py build dist
           git rev-parse HEAD > dist/source-commit.txt
           cd dist && for sum in *.sha256; do sha256sum -c "$sum"; done && ls -l
+      # A package that installs but cannot find its own runtime is not a deliverable, and the
+      # dependency list is the only thing that makes apt install the right libraries.
+      - name: Verify the artifacts
+        run: |
+          set -e
+          deb="$(ls dist/*.deb)"
+          depends="$(dpkg-deb -f "$deb" Depends)"
+          echo "Depends: $depends"
+          echo "$depends" | grep -q libasound2
+          echo "$depends" | grep -q 'libc6 (>= 2.35)'
+          listing="$(dpkg-deb -c "$deb")"
+          echo "$listing" | grep -q 'usr/bin/SONICATOR'
+          echo "$listing" | grep -q 'usr/lib/sonicator/libonnxruntime.so.1'
+          echo "$listing" | grep -q 'usr/share/applications/sonicator.desktop'
+          appimage="$(ls dist/*.AppImage)"
+          test -x "$appimage"
+          echo "AppImage: $(basename "$appimage") ($(wc -c < "$appimage") bytes)"
       - name: Installer artifacts
         uses: actions/upload-artifact@v4
         with:
