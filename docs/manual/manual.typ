@@ -1,11 +1,17 @@
 #import "style.typ": *
 
+#set document(
+  title: "SONICATOR User Manual",
+  author: "Ilya Orange",
+  keywords: ("sample browser", "SONICATOR", "user manual"),
+)
+
 #let version = "0.1.0"
 #let build-date = "November 2026"
 
 #show: book
 
-#cover(version: version, commit: "Documented build")
+#cover(version: version, commit: "November 2026")
 
 #page(footer: none, numbering: none)[
   #set text(size: 9.5pt)
@@ -143,3 +149,32 @@ application does not know something, the manual says so too.
 #include "appendices/C-formats.typ"
 #include "appendices/D-files.typ"
 #include "appendices/E-glossary.typ"
+
+// ---- Back cover -----------------------------------------------------------
+
+#page(
+  footer: none,
+  background: rect(fill: plate-dark, width: 100%, height: 100%),
+  margin: (top: 40mm, bottom: 30mm, x: 26mm),
+)[
+  #set text(fill: white)
+  #text(size: 10pt, fill: accent, weight: "bold", tracking: 2pt)[SONICATOR]
+  #v(16pt)
+  #text(size: 15pt, weight: "bold")[
+    A local sample browser for macOS and Windows.
+  ]
+  #v(10pt)
+  #text(size: 11pt, fill: rgb("#c9cbcf"))[
+    Index the folders you already have, tag and correct them, audition and edit without touching
+    the originals, and drag the result into a DAW. No account, no cloud library, and three optional
+    network actions you start yourself.
+  ]
+  #v(18pt)
+  #line(length: 30mm, stroke: 1.2pt + accent)
+  #v(14pt)
+  #text(size: 9pt, fill: rgb("#a3a5a9"))[
+    Free software under the GNU Affero General Public License v3.0 or later. \
+    © 2026 Ilya Orange. \
+    `github.com/orange303-afk/sonicator`
+  ]
+]

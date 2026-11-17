@@ -273,8 +273,9 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
     {
         tree->selectPath(seeded.root.getChildFile("Drums/Kicks").getFullPathName());
         juce::MessageManager::getInstance()->runDispatchLoopUntil(200);
-        manual::captureArea(app, app.getLocalArea(tree, tree->getLocalBounds()).expanded(2), 2,
-                            "folder-tree.png");
+        auto area = app.getLocalArea(tree, tree->getLocalBounds()).expanded(2);
+        area.setHeight(juce::jmin(area.getHeight(), 470));
+        manual::captureArea(app, area, 2, "folder-tree.png");
     }
 
     // Plate 3: the table, with the duplicate group and the selection bar in view.
@@ -297,7 +298,8 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
     app.setTagFilters({ seeded.tags.at("Kick") }, {}, false);
     library->selectRows({ 0, 1 });
     juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
-    manual::captureArea(app, { 0, juce::jmax(0, library->getY() - 46), app.getWidth(),
+    manual::captureArea(app, { juce::jmax(0, library->getX() - 24),
+                               juce::jmax(0, library->getY() - 46), 1000,
                                library->getBottom() - library->getY() + 90 },
                         2, "tags.png");
     app.setTagFilters({}, {}, false);
@@ -306,13 +308,11 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
     library->selectRows({ 0 });
     juce::MessageManager::getInstance()->runDispatchLoopUntil(400);
     if (auto* card = findDescendantWithID(app, "analysisDetails"))
-        if (auto* viewport = card->getParentComponent())
-        {
-            auto area = app.getLocalArea(viewport, viewport->getLocalBounds());
-            if (auto* keyBpm = findDescendantWithID(app, "analysisKeyBpm"))
-                area = area.getUnion(app.getLocalArea(keyBpm, keyBpm->getLocalBounds()));
-            manual::captureArea(app, area.expanded(12), 2, "analysis.png");
-        }
+        manual::captureArea(app, app.getLocalArea(card, card->getLocalBounds()).expanded(12), 2,
+                            "analysis-card.png");
+    if (auto* keyBpm = findDescendantWithID(app, "analysisKeyBpm"))
+        manual::captureArea(app, app.getLocalArea(keyBpm, keyBpm->getLocalBounds()).expanded(12), 2,
+                            "analysis-hero.png");
 
     // Plates 7 and 8: the preview band with a waveform and a prepared selection.
     auto* preview = dynamic_cast<PreviewPanel*>(findDescendantWithID(app, "preview"));
@@ -320,11 +320,17 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
     REQUIRE(preview->loadFile(juce::File(seeded.root.getChildFile(
         "Drums/Kicks/Kick_808_Am_120.wav")), false));
     juce::MessageManager::getInstance()->runDispatchLoopUntil(400);
-    manual::capture(*preview, 2, "preview.png");
+    {
+        const auto bounds = preview->getLocalBounds();
+        const int split = (int) (bounds.getWidth() * 0.62f);
+        manual::captureArea(*preview, bounds.withWidth(split), 2, "preview-wave.png");
+        manual::captureArea(*preview, bounds.withTrimmedLeft(split + 8), 2, "preview-controls.png");
+    }
     preview->selectRange(0.25, 0.95);
     CHECK(pumpUntil([preview] { return preview->isSelectionReady(); }, 20000));
     juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
-    manual::capture(*preview, 2, "selection.png");
+    manual::captureArea(*preview, preview->getLocalBounds().withWidth(
+        (int) (preview->getWidth() * 0.66f)), 2, "selection.png");
 
     // Plate 9: the cloud map, overview and a zoomed neighbourhood.
     library->selectRows({});
@@ -337,26 +343,22 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
         for (int i = 0; i < 90; ++i) cloud->onFrameForTest();
         manual::captureArea(app, { 0, 0, library->getRight() + 2, cloud->getBottom() }, 2,
                             "cloud.png");
-        cloud->zoomBy(3.0f, { cloud->getWidth() * 0.5f, cloud->getHeight() * 0.55f });
-        juce::MessageManager::getInstance()->runDispatchLoopUntil(900);
-        for (int i = 0; i < 90; ++i) cloud->onFrameForTest();
-        manual::captureArea(*cloud, cloud->getLocalBounds(), 2, "cloud-zoom.png");
     }
     app.showCloudView(false);
 
     // Plates 10 and 11: Settings General and Hotkeys. The catalog path is the documented
     // default, written with a tilde, so the plate does not carry a developer's temp directory.
-    SettingsPanel panel(settings, juce::File("~/Library/Sonicator/sonicator.sqlite"), false);
+    SettingsPanel panel(settings, juce::File("/Users/Shared/Sonicator/sonicator.sqlite"), false);
     panel.setLookAndFeel(&look);
     panel.setCommandRegistry(&app.commandRegistry());
     panel.setSize(820, 640);
     panel.resized();
     panel.selectSection(SettingsSection::general);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
-    manual::capture(panel, 2, "settings-general.png");
+    manual::captureArea(panel, { 0, 0, panel.getWidth(), 400 }, 2, "settings-general.png");
     panel.selectSection(SettingsSection::hotkeys);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
-    manual::capture(panel, 2, "settings-hotkeys.png");
+    manual::captureArea(panel, { 0, 0, panel.getWidth(), 400 }, 2, "settings-hotkeys.png");
     panel.setLookAndFeel(nullptr);
 
     // Plate 12: the plugin window, rendered from the editor the host would open.

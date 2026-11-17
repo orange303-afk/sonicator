@@ -20,11 +20,12 @@ SONICATOR_MANUAL_SHOT_DIR=$PWD/docs/manual/assets \
 | `table.png` | 5 | library table | First row selected, all columns visible |
 | `search.png` | 6 | header, toolbar and table | Query `type:kick key:Am`, one match |
 | `tags.png` | 7 | toolbar, table and Analysis panel | Tag filter `Kick`, two rows selected |
-| `analysis.png` | 9 | Analysis viewport and Key/BPM hero | `Kick_808_Am_120.wav`, manual key and BPM |
-| `preview.png` | 10 | Preview band | Waveform loaded, transport at zero |
+| `analysis-card.png` | 3, 9 | Analysis card | `Kick_808_Am_120.wav`, measured features |
+| `analysis-hero.png` | 3, 9 | Key/BPM hero | Same file, manual key and BPM |
+| `preview-wave.png` | 10 | Preview waveform | Waveform loaded, transport at zero |
+| `preview-controls.png` | 10 | Preview transport | Time, play/stop, volume, toggles |
 | `selection.png` | 11 | Preview band | Range 0.250–0.400 s, export ready |
 | `cloud.png` | 14 | full window, 2× | Cloud tab, 241 tagged files, overview |
-| `cloud-zoom.png` | 14 | cloud view | 3× zoom into the middle of the map |
 | `settings-general.png` | 23 | `SettingsPanel` | General page, dark theme |
 | `settings-hotkeys.png` | 24 | `SettingsPanel` | Hotkeys page with the real command registry |
 | `plugin.png` | 22 | `PluginEditor` | 1400×820, dark settings, Match controls visible |

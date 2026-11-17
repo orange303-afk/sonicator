@@ -36,7 +36,7 @@
   // ---- Headings -------------------------------------------------------------
 
   show heading.where(level: 1): it => {
-    pagebreak(weak: true)
+    pagebreak(weak: false)
     block(above: 0pt, below: 16pt)[
       #set text(size: 24pt, weight: "bold", fill: ink, tracking: -0.4pt)
       #it.body
@@ -86,7 +86,8 @@
   heading(level: 1)[#text(fill: accent)[#number] #title]
   if lead != none {
     block(above: 4pt, below: 12pt)[
-      #set text(size: 12pt, fill: muted, leading: 0.7em)
+      #set text(size: 12pt, fill: muted)
+      #set par(leading: 0.7em)
       #lead
     ]
   }
@@ -180,39 +181,36 @@
     width: 100%,
   )[#image(path, width: width)]
   #v(4pt)
-  #set text(size: 8.5pt, fill: muted, leading: 0.6em)
+  #set text(size: 8.5pt, fill: muted)
+  #set par(leading: 0.6em)
   #caption
 ]
 
 #let plate(path, caption) = page(
   flipped: true,
-  margin: (top: 16mm, bottom: 16mm, x: 18mm),
-  footer: context {
-    set text(font: body-font, size: 7.5pt, fill: muted)
-    grid(
-      columns: (1fr, auto),
-      [SONICATOR · User manual],
-      counter(page).display(),
-    )
-  },
+  margin: (top: 14mm, bottom: 14mm, x: 18mm),
+  footer: none,
 )[
-  #block(above: 0pt, height: 100%)[
-    #image(path, width: 100%)
-    #v(6pt)
-    #set text(size: 8.5pt, fill: muted)
-    #caption
-  ]
+  #image(path, width: 94%)
+  #v(4pt)
+  #set text(size: 8.5pt, fill: muted)
+  #caption
 ]
 
 #let data-table(header: (), rows: (), widths: auto) = {
-  table(
+  let cell(value) = if type(value) == str { eval(value, mode: "markup") } else { value }
+  let render(line) = line.map(cell)
+  block(breakable: false)[
+    #set par(justify: false)
+    #table(
     columns: widths,
     stroke: (x, y) => if y == 0 { 0.8pt + ink } else { 0.4pt + rule },
     inset: (x: 6pt, y: 4pt),
     align: left + top,
-    table.header(..header),
-    ..rows.flatten(),
-  )
+    table.header(..render(header)),
+    ..rows.map(render).flatten(),
+    )
+  ]
 }
 
 #let source(text) = block(above: 8pt)[
