@@ -39,6 +39,7 @@
 #include <future>
 namespace sonicator {
 class SplitDialog;
+class RoundTagMenu;
 namespace batch { class BatchProcessingDialog; }
 class ExtractDialog;
 class SettingsPanel;
@@ -219,6 +220,9 @@ private:
     std::unique_ptr<cloud::CloudView> cloudPanel;
     std::unique_ptr<cloud::CloudBuildService> cloudBuilder;
     std::unique_ptr<juce::ThreadPool> hoverPool;
+    // The round tag menu overlay and the screen anchor its "All tags…" fallback opens at.
+    std::unique_ptr<RoundTagMenu> roundTagMenu;
+    juce::Point<int> roundTagAnchorScreen;
     bool cloudVisible = false;
     bool cloudBuildScheduled = false;
     juce::uint32 cloudBuildAtMs = 0;
@@ -394,6 +398,15 @@ private:
     void showEditTagsMenu();
     void showSampleContextMenu(const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> screenPosition);
     void showFolderContextMenu(const juce::String& path, bool allSamples, juce::Point<int> screenPosition);
+    // The radial tag menu. The anchor is local to this component; the menu closes itself after a
+    // pick and reports the tag through the callback installed for that opening.
+    void showRoundTagMenuAt(juce::Point<int> anchor, bool forFolder);
+    void showRoundTagMenuForFolder(const juce::String& folder, juce::Point<int> anchor);
+    void showRoundTagMenuForIds(const std::vector<int64_t>& ids, juce::Point<int> anchor);
+    void showAllTagsMenu(const std::vector<int64_t>& ids, juce::Point<int> screenPosition);
+    void showAllTagsMenuForFolder(const juce::String& folder, juce::Point<int> screenPosition);
+    void confirmTagFolder(const juce::String& folder, int64_t tagId);
+    juce::Point<int> commandAnchor(bool preferFolders) const;
     void setGenreForFolder(const juce::String& path, const juce::String& genre, bool replaceManual = false);
     void finishFolderGenre();
     void showFavoriteContextMenu(const juce::String& path, juce::Point<int> screenPosition);

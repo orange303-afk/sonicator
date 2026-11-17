@@ -162,7 +162,7 @@ void RoundTagMenu::open(RoundTagGeometry nextGeometry, juce::String centreTitle,
     lastTick = 0.0;
     setVisible(true);
     toFront(false);
-    grabKeyboardFocus();
+    if (isShowing()) grabKeyboardFocus();
     startTimerHz(60);
     repaint();
 }

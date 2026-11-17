@@ -33,9 +33,12 @@
 #include <cmath>
 #include <iterator>
 #include <map>
+#include <set>
 #include "core/indexing/CatalogFileSync.h"
 #include "core/edit/AudioEditWriter.h"
 #include "ui/library/TapTempoDialog.h"
+#include "ui/library/RoundTagMenu.h"
+#include "ui/library/TagsMenuPill.h"
 #include <thread>
 namespace sonicator {
 namespace {
@@ -543,6 +546,45 @@ void MainComponent::registerCommands()
                    [this, panelId] { resetPanelSize(panelId); });
     }
 
+    {
+        CommandSpec spec;
+        spec.id = "library.roundTagMenu";
+        spec.name = "Round tag menu";
+        spec.description = "Opens the radial tag menu for the selected files";
+        spec.scope = CommandScope::library;
+        spec.category = "Tags";
+        spec.defaults = { juce::KeyPress('t', juce::ModifierKeys::commandModifier, 0) };
+        auto state = [this]() -> CommandState
+        {
+            if (! appSettings.roundTagMenu)
+                return CommandState::unavailable("Turn on Round tag menu in Settings");
+            if (library.getSelectedSamples().empty())
+                return CommandState::unavailable("Select one or more files");
+            return CommandState::ready();
+        };
+        addCommand(std::move(spec), std::move(state),
+                   [this] { showRoundTagMenuAt(commandAnchor(false), false); });
+    }
+    {
+        CommandSpec spec;
+        spec.id = "folders.roundTagMenu";
+        spec.name = "Round tag menu for the folder";
+        spec.description = "Opens the radial tag menu for every catalogued file below the selected folder";
+        spec.scope = CommandScope::folders;
+        spec.category = "Tags";
+        spec.defaults = { juce::KeyPress('t', juce::ModifierKeys::commandModifier, 0) };
+        auto state = [this]() -> CommandState
+        {
+            if (! appSettings.roundTagMenu)
+                return CommandState::unavailable("Turn on Round tag menu in Settings");
+            if (selectedFolder.isEmpty())
+                return CommandState::unavailable("Select a catalogued folder");
+            return CommandState::ready();
+        };
+        addCommand(std::move(spec), std::move(state),
+                   [this] { showRoundTagMenuAt(commandAnchor(true), true); });
+    }
+
     reapplyShortcutProfile();
     setEditCommandProfileProvider([safe = juce::Component::SafePointer<MainComponent>(this)]
     {
@@ -626,6 +668,10 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     // settings file, register system packs or contact the contribution endpoint.
     persistSessionState = ! embeddedUi && juce::JUCEApplicationBase::getInstance() != nullptr;
     setLookAndFeel(&look); look.refreshColours(); setWantsKeyboardFocus(true);
+    roundTagMenu = std::make_unique<RoundTagMenu>();
+    roundTagMenu->setComponentID("roundTagMenu");
+    addChildComponent(*roundTagMenu);
+    roundTagMenu->setAlwaysOnTop(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
     for (auto* c : std::array<juce::Component*,34>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
          &pause,&cancel,&settings,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
@@ -2624,10 +2670,339 @@ int MainComponent::assignTagAndRemember(const std::vector<int64_t>& sampleIds, i
     }
     return added;
 }
+namespace
+{
+struct BuiltRoundItems
+{
+    std::vector<RoundTagItem> inner, outer;
+};
+BuiltRoundItems buildRoundItems(const std::vector<Tag>& ranked, bool forFolder,
+                               const std::function<bool(int64_t)>& hasEverywhere)
+{
+    BuiltRoundItems out;
+    for (size_t i = 0; i < ranked.size(); ++i)
+    {
+        RoundTagItem item;
+        item.tagId = ranked[i].id;
+        item.label = ranked[i].name;
+        item.colour = juce::Colour(ranked[i].colour);
+        item.assigned = ! forFolder && hasEverywhere(ranked[i].id);
+        if (i < 8) out.inner.push_back(item);
+        else if (out.outer.size() < 7) out.outer.push_back(item);
+        else break;
+    }
+    RoundTagItem all;
+    all.action = true;
+    all.label = "All tags" + juce::String::charToString((juce::juce_wchar) 0x2026);
+    all.colour = theme::muted;
+    out.outer.push_back(all);
+    return out;
+}
+}
+
+juce::Point<int> MainComponent::commandAnchor(bool preferFolders) const
+{
+    const auto screen = juce::Desktop::getMousePosition();
+    const auto local = getLocalPoint(nullptr, screen);
+    if (getLocalBounds().contains(local)) return local;
+    return preferFolders ? folders.getBounds().getCentre() : library.getBounds().getCentre();
+}
+
+void MainComponent::showRoundTagMenuAt(juce::Point<int> anchor, bool forFolder)
+{
+    if (! appSettings.roundTagMenu) return;
+    if (forFolder)
+    {
+        if (! selectedFolder.isEmpty()) showRoundTagMenuForFolder(selectedFolder, anchor);
+        return;
+    }
+    std::vector<int64_t> ids;
+    for (const auto& record : library.getSelectedSamples()) ids.push_back(record.id);
+    showRoundTagMenuForIds(ids, anchor);
+}
+
+void MainComponent::showRoundTagMenuForIds(const std::vector<int64_t>& ids, juce::Point<int> anchor)
+{
+    if (! appSettings.roundTagMenu || readRepo == nullptr || writeRepo == nullptr
+        || roundTagMenu == nullptr || ids.empty())
+        return;
+    std::vector<Tag> ranked;
+    std::map<int64_t, std::vector<Tag>> assigned;
+    try
+    {
+        ranked = readRepo->rankedTags(15, -1);
+        assigned = readRepo->tagsForSamples(ids);
+    }
+    catch (const std::exception& e)
+    {
+        status.setText(juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+        return;
+    }
+    const auto hasEverywhere = [&assigned, &ids](int64_t tagId)
+    {
+        for (const auto id : ids)
+        {
+            const auto found = assigned.find(id);
+            if (found == assigned.end()) return false;
+            bool has = false;
+            for (const auto& tag : found->second)
+                if (tag.id == tagId) { has = true; break; }
+            if (! has) return false;
+        }
+        return true;
+    };
+    auto items = buildRoundItems(ranked, false, hasEverywhere);
+    auto names = std::make_shared<std::map<int64_t, juce::String>>();
+    auto allHave = std::make_shared<std::set<int64_t>>();
+    for (const auto& tag : ranked)
+    {
+        (*names)[tag.id] = tag.name;
+        if (! assigned.empty() && hasEverywhere(tag.id)) allHave->insert(tag.id);
+    }
+    roundTagAnchorScreen = getScreenPosition() + anchor;
+    const auto catalogPath = dbPath;
+    roundTagMenu->onTagPicked = [safe = juce::Component::SafePointer<MainComponent>(this),
+                                 ids, names, allHave, catalogPath](int64_t tagId)
+    {
+        if (safe == nullptr || safe->dbPath != catalogPath || safe->writeRepo == nullptr) return;
+        const auto nameIt = names->find(tagId);
+        const auto name = nameIt != names->end() ? nameIt->second : juce::String("tag");
+        if (allHave->count(tagId) > 0)
+        {
+            safe->writeRepo->setSampleTag(ids, tagId, false);
+            safe->triggerAdaptiveLearning(ids);
+            safe->status.setText("Removed " + name + " from " + juce::String((int) ids.size())
+                                     + " file(s)", juce::dontSendNotification);
+        }
+        else
+        {
+            const int added = safe->assignTagAndRemember(ids, tagId);
+            safe->status.setText(added > 0
+                ? "Tagged " + juce::String(added) + " of " + juce::String((int) ids.size())
+                      + " file(s) as " + name
+                : "All selected files already have the tag " + name,
+                juce::dontSendNotification);
+        }
+        safe->reloadLibrary();
+    };
+    roundTagMenu->onAllTagsPicked = [safe = juce::Component::SafePointer<MainComponent>(this),
+                                     ids, catalogPath]
+    {
+        if (safe == nullptr || safe->dbPath != catalogPath) return;
+        safe->showAllTagsMenu(ids, safe->roundTagAnchorScreen);
+    };
+    const auto font = fonts::font(10.5f, fonts::Weight::medium);
+    auto geometry = layoutRoundTagMenu(anchor, getLocalBounds(), items.inner, items.outer, font);
+    roundTagMenu->open(std::move(geometry),
+                       ids.size() == 1 ? juce::String("1 file")
+                                       : juce::String((int) ids.size()) + " files",
+                       "TAGS");
+}
+
+void MainComponent::showRoundTagMenuForFolder(const juce::String& folder, juce::Point<int> anchor)
+{
+    if (! appSettings.roundTagMenu || readRepo == nullptr || roundTagMenu == nullptr)
+        return;
+    std::vector<Tag> ranked;
+    int catalogued = 0;
+    try
+    {
+        ranked = readRepo->rankedTags(15, -1);
+        catalogued = readRepo->countInFolder(folder);
+    }
+    catch (const std::exception& e)
+    {
+        status.setText(juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+        return;
+    }
+    if (catalogued <= 0) return;
+    const auto items = buildRoundItems(ranked, true, [](int64_t) { return false; });
+    roundTagAnchorScreen = getScreenPosition() + anchor;
+    const auto catalogPath = dbPath;
+    const auto folderPath = folder;
+    roundTagMenu->onTagPicked = [safe = juce::Component::SafePointer<MainComponent>(this),
+                                 folderPath, catalogPath](int64_t tagId)
+    {
+        if (safe == nullptr || safe->dbPath != catalogPath) return;
+        safe->confirmTagFolder(folderPath, tagId);
+    };
+    roundTagMenu->onAllTagsPicked = [safe = juce::Component::SafePointer<MainComponent>(this),
+                                     folderPath, catalogPath]
+    {
+        if (safe == nullptr || safe->dbPath != catalogPath) return;
+        safe->showAllTagsMenuForFolder(folderPath, safe->roundTagAnchorScreen);
+    };
+    const auto font = fonts::font(10.5f, fonts::Weight::medium);
+    auto geometry = layoutRoundTagMenu(anchor, getLocalBounds(), items.inner, items.outer, font);
+    auto name = juce::File(folder).getFileName();
+    if (name.isEmpty()) name = folder;
+    roundTagMenu->open(std::move(geometry), name,
+                       catalogued == 1 ? juce::String("1 file")
+                                       : juce::String(catalogued) + " files");
+}
+
+void MainComponent::showAllTagsMenu(const std::vector<int64_t>& ids, juce::Point<int> screenPosition)
+{
+    if (readRepo == nullptr || writeRepo == nullptr || ids.empty()) return;
+    std::vector<Tag> tags;
+    std::map<int64_t, std::vector<Tag>> assigned;
+    try
+    {
+        tags = readRepo->tags();
+        assigned = readRepo->tagsForSamples(ids);
+    }
+    catch (...) { return; }
+    std::map<int64_t, bool> allHave;
+    for (const auto& tag : tags)
+    {
+        bool every = true;
+        for (const auto id : ids)
+        {
+            bool has = false;
+            const auto found = assigned.find(id);
+            if (found != assigned.end())
+                for (const auto& current : found->second)
+                    if (current.id == tag.id) { has = true; break; }
+            if (! has) { every = false; break; }
+        }
+        allHave[tag.id] = every;
+    }
+    juce::PopupMenu menu;
+    menu.setLookAndFeel(&look);
+    for (int i = 0; i < (int) tags.size(); ++i)
+        menu.addItem(10000 + i, tags[(size_t) i].name, true, allHave[tags[(size_t) i].id],
+                     tagDotImage(tags[(size_t) i].colour));
+    if (! tags.empty()) menu.addSeparator();
+    menu.addItem(9003, "New tag...");
+    const auto catalogPath = dbPath;
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
+                           { screenPosition.x, screenPosition.y, 1, 1 })
+                           .withMaximumNumColumns(1),
+        [safe = juce::Component::SafePointer<MainComponent>(this), ids, tags, allHave,
+         catalogPath](int result)
+        {
+            if (safe == nullptr || result == 0 || safe->dbPath != catalogPath
+                || safe->writeRepo == nullptr)
+                return;
+            if (result == 9003)
+            {
+                safe->promptTagName("New tag", {}, [safe, ids](juce::String name)
+                {
+                    if (safe == nullptr || name.trim().isEmpty() || safe->writeRepo == nullptr) return;
+                    try
+                    {
+                        const auto colour = tagPalette[safe->allTags.size() % std::size(tagPalette)].colour;
+                        const auto id = safe->writeRepo->createTag(name, colour);
+                        safe->assignTagAndRemember(ids, id);
+                        safe->reloadLibrary();
+                    }
+                    catch (const std::exception& e)
+                    {
+                        safe->status.setText(juce::String::fromUTF8(e.what()),
+                                             juce::dontSendNotification);
+                    }
+                });
+                return;
+            }
+            const size_t index = (size_t) (result - 10000);
+            if (index >= tags.size()) return;
+            const auto tag = tags[index];
+            const auto state = allHave.find(tag.id);
+            const bool assign = state == allHave.end() || ! state->second;
+            if (assign) safe->assignTagAndRemember(ids, tag.id);
+            else
+            {
+                safe->writeRepo->setSampleTag(ids, tag.id, false);
+                safe->triggerAdaptiveLearning(ids);
+            }
+            safe->reloadLibrary();
+        });
+}
+
+void MainComponent::showAllTagsMenuForFolder(const juce::String& folder,
+                                             juce::Point<int> screenPosition)
+{
+    if (readRepo == nullptr) return;
+    std::vector<Tag> tags;
+    try { tags = readRepo->tags(); } catch (...) { return; }
+    juce::PopupMenu menu;
+    menu.setLookAndFeel(&look);
+    for (int i = 0; i < (int) tags.size(); ++i)
+        menu.addItem(11000 + i, tags[(size_t) i].name, true, false,
+                     tagDotImage(tags[(size_t) i].colour));
+    if (tags.empty()) menu.addSectionHeader("No tags yet");
+    const auto catalogPath = dbPath;
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
+                           { screenPosition.x, screenPosition.y, 1, 1 })
+                           .withMaximumNumColumns(1),
+        [safe = juce::Component::SafePointer<MainComponent>(this), folder, tags,
+         catalogPath](int result)
+        {
+            if (safe == nullptr || result == 0 || safe->dbPath != catalogPath) return;
+            const size_t index = (size_t) (result - 11000);
+            if (index >= tags.size()) return;
+            safe->confirmTagFolder(folder, tags[index].id);
+        });
+}
+
+void MainComponent::confirmTagFolder(const juce::String& folderPath, int64_t tagId)
+{
+    if (readRepo == nullptr || writeRepo == nullptr || folderPath.isEmpty() || tagId <= 0) return;
+    std::vector<Tag> tags;
+    int catalogued = 0, already = 0;
+    try
+    {
+        tags = readRepo->tags();
+        catalogued = readRepo->countInFolder(folderPath);
+        already = readRepo->countWithTagInFolder(folderPath, tagId);
+    }
+    catch (const std::exception& e)
+    {
+        status.setText(juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+        return;
+    }
+    const auto found = std::find_if(tags.begin(), tags.end(),
+                                    [tagId](const Tag& tag) { return tag.id == tagId; });
+    if (found == tags.end()) return;
+    const auto tag = *found;
+    const int added = juce::jmax(0, catalogued - already);
+    dialogs::showAlert(*this, "Tag folder",
+        "Folder:\n" + folderPath
+            + "\n\nIncludes every subfolder."
+            + "\nCatalogued files: " + juce::String(catalogued)
+            + "\nNew assignments: " + juce::String(added)
+            + "\nAlready tagged: " + juce::String(already)
+            + "\n\nOriginal files are not changed. Repeating this is safe.",
+        { { "Tag", 1 }, { "Cancel", 0 } },
+        [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, tag](int choice)
+        {
+            if (safe == nullptr || choice != 1 || safe->tagging == nullptr) return;
+            if (safe->tagging->progress().running)
+            {
+                safe->status.setText("Another tagging operation is already running.",
+                                     juce::dontSendNotification);
+                return;
+            }
+            if (safe->autoTag != nullptr && safe->autoTag->progress().running)
+            {
+                safe->status.setText("Wait for AutoTag to finish before tagging the folder.",
+                                     juce::dontSendNotification);
+                return;
+            }
+            if (safe->tagging->startTagFolder(folderPath, tag.id))
+                safe->status.setText("Tagging catalogued files in " + folderPath,
+                                     juce::dontSendNotification);
+        });
+}
 void MainComponent::showEditTagsMenu()
 {
     if (! readRepo || selectedSampleId <= 0)
         return;
+    if (appSettings.roundTagMenu)
+    {
+        showRoundTagMenuForIds({ selectedSampleId }, editTags.getBounds().getCentre());
+        return;
+    }
     const auto sampleId = selectedSampleId;
     auto assigned = readRepo->tagsForSample(sampleId);
     juce::PopupMenu menu;
@@ -3948,7 +4323,10 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
         menu.addItem(7004, "AutoTag folder...", autoTagIdle && catalogued > 0);
     }
     menu.addSeparator();
-    menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0 && ! splitBusy);
+    if (appSettings.roundTagMenu)
+        menu.addItem(7014, "Tag folder...", catalogued > 0 && ! splitBusy);
+    else
+        menu.addSubMenu("Tag folder...", tagMenu, ! allTags.empty() && catalogued > 0 && ! splitBusy);
     const auto genreNames = readRepo->genreNames();
     for (int i = 0; i < genreNames.size(); ++i)
         genreMenu.addItem(genreMenuFirstId + i, genreNames[i]);
@@ -3970,9 +4348,15 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                            .withMaximumNumColumns(1)
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), folderPath, catalogued, exactIgnore,
-         catalogPath = dbPath, genreNames](int result)
+         catalogPath = dbPath, genreNames, screenPosition](int result)
         {
             if (safe == nullptr || result == 0 || safe->dbPath != catalogPath) return;
+            if (result == 7014)
+            {
+                safe->showRoundTagMenuForFolder(folderPath,
+                                                safe->getLocalPoint(nullptr, screenPosition));
+                return;
+            }
             if (safe->folderGenreWork.valid() && result != 7001 && result != 7006 && result != 7011)
             {
                 safe->status.setText("Wait for folder genre assignment to finish.", juce::dontSendNotification);
@@ -4042,35 +4426,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                 {
                     const size_t index = (size_t) (result - 7100);
                     if (index >= safe->allTags.size() || safe->readRepo == nullptr) return;
-                    const auto tag = safe->allTags[index];
-                    const int already = safe->readRepo->countWithTagInFolder(folderPath, tag.id);
-                    const int added = juce::jmax(0, catalogued - already);
-                    dialogs::showAlert(*safe, "Tag folder",
-                        "Folder:\n" + folderPath
-                            + "\n\nIncludes every subfolder."
-                            + "\nCatalogued files: " + juce::String(catalogued)
-                            + "\nNew assignments: " + juce::String(added)
-                            + "\nAlready tagged: " + juce::String(already)
-                            + "\n\nOriginal files are not changed. Repeating this is safe.",
-                        { { "Tag", 1 }, { "Cancel", 0 } },
-                        [safe, folderPath, tag](int choice)
-                        {
-                            if (safe == nullptr || choice != 1 || safe->tagging == nullptr) return;
-                            if (safe->tagging->progress().running)
-                            {
-                                safe->status.setText("Another tagging operation is already running.", juce::dontSendNotification);
-                                return;
-                            }
-                            if (safe->autoTag != nullptr && safe->autoTag->progress().running)
-                            {
-                                safe->status.setText("Wait for AutoTag to finish before tagging the folder.", juce::dontSendNotification);
-                                return;
-                            }
-                            if (safe->tagging->startTagFolder(folderPath, tag.id))
-                                safe->status.setText("Tagging catalogued files in " + folderPath, juce::dontSendNotification);
-                            else
-                                safe->status.setText("Tagging could not start.", juce::dontSendNotification);
-                        }, juce::MessageBoxIconType::QuestionIcon);
+                    safe->confirmTagFolder(folderPath, safe->allTags[index].id);
                 }
                 else if (result == 7006)
                 {
@@ -4517,10 +4873,32 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     auto recent = readRepo->recentTags();
     juce::PopupMenu menu, tagsMenu;
     menu.setLookAndFeel(&look);
-    for (int i = 0; i < (int) recent.size(); ++i)
-        menu.addItem(20000 + i, recent[(size_t) i].name, true, false,
-                     tagDotImage(recent[(size_t) i].colour));
-    if (! recent.empty()) menu.addSeparator();
+    std::shared_ptr<juce::Point<int>> roundTagPillCentre;
+    if (appSettings.roundTagMenu)
+    {
+        roundTagPillCentre = std::make_shared<juce::Point<int>>(screenPosition);
+        auto pill = std::make_unique<TagsMenuPill>(roundTagPillCentre,
+            [safe = juce::Component::SafePointer<MainComponent>(this), roundTagPillCentre,
+             catalogPath = dbPath]
+            {
+                juce::MessageManager::callAsync([safe, roundTagPillCentre, catalogPath]
+                {
+                    if (safe == nullptr || safe->dbPath != catalogPath) return;
+                    juce::PopupMenu::dismissAllActiveMenus();
+                    safe->showRoundTagMenuAt(safe->getLocalPoint(nullptr, *roundTagPillCentre),
+                                             false);
+                });
+            });
+        menu.addCustomItem(9026, std::move(pill), nullptr, "Tags");
+        menu.addSeparator();
+    }
+    else
+    {
+        for (int i = 0; i < (int) recent.size(); ++i)
+            menu.addItem(20000 + i, recent[(size_t) i].name, true, false,
+                         tagDotImage(recent[(size_t) i].colour));
+        if (! recent.empty()) menu.addSeparator();
+    }
     menu.addItem(9000, "Copy", anyExisting);
     menu.addItem(9009, anyInherited ? "Ignored with folder" : "Ignore",
                  ! anyInherited, allIgnored);
@@ -4542,12 +4920,15 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                                          ! normalizeRecords.empty() && ! isNormalizeRunning()));
         menu.addItem(9025, "Batch Processing...", ! existingFiles.empty() && ! isBatchRunning());
     }
-    for (int i = 0; i < (int) allTags.size(); ++i)
-        tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
-                         allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
-    if (! allTags.empty()) tagsMenu.addSeparator();
-    tagsMenu.addItem(9003, "New tag...");
-    menu.addSubMenu("Tag", tagsMenu);
+    if (! appSettings.roundTagMenu)
+    {
+        for (int i = 0; i < (int) allTags.size(); ++i)
+            tagsMenu.addItem(10000 + i, allTags[(size_t) i].name, true,
+                             allHave[allTags[(size_t) i].id], tagDotImage(allTags[(size_t) i].colour));
+        if (! allTags.empty()) tagsMenu.addSeparator();
+        tagsMenu.addItem(9003, "New tag...");
+        menu.addSubMenu("Tag", tagsMenu);
+    }
 
     juce::PopupMenu typeMenu;
     const auto standardTypes = standardSampleTypeNames();
@@ -4679,9 +5060,17 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
          ignoredPaths, allIgnored, anyInherited, splitCandidates, extractCandidates, customList,
-          standardTypes, normalizeRecords, genreNames, catalogPath = dbPath](int result)
+          standardTypes, normalizeRecords, genreNames, catalogPath = dbPath,
+          roundTagPillCentre](int result)
         {
             if (safe == nullptr || result == 0 || safe->dbPath != catalogPath) return;
+            if (result == 9026)
+            {
+                if (roundTagPillCentre != nullptr)
+                    safe->showRoundTagMenuAt(
+                        safe->getLocalPoint(nullptr, *roundTagPillCentre), false);
+                return;
+            }
             // Defence in depth: the plugin hides these items, and no path may start them either.
             if (safe->embeddedUi && (result == 9005 || result == 9006 || result == 9007
                                      || result == 9008 || result == 9010 || result == 9025))
@@ -5704,6 +6093,8 @@ void MainComponent::applySettings(const AppSettings& next)
     appSettings.language = next.language;
     appSettings.alwaysOverwriteOriginalFiles = next.alwaysOverwriteOriginalFiles;
     appSettings.roundTagMenu = next.roundTagMenu;
+    if (! appSettings.roundTagMenu && roundTagMenu != nullptr)
+        roundTagMenu->close();
     preview.setAlwaysOverwriteOriginalFiles(appSettings.alwaysOverwriteOriginalFiles);
     refreshTheme();
     // The global scale factor belongs to the whole process: inside a DAW it would resize the
@@ -6107,6 +6498,11 @@ void MainComponent::paint(juce::Graphics& g)
 }
 void MainComponent::resized()
 {
+    if (roundTagMenu != nullptr)
+    {
+        roundTagMenu->setBounds(getLocalBounds());
+        roundTagMenu->close();
+    }
     if (embeddedSettingsHost != nullptr)
         embeddedSettingsHost->setBounds(getLocalBounds());
     if (embeddedDialogHost != nullptr)
