@@ -54,7 +54,7 @@ TEST_CASE("Several keys per command round-trip", "[commands][bindings]")
     REQUIRE(shortcutMatches(keys[1], key(juce::KeyPress::deleteKey)));
 }
 
-TEST_CASE("Command and Control stay distinct", "[commands][bindings]")
+TEST_CASE("The stored Command and Control shortcuts are distinct", "[commands][bindings]")
 {
     ShortcutKey command;
     command.keyCode = 'z';
@@ -62,10 +62,18 @@ TEST_CASE("Command and Control stay distinct", "[commands][bindings]")
     ShortcutKey control;
     control.keyCode = 'z';
     control.control = true;
+    // The stored model keeps the two flags apart on every platform: migration, conflict detection
+    // and the shortcut editor all read these fields.
     REQUIRE(command != control);
     const auto commandKey = keyPressFromShortcutKey(command);
     const auto controlKey = keyPressFromShortcutKey(control);
+   #if JUCE_MAC
     REQUIRE(commandKey != controlKey);
+   #else
+    // Windows and Linux have one modifier for both: JUCE maps the command modifier onto Control, so
+    // the two shortcuts resolve to the same key press and the interface shows Ctrl.
+    REQUIRE(commandKey == controlKey);
+   #endif
 }
 
 TEST_CASE("Conflicts only exist inside overlapping scopes", "[commands][bindings]")

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <unistd.h>
 #include <catch2/catch_approx.hpp>
 #include "core/batch/BatchEncoder.h"
 #include "core/batch/BatchMetadata.h"
@@ -462,6 +463,8 @@ TEST_CASE("MP3 output is a readable lossy copy and honours the clipping policy",
     vbrPlan.mp3VbrQuality = 2;
     auto vbrResult = renderAndPublish(preparedFor(source, vbrRecipe), vbrPlan, snapshot,
                                       vbrRecipe, ConflictPolicy::rename, protection);
+    INFO(vbrResult.message);
+    INFO((int) vbrResult.code);
     REQUIRE(vbrResult.state == OutputState::completed);
     std::unique_ptr<juce::AudioFormatReader> vbrReader(formats.createReaderFor(vbrResult.target));
     REQUIRE(vbrReader != nullptr);
@@ -514,6 +517,7 @@ TEST_CASE("An unwritable destination fails without touching the source or old ou
 #if JUCE_WINDOWS
     SKIP("POSIX directory mode bits do not implement Windows ACL write denial");
 #else
+    if (::geteuid() == 0) SKIP("running as root: directory mode bits deny nothing");
     TestDirectory t;
     const auto source = floatWav(t.dir.getChildFile("Source/ro.wav"), { 0.2f, -0.2f });
     const auto hash = juce::SHA256(source).toHexString();
