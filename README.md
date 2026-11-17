@@ -19,7 +19,10 @@ browsing — the catalog is a database beside your files, not a second copy of t
 
 No account. No cloud library. Your audio never leaves the computer. The application works offline;
 the only network actions are ones you start yourself (an update check, a report you submit in your
-browser, and an optional anonymous feedback contribution, off by default).
+browser, and an optional anonymous feedback contribution, off by default). Every feature below is
+in the build today; the manual states the limits where they matter.
+
+[User manual](docs/manual/sonicator-manual.pdf) · [Build](#build) · [Tests](#tests) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/BACKLOG.md)
 
 ## What it does
 
