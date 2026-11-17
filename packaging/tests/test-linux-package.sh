@@ -11,6 +11,12 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
+# The packager is Linux-only: it uses objdump, readelf, dpkg and sha256sum on real ELF payloads.
+if [ "$(uname -s)" != "Linux" ]; then
+    echo "skipping the Linux packaging checks on $(uname -s)"
+    exit 0
+fi
+
 # A release build directory with just enough shape for the packager to accept it.
 seed() {
     mkdir -p "$1/Sonicator_artefacts/Release"
