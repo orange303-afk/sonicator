@@ -5703,6 +5703,7 @@ void MainComponent::applySettings(const AppSettings& next)
     appSettings.scalePercent = AppSettings::clampScale(next.scalePercent);
     appSettings.language = next.language;
     appSettings.alwaysOverwriteOriginalFiles = next.alwaysOverwriteOriginalFiles;
+    appSettings.roundTagMenu = next.roundTagMenu;
     preview.setAlwaysOverwriteOriginalFiles(appSettings.alwaysOverwriteOriginalFiles);
     refreshTheme();
     // The global scale factor belongs to the whole process: inside a DAW it would resize the
@@ -5720,6 +5721,7 @@ void MainComponent::applySettings(const AppSettings& next)
             saved.scalePercent = appSettings.scalePercent;
             saved.language = appSettings.language;
             saved.alwaysOverwriteOriginalFiles = appSettings.alwaysOverwriteOriginalFiles;
+            saved.roundTagMenu = appSettings.roundTagMenu;
         });
     }
     catch (const std::exception& e)

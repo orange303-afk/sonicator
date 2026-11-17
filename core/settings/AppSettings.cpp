@@ -113,6 +113,7 @@ AppSettings SettingsStore::load() const
     };
     settings.midiPreview = readBool("midiPreview", settings.midiPreview);
     settings.showIgnored = readBool("showIgnored", settings.showIgnored);
+    settings.roundTagMenu = readBool("roundTagMenu", settings.roundTagMenu);
     settings.reasonPacksAdded = readBool("reasonPacksAdded", settings.reasonPacksAdded);
     settings.abletonPacksAdded = readBool("abletonPacksAdded", settings.abletonPacksAdded);
     auto readNumber = [object](const char* key, double fallback)
@@ -199,6 +200,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("hideEmpty", settings.hideEmpty);
     object->setProperty("cloudView", settings.cloudView);
     object->setProperty("showIgnored", settings.showIgnored);
+    object->setProperty("roundTagMenu", settings.roundTagMenu);
     object->setProperty("reasonPacksAdded", settings.reasonPacksAdded);
     object->setProperty("abletonPacksAdded", settings.abletonPacksAdded);
     object->setProperty("splitThreshold", settings.splitThresholdDb);

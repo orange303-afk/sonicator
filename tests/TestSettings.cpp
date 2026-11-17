@@ -203,6 +203,14 @@ TEST_CASE("Show ignored persists and defaults to off", "[settings][ignore]")
     REQUIRE(store.load().showIgnored);
 }
 
+TEST_CASE("Round tag menu persists and defaults to off", "[settings][tags]")
+{
+    TestDirectory t; SettingsStore store(t.dir.getChildFile("settings.json"));
+    REQUIRE_FALSE(store.load().roundTagMenu);
+    store.update([](AppSettings& s) { s.roundTagMenu = true; });
+    REQUIRE(store.load().roundTagMenu);
+}
+
 TEST_CASE("Split defaults persist and clamp to the supported ranges", "[settings][split]")
 {
     TestDirectory t; SettingsStore store(t.dir.getChildFile("settings.json"));

@@ -43,6 +43,7 @@ struct AppSettings
     juce::String lastSamplePath;       // restored selection without starting preview playback
     bool hideEmpty = true;
     bool cloudView = false;       // the library opens as the tag map instead of the list
+    bool roundTagMenu = false;    // the Tags pill and Ctrl/Cmd+T open the radial tag menu
     bool showIgnored = false;          // reveal catalog rows hidden by ignored_paths
     bool reasonPacksAdded = false;     // global one-time registration, not reset on root removal
     bool abletonPacksAdded = false;    // same rule for the installed Ableton factory packs

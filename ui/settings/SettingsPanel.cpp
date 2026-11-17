@@ -51,9 +51,10 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     setWantsKeyboardFocus(true);
 
     // --- general page controls -------------------------------------------------------------
-    for (auto* c : std::array<juce::Component*, 20> {
+    for (auto* c : std::array<juce::Component*, 23> {
              &appearance, &themeLabel, &scaleLabel, &languageHeading, &languageLabel, &languageNote,
              &libraryHeading, &databaseKey, &databaseLabel, &libraryNote, &databaseStatus,
+             &tagsHeading, &roundTagMenuToggle, &roundTagMenuNote,
              &editingHeading, &alwaysOverwriteToggle, &alwaysOverwriteNote,
              &workspaceHeading, &workspaceNote, &themeBox, &scaleBox, &languageBox, &moveDatabase })
         generalContent.addAndMakeVisible(c);
@@ -158,6 +159,21 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     databaseLabel.setMinimumHorizontalScale(0.8f);
     libraryNote.setFont(noteFont()); libraryNote.setJustificationType(juce::Justification::centredLeft);
     databaseStatus.setFont(noteFont()); databaseStatus.setJustificationType(juce::Justification::centredLeft);
+    tagsHeading.setText("TAGS", juce::dontSendNotification); tagsHeading.setFont(sectionFont());
+    tagsHeading.setColour(juce::Label::textColourId, theme::muted);
+    roundTagMenuToggle.setComponentID("settingsRoundTagMenu");
+    roundTagMenuToggle.setToggleState(initial.roundTagMenu, juce::dontSendNotification);
+    roundTagMenuToggle.onClick = [this]
+    {
+        current.roundTagMenu = roundTagMenuToggle.getToggleState();
+        notifySettings();
+    };
+    roundTagMenuNote.setText("Shows one Tags pill at the top of the row menu; hovering or clicking it opens "
+                             "the round tag menu. Ctrl/Cmd+T opens the same menu for the selected rows "
+                             "or folder. Off keeps the current tag list.",
+                             juce::dontSendNotification);
+    roundTagMenuNote.setFont(noteFont());
+    roundTagMenuNote.setJustificationType(juce::Justification::centredLeft);
     editingHeading.setText("EDITING", juce::dontSendNotification); editingHeading.setFont(sectionFont());
     alwaysOverwriteToggle.setComponentID("settingsAlwaysOverwrite");
     alwaysOverwriteToggle.setToggleState(initial.alwaysOverwriteOriginalFiles, juce::dontSendNotification);
@@ -794,6 +810,11 @@ void SettingsPanel::layoutGeneralPage(juce::Rectangle<int> area)
         note(libraryNote, 36, 6);
         note(databaseStatus, 22, 2);
     }
+
+    section(tagsHeading, studio::spacingSection);
+    add(26, studio::spacingTight, [this](juce::Rectangle<int> area)
+    { roundTagMenuToggle.setBounds(area.withTrimmedLeft(labelColumn)); });
+    note(roundTagMenuNote, 52, 2);
 
     section(editingHeading, studio::spacingSection);
     add(26, studio::spacingTight, [this](juce::Rectangle<int> area)

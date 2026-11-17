@@ -92,6 +92,7 @@ private:
 
     juce::Label title, appearance, themeLabel, scaleLabel, languageHeading, languageLabel,
                  languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
+                 tagsHeading, roundTagMenuNote,
                  editingHeading, alwaysOverwriteNote, workspaceHeading, workspaceNote,
                  audioHeading, audioNote, reportHeading, aboutHeading, productLabel, authorLabel,
                  versionLabel, linksHeading, supportHeading, creditsHeading, prototypesLabel,
@@ -101,6 +102,7 @@ private:
     studio::Paragraph reportNote, supportNote, creditsText;
     juce::ComboBox themeBox, scaleBox, languageBox;
     juce::ToggleButton contributeDataToggle;
+    juce::ToggleButton roundTagMenuToggle { "Round tag menu" };
     juce::ToggleButton alwaysOverwriteToggle { "Always overwrite original files" };
     juce::Label contributionNote;
     juce::TextButton contributionPreview { "What will be sent..." },
