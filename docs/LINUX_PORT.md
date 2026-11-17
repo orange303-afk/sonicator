@@ -52,6 +52,8 @@ None. The four that failed during the port were fixed rather than tolerated:
 - The `linux` job in `.github/workflows/ci.yml` is required; it builds, runs the suite under Xvfb and
   starts the application headless.
 - No Linux audio-device or MIDI acceptance: the suite runs without a device under Xvfb.
+- Version 0.1.0 publishes the first Linux artifacts on GitHub as an **in-development preview**: the
+  release notes say so, and no Linux claim is made at the level of the macOS and Windows packages.
 - First artifacts exist and verify: `SONICATOR-0.1.0-Linux-amd64.deb` (17 MB),
   `SONICATOR-0.1.0-Linux-x86_64.AppImage` (20 MB) and the matching sources (72 MB), built by the
   release workflow in `ubuntu:22.04`. The package carries `usr/bin/SONICATOR`,

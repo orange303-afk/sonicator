@@ -100,7 +100,13 @@ python3 packaging/make-source-bundle.py build dist
 ```
 
 Deliverables: `SONICATOR-<version>-Linux-x86_64.AppImage`,
-`SONICATOR-<version>-Linux-amd64.deb`, the matching sources archive and checksums.
+`SONICATOR-<version>-Linux-amd64.deb`, `SONICATOR-<version>-sources-Linux-x86_64.tar.gz` and
+checksums (`SHA256SUMS` plus a per-file `.sha256`).
+
+Version 0.1.0 publishes these next to the stable macOS and Windows assets with an explicit
+in-development warning in the release notes: the package contents, the suite and the headless start
+are verified, the desktop behaviour is not. Keep that wording until `docs/LINUX_ACCEPTANCE.md` is
+filled in.
 
 **The container is the release baseline.** An AppImage carries no glibc, so the glibc of the machine
 that builds it becomes the floor for every user. Release artifacts are therefore built inside
