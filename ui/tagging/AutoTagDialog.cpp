@@ -165,6 +165,7 @@ AutoTagDialog::AutoTagDialog(AutoTagResult prepared, AutoTagService& s,
     summary.setColour(juce::Label::textColourId, theme::text);
     selectedLabel.setFont(fonts::font(12.0f));
     selectedLabel.setColour(juce::Label::textColourId, theme::muted);
+    selectedLabel.setComponentID("autoTagSelectedLabel");
     progress.setFont(fonts::font(12.0f));
     progress.setColour(juce::Label::textColourId, theme::muted);
 
@@ -448,9 +449,8 @@ void AutoTagDialog::openTagMenuFromCell(int row, const juce::MouseEvent& event)
         if (header.getColumnIdOfIndex(i, true) == 4) { columnIndex = i; break; }
     const auto columnX = header.getColumnPosition(columnIndex).getX();
     const auto columnWidth = header.getColumnWidth(4);
-    const auto rowArea = proposals.getRowPosition(row, true);
-    const juce::Rectangle<int> cell(columnX, rowArea.getY(), columnWidth,
-                                    proposals.getRowHeight());
+    // cellClicked delivers coordinates relative to the row component, so the cell starts at y=0.
+    const juce::Rectangle<int> cell(columnX, 0, columnWidth, proposals.getRowHeight());
     std::vector<std::pair<juce::Rectangle<int>, size_t>> pills;
     layoutPills(rows[(size_t) row], cell, pills);
     for (const auto& entry : pills)

@@ -7,6 +7,7 @@
 #include "ui/library/TagStrip.h"
 #include "ui/settings/SettingsPanel.h"
 #include "ui/tagging/AutoTagDialog.h"
+#include "ui/library/RoundTagMenu.h"
 #include "ui/split/SplitDialog.h"
 #include "ui/extract/ExtractDialog.h"
 #include "ui/settings/RelocateFoldersPanel.h"
@@ -510,6 +511,66 @@ TEST_CASE("AutoTag dialog groups several proposals into one file row", "[ui][aut
     auto* table = dynamic_cast<juce::TableListBox*>(find(dialog));
     REQUIRE(table != nullptr);
     REQUIRE(table->getNumRows() == 2);
+}
+TEST_CASE("AutoTag tag pills respond to alt-click and open the round menu", "[ui][autotag]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("dialog-pills.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    AutoTagService service(repo);
+    AutoTagResult result;
+    result.checked = 2; result.newAssignments = 2;
+    AutoTagProposal first;
+    first.sampleId = 1; first.filePath = "/lib/kick.wav"; first.fileName = "kick.wav";
+    first.canonicalType = "Kick"; first.tagId = 1;
+    AutoTagProposal second;
+    second.sampleId = 2; second.filePath = "/lib/snare.wav"; second.fileName = "snare.wav";
+    second.canonicalType = "Snare"; second.tagId = 2;
+    result.proposals = { first, second };
+    Tag kick; kick.id = 1; kick.name = "Kick"; kick.colour = 0xffe05a5a;
+    Tag snare; snare.id = 2; snare.name = "Snare"; snare.colour = 0xffe08a45;
+    AutoTagDialog dialog(std::move(result), service, [] {}, {}, {},
+                         { kick, snare }, { kick, snare });
+    dialog.setSize(980, 620);
+    dialog.resized();
+    std::function<juce::Component*(juce::Component&)> find = [&](juce::Component& parent) -> juce::Component*
+    {
+        if (parent.getComponentID() == "autoTagProposals") return &parent;
+        for (auto* child : parent.getChildren())
+            if (auto* found = find(*child)) return found;
+        return nullptr;
+    };
+    auto* table = dynamic_cast<juce::TableListBox*>(find(dialog));
+    REQUIRE(table != nullptr);
+    auto* apply = dynamic_cast<juce::Button*>(dialog.findChildWithID("autoTagApply"));
+    REQUIRE(apply != nullptr);
+    REQUIRE(apply->isEnabled());
+
+    const auto& header = table->getHeader();
+    int tagsIndex = 0;
+    for (int i = 0; i < header.getNumColumns(true); ++i)
+        if (header.getColumnIdOfIndex(i, true) == 4) { tagsIndex = i; break; }
+    const float x = (float) header.getColumnPosition(tagsIndex).getX() + 10.0f;
+    const auto now = juce::Time::getCurrentTime();
+    const auto eventAt = [&](juce::ModifierKeys mods)
+    {
+        return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(), { x, 13.0f },
+                                mods, 1.0f, 0, 0, 0, 0, &dialog, &dialog, now, { x, 13.0f },
+                                now, 1, false);
+    };
+
+    // Alt-click the second row's pill: that tag leaves the apply set.
+    table->getModel()->cellClicked(1, 4, eventAt(juce::ModifierKeys(
+        juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::altModifier)));
+    auto* selected = dynamic_cast<juce::Label*>(dialog.findChildWithID("autoTagSelectedLabel"));
+    REQUIRE(selected != nullptr);
+    REQUIRE(selected->getText().contains("1 of 2"));
+
+    // A plain click on the same pill opens the round menu anchored at the cell.
+    table->getModel()->cellClicked(1, 4, eventAt(juce::ModifierKeys(
+        juce::ModifierKeys::leftButtonModifier)));
+    auto* ring = dynamic_cast<RoundTagMenu*>(dialog.findChildWithID("autoTagRoundMenu"));
+    REQUIRE(ring != nullptr);
+    REQUIRE(ring->isOpen());
 }
 TEST_CASE("Favorite tree keeps a folder and its catalogued descendants expandable", "[ui][folders][favorites]")
 {
