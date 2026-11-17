@@ -637,3 +637,19 @@ TEST_CASE("Live intake accepts a batch and deletes it", "[contribute][integratio
         "https://contribute.sampledicer.pro/v1/contributions/" + installId);
     CHECK(remove.status == 204);
 }
+
+TEST_CASE("The reported platform name is one the intake accepts", "[contribute]")
+{
+    // Linux builds used to claim "mac", which quietly wrote wrong platform data into the
+    // training set. The value is compiled in, so the test pins the host to its own name.
+    const auto name = platformName();
+    CHECK(name.isNotEmpty());
+    CHECK(juce::StringArray({"mac", "win", "linux"}).contains(name));
+   #if JUCE_LINUX
+    CHECK(name == "linux");
+   #elif JUCE_WINDOWS
+    CHECK(name == "win");
+   #elif JUCE_MAC
+    CHECK(name == "mac");
+   #endif
+}

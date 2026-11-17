@@ -215,7 +215,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/edit/NormalizeService.cpp
     core/batch/BatchTypes.cpp core/batch/BatchSources.cpp core/batch/BatchPaths.cpp core/batch/BatchPipeline.cpp core/batch/BatchSplit.cpp core/batch/BatchResampler.cpp core/batch/BatchQuantizer.cpp core/batch/BatchMetadata.cpp core/batch/BatchPublisher.cpp core/batch/BatchEncoder.cpp core/batch/BatchService.cpp core/batch/BatchPresetStore.cpp core/batch/BatchPreviewService.cpp
     core/indexing/CatalogFileSync.cpp
-    core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp
+    core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp core/contribute/PlatformName.cpp
     core/updates/UpdateCheck.cpp
     core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
     core/smart/TapTempo.cpp
@@ -233,6 +233,19 @@ target_link_libraries(SonicatorCore PUBLIC
 if(SONICATOR_ENABLE_MATCH)
     target_sources(SonicatorCore PRIVATE core/match/OfflineMatchRenderer.cpp)
     target_link_libraries(SonicatorCore PUBLIC sonicator_rubberband)
+endif()
+# Linux audio: ALSA is JUCE's default and always present; JACK is what the Linux audio world expects
+# beside it. Both backends are compiled into juce_audio_devices, so the definition has to reach the
+# target that compiles the module, and the client library has to be linked explicitly: JUCE's module
+# declaration names alsa only.
+if(UNIX AND NOT APPLE)
+    target_compile_definitions(SonicatorCore PUBLIC JUCE_JACK=1)
+    find_library(JACK_LIBRARY jack)
+    if(JACK_LIBRARY)
+        target_link_libraries(SonicatorCore PUBLIC ${JACK_LIBRARY})
+    else()
+        message(WARNING "libjack not found: the build will not offer a JACK device type")
+    endif()
 endif()
 juce_add_binary_data(SonicatorAssets SOURCES
     resources/branding/logo-silver.png
@@ -271,6 +284,17 @@ if(WIN32)
     add_custom_command(TARGET Sonicator POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll" "$<TARGET_FILE_DIR:Sonicator>"
+        VERBATIM)
+endif()
+if(UNIX AND NOT APPLE)
+    # A packaged Linux build ships the runtime beside the binary; $ORIGIN is the loader's own
+    # directory, so nothing points into the build tree. The second entry is where a package keeps
+    # its own shared objects.
+    set_target_properties(Sonicator PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/sonicator")
+    add_custom_command(TARGET Sonicator POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.so" "$<TARGET_FILE_DIR:Sonicator>"
         VERBATIM)
 endif()
 if(APPLE)

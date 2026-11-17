@@ -89,8 +89,7 @@
       "inherits": "base",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "JUCE_JACK": "ON"
+        "CMAKE_BUILD_TYPE": "Release"
       }
     }
   ],

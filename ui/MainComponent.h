@@ -27,6 +27,7 @@
 #include "core/match/MatchTypes.h"
 #include "plugin/HostTempoSnapshot.h"
 #include "core/contribute/ContributionUploader.h"
+#include "core/contribute/PlatformName.h"
 #include "ui/commands/CommandRegistry.h"
 #include "ui/commands/ShortcutBindings.h"
 #include "ui/commands/CommandRouter.h"
