@@ -248,10 +248,11 @@ jobs:
         # round otherwise, and every round costs a full CI cycle.
         run: cmake --build --preset ci-linux -- -k 0
 
-      # About twenty test files open real windows, so the suite needs a display even when nothing
-      # draws on screen.
+      # About twenty test files open real windows, so the suite needs a display. A container's
+      # /dev/shm is 64 MB, and the shared-memory image path runs out of it mid-suite with
+      # "X Error: BadAccess (MIT-SHM)"; without the extension JUCE draws through XPutImage.
       - name: Test under Xvfb
-        run: xvfb-run --auto-servernum ctest --preset ci-linux
+        run: xvfb-run --auto-servernum -s "-extension MIT-SHM" ctest --preset ci-linux
 
       # A binary that links but cannot open its window is not a port. The application must resolve
       # every library and survive its first launch, which also creates and migrates the catalog.
@@ -262,7 +263,7 @@ jobs:
             echo "::error::the application has unresolved shared libraries"
             exit 1
           fi
-          xvfb-run --auto-servernum build/Sonicator_artefacts/Release/SONICATOR &
+          xvfb-run --auto-servernum -s "-extension MIT-SHM" build/Sonicator_artefacts/Release/SONICATOR &
           pid=$!
           sleep 10
           kill -0 "$pid"

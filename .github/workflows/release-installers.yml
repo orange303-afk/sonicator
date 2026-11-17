@@ -266,9 +266,11 @@ jobs:
         run: |
           cmake --preset ci-linux
           cmake --build --preset ci-linux
-      # About twenty test files open real windows, so the suite needs a display.
+      # About twenty test files open real windows, so the suite needs a display. A container's
+      # /dev/shm is 64 MB, and the shared-memory image path runs out of it mid-suite with
+      # "X Error: BadAccess (MIT-SHM)"; without the extension JUCE draws through XPutImage.
       - name: Test under Xvfb
-        run: xvfb-run --auto-servernum ctest --preset ci-linux
+        run: xvfb-run --auto-servernum -s "-extension MIT-SHM" ctest --preset ci-linux
       - name: Package and collect matching sources
         run: |
           sh packaging/linux/build-packages.sh build dist
