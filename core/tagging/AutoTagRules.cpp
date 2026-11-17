@@ -183,6 +183,7 @@ juce::String autoTagRuleKey(AutoTagRule rule)
         case AutoTagRule::Genre: return "genre";
         case AutoTagRule::Structure: return "structure";
         case AutoTagRule::Folder: return "folder";
+        case AutoTagRule::Review: return "review";
         case AutoTagRule::None: break;
     }
     return "none";

@@ -183,9 +183,18 @@ Rule set version: `autoTagRulesVersion = 3` in `core/tagging/AutoTagTypes.h`.
 ### Review and application
 
 Preparation runs off the UI thread and writes nothing. The dialog shows the scope, checked files,
-proposal and new-assignment counts, already-assigned rows, skipped reasons, no-evidence count and
-errors. Proposals are listed with filename, folder, tag, reason and state. Large lists stay in a
-virtualized table. Each new proposal can be excluded; already-assigned rows cannot be applied.
+the number of files and proposed tags, new and already-assigned counts, skipped reasons, no-evidence
+count and errors. One row is one file: the **Tags** cell holds every proposed tag as a pill.
+
+- **Alt-click a pill** to drop that tag from this apply; the pill dims and Alt-click restores it.
+- The **Use** box includes or excludes every tag of that file at once.
+- **Click a pill or the `+`** to open the round tag menu for that file. Picking a tag adds a
+  proposal, picking a checked tag drops it, and **All tags…** opens the full list. Added proposals
+  carry the size and modification time used by the apply revalidation.
+- **Selecting a row** auditions that file in the preview.
+
+None of these edits the catalog; only **Apply selected** writes. Rows whose proposals are all
+already assigned cannot be applied. Added proposals are never a way to remove an existing tag.
 
 **Cancel** closes without writing. **Apply selected** writes only included, still-valid proposals.
 Before each batch it revalidates that the sample and tag still exist and that the file size/mtime

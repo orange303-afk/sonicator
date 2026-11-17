@@ -31,6 +31,17 @@ Three additions on top of the round tag menu stage.
 - [ ] Marking the Type unknown still skips the type proposal.
 - [ ] Existing tags are never removed by any of these paths.
 
+## AutoTag review editor
+
+- [ ] Several proposed tags for one file share one row and appear as pills in **Tags**.
+- [ ] Alt-click a pill dims it and drops it from Apply; Alt-click again restores it.
+- [ ] The **Use** box includes or excludes every tag of that file.
+- [ ] Clicking a pill or the `+` opens the round tag menu anchored there; picking a tag adds a
+      proposal, picking a checked tag drops it; `All tags…` lists everything.
+- [ ] Added proposals are applied only by **Apply selected**, and Apply writes nothing before it.
+- [ ] Selecting a row still auditions the file.
+- [ ] Rows whose proposals are all already assigned cannot be applied.
+
 ## Automated coverage
 
 `TestAutoTag.cpp` pins the new order and the manual override cases. The preview and the shortcut are

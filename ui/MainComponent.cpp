@@ -3470,7 +3470,17 @@ void MainComponent::showAutoTagDialog(AutoTagResult result)
         [safe = juce::Component::SafePointer<MainComponent>(this)]
         {
             if (safe != nullptr) safe->preview.stopPlayback();
-        });
+        },
+        [this]() -> std::vector<Tag>
+        {
+            try { return readRepo != nullptr ? readRepo->rankedTags(15) : std::vector<Tag>(); }
+            catch (...) { return {}; }
+        }(),
+        [this]() -> std::vector<Tag>
+        {
+            try { return readRepo != nullptr ? readRepo->tags() : std::vector<Tag>(); }
+            catch (...) { return {}; }
+        }());
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned(dialog);
     options.dialogTitle = "AutoTag proposals";

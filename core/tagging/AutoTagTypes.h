@@ -8,7 +8,7 @@ namespace sonicator {
 // rule set must not be applied without preparing it again.
 inline constexpr int autoTagRulesVersion = 3;
 
-enum class AutoTagRule { None, FilenameToken, FilenameCompound, MetadataType, SmartType, ManualType, Gear, Genre, Structure, Folder };
+enum class AutoTagRule { None, FilenameToken, FilenameCompound, MetadataType, SmartType, ManualType, Gear, Genre, Structure, Folder, Review };
 juce::String autoTagRuleKey(AutoTagRule);
 
 struct AutoTagProposal

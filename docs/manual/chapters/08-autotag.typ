@@ -71,9 +71,15 @@ confidence percentages.
 #section("Reviewing and applying")
 
 Preparation runs off the UI thread and writes nothing. The dialog shows the scope, how many files
-were checked, how many proposals are new, how many were already assigned, skip reasons, files with no
-evidence and errors. Proposals can be excluded one by one; rows that are already assigned cannot be
-applied again.
+were checked, how many tags are proposed, how many are new or already assigned, skip reasons, files
+with no evidence and errors.
+
+One row is one file. The *Tags* cell holds every proposed tag as a pill. Alt-click a pill to drop it
+from this apply (it dims; Alt-click again restores it), or use the *Use* box to include or exclude
+every tag of that file at once. Click a pill or the `+` to open the round tag menu for that file:
+picking a tag adds a proposal for it, picking a checked tag drops it, and *All tags…* opens the full
+list. Everything here only edits the pending set; nothing is written until *Apply selected*.
+Selecting a row auditions that file in the preview.
 
 *Cancel* closes without writing. *Apply selected* writes only included, still-valid proposals. Before
 each batch it revalidates that the sample and the tag still exist and that the file's size and

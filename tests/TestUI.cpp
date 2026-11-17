@@ -482,6 +482,35 @@ TEST_CASE("AutoTag dialog virtualizes proposals and honours include toggles", "[
     table->getModel()->cellClicked(0, 1, click);
     REQUIRE(apply->isEnabled()); // already-assigned rows cannot be re-enabled
 }
+TEST_CASE("AutoTag dialog groups several proposals into one file row", "[ui][autotag]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("dialog-groups.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    AutoTagService service(repo);
+    AutoTagResult result;
+    result.checked = 2; result.newAssignments = 3;
+    AutoTagProposal first;
+    first.sampleId = 1; first.filePath = "/lib/kick.wav"; first.fileName = "kick.wav";
+    first.canonicalType = "Kick"; first.tagId = 1;
+    AutoTagProposal extra;
+    extra.sampleId = 1; extra.filePath = "/lib/kick.wav"; extra.fileName = "kick.wav";
+    extra.canonicalType = "909"; extra.tagId = 2;
+    AutoTagProposal other;
+    other.sampleId = 2; other.filePath = "/lib/snare.wav"; other.fileName = "snare.wav";
+    other.canonicalType = "Snare"; other.tagId = 3;
+    result.proposals = { first, extra, other };
+    AutoTagDialog dialog(std::move(result), service, [] {});
+    std::function<juce::Component*(juce::Component&)> find = [&](juce::Component& parent) -> juce::Component*
+    {
+        if (parent.getComponentID() == "autoTagProposals") return &parent;
+        for (auto* child : parent.getChildren())
+            if (auto* found = find(*child)) return found;
+        return nullptr;
+    };
+    auto* table = dynamic_cast<juce::TableListBox*>(find(dialog));
+    REQUIRE(table != nullptr);
+    REQUIRE(table->getNumRows() == 2);
+}
 TEST_CASE("Favorite tree keeps a folder and its catalogued descendants expandable", "[ui][folders][favorites]")
 {
     TestDirectory t; Database db(t.dir.getChildFile("favorites.sqlite")); SampleRepository repo(db); repo.createTables();
