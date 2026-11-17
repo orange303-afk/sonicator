@@ -11,8 +11,7 @@
 set(RUBBERBAND_VERSION "3.3.0")
 FetchContent_Declare(rubberband
     URL "https://github.com/breakfastquay/rubberband/archive/refs/tags/v${RUBBERBAND_VERSION}.tar.gz"
-    URL_HASH SHA256=2bb837fe00932442ca90e185af8a468f7591df0c002b4a9e27a1bced1563ac84
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    URL_HASH SHA256=2bb837fe00932442ca90e185af8a468f7591df0c002b4a9e27a1bced1563ac84)
 FetchContent_MakeAvailable(rubberband)
 
 add_library(sonicator_rubberband STATIC

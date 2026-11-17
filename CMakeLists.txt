@@ -13,6 +13,12 @@ if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 include(FetchContent)
+# Extracted archives keep the archive's timestamp instead of the download time. The keyword that
+# does this arrived in CMake 3.24; the 3.22 that Ubuntu 22.04 ships (the release baseline) reads it
+# as a second URL_HASH value and fails the configure, so the policy is set instead of the keyword.
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 # zlib is used by JUCE and by the NKI reader. macOS and Linux ship it with the SDK; Windows does not,
 # so the build fetches the upstream archive there instead of requiring vcpkg or a manual install.
 find_package(ZLIB)
@@ -148,8 +154,7 @@ set(LIBSAMPLERATE_INSTALL OFF CACHE BOOL "" FORCE)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 FetchContent_Declare(libsamplerate
     URL "https://github.com/libsndfile/libsamplerate/archive/refs/tags/0.2.2.tar.gz"
-    URL_HASH SHA256=16e881487f184250deb4fcb60432d7556ab12cb58caea71ef23960aec6c0405a
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    URL_HASH SHA256=16e881487f184250deb4fcb60432d7556ab12cb58caea71ef23960aec6c0405a)
 FetchContent_MakeAvailable(libsamplerate)
 unset(CMAKE_POLICY_VERSION_MINIMUM)
 if("${SONICATOR_BUILD_TESTING_SAVED}" STREQUAL "")
