@@ -1,10 +1,52 @@
-# SONICATOR — Sample Browser
+# SONICATOR
+
+**Intelligent Sample Explorer — a local sample browser for macOS and Windows.**
 
 [![CI](https://github.com/orange303-afk/sonicator/actions/workflows/ci.yml/badge.svg)](https://github.com/orange303-afk/sonicator/actions/workflows/ci.yml)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-lightgrey)
 
-A local sample library browser and explorer for macOS and Windows: indexing, search, tags, smart
-metadata, waveform preview and drag-and-drop into a DAW, without a cloud account or a network
-dependency. This is a real working application, not an ML/map mockup.
+[![The SONICATOR workspace](docs/manual/assets/workspace.png)](docs/manual/assets/workspace.png)
+
+*The library at work: tags, smart Type/BPM/Key, the Analysis card and the preview band, over a
+313-file test library. [Read the user manual (PDF).](docs/manual/sonicator-manual.pdf)*
+
+SONICATOR turns the sample folders you already have into a library you can actually search. Point
+it at a pack, a drive, an old sampler collection; it builds an index of names, formats, measured
+audio features, tags and metadata, and then gets out of the way. Preview anything, drag it into a
+DAW, tag it, correct its tempo, find its twins. The audio is never imported, moved or rewritten by
+browsing — the catalog is a database beside your files, not a second copy of them.
+
+No account. No cloud library. Your audio never leaves the computer. The application works offline;
+the only network actions are ones you start yourself (an update check, a report you submit in your
+browser, and an optional anonymous feedback contribution, off by default).
+
+## What it does
+
+- **Indexes without touching.** Recursive scans with Pause / Cancel, incremental *Rescan*, *Rescan
+  and analyze new files*, hash-based duplicate groups, missing-file tracking and full SHA-256
+  identity. Originals are opened read-only.
+- **Finds in one field.** Plain words across names and paths, masks (`*.rx2`, `kick_*`), `ext:wav`,
+  `type:kick`, `key:Am`, `note:C4`, `genre:house`, quoted phrases, and a ten-item search history.
+- **Makes the library yours.** Coloured tags, a tag filter and Favorites; AutoTag proposes
+  instrument tags from filenames and metadata and waits for your review; Type, BPM, Key and Genre
+  can be corrected by hand, with the automatic value kept underneath.
+- **Auditions and shapes.** Auto Preview, loop, skip silence and MIDI preview; a waveform selection
+  exports exactly that range; a waveform editor trims, fades, normalizes, reverses and converts to
+  mono in an edit buffer, writing only when you choose *Overwrite* or *Save copy*; Split by silence,
+  Extract samples and Normalize selected work in batches.
+- **Shows the library as a map.** The Cloud view lays tagged files out as islands by tag and timbre,
+  with hover audition, a camera history and non-destructive drag out.
+- **Moves audio out.** Drag one file, many files or a prepared selection WAV; Batch Processing runs
+  an ordered chain (DC, trim, normalize, gain, fades, split) into WAV, AIFF, FLAC, MP3 or OGG with
+  naming, dither and conflict policies, a preview and a per-output report.
+- **Follows you into the DAW.** The SONICATOR VST3/AU plug-in shares the same catalog and settings,
+  stores its selection and size in the project, and adds Match BPM / Match Scale for loops.
+- **Reads the awkward formats.** REX2 slices, SoundFont 2, EXS24/NKI/SFZ instruments, MOD/XM/S3M
+  and XI trackers, E-mu EBL, Kurzweil banks, Akai volumes, VOC and ISO/BIN/CUE disc images — with
+  honest limits stated where they apply.
+
+Built for people who have a hundred thousand samples and no patience for a cloud sample manager.
 
 ## Build
 
