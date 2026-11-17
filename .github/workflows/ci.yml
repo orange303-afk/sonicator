@@ -246,7 +246,9 @@ jobs:
         run: sh packaging/tests/test-linux-package.sh
 
       - name: Build
-        run: cmake --build --preset ci-linux
+        # Keep going past the first failing target: a port surfaces several unrelated errors per
+        # round otherwise, and every round costs a full CI cycle.
+        run: cmake --build --preset ci-linux -- -k 0
 
       # About twenty test files open real windows, so the suite needs a display even when nothing
       # draws on screen.
