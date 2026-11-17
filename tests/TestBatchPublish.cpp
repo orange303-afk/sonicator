@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
-#include <unistd.h>
+#if defined(__unix__) || defined(__APPLE__)
+ #include <unistd.h>
+#endif
 #include <catch2/catch_approx.hpp>
 #include "core/batch/BatchEncoder.h"
 #include "core/batch/BatchMetadata.h"
