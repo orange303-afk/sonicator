@@ -21,7 +21,8 @@ fi
 seed() {
     mkdir -p "$1/Sonicator_artefacts/Release"
     cp /bin/true "$1/Sonicator_artefacts/Release/SONICATOR"
-    cp /bin/true "$1/Sonicator_artefacts/Release/libonnxruntime.so"
+    # The SONAME is the versioned name; the packager refuses to run without it.
+    cp /bin/true "$1/Sonicator_artefacts/Release/libonnxruntime.so.1"
 }
 
 # 1. A missing application must be named, not half-packaged.

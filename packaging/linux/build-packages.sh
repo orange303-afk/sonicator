@@ -18,7 +18,7 @@ mkdir -p "$output"
 output="$(CDPATH='' cd -- "$output" && pwd -P)"
 build="$(CDPATH='' cd -- "$build" && pwd -P)"
 app="$build/Sonicator_artefacts/Release/SONICATOR"
-runtime="$build/Sonicator_artefacts/Release/libonnxruntime.so"
+runtime="$build/Sonicator_artefacts/Release/libonnxruntime.so.1"
 test -x "$app" || { echo "Missing application: $app" >&2; exit 1; }
 test -f "$runtime" || { echo "Missing runtime: $runtime" >&2; exit 1; }
 
@@ -74,8 +74,14 @@ stage_tree() {
              "$root/usr/share/applications" "$root/usr/share/doc/sonicator"
     cp "$app" "$root/usr/bin/SONICATOR"
     chmod 755 "$root/usr/bin/SONICATOR"
-    cp "$runtime" "$root/usr/lib/sonicator/libonnxruntime.so"
-    chmod 644 "$root/usr/lib/sonicator/libonnxruntime.so"
+    # The runtime's SONAME is libonnxruntime.so.1; the unversioned name is only for linkers.
+    cp "$runtime" "$root/usr/lib/sonicator/libonnxruntime.so.1"
+    chmod 644 "$root/usr/lib/sonicator/libonnxruntime.so.1"
+    ln -sf libonnxruntime.so.1 "$root/usr/lib/sonicator/libonnxruntime.so"
+    if [ -f "$build/Sonicator_artefacts/Release/libonnxruntime_providers_shared.so" ]; then
+        cp "$build/Sonicator_artefacts/Release/libonnxruntime_providers_shared.so" \
+            "$root/usr/lib/sonicator/"
+    fi
     cp "$here/sonicator.desktop" "$root/usr/share/applications/sonicator.desktop"
     cp "$here/README.txt" "$root/usr/share/doc/sonicator/README.txt"
     for size in 16 32 48 64 128 256 512; do
@@ -83,8 +89,9 @@ stage_tree() {
         mkdir -p "$directory"
         cp "$here/icons/${size}x${size}.png" "$directory/sonicator.png"
     done
-    verify_binary "$root/usr/bin/SONICATOR"
-    verify_binary "$root/usr/lib/sonicator/libonnxruntime.so"
+    verify_glibc "$root/usr/bin/SONICATOR"
+    verify_app_rpath "$root/usr/bin/SONICATOR"
+    verify_glibc "$root/usr/lib/sonicator/libonnxruntime.so.1"
     python3 "$repo/packaging/collect-licenses.py" "$build" "$root/usr/share/doc/sonicator/Licenses"
 }
 
@@ -128,7 +135,7 @@ chmod 755 "$image"
 
 # Read the AppImage back: it must contain the payload, not a reference to the staging tree.
 ( cd "$stage" && "$image" --appimage-extract >/dev/null )
-for expected in usr/bin/SONICATOR usr/lib/sonicator/libonnxruntime.so \
+for expected in usr/bin/SONICATOR usr/lib/sonicator/libonnxruntime.so.1 \
                 usr/share/applications/sonicator.desktop AppRun; do
     test -f "$stage/squashfs-root/$expected" || {
         echo "AppImage is missing $expected" >&2; exit 1; }

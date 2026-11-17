@@ -297,10 +297,25 @@ if(UNIX AND NOT APPLE)
     # its own shared objects.
     set_target_properties(Sonicator PROPERTIES
         BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/sonicator")
+    # The archive names the runtime libonnxruntime.so.1.20.1 behind two symlinks, and its SONAME is
+    # libonnxruntime.so.1: the loader asks for that name, so the real file has to be there under it.
+    # Copying the unversioned symlink alone leaves the application unable to start.
+    file(REAL_PATH "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.so" ONNXRUNTIME_LINUX_REAL)
     add_custom_command(TARGET Sonicator POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.so" "$<TARGET_FILE_DIR:Sonicator>"
+            "${ONNXRUNTIME_LINUX_REAL}" "$<TARGET_FILE_DIR:Sonicator>/libonnxruntime.so.1"
+        COMMAND ${CMAKE_COMMAND} -E create_symlink libonnxruntime.so.1
+            "$<TARGET_FILE_DIR:Sonicator>/libonnxruntime.so"
         VERBATIM)
+    if(EXISTS "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime_providers_shared.so")
+        # Loaded lazily by non-CPU execution providers; absent here means a clear library error
+        # rather than a silently missing backend.
+        add_custom_command(TARGET Sonicator POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime_providers_shared.so"
+                "$<TARGET_FILE_DIR:Sonicator>"
+            VERBATIM)
+    endif()
 endif()
 if(APPLE)
     # Ship the runtime inside the app, not at an absolute FetchContent build-tree path.
