@@ -25,7 +25,8 @@ SONICATOR_MANUAL_SHOT_DIR=$PWD/docs/manual/assets \
 | `preview-wave.png` | 10 | Preview waveform | Waveform loaded, transport at zero |
 | `preview-controls.png` | 10 | Preview transport | Time, play/stop, volume, toggles |
 | `selection.png` | 11 | Preview band | Range 0.250–0.400 s, export ready |
-| `cloud.png` | 14 | full window, 2× | Cloud tab, 241 tagged files, overview |
+| `cloud.png` | 14 | full window, 2× | Cloud tab, overview |
+| `cloud-mid.png` | — | full window, 2× | Cloud tab at 1.55×, README hero |
 | `settings-general.png` | 23 | `SettingsPanel` | General page, dark theme |
 | `settings-hotkeys.png` | 24 | `SettingsPanel` | Hotkeys page with the real command registry |
 | `plugin.png` | 22 | `PluginEditor` | 1400×820, dark settings, Match controls visible |

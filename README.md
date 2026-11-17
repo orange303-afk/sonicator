@@ -49,6 +49,11 @@ in the build today; the manual states the limits where they matter.
   and XI trackers, E-mu EBL, Kurzweil banks, Akai volumes, VOC and ISO/BIN/CUE disc images — with
   honest limits stated where they apply.
 
+[![The SONICATOR Cloud view](docs/manual/assets/cloud-mid.png)](docs/manual/assets/cloud-mid.png)
+
+*The same library as a map. Islands are tags, points are files, hover auditions a point, and the
+camera keeps its history. [How the map is built →](docs/CLOUD_MAP.md)*
+
 Built for people who have a hundred thousand samples and no patience for a cloud sample manager.
 
 ## Build

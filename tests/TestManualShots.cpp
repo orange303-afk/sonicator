@@ -343,6 +343,11 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
         for (int i = 0; i < 90; ++i) cloud->onFrameForTest();
         manual::captureArea(app, { 0, 0, library->getRight() + 2, cloud->getBottom() }, 2,
                             "cloud.png");
+        cloud->zoomBy(1.55f, { cloud->getWidth() * 0.5f, cloud->getHeight() * 0.62f });
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(900);
+        for (int i = 0; i < 90; ++i) cloud->onFrameForTest();
+        manual::captureArea(app, { 0, 0, library->getRight() + 2, cloud->getBottom() }, 2,
+                            "cloud-mid.png");
     }
     app.showCloudView(false);
 
