@@ -273,6 +273,9 @@ jobs:
         run: xvfb-run --auto-servernum -s "-extension MIT-SHM" ctest --preset ci-linux
       - name: Package and collect matching sources
         run: |
+          # The container checks the tree out under a different owner, and the matching-source
+          # archive is built with git archive from this directory.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           sh packaging/linux/build-packages.sh build dist
           python3 packaging/make-source-bundle.py build dist
           git rev-parse HEAD > dist/source-commit.txt
