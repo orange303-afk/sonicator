@@ -16,7 +16,9 @@ before any source change; CI runs afterwards use the `ci-linux` preset in the sa
 | `SonicatorCore`, `SonicatorUI`, `SONICATOR` | Built |
 | `SonicatorTests` | Built |
 | Packaging behavior tests (`packaging/tests/test-linux-package.sh`) | Passed |
-| Full build time on the stand (4-core Celeron N4100) | Not measured: the machine went offline mid-build |
+| Full suite on the stand (Ubuntu 24.04, glibc 2.39) | **1283 cases: 1279 passed, 4 skipped, 0 failed**; 268315 assertions, 39 s |
+| Full suite in the release container (Ubuntu 22.04, root) | Same suite; two tests skip under root because directory mode bits deny nothing to it |
+| Full build time on the stand (4-core Celeron N4100) | 19 min 20 s from a warm configure |
 
 Source changes the port needed so far — every one a real defect, none a workaround:
 
@@ -34,14 +36,23 @@ Source changes the port needed so far — every one a real defect, none a workar
 
 ## Failing tests
 
-Not measured yet.
+None. The four that failed during the port were fixed rather than tolerated:
+
+| Test | Cause | Resolution |
+|---|---|---|
+| `A failed overwrite leaves the original byte-identical` | CI runs as root, and root is not stopped by a read-only directory | Skips under root, runs normally elsewhere |
+| `An unwritable destination fails without touching the source or old output` | Same root bypass | Same skip |
+| `Command and Control stay distinct` | Windows and Linux have one modifier; JUCE maps Command onto Control | The stored model stays distinct; the key press equality is asserted per platform |
+| `MP3 output is a readable lossy copy...` (VBR half) | The encoder never replaced LAME's placeholder Xing frame, so a VBR file carried no frame count and its duration was guessed from the first frame: Linux read 2 s as 26496 samples | The encoder now writes the finished tag at the ID3 offset, and the test pins the `Xing` frame |
 
 ## What is not done
 
 - The `linux` job in `.github/workflows/ci.yml` is informational (`continue-on-error`) until the
   suite is green.
 - No Linux audio-device or MIDI acceptance: the suite runs without a device under Xvfb.
-- No installer: `packaging/linux/` and the release workflow follow the green suite.
+- No Linux artifacts have been produced yet: `packaging/linux/build-packages.sh` refuses to package a
+  binary above the glibc 2.35 baseline, and the stand runs 24.04, so the first artifacts come from the
+  release workflow's `ubuntu:22.04` container.
 - `docs/TESTING.md` keeps Linux as unverified until the suite is green and acceptance is recorded.
 
 ## How to reproduce
