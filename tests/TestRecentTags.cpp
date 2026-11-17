@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include "core/database/CatalogSchema.h"
 #include "core/database/SampleRepository.h"
 #include "TestHelpers.h"
 #include <algorithm>
@@ -141,7 +142,7 @@ TEST_CASE("Schema v7 catalogs upgrade to v8 with a backup", "[tags][recent][migr
         REQUIRE(sqlite3_step(s) == SQLITE_ROW);
         version = sqlite3_column_int(s, 0);
         sqlite3_finalize(s); sqlite3_close(raw);
-        REQUIRE(version == 19);
+        REQUIRE(version == catalogSchemaVersion);
         const auto tag = repo.createTag("Kick", 0xff00ff00);
         repo.recordRecentTag(tag);
         REQUIRE(repo.recentTags().size() == 1);
