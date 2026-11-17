@@ -199,15 +199,13 @@ jobs:
             build/Testing/Temporary/LastTestsFailed.log
           if-no-files-found: ignore
 
-  # Linux has never been built. This job is informational: it must not fail the run while the port
-  # is being established. The state it reaches is recorded in docs/LINUX_PORT.md.
+  # Linux runs in the release baseline container: an AppImage carries no glibc, so the build host's
+  # glibc is the runtime floor for every user, and 22.04 keeps it at 2.35. The state this job reached
+  # while the port was being established is recorded in docs/LINUX_PORT.md.
   linux:
-    name: Linux Release (informational)
-    # The container is the product of this job: an AppImage does not carry glibc, so the build
-    # host's glibc is the runtime floor for every user. 22.04 keeps it at 2.35.
+    name: Linux Release
     runs-on: ubuntu-24.04
     container: ubuntu:22.04
-    continue-on-error: true
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
