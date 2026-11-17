@@ -1879,6 +1879,9 @@ bool MainComponent::refreshIfCatalogChanged()
 void MainComponent::reloadLibrary()
 {
     if (! readRepo) return;
+    // A catalog reload can change which tags exist or which rows are visible; never leave a stale
+    // ring over the table.
+    if (roundTagMenu != nullptr) roundTagMenu->close();
     if (discBrowser) discBrowser->setHideEmpty(filter.hideEmpty);
     try
     {
@@ -2765,6 +2768,12 @@ void MainComponent::showRoundTagMenuForIds(const std::vector<int64_t>& ids, juce
                                  ids, names, allHave, catalogPath](int64_t tagId)
     {
         if (safe == nullptr || safe->dbPath != catalogPath || safe->writeRepo == nullptr) return;
+        if (safe->isSplitRunning() || safe->isExtractRunning())
+        {
+            safe->status.setText("Wait for the running job to finish.",
+                                 juce::dontSendNotification);
+            return;
+        }
         const auto nameIt = names->find(tagId);
         const auto name = nameIt != names->end() ? nameIt->second : juce::String("tag");
         if (allHave->count(tagId) > 0)
@@ -2876,6 +2885,7 @@ void MainComponent::showAllTagsMenu(const std::vector<int64_t>& ids, juce::Point
     for (int i = 0; i < (int) tags.size(); ++i)
         menu.addItem(10000 + i, tags[(size_t) i].name, true, allHave[tags[(size_t) i].id],
                      tagDotImage(tags[(size_t) i].colour));
+    if (tags.empty()) menu.addSectionHeader("No tags yet");
     if (! tags.empty()) menu.addSeparator();
     menu.addItem(9003, "New tag...");
     const auto catalogPath = dbPath;
@@ -2952,6 +2962,11 @@ void MainComponent::showAllTagsMenuForFolder(const juce::String& folder,
 void MainComponent::confirmTagFolder(const juce::String& folderPath, int64_t tagId)
 {
     if (readRepo == nullptr || writeRepo == nullptr || folderPath.isEmpty() || tagId <= 0) return;
+    if (isSplitRunning() || isExtractRunning())
+    {
+        status.setText("Wait for the running job to finish.", juce::dontSendNotification);
+        return;
+    }
     std::vector<Tag> tags;
     int catalogued = 0, already = 0;
     try
@@ -2996,6 +3011,8 @@ void MainComponent::confirmTagFolder(const juce::String& folderPath, int64_t tag
             if (safe->tagging->startTagFolder(folderPath, tag.id))
                 safe->status.setText("Tagging catalogued files in " + folderPath,
                                      juce::dontSendNotification);
+            else
+                safe->status.setText("Tagging could not start.", juce::dontSendNotification);
         });
 }
 void MainComponent::showEditTagsMenu()
@@ -4883,14 +4900,14 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         roundTagPillCentre = std::make_shared<juce::Point<int>>(screenPosition);
         auto pill = std::make_unique<TagsMenuPill>(roundTagPillCentre,
             [safe = juce::Component::SafePointer<MainComponent>(this), roundTagPillCentre,
-             catalogPath = dbPath]
+             ids, catalogPath = dbPath]
             {
-                juce::MessageManager::callAsync([safe, roundTagPillCentre, catalogPath]
+                juce::MessageManager::callAsync([safe, roundTagPillCentre, ids, catalogPath]
                 {
                     if (safe == nullptr || safe->dbPath != catalogPath) return;
                     juce::PopupMenu::dismissAllActiveMenus();
-                    safe->showRoundTagMenuAt(safe->getLocalPoint(nullptr, *roundTagPillCentre),
-                                             false);
+                    safe->showRoundTagMenuForIds(ids,
+                                                 safe->getLocalPoint(nullptr, *roundTagPillCentre));
                 });
             });
         menu.addCustomItem(9026, std::move(pill), nullptr, "Tags");
@@ -5071,8 +5088,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
             if (result == 9026)
             {
                 if (roundTagPillCentre != nullptr)
-                    safe->showRoundTagMenuAt(
-                        safe->getLocalPoint(nullptr, *roundTagPillCentre), false);
+                    safe->showRoundTagMenuForIds(
+                        ids, safe->getLocalPoint(nullptr, *roundTagPillCentre));
                 return;
             }
             // Defence in depth: the plugin hides these items, and no path may start them either.

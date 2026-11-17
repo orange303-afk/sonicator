@@ -72,6 +72,7 @@ public:
 private:
     void timerCallback() override;
     void dismiss();
+    void hideNow();
     void updateTargets();
     juce::Rectangle<float> renderedBounds(int index) const;
 
@@ -79,6 +80,7 @@ private:
     juce::String title, caption;
     std::vector<float> growth, target;
     juce::Point<float> mouse { -1.0e6f, -1.0e6f };
+    juce::Component::SafePointer<juce::Component> previousFocus;
     double openStarted = 0.0, closeStarted = 0.0, lastTick = 0.0;
     float openProgress = 0.0f;
     int animationMs = 260;

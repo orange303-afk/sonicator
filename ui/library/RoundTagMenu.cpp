@@ -87,25 +87,34 @@ RoundTagGeometry layoutRoundTagMenu(juce::Point<int> anchor,
 
     auto united = geometry.hub;
     for (const auto& pill : geometry.pills) united = united.getUnion(pill.bounds);
+    // Hover grows the pill and pushes it outward; reserve that room too, or an edge pill still
+    // clips after the base rectangle has been clamped.
+    float reserveX = 0.0f, reserveY = 0.0f;
+    for (const auto& pill : geometry.pills)
+    {
+        reserveX = juce::jmax(reserveX, pushDistance + maxGrowth * pill.bounds.getWidth() * 0.5f);
+        reserveY = juce::jmax(reserveY, pushDistance + maxGrowth * pill.bounds.getHeight() * 0.5f);
+    }
+    const auto unitedGrown = united.expanded(reserveX, reserveY);
     const auto area = available.toFloat().reduced(edgeMargin);
     float dx = 0.0f, dy = 0.0f;
-    if (united.getWidth() <= area.getWidth())
+    if (unitedGrown.getWidth() <= area.getWidth())
     {
-        if (united.getX() < area.getX()) dx = area.getX() - united.getX();
-        if (united.getRight() > area.getRight()) dx = area.getRight() - united.getRight();
+        if (unitedGrown.getX() < area.getX()) dx = area.getX() - unitedGrown.getX();
+        if (unitedGrown.getRight() > area.getRight()) dx = area.getRight() - unitedGrown.getRight();
     }
     else
     {
-        dx = area.getCentreX() - united.getCentreX();
+        dx = area.getCentreX() - unitedGrown.getCentreX();
     }
-    if (united.getHeight() <= area.getHeight())
+    if (unitedGrown.getHeight() <= area.getHeight())
     {
-        if (united.getY() < area.getY()) dy = area.getY() - united.getY();
-        if (united.getBottom() > area.getBottom()) dy = area.getBottom() - united.getBottom();
+        if (unitedGrown.getY() < area.getY()) dy = area.getY() - unitedGrown.getY();
+        if (unitedGrown.getBottom() > area.getBottom()) dy = area.getBottom() - unitedGrown.getBottom();
     }
     else
     {
-        dy = area.getCentreY() - united.getCentreY();
+        dy = area.getCentreY() - unitedGrown.getCentreY();
     }
     if (dx != 0.0f || dy != 0.0f)
     {
@@ -155,6 +164,7 @@ void RoundTagMenu::open(RoundTagGeometry nextGeometry, juce::String centreTitle,
     growth.assign(geometry.pills.size(), 0.0f);
     target.assign(geometry.pills.size(), 0.0f);
     mouse = { -1.0e6f, -1.0e6f };
+    previousFocus = juce::Component::getCurrentlyFocusedComponent();
     openFlag = true;
     closing = false;
     openProgress = animationMs <= 0 ? 1.0f : 0.0f;
@@ -172,11 +182,7 @@ void RoundTagMenu::close()
     if (! openFlag) return;
     if (animationMs <= 0)
     {
-        openFlag = false;
-        closing = false;
-        openProgress = 0.0f;
-        stopTimer();
-        setVisible(false);
+        hideNow();
         return;
     }
     closing = true;
@@ -189,6 +195,19 @@ void RoundTagMenu::dismiss()
     if (! openFlag) return;
     close();
     if (onDismissed) onDismissed();
+}
+
+void RoundTagMenu::hideNow()
+{
+    openFlag = false;
+    closing = false;
+    openProgress = 0.0f;
+    stopTimer();
+    setVisible(false);
+    // Keyboard focus goes back where it came from, so tagging then arrowing to the next row works.
+    if (auto* previous = previousFocus.getComponent())
+        if (previous->isShowing()) previous->grabKeyboardFocus();
+    previousFocus = nullptr;
 }
 
 juce::Rectangle<float> RoundTagMenu::renderedBounds(int index) const
@@ -226,10 +245,7 @@ void RoundTagMenu::timerCallback()
             1.0 - (now - closeStarted) / 90.0);
         if (openProgress <= 0.0f)
         {
-            closing = false;
-            openFlag = false;
-            stopTimer();
-            setVisible(false);
+            hideNow();
         }
     }
     else if (openProgress < 1.0f)
@@ -340,22 +356,35 @@ void RoundTagMenu::mouseMove(const juce::MouseEvent& event)
 
 void RoundTagMenu::mouseDown(const juce::MouseEvent& event)
 {
-    for (size_t i = 0; i < geometry.pills.size(); ++i)
+    if (! openFlag || closing) return;
+    if (event.mods.isPopupMenu())
     {
-        if (! renderedBounds((int) i).contains(event.position)) continue;
-        const auto item = geometry.pills[i].item;
-        close();
-        if (item.action)
-        {
-            if (onAllTagsPicked) onAllTagsPicked();
-        }
-        else if (onTagPicked)
-        {
-            onTagPicked(item.tagId);
-        }
+        dismiss();
         return;
     }
-    dismiss();
+    // Paint draws the most grown pill last, so the hit test must use the same order.
+    std::vector<int> order((size_t) geometry.pills.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(),
+              [this](int a, int b) { return growth[(size_t) a] < growth[(size_t) b]; });
+    int picked = -1;
+    for (const int index : order)
+        if (renderedBounds(index).contains(event.position)) picked = index;
+    if (picked < 0)
+    {
+        dismiss();
+        return;
+    }
+    const auto item = geometry.pills[(size_t) picked].item;
+    close();
+    if (item.action)
+    {
+        if (onAllTagsPicked) onAllTagsPicked();
+    }
+    else if (onTagPicked)
+    {
+        onTagPicked(item.tagId);
+    }
 }
 
 bool RoundTagMenu::keyPressed(const juce::KeyPress& key)

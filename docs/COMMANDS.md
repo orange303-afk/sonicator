@@ -67,6 +67,8 @@ disabled with the reason "No editable audio in the preview".
 |---|---|---|---|
 | `library.normalizeSelected` | Normalize selected… | library | ⇧⌘N |
 | `library.addLastTag` | Add last tag | library | — |
+| `library.roundTagMenu` | Round tag menu | library | ⌘T |
+| `folders.roundTagMenu` | Round tag menu for the folder | folders | ⌘T |
 | `app.settings` | Settings | app | ⌘, |
 | `app.settings.hotkeys` | Settings - Hotkeys | app | — |
 | `app.focusSearch` | Focus search | app | ⌘F |
@@ -77,6 +79,10 @@ disabled with the reason "No editable audio in the preview".
 
 `library.addLastTag` applies the last tag the user assigned in this catalog, never a prediction.
 It is unavailable when the selection is empty or no tag has been applied yet.
+
+The two round tag menu commands are unavailable while **Round tag menu** is off in Settings, and
+when the library selection or the folder selection is empty. The key means the same in both
+scopes: the command router picks the one that belongs to the focused panel.
 
 `app.settings` opens the last used section. The section ids `general`, `audioMidi`, `hotkeys`,
 `plugins` and `about` are stored in the settings file; a page that is unavailable (in the DAW
@@ -100,7 +106,7 @@ means extracting its menu branch into a single handler first.
 | Area | Actions |
 |---|---|
 | Library row | Star/unstar, Copy path, Show in Finder, Analyze selected, AutoTag selected, Reset tags, Split by silence, Extract samples, Ignore, Show all copies |
-| Tags | Tag ▸, New tag, Manage tags (colour/rename/delete), Remove tag, Round tag menu (Ctrl/Cmd+T) |
+| Tags | Tag ▸, New tag, Manage tags (colour/rename/delete), Remove tag |
 | Metadata | Type ▸ (standard, custom, reset), BPM ▸ (set, tap, clear), Genre ▸ (genre, Unknown, clear, custom) |
 | Library toolbar | New files, Rescan, Reanalyze all, Smart metadata, Add folder, Tags filter, Starred, Hide empty, Clear filters, page size, previous/next page |
 | Folder tree | Open in Finder, Favorite, Ignore, Rename, Scan, Smart metadata, AutoTag, Tag ▸, Reset tags, Remove from library |

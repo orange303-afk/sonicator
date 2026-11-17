@@ -67,3 +67,60 @@ TEST_CASE("Round tag nearest ignores the centre and far reach", "[tags][round]")
     REQUIRE(roundTagNearest(geometry.pills, geometry.centre) == -1);
     REQUIRE(roundTagNearest(geometry.pills, { -500.0f, -500.0f }) == -1);
 }
+
+TEST_CASE("Round tag layout leaves room for hover growth at the editor edge", "[tags][round]")
+{
+    const auto geometry = layoutRoundTagMenu({ 0, 0 }, { 0, 0, 880, 580 },
+                                             makeItems(8, "In"), makeItems(7, "Out"), testFont());
+    const auto area = juce::Rectangle<float>(0.0f, 0.0f, 880.0f, 580.0f);
+    for (const auto& pill : geometry.pills)
+    {
+        auto grown = pill.bounds.withSizeKeepingCentre(pill.bounds.getWidth() * 1.26f,
+                                                       pill.bounds.getHeight() * 1.26f);
+        grown.translate(std::cos(pill.angle) * 13.0f, std::sin(pill.angle) * 13.0f);
+        REQUIRE(area.contains(grown));
+    }
+}
+
+namespace
+{
+juce::MouseEvent mouseClick(RoundTagMenu& menu, juce::Point<float> position,
+                            juce::ModifierKeys mods = {})
+{
+    const auto now = juce::Time::getCurrentTime();
+    return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(), position, mods,
+                            1.0f, 0, 0, 0, 0, &menu, &menu, now, position, now, 1, false);
+}
+}
+
+TEST_CASE("Round tag menu applies one pick and closes", "[tags][round]")
+{
+    RoundTagMenu menu;
+    menu.setAnimationDuration(0);
+    int picks = 0;
+    menu.onTagPicked = [&picks](int64_t) { ++picks; };
+    const auto geometry = layoutRoundTagMenu({ 400, 400 }, { 0, 0, 900, 900 },
+                                             makeItems(8, "In"), makeItems(7, "Out"), testFont());
+    menu.open(geometry, "3 files", "TAGS");
+    const auto target = geometry.pills[1].centre;
+    menu.mouseDown(mouseClick(menu, target));
+    menu.mouseDown(mouseClick(menu, target));
+    REQUIRE(picks == 1);
+    REQUIRE_FALSE(menu.isOpen());
+}
+
+TEST_CASE("Round tag menu dismisses on a right click instead of picking", "[tags][round]")
+{
+    RoundTagMenu menu;
+    menu.setAnimationDuration(0);
+    int picks = 0, dismissals = 0;
+    menu.onTagPicked = [&picks](int64_t) { ++picks; };
+    menu.onDismissed = [&dismissals] { ++dismissals; };
+    const auto geometry = layoutRoundTagMenu({ 400, 400 }, { 0, 0, 900, 900 },
+                                             makeItems(8, "In"), makeItems(7, "Out"), testFont());
+    menu.open(geometry, "3 files", "TAGS");
+    menu.mouseDown(mouseClick(menu, geometry.pills[1].centre,
+                              juce::ModifierKeys::rightButtonModifier));
+    REQUIRE(picks == 0);
+    REQUIRE(dismissals == 1);
+}

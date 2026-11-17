@@ -106,6 +106,7 @@ TEST_CASE("Schema 20 seeds usage from recent tags", "[tags][ranking][migration]"
     SampleRepository repo(db);
     repo.createTables();
     const auto ranked = repo.rankedTags(15, testNow);
-    // The older tag was assigned first (seq 1) and receives the heavier seed weight.
-    REQUIRE(indexOf(ranked, older) < indexOf(ranked, newer));
+    // The newest recent tag receives the heavier seed weight, so an upgraded catalog opens with
+    // the same order the recent list had.
+    REQUIRE(indexOf(ranked, newer) < indexOf(ranked, older));
 }

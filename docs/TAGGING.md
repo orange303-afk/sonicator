@@ -49,7 +49,7 @@ tag_usage(tag_id INTEGER PRIMARY KEY REFERENCES tags(id) ON DELETE CASCADE,
 Each explicit assignment increments `use_count` and sets `last_used_at` — the same call sites as
 `recent_tags`, so AutoTag and Reset never move it. Ordering is
 `(use_count + 0.5) * 2^(-ageDays / 30)`; never-used tags score zero and sort by name. An upgrade
-from schema 19 seeds the table once from `recent_tags` (oldest row has the heaviest weight), so an
+from schema 19 seeds the table once from `recent_tags` (newest row has the heaviest weight), so an
 existing catalog opens with a sensible order.
 
 The overlay is a transparent full-window child: appearance 260 ms, proximity growth up to 1.26 at

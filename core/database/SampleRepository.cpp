@@ -906,7 +906,7 @@ void SampleRepository::createTables()
             // so the first round menu is not alphabetical. A fresh catalog has no recent tags.
             detail::exec(db.handle,
                 "INSERT OR IGNORE INTO tag_usage(tag_id,use_count,last_used_at)"
-                " SELECT tag_id, MAX(1, 6 - seq), used_at FROM recent_tags;");
+                " SELECT tag_id, MAX(1, seq), used_at FROM recent_tags;");
         }
         {
             // Rows written before schema 13 have no id; give each one now, once.
