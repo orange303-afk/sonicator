@@ -198,3 +198,63 @@ jobs:
             build/Testing/Temporary/LastTest.log
             build/Testing/Temporary/LastTestsFailed.log
           if-no-files-found: ignore
+
+  # Linux has never been built. This job is informational: it must not fail the run while the port
+  # is being established. The state it reaches is recorded in docs/LINUX_PORT.md.
+  linux:
+    name: Linux Release (informational)
+    # The container is the product of this job: an AppImage does not carry glibc, so the build
+    # host's glibc is the runtime floor for every user. 22.04 keeps it at 2.35.
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    continue-on-error: true
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git ca-certificates \
+            libasound2-dev libjack-jackd2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxcursor-dev libxcomposite-dev \
+            libfreetype-dev libgl1-mesa-dev libglu1-mesa-dev \
+            xvfb
+
+      - name: Toolchain versions
+        run: |
+          cmake --version
+          ninja --version
+          g++ --version | head -1
+
+      # FetchContent sources dominate the first configure. The key follows the files that pin those
+      # versions, so a dependency bump re-downloads once instead of on every run.
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: linux-deps-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'CMakePresets.json', 'cmake/RubberBand.cmake') }}
+          restore-keys: |
+            linux-deps-
+
+      - name: Configure
+        run: cmake --preset ci-linux
+
+      - name: Build
+        run: cmake --build --preset ci-linux
+
+      # About twenty test files open real windows, so the suite needs a display even when nothing
+      # draws on screen.
+      - name: Test under Xvfb
+        run: xvfb-run --auto-servernum ctest --preset ci-linux
+
+      - name: Test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-linux
+          path: |
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
+          if-no-files-found: ignore
