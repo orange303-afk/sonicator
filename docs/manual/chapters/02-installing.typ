@@ -19,9 +19,9 @@ each installer with the source archive for its platform.
   header: ("Artifact", "Platform", "Contents"),
   widths: (2.2fr, 1fr, 2.2fr),
   rows: (
-    ("`SONICATOR-0.1.0-macOS-universal.pkg`", "macOS 11 or newer", "Application, VST3 and AU, arm64 and x86_64"),
-    ("`SONICATOR-0.1.0-Windows-x64.msi`", "Windows 10 or newer, 64-bit", "Application and VST3 (AU is macOS-only)"),
-    ("`SONICATOR-0.1.0-sources.tar.gz`", "One per platform", "Project and pinned dependency sources; the two archives share a name and differ in content"),
+    ("`SONICATOR-0.1.1-macOS-universal.pkg`", "macOS 11 or newer", "Application, VST3 and AU, arm64 and x86_64"),
+    ("`SONICATOR-0.1.1-Windows-x64.msi`", "Windows 10 or newer, 64-bit", "Application and VST3 (AU is macOS-only)"),
+    ("`SONICATOR-0.1.1-sources.tar.gz`", "One per platform", "Project and pinned dependency sources; the two archives share a name and differ in content"),
   ),
 )
 
@@ -29,8 +29,8 @@ Every artifact has a `.sha256` file. If you downloaded the files by hand, compar
 before installing:
 
 ```sh
-shasum -a 256 SONICATOR-0.1.0-macOS-universal.pkg     # macOS
-certutil -hashfile SONICATOR-0.1.0-Windows-x64.msi SHA256   # Windows
+shasum -a 256 SONICATOR-0.1.1-macOS-universal.pkg     # macOS
+certutil -hashfile SONICATOR-0.1.1-Windows-x64.msi SHA256   # Windows
 ```
 
 Both installers are *unsigned and not notarised*. That is a fact about this build, not a mistake in
