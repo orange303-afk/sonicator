@@ -6,6 +6,12 @@ import sys
 
 repo = pathlib.Path(__file__).resolve().parents[1]
 build, output = map(pathlib.Path, sys.argv[1:])
+# The ONNX Runtime NuGet package is extracted into a versioned directory; the newest one is the
+# runtime this build used.
+onnx_sources = sorted(build.glob("onnxruntime-*-src"))
+if not onnx_sources:
+    sys.exit(f"Missing licence material: {build}/onnxruntime-*-src")
+onnx_source = onnx_sources[-1]
 files = {
     repo / "LICENSE": "SONICATOR-AGPL.txt",
     repo / "THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
@@ -15,8 +21,8 @@ files = {
     build / "_deps/libxmp-src/docs/COPYING": "libxmp-COPYING.txt",
     build / "_deps/libsamplerate-src/COPYING": "libsamplerate-COPYING.txt",
     build / "_deps/rubberband-src/COPYING": "RubberBand-COPYING.txt",
-    build / "_deps/onnxruntime-src/LICENSE": "ONNX-LICENSE.txt",
-    build / "_deps/onnxruntime-src/ThirdPartyNotices.txt": "ONNX-ThirdPartyNotices.txt",
+    onnx_source / "LICENSE": "ONNX-LICENSE.txt",
+    onnx_source / "ThirdPartyNotices.txt": "ONNX-ThirdPartyNotices.txt",
     build / "_deps/juce-src/LICENSE.md": "JUCE/LICENSE.md",
     build / "_deps/juce-src/JUCE.spdx.json": "JUCE/JUCE.spdx.json",
 }

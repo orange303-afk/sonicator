@@ -1,7 +1,7 @@
 # The SONICATOR VST3/AU instrument: the shared application window as a DAW editor around the
 # application's own catalog. Built only with -DSONICATOR_BUILD_PLUGIN=ON.
 set(plugin_target SonicatorPlugin)
-set(plugin_dylib "${onnxruntime_SOURCE_DIR}/lib/libonnxruntime.dylib")
+set(plugin_dylib "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib")
 set(plugin_formats VST3)
 if(APPLE)
     list(APPEND plugin_formats AU)
@@ -42,7 +42,7 @@ if(NOT APPLE)
         # The VST3 manifest helper loads this module, so its runtime must exist first.
         add_custom_command(TARGET ${plugin_target}_VST3 POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll"
+                "${ONNXRUNTIME_SOURCE}/runtimes/win-x64/native/onnxruntime.dll"
                 "$<TARGET_FILE_DIR:${plugin_target}_VST3>"
             VERBATIM)
         juce_enable_vst3_manifest_step(${plugin_target})

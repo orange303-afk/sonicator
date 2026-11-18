@@ -51,7 +51,9 @@ jobs:
       - name: Cache fetched dependencies
         uses: actions/cache@v4
         with:
-          path: build/_deps
+          path: |
+            build/_deps
+            build/onnxruntime-*.nupkg
           key: ${{ runner.os }}-${{ matrix.config }}-deps-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'CMakePresets.json') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.config }}-deps-

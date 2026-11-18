@@ -16,7 +16,13 @@ commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=Tr
 committed = subprocess.run(["git", "archive", "--format=tar", "HEAD"], cwd=repo,
                            check=True, capture_output=True).stdout
 sources = {name: build / "_deps" / f"{name}-src" for name in
-           ("juce", "libxmp", "libsamplerate", "rubberband", "onnxruntime")}
+           ("juce", "libxmp", "libsamplerate", "rubberband")}
+# ONNX Runtime is distributed as a NuGet package, extracted into a versioned directory rather
+# than a FetchContent `_deps` checkout.
+onnx_sources = sorted(build.glob("onnxruntime-*-src"))
+if not onnx_sources:
+    sys.exit(f"Missing pinned dependency source: onnxruntime: {build}/onnxruntime-*-src")
+sources["onnxruntime"] = onnx_sources[-1]
 sources["lame"] = build / "lame-src"
 zlib = build / "_deps/zlib-src"
 if zlib.is_dir():
@@ -51,14 +57,15 @@ Copy dependencies/lame to <build>/lame-src before configure. Pass these CMake fl
 alongside -DSONICATOR_BUILD_PLUGIN=ON -DBUILD_TESTING=OFF and Release configuration:
 
 """ + "\n".join(f"-DFETCHCONTENT_SOURCE_DIR_{name.upper()}=<absolute-path>/dependencies/{name}"
-                   for name in sources if name != "lame") + """
+                   for name in sources if name not in ("lame", "onnxruntime")) + """
 
 Build targets Sonicator and SonicatorPlugin_VST3; on macOS also SonicatorPlugin_AU.
 For macOS pass -DCMAKE_OSX_ARCHITECTURES=\"arm64;x86_64\". Use the package scripts
 under source/packaging to redistribute your modified builds under the applicable
 licences. No vendor signing key, authorization or paid service is needed to
 replace libraries/rebuild. Ad-hoc macOS signatures are generated locally.
-ONNX source (MIT) is at https://github.com/microsoft/onnxruntime/tree/v1.20.1 .
+ONNX Runtime (MIT) ships as the Microsoft.ML.OnnxRuntime NuGet package, extracted
+from <build>/onnxruntime-1.20.1.nupkg; its MIT licence is in dependencies/onnxruntime.
 """
 with tarfile.open(archive_path, "w:gz") as archive:
     with tarfile.open(fileobj=io.BytesIO(committed), mode="r:") as source:

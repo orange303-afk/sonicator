@@ -29,7 +29,9 @@ jobs:
           python-version: '3.12'
       - uses: actions/cache@v4
         with:
-          path: build/_deps
+          path: |
+            build/_deps
+            build/onnxruntime-*.nupkg
           key: macos-installer-deps-v2-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
       - name: Packaging behavior tests
         run: python3 -m unittest discover -s packaging/tests -v
@@ -60,8 +62,9 @@ jobs:
           PKG="$PWD/dist/SONICATOR-0.1.0-macOS-universal.pkg"
           sudo installer -pkg "$PKG" -target / -dumplog
           # A runtime hidden in the build tree cannot rescue a broken installed bundle.
-          mv build/_deps/onnxruntime-src/lib build/_deps/onnxruntime-src/lib-unavailable
-          trap 'mv build/_deps/onnxruntime-src/lib-unavailable build/_deps/onnxruntime-src/lib' EXIT
+          ONNX_LIB="$(ls -d build/onnxruntime-*-src/lib)"
+          mv "$ONNX_LIB" "$ONNX_LIB-unavailable"
+          trap 'mv "$ONNX_LIB-unavailable" "$ONNX_LIB"' EXIT
           APP=/Applications/SONICATOR.app
           VST3=/Library/Audio/Plug-Ins/VST3/SONICATOR.vst3
           AU=/Library/Audio/Plug-Ins/Components/SONICATOR.component
@@ -149,7 +152,9 @@ jobs:
           dotnet-version: '8.0.x'
       - uses: actions/cache@v4
         with:
-          path: build/_deps
+          path: |
+            build/_deps
+            build/onnxruntime-*.nupkg
           key: windows-installer-deps-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
       - name: Packaging behavior tests
         run: |
@@ -258,7 +263,9 @@ jobs:
       - name: Cache fetched dependencies
         uses: actions/cache@v4
         with:
-          path: build/_deps
+          path: |
+            build/_deps
+            build/onnxruntime-*.nupkg
           key: linux-installer-deps-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
       - name: Packaging behavior tests
         run: sh packaging/tests/test-linux-package.sh

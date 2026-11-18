@@ -63,10 +63,12 @@ option requires for a combined work.
   - Licence: LGPL-2.1-or-later is compatible with the project's AGPLv3 route. The combined binary must
     keep the usual source/notice obligations and allow relinking against a modified libxmp.
   - https://github.com/libxmp/libxmp/blob/libxmp-4.6.2/docs/COPYING
-- ONNX Runtime **1.20.1**, MIT, fetched as a prebuilt release archive for macOS universal2, Windows x64
-  and Linux x64.
-  - https://github.com/microsoft/onnxruntime/releases/tag/v1.20.1
-  - https://github.com/microsoft/onnxruntime/blob/v1.20.1/LICENSE.txt
+- ONNX Runtime **1.20.1**, MIT, fetched as the `Microsoft.ML.OnnxRuntime` NuGet package and taken from
+  its per-platform native libraries (macOS arm64 + x64 combined with `lipo`, Windows x64, Linux x64).
+  The package is the C/C++ install route in the ONNX Runtime documentation; the GitHub release assets
+  are the same binaries but stopped answering on 2026-11-17.
+  - https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime/1.20.1
+  - https://onnxruntime.ai/docs/install/
   - **The runtime is linked but no model file ships with the product.** `core/ml/OnnxAudioClassifier`
     exposes `loadModel` and `loadModelFromMemory`, and `core/smart/AcousticClassifierService` only runs
     the classifier when a model has been loaded; nothing in the application calls either loader, so
