@@ -82,6 +82,17 @@ if(NOT EXISTS "${ONNXRUNTIME_SOURCE}/.ready")
             COMMAND /usr/bin/install_name_tool -id "@rpath/libonnxruntime.dylib"
                 "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib"
             COMMAND_ERROR_IS_FATAL ANY)
+    elseif(UNIX)
+        file(MAKE_DIRECTORY "${ONNXRUNTIME_SOURCE}/lib")
+        file(COPY
+            "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime.so"
+            "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime_providers_shared.so"
+            DESTINATION "${ONNXRUNTIME_SOURCE}/lib")
+        # The packaged runtime's SONAME is libonnxruntime.so.1, while the package names the file
+        # without a version. Build-tree binaries find the directory through their rpath only, so
+        # the SONAME has to exist there as well.
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink libonnxruntime.so
+                        "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.so.1")
     endif()
     file(TOUCH "${ONNXRUNTIME_SOURCE}/.ready")
 endif()
@@ -99,7 +110,7 @@ elseif(WIN32)
     )
 else()
     set_target_properties(onnxruntime_lib PROPERTIES
-        IMPORTED_LOCATION "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime.so"
+        IMPORTED_LOCATION "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.so"
         INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_SOURCE}/build/native/include"
     )
 endif()
@@ -322,7 +333,7 @@ if(UNIX AND NOT APPLE)
         BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib/sonicator")
     # The packaged runtime's SONAME is libonnxruntime.so.1: the loader asks for that name, so the
     # file has to be there under it.
-    file(REAL_PATH "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime.so"
+    file(REAL_PATH "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.so"
          ONNXRUNTIME_LINUX_REAL)
     add_custom_command(TARGET Sonicator POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -330,12 +341,12 @@ if(UNIX AND NOT APPLE)
         COMMAND ${CMAKE_COMMAND} -E create_symlink libonnxruntime.so.1
             "$<TARGET_FILE_DIR:Sonicator>/libonnxruntime.so"
         VERBATIM)
-    if(EXISTS "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime_providers_shared.so")
+    if(EXISTS "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime_providers_shared.so")
         # Loaded lazily by non-CPU execution providers; absent here means a clear library error
         # rather than a silently missing backend.
         add_custom_command(TARGET Sonicator POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime_providers_shared.so"
+                "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime_providers_shared.so"
                 "$<TARGET_FILE_DIR:Sonicator>"
             VERBATIM)
     endif()
