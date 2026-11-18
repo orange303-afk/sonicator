@@ -106,7 +106,7 @@ tracked in `docs/LINUX_ACCEPTANCE.md`. Releases are an AppImage and a `.deb` for
 `ubuntu:22.04` because an AppImage carries no glibc and the build host's glibc becomes every user's
 floor.
 
-**Linux is a preview.** The 0.1.0 assets are published as in development and may be unstable: the
+**Linux is a preview.** The 0.1.1 assets are published as in development and may be unstable: the
 application builds, starts and passes the suite on Linux, but no owner acceptance has been run, so
 audio devices, drag and drop into DAWs, HiDPI and Wayland are unverified.
 

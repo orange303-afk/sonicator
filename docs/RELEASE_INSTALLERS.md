@@ -6,9 +6,9 @@ remaining limits are in [RELEASE_INSTALLERS_ACCEPTANCE.md](RELEASE_INSTALLERS_AC
 
 ## Deliverables
 
-- `SONICATOR-0.1.0-macOS-universal.pkg`: independently selectable application, VST3 and AU;
+- `SONICATOR-0.1.1-macOS-universal.pkg`: independently selectable application, VST3 and AU;
   arm64 + x86_64, macOS 11 or newer.
-- `SONICATOR-0.1.0-Windows-x64.msi`: independently selectable application and VST3;
+- `SONICATOR-0.1.1-Windows-x64.msi`: independently selectable application and VST3;
   64-bit Windows 10 or newer. AU is macOS-only.
 - `sonicator-manual.pdf`: the user manual.
 
@@ -95,7 +95,7 @@ Other presets retain their original compiler-parallelism behavior.
 Never run `packaging/windows/test-install.ps1` on a working user's installation. It is guarded
 for a disposable GitHub runner, where it exercises installed app window creation, pluginval,
 repair, a higher-version upgrade fixture, feature selections and uninstall, while checking
-catalog/settings/export hashes. The temporary 0.1.1 MSI is a **test fixture**, not a release.
+catalog/settings/export hashes. The temporary 0.1.2 MSI is a **test fixture**, not a release.
 The disposable startup profile explicitly opts out of contribution sharing, avoiding the
 first-launch consent modal during the shutdown test. It refuses to overwrite an existing
 profile; interacting with the first-launch dialog is separate manual acceptance.
@@ -114,7 +114,7 @@ Deliverables: `SONICATOR-<version>-Linux-x86_64.AppImage` and
 `SONICATOR-<version>-Linux-amd64.deb`, published alone like the other platforms. The script also
 writes `SONICATOR-<version>-Linux.sha256` and CI keeps it with the build artifacts.
 
-Version 0.1.0 publishes these next to the stable macOS and Windows assets with an explicit
+Version 0.1.1 publishes these next to the stable macOS and Windows assets with an explicit
 in-development warning in the release notes: the package contents, the suite and the headless start
 are verified, the desktop behaviour is not. Keep that wording until `docs/LINUX_ACCEPTANCE.md` is
 filled in.
