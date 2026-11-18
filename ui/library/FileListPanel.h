@@ -126,5 +126,8 @@ private:
     void handlePress(const juce::MouseEvent&);
     void handleDrag(const juce::MouseEvent&);
     void handleRelease();
+    // True for a point in the scrollbar lanes, which are never rows: a press there must not
+    // select anything or arm a file drag.
+    bool isScrollBarPoint(juce::Point<int> tablePosition) const;
 };
 } // namespace sonicator

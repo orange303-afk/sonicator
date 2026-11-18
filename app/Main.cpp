@@ -1,5 +1,6 @@
 #include "ui/MainComponent.h"
 #include "ui/shell/AppFonts.h"
+#include "ui/shell/AppIcon.h"
 #include "ui/shell/WindowBounds.h"
 #include "core/settings/AppSettings.h"
 #include "core/database/SampleRepository.h"
@@ -67,6 +68,12 @@ private:
             else if (const auto* primary = displays.getPrimaryDisplay()) area = primary->userArea;
             setBounds(sonicator::resolveWindowBounds(saved, area));
             setVisible(true);
+#if JUCE_WINDOWS
+            // Explorer caches the icon it associates with an executable. Setting the peer icon
+            // makes the title bar and the taskbar show the mark without waiting for that cache.
+            if (auto* peer = getPeer())
+                peer->setIcon(sonicator::appWindowIcon());
+#endif
             geometryReady = true;
         }
         void persistGeometry()

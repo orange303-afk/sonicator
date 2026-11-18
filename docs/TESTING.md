@@ -405,3 +405,14 @@ Environment unchanged: macOS native arm64, Apple Clang, CMake, JUCE 9.0.5.
 - Default suite and CTest pass. Existing JUCE non-ASCII string-literal debug assertions still print
   in preview tests; these are not new test failures. Physical listening/MIDI hardware acceptance,
   Windows and formal realtime profiling remain unverified by these render tests.
+
+## Library scrollbar and row gestures (2026-11-18)
+
+- The scrollbar lane is not a row. `FileListPanel` now ignores a press that lands in the vertical
+  or horizontal scrollbar lane before it hit-tests rows, because `ListBox::getRowContainingPosition`
+  only looks at `y` and used to select the row underneath the thumb. A scrollbar click or thumb
+  drag therefore keeps the selection and cannot arm a file drag.
+- Coverage (`[scrollbar]`): 60 rows with a visible vertical bar; a synthetic press and a 12 px drag
+  on the bar leave both selected rows intact and fire neither `onMatchedDrag` nor `onDragMessage`;
+  the look and feel reports a 14 px lane and paints an 8 px thumb, checked by counting painted
+  pixels on a rendered bar.

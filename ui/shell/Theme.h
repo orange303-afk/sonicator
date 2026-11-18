@@ -521,18 +521,32 @@ public:
         g.drawFittedText(columnName, area, juce::Justification::centredLeft, 1);
     }
 
+    // A 14 px lane keeps the scrollbar easy to hit without a hard groove in the flat surfaces.
+    int getDefaultScrollbarWidth() override { return 14; }
     void drawScrollbar(juce::Graphics& g, juce::ScrollBar&, int x, int y, int width, int height,
-                       bool vertical, int thumbStart, int thumbSize, bool isMouseOver, bool) override
+                       bool vertical, int thumbStart, int thumbSize, bool isMouseOver,
+                       bool isMouseDown) override
     {
-        if (thumbSize <= 0) return;
-        const int thickness = juce::jmin(6, vertical ? width : height);
-        juce::Rectangle<int> thumb;
+        const int lane = vertical ? width : height;
+        if (thumbSize <= 0 || lane < 6) return;
+        const int thickness = juce::jmin(8, lane - 4);
+        const int inset = (lane - thickness) / 2;
+        juce::Rectangle<int> thumb, track;
         if (vertical)
-            thumb = { x + (width - thickness) / 2, thumbStart, thickness, thumbSize };
+        {
+            thumb = { x + inset, thumbStart, thickness, thumbSize };
+            track = { x + inset, y, thickness, height };
+        }
         else
-            thumb = { thumbStart, y + (height - thickness) / 2, thumbSize, thickness };
-
-        g.setColour(isMouseOver ? theme::selection : theme::raised);
+        {
+            thumb = { thumbStart, y + inset, thumbSize, thickness };
+            track = { x, y + inset, width, thickness };
+        }
+        // The track is only a hint of where the bar is; the thumb carries the state.
+        g.setColour(theme::line.withAlpha(0.45f));
+        g.fillRoundedRectangle(track.toFloat(), (float) thickness / 2.0f);
+        g.setColour(isMouseDown ? theme::selection.brighter(0.35f)
+                                : (isMouseOver ? theme::selection : theme::raised));
         g.fillRoundedRectangle(thumb.toFloat(), (float) thickness / 2.0f);
     }
 };

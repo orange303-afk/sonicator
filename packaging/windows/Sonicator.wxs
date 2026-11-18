@@ -7,6 +7,10 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of SONICATOR is already installed."
                   AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"/>
     <MediaTemplate EmbedCab="yes"/>
+    <!-- Apps & features has no icon unless the package carries one. The shortcut itself is not
+         advertised, so it takes the icon from the executable and stays valid across upgrades. -->
+    <Icon Id="AppIcon.ico" SourceFile="$(var.AppIcon)"/>
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico"/>
     <!-- MSI deliberately reports VersionNT=603 / WindowsBuild=9600 on newer Windows.
          Query the real build, rather than rejecting supported Windows 10/11/Server. -->
     <Property Id="WINDOWSBUILDNUMBER" Secure="yes">

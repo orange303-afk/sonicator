@@ -13,10 +13,18 @@
 #include "ui/settings/RelocateFoldersPanel.h"
 #include "ui/shell/WindowBounds.h"
 #include "ui/shell/Theme.h"
+#include "ui/shell/AppIcon.h"
 #include <set>
 #include "core/indexing/IndexingService.h"
 #include "TestHelpers.h"
 using namespace sonicator;
+TEST_CASE("The embedded window icon loads at 256 px", "[ui]")
+{
+    const auto icon = appWindowIcon();
+    REQUIRE(icon.isValid());
+    REQUIRE(icon.getWidth() == 256);
+    REQUIRE(icon.getHeight() == 256);
+}
 TEST_CASE("Search field requests history on left click, not on typing or right click", "[ui][search-history]")
 {
     SearchField field;

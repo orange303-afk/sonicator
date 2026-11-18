@@ -108,6 +108,20 @@ of never being correct. Treat as a study item, not a plan.
 Header `Spitfire` + a table of sample records with offsets; likely raw PCM after the table.
 Proprietary, 25 files. Investigate only if the user wants that specific library.
 
+### 10. Core Audio Format `.caf` — none in the inventory, planned
+
+Not present in this walk (0 files), so the counts say nothing about demand; the format is common
+outside the library (Logic, Pro Tools, iOS, `afconvert`). Apple's chunked container, with `lpcm`,
+`ulaw`/`alaw`, `ima4`, `alac` and AAC payloads. The plan is a cross-platform reader (LPCM, µ-law,
+A-law, IMA4) that refuses ALAC/AAC honestly rather than a macOS-only CoreAudio path that would make
+the catalog platform-dependent. Study and plan: `docs/CAF.md`.
+
+### 11. Slate Trigger `.tci` — deferred
+
+A self-contained drum instrument (velocity layers × round robins) with a proprietary bitstream
+codec; no specification. A clean-room MIT decoder exists (`tci2wav`), but it is a research-grade
+port with an unresolved stereo transient and no file here to validate. Study: `docs/TCI.md`.
+
 ### Not worth a reader
 
 `.smp`/`.snd`/`.sam` (several headerless old formats, ambiguous 8-bit, low value), `.ens`/`.ism`

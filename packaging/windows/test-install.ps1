@@ -32,6 +32,23 @@ $ActiveMsi = $Msi
 try {
     Invoke-Msi -Arguments @('/i', "`"$Msi`"")
     Assert-Features $true $true
+    # The Start-menu shortcut is not advertised, so Windows takes its icon from the executable.
+    # Both the shortcut and the embedded icon have to survive packaging.
+    $Shortcut = "$env:ProgramData/Microsoft/Windows/Start Menu/Programs/SONICATOR.lnk"
+    if (!(Test-Path $Shortcut -PathType Leaf)) { throw "Missing Start Menu shortcut: $Shortcut" }
+    Add-Type -AssemblyName System.Drawing
+    if ($null -eq [System.Drawing.Icon]::ExtractAssociatedIcon($App)) {
+        throw 'The installed executable carries no icon'
+    }
+    $Shell = New-Object -ComObject WScript.Shell
+    $Link = $Shell.CreateShortcut($Shortcut)
+    if ((Resolve-Path $Link.TargetPath).Path -ne (Resolve-Path $App).Path) {
+        throw "Start Menu shortcut targets '$($Link.TargetPath)', expected $App"
+    }
+    $IconPath = [Environment]::ExpandEnvironmentVariables(($Link.IconLocation -replace ',\d+$', ''))
+    if ($IconPath -and !(Test-Path $IconPath)) {
+        throw "Start Menu shortcut icon is missing: $($Link.IconLocation)"
+    }
     # This smoke test is about installation, not answering the first-launch consent dialog.
     # Windows WM_CLOSE is correctly ignored while another modal component is active.
     # Seed a fresh disposable profile with sharing OFF, never an owner's existing settings.

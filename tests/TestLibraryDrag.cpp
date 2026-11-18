@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "core/export/ExternalFileDrag.h"
 #include "ui/library/FileListPanel.h"
+#include "ui/shell/Theme.h"
 #include "TestHelpers.h"
 #include "EblTestFile.h"
 #include <cmath>
@@ -104,6 +105,60 @@ TEST_CASE("Row gesture reaches the listener with the whole multi-selection", "[d
     REQUIRE(called); REQUIRE_FALSE(canMove);
     REQUIRE(seen.size() == 2);
     REQUIRE(seen[0] == a.getFullPathName()); REQUIRE(seen[1] == b.getFullPathName());
+}
+
+TEST_CASE("A scrollbar press keeps the selection and never arms a row drag", "[drag][library][scrollbar]")
+{
+    TestDirectory t; auto a = t.wave("a.wav"), b = t.wave("b.wav");
+    std::vector<SampleRecord> rows;
+    for (int i = 0; i < 60; ++i)
+    {
+        SampleRecord r; r.id = i + 1; r.filePath = (i % 2 == 0 ? a : b).getFullPathName();
+        r.fileName = juce::String("row-") + juce::String(i) + ".wav";
+        rows.push_back(std::move(r));
+    }
+    FileListPanel list; list.setBounds(0, 0, 800, 260); list.resized();
+    list.setSamples(rows);
+    list.createComponentSnapshot(list.getLocalBounds());
+    auto& table = FileListPanelTestAccess::table(list);
+    auto* viewport = table.getViewport();
+    REQUIRE(viewport != nullptr);
+    auto& bar = viewport->getVerticalScrollBar();
+    REQUIRE(bar.isVisible());
+    list.selectRows({ 0, 2 });
+    REQUIRE(list.getSelectedRowCount() == 2);
+    bool dragged = false, message = false;
+    list.onMatchedDrag = [&](const std::vector<SampleRecord>&, juce::Component*) { dragged = true; return true; };
+    list.onDragMessage = [&](juce::String) { message = true; };
+    const auto now = juce::Time::getCurrentTime();
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const auto centre = bar.getLocalBounds().getCentre().toFloat();
+    juce::MouseEvent down(source, centre, juce::ModifierKeys(), 1.0f, 0, 0, 0, 0,
+                          &bar, &bar, now, centre, now, 1, false);
+    FileListPanelTestAccess::press(list, down);
+    REQUIRE(list.getSelectedRowCount() == 2);
+    REQUIRE(list.isRowSelected(0)); REQUIRE(list.isRowSelected(2));
+    juce::MouseEvent moved(source, centre + juce::Point<float>(0.0f, 12.0f), juce::ModifierKeys(),
+                           1.0f, 0, 0, 0, 0, &bar, &bar, now, centre, now, 1, true);
+    FileListPanelTestAccess::drag(list, moved);
+    REQUIRE_FALSE(dragged);
+    REQUIRE_FALSE(message);
+    REQUIRE(list.getSelectedRowCount() == 2);
+}
+
+TEST_CASE("The scrollbar lane is 14 px and its thumb is 8 px wide", "[ui][library][scrollbar]")
+{
+    SonicatorLookAndFeel lookAndFeel;
+    REQUIRE(lookAndFeel.getDefaultScrollbarWidth() == 14);
+    juce::Image image(juce::Image::ARGB, 14, 200, true);
+    juce::Graphics g(image);
+    juce::ScrollBar bar(false);
+    lookAndFeel.drawScrollbar(g, bar, 0, 0, 14, 200, true, 40, 80, false, false);
+    int painted = 0;
+    for (int x = 0; x < 14; ++x)
+        if (image.getPixelAt(x, 60).getAlpha() > 0) ++painted;
+    REQUIRE(painted >= 7);
+    REQUIRE(painted <= 10);
 }
 
 TEST_CASE("Enter opens the selected container row", "[ui][disc]")

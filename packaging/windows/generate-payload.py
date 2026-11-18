@@ -60,8 +60,11 @@ for folder, directory_id, group_id in [("app", "INSTALLFOLDER", "AppPayload"),
         component = element(current, "Component", Id=component_id, Guid=guid, Bitness="always64")
         file = element(component, "File", Id=identifier("f", key), Source=str(path), KeyPath="yes")
         if key == "app/sonicator.exe":
+            # Not advertised: an advertised shortcut shows an icon only when the MSI carries an
+            # Icon row for it, while a plain shortcut uses the icon embedded in the executable.
+            # The executable icon is also the one a taskbar pin keeps across major upgrades.
             element(file, "Shortcut", Id="StartMenuShortcut", Directory="ProgramMenuFolder",
-                    Name="SONICATOR", Advertise="yes", WorkingDirectory="INSTALLFOLDER")
+                    Name="SONICATOR", WorkingDirectory="INSTALLFOLDER")
         element(group, "ComponentRef", Id=component_id)
 ET.indent(root)
 ET.ElementTree(root).write(output, encoding="utf-8", xml_declaration=True)

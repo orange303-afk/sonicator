@@ -208,9 +208,28 @@ void FileListPanel::notifyStarClick(int row)
         if (onStarClicked) onStarClicked(*record);
 }
 
+bool FileListPanel::isScrollBarPoint(juce::Point<int> pos) const
+{
+    auto* viewport = table.getViewport();
+    if (viewport == nullptr) return false;
+    // The scrollbar lanes sit outside the visible content: vertical to the right of the content
+    // width, horizontal below the content height. ListBox::getRowContainingPosition ignores x
+    // beyond the row, so without this check a press on the scrollbar selects the row underneath it.
+    const int contentRight = viewport->getX() + viewport->getMaximumVisibleWidth();
+    const int contentBottom = viewport->getY() + viewport->getMaximumVisibleHeight();
+    return pos.x >= contentRight || pos.y >= contentBottom;
+}
 void FileListPanel::handlePress(const juce::MouseEvent& e)
 {
     const auto pos = e.getEventRelativeTo(&table).getPosition();
+    // A press on the scrollbar belongs to the scrollbar: keep the selection and do not arm a drag.
+    if (isScrollBarPoint(pos))
+    {
+        dragArmed = false;
+        dragStarted = false;
+        pressedRow = -1;
+        return;
+    }
     // The star column is a control, not a drag handle: a left click toggles the favorite.
     if (! e.mods.isPopupMenu() && ! e.mods.isAltDown() && ! e.mods.isCommandDown())
     {
