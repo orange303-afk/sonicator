@@ -7,11 +7,9 @@ import sys
 repo = pathlib.Path(__file__).resolve().parents[1]
 build, output = map(pathlib.Path, sys.argv[1:])
 # The ONNX Runtime NuGet package is extracted into a versioned directory; the newest one is the
-# runtime this build used.
+# runtime this build used. A build without the classifier never downloads it and ships no notice.
 onnx_sources = sorted(build.glob("onnxruntime-*-src"))
-if not onnx_sources:
-    sys.exit(f"Missing licence material: {build}/onnxruntime-*-src")
-onnx_source = onnx_sources[-1]
+onnx_source = onnx_sources[-1] if onnx_sources else None
 files = {
     repo / "LICENSE": "SONICATOR-AGPL.txt",
     repo / "THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
@@ -21,11 +19,12 @@ files = {
     build / "_deps/libxmp-src/docs/COPYING": "libxmp-COPYING.txt",
     build / "_deps/libsamplerate-src/COPYING": "libsamplerate-COPYING.txt",
     build / "_deps/rubberband-src/COPYING": "RubberBand-COPYING.txt",
-    onnx_source / "LICENSE": "ONNX-LICENSE.txt",
-    onnx_source / "ThirdPartyNotices.txt": "ONNX-ThirdPartyNotices.txt",
     build / "_deps/juce-src/LICENSE.md": "JUCE/LICENSE.md",
     build / "_deps/juce-src/JUCE.spdx.json": "JUCE/JUCE.spdx.json",
 }
+if onnx_source is not None:
+    files[onnx_source / "LICENSE"] = "ONNX-LICENSE.txt"
+    files[onnx_source / "ThirdPartyNotices.txt"] = "ONNX-ThirdPartyNotices.txt"
 # Include nested codec/SDK/graphics notices, preserving their source paths. Some licences
 # (JPEG, FLAC etc.) live in headers/readmes, so retain those too, not just LICENSE files.
 modules = build / "_deps/juce-src/modules"

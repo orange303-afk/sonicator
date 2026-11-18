@@ -1,0 +1,76 @@
+name: Release installer (macOS 10.15 x86_64)
+
+# A second, Intel-only installer of the current version for Macs that cannot install the
+# universal package. Catalina is the last system several 2012-era Macs receive, and the
+# universal payload's own minimum is newer. This workflow never rebuilds, renames or replaces
+# the universal artifacts: it produces one additional package next to them.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-catalina-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-legacy:
+    name: macOS 10.15 x86_64 PKG
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Resolve version
+        run: |
+          version="$(sed -n 's/^project(Sonicator VERSION \([0-9][0-9.]*\) .*/\1/p' CMakeLists.txt)"
+          test -n "$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: macos-legacy-deps-v1-${{ hashFiles('CMakeLists.txt', 'cmake/RubberBand.cmake') }}
+      - name: Packaging behavior tests
+        run: python3 -m unittest discover -s packaging/tests -v
+      - name: Build x86_64 payloads for macOS 10.15
+        # No ONNX Runtime: the application never loads a model, and its bundled dylib alone
+        # requires macOS 13.3. The tests keep the classifier; this build leaves it out.
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 -DBUILD_TESTING=OFF \
+            -DSONICATOR_ENABLE_ONNX=OFF -DSONICATOR_BUILD_PLUGIN=ON
+          cmake --build build --target Sonicator SonicatorPlugin_VST3 SonicatorPlugin_AU -j 4
+      - name: Package and collect matching sources
+        run: |
+          sh packaging/macos/build-pkg.sh build dist legacy-x86_64
+          sh packaging/tests/test-macos-pkg.sh \
+            "dist/SONICATOR-$VERSION-macOS-x86_64-10.15.pkg" legacy-x86_64
+          python3 packaging/make-source-bundle.py build dist -x86_64-10.15
+          git rev-parse HEAD > dist/source-commit-legacy.txt
+          cd dist
+          shasum -a 256 -c "SONICATOR-$VERSION-macOS-x86_64-10.15.pkg.sha256"
+          shasum -a 256 -c "SONICATOR-$VERSION-sources-x86_64-10.15.tar.gz.sha256"
+      - name: Report architecture and Mach-O minimums
+        run: |
+          for file in \
+            build/Sonicator_artefacts/Release/SONICATOR.app/Contents/MacOS/SONICATOR \
+            build/plugin/SonicatorPlugin_artefacts/Release/VST3/SONICATOR.vst3/Contents/MacOS/SONICATOR \
+            build/plugin/SonicatorPlugin_artefacts/Release/AU/SONICATOR.component/Contents/MacOS/SONICATOR; do
+            echo "$file"
+            /usr/bin/lipo -archs "$file"
+            /usr/bin/otool -l "$file" | awk '$1 == "minos" {print "  minos " $2}'
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SONICATOR-macOS-x86_64-10.15
+          if-no-files-found: error
+          path: |
+            dist/SONICATOR-${{ env.VERSION }}-macOS-x86_64-10.15.pkg
+            dist/SONICATOR-${{ env.VERSION }}-macOS-x86_64-10.15.pkg.sha256
+            dist/SONICATOR-${{ env.VERSION }}-sources-x86_64-10.15.tar.gz
+            dist/SONICATOR-${{ env.VERSION }}-sources-x86_64-10.15.tar.gz.sha256
+            dist/source-commit-legacy.txt

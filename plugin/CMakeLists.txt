@@ -1,7 +1,9 @@
 # The SONICATOR VST3/AU instrument: the shared application window as a DAW editor around the
 # application's own catalog. Built only with -DSONICATOR_BUILD_PLUGIN=ON.
 set(plugin_target SonicatorPlugin)
-set(plugin_dylib "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib")
+if(SONICATOR_ENABLE_ONNX)
+    set(plugin_dylib "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib")
+endif()
 set(plugin_formats VST3)
 if(APPLE)
     list(APPEND plugin_formats AU)
@@ -40,11 +42,13 @@ target_compile_definitions(${plugin_target} PUBLIC JUCE_VST3_CAN_REPLACE_VST2=0)
 if(NOT APPLE)
     if(WIN32)
         # The VST3 manifest helper loads this module, so its runtime must exist first.
-        add_custom_command(TARGET ${plugin_target}_VST3 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${ONNXRUNTIME_SOURCE}/runtimes/win-x64/native/onnxruntime.dll"
-                "$<TARGET_FILE_DIR:${plugin_target}_VST3>"
-            VERBATIM)
+        if(SONICATOR_ENABLE_ONNX)
+            add_custom_command(TARGET ${plugin_target}_VST3 POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${ONNXRUNTIME_SOURCE}/runtimes/win-x64/native/onnxruntime.dll"
+                    "$<TARGET_FILE_DIR:${plugin_target}_VST3>"
+                VERBATIM)
+        endif()
         juce_enable_vst3_manifest_step(${plugin_target})
     endif()
     return()
@@ -76,12 +80,14 @@ foreach(wrapper_target IN LISTS plugin_wrapper_targets)
     set_target_properties(${wrapper_target} PROPERTIES
         BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_RPATH "@loader_path/../Frameworks")
-    add_custom_command(TARGET ${wrapper_target} POST_BUILD
-        COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedDylib.sh"
-            "$<TARGET_BUNDLE_DIR:${wrapper_target}>"
-            "${plugin_dylib}"
-            "$<TARGET_FILE_NAME:${wrapper_target}>"
-        VERBATIM)
+    if(SONICATOR_ENABLE_ONNX)
+        add_custom_command(TARGET ${wrapper_target} POST_BUILD
+            COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedDylib.sh"
+                "$<TARGET_BUNDLE_DIR:${wrapper_target}>"
+                "${plugin_dylib}"
+                "$<TARGET_FILE_NAME:${wrapper_target}>"
+            VERBATIM)
+    endif()
 endforeach()
 
 # Declared after the embed step and before signing: the helper dlopens the built bundle, which

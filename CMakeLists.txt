@@ -1,9 +1,19 @@
 cmake_minimum_required(VERSION 3.22)
+# The deployment target has to be set before the first project() call: CMake reads it while it
+# initialises the platform, and an assignment afterwards is ignored, which leaves every binary at
+# the SDK's own minimum (15.0 on the release runner, which is why the 0.1.1 package refuses older
+# systems). 10.15 is the last system the Intel Macs that cannot run Big Sur receive; an arm64 slice
+# is promoted to 11.0 by the toolchain because no Apple Silicon Mac runs anything older.
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version")
 project(Sonicator VERSION 0.1.1 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(SONICATOR_MSVC_COMPILER_JOBS "1" CACHE STRING "MSVC compiler processes per project")
+# ONNX Runtime backs the neural sample classifier. The application never loads a model today, yet
+# the linked runtime carries a macOS minimum of 13.3 and 52 MB of payload, so a build for older
+# systems leaves it out entirely. The tests still exercise it and configure with the option on.
+option(SONICATOR_ENABLE_ONNX "Link ONNX Runtime and compile the neural classifier" ON)
 if(MSVC AND SONICATOR_MSVC_COMPILER_JOBS GREATER 1)
     # MSBuild /m parallelizes projects, not translation units. Bound compiler parallelism
     # explicitly; release presets serialize projects to avoid multiplying that limit.
@@ -51,68 +61,70 @@ set(LIBXMP_PIC ON CACHE BOOL "" FORCE)
 # binaries but are not a stable host: the repository and its release files answered 404 on
 # 2026-11-17. The package is a zip with the headers under build/native/include and one native
 # library per runtime identifier; macOS gets a universal dylib by combining its two slices.
-set(ONNXRUNTIME_VERSION 1.20.1)
-set(ONNXRUNTIME_SHA256 9c32108e9a1c78b090a95c2a219f244dd5f067d4caf68fb0f967103f3f20839c)
-set(ONNXRUNTIME_ARCHIVE "${CMAKE_BINARY_DIR}/onnxruntime-${ONNXRUNTIME_VERSION}.nupkg")
-set(ONNXRUNTIME_SOURCE "${CMAKE_BINARY_DIR}/onnxruntime-${ONNXRUNTIME_VERSION}-src")
-if(NOT EXISTS "${ONNXRUNTIME_SOURCE}/.ready")
-    if(EXISTS "${ONNXRUNTIME_ARCHIVE}")
-        file(SHA256 "${ONNXRUNTIME_ARCHIVE}" onnxruntime_archive_hash)
+if(SONICATOR_ENABLE_ONNX)
+    set(ONNXRUNTIME_VERSION 1.20.1)
+    set(ONNXRUNTIME_SHA256 9c32108e9a1c78b090a95c2a219f244dd5f067d4caf68fb0f967103f3f20839c)
+    set(ONNXRUNTIME_ARCHIVE "${CMAKE_BINARY_DIR}/onnxruntime-${ONNXRUNTIME_VERSION}.nupkg")
+    set(ONNXRUNTIME_SOURCE "${CMAKE_BINARY_DIR}/onnxruntime-${ONNXRUNTIME_VERSION}-src")
+    if(NOT EXISTS "${ONNXRUNTIME_SOURCE}/.ready")
+        if(EXISTS "${ONNXRUNTIME_ARCHIVE}")
+            file(SHA256 "${ONNXRUNTIME_ARCHIVE}" onnxruntime_archive_hash)
+        endif()
+        if(NOT onnxruntime_archive_hash STREQUAL ONNXRUNTIME_SHA256)
+            file(DOWNLOAD
+                "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${ONNXRUNTIME_VERSION}/microsoft.ml.onnxruntime.${ONNXRUNTIME_VERSION}.nupkg"
+                "${ONNXRUNTIME_ARCHIVE}"
+                EXPECTED_HASH SHA256=${ONNXRUNTIME_SHA256}
+                SHOW_PROGRESS)
+        endif()
+        file(ARCHIVE_EXTRACT INPUT "${ONNXRUNTIME_ARCHIVE}" DESTINATION "${ONNXRUNTIME_SOURCE}")
+        if(APPLE)
+            file(MAKE_DIRECTORY "${ONNXRUNTIME_SOURCE}/lib")
+            execute_process(
+                COMMAND /usr/bin/lipo -create
+                    "${ONNXRUNTIME_SOURCE}/runtimes/osx-arm64/native/libonnxruntime.dylib"
+                    "${ONNXRUNTIME_SOURCE}/runtimes/osx-x64/native/libonnxruntime.dylib"
+                    -output "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib"
+                COMMAND_ERROR_IS_FATAL ANY)
+            # The package names the library @rpath/libonnxruntime.1.20.1.dylib. Give the combined
+            # runtime the unversioned id the app ships under, so build-tree binaries and the bundle
+            # resolve the same name; EmbedMacRuntime.sh already rewrites the executable to it.
+            execute_process(
+                COMMAND /usr/bin/install_name_tool -id "@rpath/libonnxruntime.dylib"
+                    "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib"
+                COMMAND_ERROR_IS_FATAL ANY)
+        elseif(UNIX)
+            file(MAKE_DIRECTORY "${ONNXRUNTIME_SOURCE}/lib")
+            file(COPY
+                "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime.so"
+                "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime_providers_shared.so"
+                DESTINATION "${ONNXRUNTIME_SOURCE}/lib")
+            # The packaged runtime's SONAME is libonnxruntime.so.1, while the package names the file
+            # without a version. Build-tree binaries find the directory through their rpath only, so
+            # the SONAME has to exist there as well.
+            execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink libonnxruntime.so
+                            "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.so.1")
+        endif()
+        file(TOUCH "${ONNXRUNTIME_SOURCE}/.ready")
     endif()
-    if(NOT onnxruntime_archive_hash STREQUAL ONNXRUNTIME_SHA256)
-        file(DOWNLOAD
-            "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${ONNXRUNTIME_VERSION}/microsoft.ml.onnxruntime.${ONNXRUNTIME_VERSION}.nupkg"
-            "${ONNXRUNTIME_ARCHIVE}"
-            EXPECTED_HASH SHA256=${ONNXRUNTIME_SHA256}
-            SHOW_PROGRESS)
-    endif()
-    file(ARCHIVE_EXTRACT INPUT "${ONNXRUNTIME_ARCHIVE}" DESTINATION "${ONNXRUNTIME_SOURCE}")
+    add_library(onnxruntime_lib SHARED IMPORTED GLOBAL)
     if(APPLE)
-        file(MAKE_DIRECTORY "${ONNXRUNTIME_SOURCE}/lib")
-        execute_process(
-            COMMAND /usr/bin/lipo -create
-                "${ONNXRUNTIME_SOURCE}/runtimes/osx-arm64/native/libonnxruntime.dylib"
-                "${ONNXRUNTIME_SOURCE}/runtimes/osx-x64/native/libonnxruntime.dylib"
-                -output "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib"
-            COMMAND_ERROR_IS_FATAL ANY)
-        # The package names the library @rpath/libonnxruntime.1.20.1.dylib. Give the combined
-        # runtime the unversioned id the app ships under, so build-tree binaries and the bundle
-        # resolve the same name; EmbedMacRuntime.sh already rewrites the executable to it.
-        execute_process(
-            COMMAND /usr/bin/install_name_tool -id "@rpath/libonnxruntime.dylib"
-                "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib"
-            COMMAND_ERROR_IS_FATAL ANY)
-    elseif(UNIX)
-        file(MAKE_DIRECTORY "${ONNXRUNTIME_SOURCE}/lib")
-        file(COPY
-            "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime.so"
-            "${ONNXRUNTIME_SOURCE}/runtimes/linux-x64/native/libonnxruntime_providers_shared.so"
-            DESTINATION "${ONNXRUNTIME_SOURCE}/lib")
-        # The packaged runtime's SONAME is libonnxruntime.so.1, while the package names the file
-        # without a version. Build-tree binaries find the directory through their rpath only, so
-        # the SONAME has to exist there as well.
-        execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink libonnxruntime.so
-                        "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.so.1")
+        set_target_properties(onnxruntime_lib PROPERTIES
+            IMPORTED_LOCATION "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib"
+            INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_SOURCE}/build/native/include"
+        )
+    elseif(WIN32)
+        set_target_properties(onnxruntime_lib PROPERTIES
+            IMPORTED_LOCATION "${ONNXRUNTIME_SOURCE}/runtimes/win-x64/native/onnxruntime.dll"
+            IMPORTED_IMPLIB "${ONNXRUNTIME_SOURCE}/runtimes/win-x64/native/onnxruntime.lib"
+            INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_SOURCE}/build/native/include"
+        )
+    else()
+        set_target_properties(onnxruntime_lib PROPERTIES
+            IMPORTED_LOCATION "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.so"
+            INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_SOURCE}/build/native/include"
+        )
     endif()
-    file(TOUCH "${ONNXRUNTIME_SOURCE}/.ready")
-endif()
-add_library(onnxruntime_lib SHARED IMPORTED GLOBAL)
-if(APPLE)
-    set_target_properties(onnxruntime_lib PROPERTIES
-        IMPORTED_LOCATION "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib"
-        INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_SOURCE}/build/native/include"
-    )
-elseif(WIN32)
-    set_target_properties(onnxruntime_lib PROPERTIES
-        IMPORTED_LOCATION "${ONNXRUNTIME_SOURCE}/runtimes/win-x64/native/onnxruntime.dll"
-        IMPORTED_IMPLIB "${ONNXRUNTIME_SOURCE}/runtimes/win-x64/native/onnxruntime.lib"
-        INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_SOURCE}/build/native/include"
-    )
-else()
-    set_target_properties(onnxruntime_lib PROPERTIES
-        IMPORTED_LOCATION "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.so"
-        INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_SOURCE}/build/native/include"
-    )
 endif()
 FetchContent_Declare(libxmp
     GIT_REPOSITORY https://github.com/libxmp/libxmp.git
@@ -255,7 +267,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/indexing/CatalogFileSync.cpp
     core/contribute/ContributionPayload.cpp core/contribute/ContributionUploader.cpp core/contribute/PlatformName.cpp
     core/updates/UpdateCheck.cpp
-    core/ml/MelSpectrogram.cpp core/ml/OnnxAudioClassifier.cpp
+    core/ml/MelSpectrogram.cpp
     core/smart/TapTempo.cpp
     core/ml/AdaptiveClassifier.cpp core/ml/FeatureV2Backfill.cpp core/ml/GlobalLinearModel.cpp
     core/cloud/CloudSource.cpp core/cloud/CloudLayoutBuilder.cpp core/cloud/CloudCache.cpp core/cloud/CloudBuildService.cpp
@@ -264,10 +276,15 @@ target_include_directories(SonicatorCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} reso
 target_compile_definitions(SonicatorCore PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_REPORT_APP_USAGE=0
-    SONICATOR_ENABLE_MATCH=$<BOOL:${SONICATOR_ENABLE_MATCH}>)
+    SONICATOR_ENABLE_MATCH=$<BOOL:${SONICATOR_ENABLE_MATCH}>
+    SONICATOR_ENABLE_ONNX=$<BOOL:${SONICATOR_ENABLE_ONNX}>)
 target_link_libraries(SonicatorCore PUBLIC
-    juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static onnxruntime_lib
+    juce::juce_audio_utils juce::juce_dsp juce::juce_cryptography ZLIB::ZLIB xmp_static
     SampleRate::samplerate lame_static)
+if(SONICATOR_ENABLE_ONNX)
+    target_sources(SonicatorCore PRIVATE core/ml/OnnxAudioClassifier.cpp)
+    target_link_libraries(SonicatorCore PUBLIC onnxruntime_lib)
+endif()
 if(SONICATOR_ENABLE_MATCH)
     target_sources(SonicatorCore PRIVATE core/match/OfflineMatchRenderer.cpp)
     target_link_libraries(SonicatorCore PUBLIC sonicator_rubberband)
@@ -318,14 +335,14 @@ if(APPLE)
     set_target_properties(Sonicator PROPERTIES
         BUILD_WITH_INSTALL_RPATH TRUE INSTALL_RPATH "@loader_path/../Frameworks")
 endif()
-if(WIN32)
+if(WIN32 AND SONICATOR_ENABLE_ONNX)
     # BUILD_RPATH has no effect on Windows; the runtime DLL must sit next to the executable.
     add_custom_command(TARGET Sonicator POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${ONNXRUNTIME_SOURCE}/runtimes/win-x64/native/onnxruntime.dll" "$<TARGET_FILE_DIR:Sonicator>"
         VERBATIM)
 endif()
-if(UNIX AND NOT APPLE)
+if(UNIX AND NOT APPLE AND SONICATOR_ENABLE_ONNX)
     # A packaged Linux build ships the runtime beside the binary; $ORIGIN is the loader's own
     # directory, so nothing points into the build tree. The second entry is where a package keeps
     # its own shared objects.
@@ -352,21 +369,30 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 if(APPLE)
-    # Ship the runtime inside the app, not at an absolute FetchContent build-tree path.
-    # Nested code is signed first; the complete bundle is then sealed ad-hoc.
-    add_custom_command(TARGET Sonicator POST_BUILD
-        COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedMacRuntime.sh"
-            "$<TARGET_BUNDLE_DIR:Sonicator>"
-            "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib"
-            "$<TARGET_FILE_NAME:Sonicator>"
-        VERBATIM)
+    if(SONICATOR_ENABLE_ONNX)
+        # Ship the runtime inside the app, not at an absolute FetchContent build-tree path.
+        # Nested code is signed first; the complete bundle is then sealed ad-hoc.
+        add_custom_command(TARGET Sonicator POST_BUILD
+            COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedMacRuntime.sh"
+                "$<TARGET_BUNDLE_DIR:Sonicator>"
+                "${ONNXRUNTIME_SOURCE}/lib/libonnxruntime.dylib"
+                "$<TARGET_FILE_NAME:Sonicator>"
+            VERBATIM)
+    else()
+        # Without a bundled runtime there is nothing to embed, but the bundle still has to be
+        # signed and sealed before it is packaged.
+        add_custom_command(TARGET Sonicator POST_BUILD
+            COMMAND /usr/bin/codesign --force --sign - "$<TARGET_BUNDLE_DIR:Sonicator>"
+            COMMAND /usr/bin/codesign --verify --deep --strict "$<TARGET_BUNDLE_DIR:Sonicator>"
+            VERBATIM)
+    endif()
 endif()
 include(CTest)
 option(SONICATOR_BUILD_TOOLS "Build development tools (layout report)" OFF)
 if(SONICATOR_BUILD_TOOLS)
     add_executable(cloud-layout-report tools/cloud-layout-report/main.cpp)
     target_link_libraries(cloud-layout-report PRIVATE SonicatorCore)
-    if(APPLE)
+    if(APPLE AND SONICATOR_ENABLE_ONNX)
         set_target_properties(cloud-layout-report PROPERTIES BUILD_RPATH "${ONNXRUNTIME_SOURCE}/lib")
     endif()
 endif()

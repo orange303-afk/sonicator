@@ -37,11 +37,13 @@ std::optional<SmartCandidate> extractGenreCandidate(
 
 } // namespace
 
+#if SONICATOR_ENABLE_ONNX
 OnnxAudioClassifier& AcousticClassifierService::getSharedClassifier()
 {
     static OnnxAudioClassifier classifier;
     return classifier;
 }
+#endif
 
 AdaptiveClassifier& AcousticClassifierService::getSharedAdaptiveClassifier()
 {
@@ -119,6 +121,7 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
         }
         else
         {
+#if SONICATOR_ENABLE_ONNX
             auto& classifier = getSharedClassifier();
             if (classifier.isLoaded())
             {
@@ -140,6 +143,7 @@ std::vector<SmartCandidate> AcousticClassifierService::analyzeBuffer(
                     candidates.push_back(std::move(c));
                 }
             }
+#endif
         }
 
         // A global prototype is a fallback, not a second opinion: adding it beside a filename or

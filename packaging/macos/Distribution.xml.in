@@ -2,9 +2,9 @@
 <installer-gui-script minSpecVersion="2">
   <title>SONICATOR @VERSION@</title>
   <readme file="README.txt" mime-type="text/plain"/>
-  <options customize="always" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64,x86_64"/>
+  <options customize="always" require-scripts="true" rootVolumeOnly="true" hostArchitectures="@HOST_ARCHS@"/>
   <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
-  <allowed-os-versions><os-version min="11.0"/></allowed-os-versions>
+  <allowed-os-versions><os-version min="@MIN_OS@"/></allowed-os-versions>
   <choices-outline>
     <line choice="app"/>
     <line choice="vst3"/>

@@ -1,5 +1,8 @@
 SONICATOR — application, VST3 and Audio Unit
 
+On macOS 10.15 (Catalina) use the x86_64-10.15 package: it carries the same
+application and plugins for Intel Macs that cannot run newer systems.
+
 This installer is unsigned and is not notarized by Apple. Its application and
 plugins carry ad-hoc signatures, not a Developer ID signature.
 

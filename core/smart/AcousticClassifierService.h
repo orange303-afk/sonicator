@@ -2,7 +2,9 @@
 #include "core/database/SampleRecord.h"
 #include "core/smart/SmartTypes.h"
 #include "core/scanner/FileScanner.h"
+#if SONICATOR_ENABLE_ONNX
 #include "core/ml/OnnxAudioClassifier.h"
+#endif
 #include "core/ml/AdaptiveClassifier.h"
 #include <juce_core/juce_core.h>
 #include <vector>
@@ -32,7 +34,9 @@ public:
         const std::vector<SmartCandidate>& existingCandidates = {}
     );
 
+#if SONICATOR_ENABLE_ONNX
     static OnnxAudioClassifier& getSharedClassifier();
+#endif
     static AdaptiveClassifier& getSharedAdaptiveClassifier();
 };
 

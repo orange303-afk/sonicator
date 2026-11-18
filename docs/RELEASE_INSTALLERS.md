@@ -8,6 +8,8 @@ remaining limits are in [RELEASE_INSTALLERS_ACCEPTANCE.md](RELEASE_INSTALLERS_AC
 
 - `SONICATOR-0.1.1-macOS-universal.pkg`: independently selectable application, VST3 and AU;
   arm64 + x86_64, macOS 11 or newer.
+- `SONICATOR-0.1.1-macOS-x86_64-10.15.pkg`: the same three components for the Intel Macs that
+  cannot install the universal package; x86_64 only, macOS 10.15 or newer, no ONNX Runtime.
 - `SONICATOR-0.1.1-Windows-x64.msi`: independently selectable application and VST3;
   64-bit Windows 10 or newer. AU is macOS-only.
 - `sonicator-manual.pdf`: the user manual.
@@ -43,7 +45,10 @@ Locations:
 - `/Library/Audio/Plug-Ins/VST3/SONICATOR.vst3`
 - `/Library/Audio/Plug-Ins/Components/SONICATOR.component`
 
-The app and plugins embed ONNX under `Contents/Frameworks`, with relative load commands.
+The app and plugins of a build with ONNX enabled embed the runtime under `Contents/Frameworks`,
+with relative load commands. A build without it carries no nested dylib at all. That runtime is
+built for 13.3, so a universal package that embeds it cannot run below 13.3 whatever minimum it
+declares; the x86_64-10.15 package omits it and is what older systems install.
 The package stages clean copies, includes licence texts, signs nested code before the bundle,
 and checks both architectures, non-system dependency paths, bundle signatures and version.
 These are **ad-hoc** signatures, not Apple Developer ID signatures.
@@ -61,6 +66,35 @@ Quit the app and DAWs before upgrading. Open the app first to create/migrate the
 the plugin deliberately never migrates it. Restart/rescan hosts after installation. Old per-user
 copies of the plugin are not deleted; if a host sees duplicate versions, the owner must choose
 which old installation to remove.
+
+### Old Intel Macs (macOS 10.15)
+
+`SONICATOR-<version>-macOS-x86_64-10.15.pkg` is an additional package for the same version. It
+does not replace or rebuild the universal one.
+
+```bash
+cmake -S . -B build-legacy -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=x86_64 -DBUILD_TESTING=OFF \
+  -DSONICATOR_ENABLE_ONNX=OFF -DSONICATOR_BUILD_PLUGIN=ON
+cmake --build build-legacy --target Sonicator SonicatorPlugin_VST3 SonicatorPlugin_AU
+sh packaging/macos/build-pkg.sh build-legacy dist legacy-x86_64
+sh packaging/tests/test-macos-pkg.sh "dist/SONICATOR-<version>-macOS-x86_64-10.15.pkg" legacy-x86_64
+python3 packaging/make-source-bundle.py build-legacy dist -x86_64-10.15
+```
+
+`CMAKE_OSX_DEPLOYMENT_TARGET` is set before `project()` for every build: after it CMake ignores
+the value and the binaries inherit the SDK's own minimum (15.0 on a current runner). The x86_64
+slice then reports 10.15, while the arm64 slice is promoted to 11.0 by the toolchain, so the
+universal package covers both.
+
+ONNX Runtime is left out because its macOS dylib requires 13.3 and the application never loads a
+model; the neural classifier falls back to the acoustic rules, exactly as it behaves in every
+current build. The test suite keeps the classifier on: `-DSONICATOR_ENABLE_ONNX=OFF` together
+with `BUILD_TESTING=ON` stops the configure with an explicit message.
+
+The package is gated on `lipo` (x86_64 only, no arm64 slice), `minos` ≤ 10.15 for the app, VST3
+and AU, relocatable dependencies and an ad-hoc signature. Booting it on a real 10.15 system is not
+reproducible on Apple Silicon and stays a manual check by the owner or the reporting user.
 
 ## Windows
 
