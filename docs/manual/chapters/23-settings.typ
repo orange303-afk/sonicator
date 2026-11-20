@@ -77,9 +77,11 @@ components and has no effect in this build. Neither page changes what the librar
 #section("Update check")
 
 *Settings → About → Check for updates* asks `api.github.com` for the newest published release and
-compares it with the running version. The request carries the application version in its user agent
-and the project name in the URL. It sends no catalog, file, path, machine or account data. The
-application never checks on its own, and a failed check changes nothing.
+compares it with the running version. The standalone also checks once, three seconds after launch;
+only a genuinely newer release opens a window with *Release notes*, *Download from GitHub* for this
+platform and *Gumroad*. A failed check is silent. The request carries the application version in its
+user agent and the project name in the URL. It sends no catalog, file, path, machine or account data.
+The plugin never checks.
 
 #section("Contribute anonymous feedback")
 

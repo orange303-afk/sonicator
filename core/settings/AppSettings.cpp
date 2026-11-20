@@ -113,6 +113,7 @@ AppSettings SettingsStore::load() const
     };
     settings.midiPreview = readBool("midiPreview", settings.midiPreview);
     settings.showIgnored = readBool("showIgnored", settings.showIgnored);
+    settings.ignoreSymlinks = readBool("ignoreSymlinks", settings.ignoreSymlinks);
     settings.roundTagMenu = readBool("roundTagMenu", settings.roundTagMenu);
     settings.reasonPacksAdded = readBool("reasonPacksAdded", settings.reasonPacksAdded);
     settings.abletonPacksAdded = readBool("abletonPacksAdded", settings.abletonPacksAdded);
@@ -140,6 +141,9 @@ AppSettings SettingsStore::load() const
     settings.rexGate = readBool("rexGate", settings.rexGate);
     settings.alwaysOverwriteOriginalFiles = readBool("alwaysOverwriteOriginalFiles",
                                                     settings.alwaysOverwriteOriginalFiles);
+    settings.overwriteOriginalDisposal = files::disposalPolicyFromString(
+        object->getProperty("overwriteOriginalDisposal").toString(),
+        settings.overwriteOriginalDisposal);
     settings.contributeTrainingData = readBool("contributeTrainingData", settings.contributeTrainingData);
     settings.contributionConsentVersion = (int) juce::jlimit(0.0, 100.0,
         readNumber("contributionConsentVersion", (double) settings.contributionConsentVersion));
@@ -200,6 +204,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("hideEmpty", settings.hideEmpty);
     object->setProperty("cloudView", settings.cloudView);
     object->setProperty("showIgnored", settings.showIgnored);
+    object->setProperty("ignoreSymlinks", settings.ignoreSymlinks);
     object->setProperty("roundTagMenu", settings.roundTagMenu);
     object->setProperty("reasonPacksAdded", settings.reasonPacksAdded);
     object->setProperty("abletonPacksAdded", settings.abletonPacksAdded);
@@ -219,6 +224,8 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("loopPreview", settings.loopPreview);
     object->setProperty("rexGate", settings.rexGate);
     object->setProperty("alwaysOverwriteOriginalFiles", settings.alwaysOverwriteOriginalFiles);
+    object->setProperty("overwriteOriginalDisposal",
+                        files::disposalPolicyToString(settings.overwriteOriginalDisposal));
     object->setProperty("contributeTrainingData", settings.contributeTrainingData);
     object->setProperty("contributionConsentVersion", settings.contributionConsentVersion);
     object->setProperty("contributionInstallId", settings.contributionInstallId);

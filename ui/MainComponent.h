@@ -207,6 +207,7 @@ private:
                  clearFilters { "Clear filters" };
     juce::TextButton editTags { "Edit tags..." };
     studio::CheckChip hideEmpty { "Hide empty" };
+    studio::CheckChip ignoreSymlinks { "Ignore symlinks" };
     studio::IconButton previousPage { ActionIcon::chevronLeft, "<" };
     studio::IconButton nextPage { ActionIcon::chevronRight, ">" };
     juce::ComboBox pageSizeBox;
@@ -264,6 +265,11 @@ private:
     std::unique_ptr<NormalizeService> normalizer;
     // Poll on the message thread; join before destroying/replacing the catalog repositories.
     std::future<FolderGenreAssignment> folderGenreWork;
+    std::future<bool> symlinkFlagWork;
+    std::atomic<bool> cancelSymlinkFlags { false };
+    // Catalog rows for cleaned duplicates are removed off the message thread; the timer reloads.
+    std::future<void> cleanupCatalogWork;
+    juce::String pendingCleanupSummary;
     juce::String folderGenrePath, folderGenreName;
     bool folderGenreReplacement = false;
     // Guards the contribution fields, which the scheduler reads off the message thread.
@@ -272,6 +278,7 @@ private:
     std::unique_ptr<contribute::Scheduler> contributionScheduler;
     juce::Component::SafePointer<juce::DialogWindow> splitDialog;
     juce::Component::SafePointer<SplitDialog> splitContent;
+    juce::Component::SafePointer<juce::DialogWindow> duplicateDialog;
     juce::Component::SafePointer<juce::DialogWindow> extractDialog;
     juce::Component::SafePointer<ExtractDialog> extractContent;
     juce::StringArray pendingSplitScan;
@@ -398,6 +405,17 @@ private:
     void showEditTagsMenu();
     void showSampleContextMenu(const std::vector<SampleRecord>& selection, const SampleRecord& lead, juce::Point<int> screenPosition);
     void showFolderContextMenu(const juce::String& path, bool allSamples, juce::Point<int> screenPosition);
+    // Physical deletion of the selected rows' files. Confirms first, moves to Trash only, then
+    // removes the catalog rows. Exports and container members are refused, never widened.
+    void deleteFilesFromDisk(std::vector<SampleRecord> records);
+    void performDeleteFromDisk(std::vector<SampleRecord> records);
+    bool isProtectedExportPath(const juce::File&) const;
+    // Duplicate review and cleanup: groups come from the catalog's byte-identical index.
+    // Empty scope means the whole catalog; a folder limits the review to copies inside it.
+    void openDuplicateCleanup(const juce::String& folder = {});
+    void applyDuplicateCleanupResult(const juce::StringArray& removedPaths,
+                                     const juce::StringArray& linkedPaths,
+                                     const juce::String& summary);
     // The radial tag menu. The anchor is local to this component; the menu closes itself after a
     // pick and reports the tag through the callback installed for that opening.
     void showRoundTagMenuAt(juce::Point<int> anchor, bool forFolder);
@@ -409,6 +427,12 @@ private:
     juce::Point<int> commandAnchor(bool preferFolders) const;
     void setGenreForFolder(const juce::String& path, const juce::String& genre, bool replaceManual = false);
     void finishFolderGenre();
+    // Catalog pass that marks symlinked rows; started when the view starts hiding them and the
+    // catalog was written before the flag existed. Polled by the main timer.
+    void startSymlinkFlagRefresh();
+    void finishSymlinkFlagRefresh();
+    void setIgnoreSymlinks(bool enabled);
+    void finishCleanupCatalogUpdate();
     void showFavoriteContextMenu(const juce::String& path, juce::Point<int> screenPosition);
     void promptRenameFolder(const juce::String& path);
     void clearSampleSelection();

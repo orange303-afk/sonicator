@@ -6,6 +6,7 @@
 #include "plugin/PluginProcessor.h"
 #include "plugin/PluginEditor.h"
 #include "core/settings/AppSettings.h"
+#include "core/Version.h"
 #include "ui/library/FileListPanel.h"
 #include "ui/settings/SettingsPanel.h"
 #include <juce_events/juce_events.h>
@@ -24,7 +25,7 @@ class SmokeApp final : public juce::JUCEApplication, private juce::Timer
 {
 public:
     const juce::String getApplicationName() override { return "SONICATOR Plugin Smoke"; }
-    const juce::String getApplicationVersion() override { return "0.1.0"; }
+    const juce::String getApplicationVersion() override { return sonicator::version(); }
     bool moreThanOneInstanceAllowed() override { return true; }
     void anotherInstanceStarted(const juce::String&) override {}
     void systemRequestedQuit() override { quit(); }

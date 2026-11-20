@@ -239,12 +239,15 @@ NormalizeFileResult normalizeFile(const juce::File& source, const NormalizeOptio
             return result;
         }
         edit::copyFileAttributes(writeTarget, temporary.getFile());
-        if (! temporary.overwriteTargetFileWithTemporary())
+        const auto published = edit::publishReplacement(writeTarget, temporary,
+                                                        options.originalDisposal);
+        if (! published.success)
         {
             result.state = NormalizeFileState::failed;
-            result.error = "Cannot replace the file";
+            result.error = published.error;
             return result;
         }
+        if (published.disposalFailed) result.warning = published.error;
         result.destination = writeTarget;
         result.replacedOriginal = true;
     }

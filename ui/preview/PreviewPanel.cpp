@@ -880,6 +880,7 @@ void PreviewPanel::applyPersistedSettings(const AppSettings& settings)
         midi.setToggleState(engine.isMidiPreview(), juce::dontSendNotification);
     applyTransportLooping();
     alwaysOverwrite = settings.alwaysOverwriteOriginalFiles;
+    overwriteDisposal = settings.overwriteOriginalDisposal;
 }
 
 bool PreviewPanel::hasUnsavedEditsFor(const juce::File& file) const
@@ -1701,6 +1702,22 @@ void PreviewPanel::saveEdits(std::function<void(bool)> done)
     // without a second confirmation. Formats without a writer still go through the copy dialog.
     if (canOverwrite && alwaysOverwrite)
     {
+        // A saved preference may skip the Save/Copy question, but never the warning that the
+        // replaced original is about to be deleted permanently.
+        if (overwriteDisposal == files::DisposalPolicy::DeletePermanently)
+        {
+            dialogs::showAlert(*this, "Overwrite and delete the original?",
+                "This replaces \u201c" + name + "\u201d and deletes the previous copy permanently. "
+                "It cannot be recovered through Trash.",
+                { { "Overwrite and delete", 1 }, { "Cancel", 0 } },
+                [safe, done](int id)
+                {
+                    if (safe == nullptr) { if (done) done(false); return; }
+                    if (id == 1) safe->overwriteEdits(done);
+                    else if (done) done(false);
+                }, juce::MessageBoxIconType::WarningIcon);
+            return;
+        }
         overwriteEdits(done);
         return;
     }
@@ -1732,13 +1749,16 @@ void PreviewPanel::overwriteEdits(std::function<void(bool)> done)
         if (done) done(false);
         return;
     }
-    const auto result = edit::overwrite(editTarget, *editBuffer);
+    const auto result = edit::overwrite(editTarget, *editBuffer, {}, overwriteDisposal);
     if (! result.success)
     {
         selectionStatus.setText(result.error, juce::dontSendNotification);
         if (done) done(false);
         return;
     }
+    // The file was saved; only its old copy could not be disposed of.
+    if (result.error.isNotEmpty())
+        selectionStatus.setText(result.error, juce::dontSendNotification);
     const auto target = editTarget;
     const auto sampleId = editingSampleId;
     editBuffer.reset();

@@ -37,8 +37,33 @@ try {
     $Shortcut = "$env:ProgramData/Microsoft/Windows/Start Menu/Programs/SONICATOR.lnk"
     if (!(Test-Path $Shortcut -PathType Leaf)) { throw "Missing Start Menu shortcut: $Shortcut" }
     Add-Type -AssemblyName System.Drawing
-    if ($null -eq [System.Drawing.Icon]::ExtractAssociatedIcon($App)) {
+    $Associated = [System.Drawing.Icon]::ExtractAssociatedIcon($App)
+    if ($null -eq $Associated) {
         throw 'The installed executable carries no icon'
+    }
+    if ($Associated.Width -lt 32) {
+        throw "The installed executable icon is too small: $($Associated.Width)px"
+    }
+    # ExtractAssociatedIcon can quietly return a generic fallback. Asking the shell for each size
+    # proves the executable really carries the branded images Explorer, the taskbar and Alt+Tab use.
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class SonicatorIconSizes {
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    public static extern uint PrivateExtractIcons(string file, int index, int cx, int cy,
+        IntPtr[] icons, uint[] ids, uint count, uint flags);
+    [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr icon);
+}
+"@
+    foreach ($Size in @(16, 32, 48, 256)) {
+        $Handles = New-Object IntPtr[] 1
+        $Ids = New-Object uint32[] 1
+        $Count = [SonicatorIconSizes]::PrivateExtractIcons($App, 0, $Size, $Size, $Handles, $Ids, 1, 0)
+        if ($Count -ne 1 -or $Handles[0] -eq [IntPtr]::Zero) {
+            throw "The installed executable has no $Size px icon"
+        }
+        $null = [SonicatorIconSizes]::DestroyIcon($Handles[0])
     }
     $Shell = New-Object -ComObject WScript.Shell
     $Link = $Shell.CreateShortcut($Shortcut)
@@ -69,6 +94,29 @@ try {
         if ($Process.MainWindowHandle -ne 0) { $Ready = $true; break }
     }
     if (!$Ready) { $Process.Kill(); throw 'Installed app did not create its window' }
+    # The window must carry its icon itself: WM_GETICON proves the peer received WM_SETICON, which
+    # is what the title bar and taskbar show before Explorer refreshes its icon cache. Pinning
+    # itself is a manual shell check (docs/RELEASE_INSTALLERS.md).
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class SonicatorIconProbe {
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern IntPtr GetClassLongPtr(IntPtr hWnd, int index);
+}
+"@
+    $BigIcon = [SonicatorIconProbe]::SendMessage($Process.MainWindowHandle, 0x007F, [IntPtr]1, [IntPtr]::Zero)
+    $SmallIcon = [SonicatorIconProbe]::SendMessage($Process.MainWindowHandle, 0x007F, [IntPtr]0, [IntPtr]::Zero)
+    if ($BigIcon -eq [IntPtr]::Zero) {
+        $BigIcon = [SonicatorIconProbe]::GetClassLongPtr($Process.MainWindowHandle, -14)
+    }
+    if ($SmallIcon -eq [IntPtr]::Zero) {
+        $SmallIcon = [SonicatorIconProbe]::GetClassLongPtr($Process.MainWindowHandle, -34)
+    }
+    if ($BigIcon -eq [IntPtr]::Zero) { throw 'The running window has no large icon' }
+    if ($SmallIcon -eq [IntPtr]::Zero) { throw 'The running window has no small icon' }
+    $StartEntry = Get-StartApps | Where-Object { $_.Name -eq 'SONICATOR' }
+    if ($null -ne $StartEntry) { Write-Host "Start entry AppID: $($StartEntry.AppID)" }
     $null = $Process.CloseMainWindow()
     if (!$Process.WaitForExit(15000)) { $Process.Kill(); throw 'Installed app did not shut down cleanly' }
     if ($Process.ExitCode -ne 0) { throw "Installed app exit: $($Process.ExitCode)" }

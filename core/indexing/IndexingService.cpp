@@ -170,6 +170,7 @@ void IndexingService::analyzePending(const std::vector<AudioFileInfo>& pending)
             {
                 result.filePath = entry.file.getFullPathName();
                 result.fileName = entry.file.getFileName();
+                result.isLink = entry.file.isSymbolicLink();
                 result.error = juce::String::fromUTF8(e.what());
                 result.version = FileScanner::isMetadataOnlyFormat(entry.file)
                     ? metadataOnlyVersion : basicFeaturesVersion;
@@ -178,6 +179,7 @@ void IndexingService::analyzePending(const std::vector<AudioFileInfo>& pending)
             {
                 result.filePath = entry.file.getFullPathName();
                 result.fileName = entry.file.getFileName();
+                result.isLink = entry.file.isSymbolicLink();
                 result.error = "Analysis failed";
                 result.version = FileScanner::isMetadataOnlyFormat(entry.file)
                     ? metadataOnlyVersion : basicFeaturesVersion;

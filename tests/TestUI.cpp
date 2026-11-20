@@ -880,6 +880,11 @@ TEST_CASE("Embedded settings stay inside the editor and survive a theme change",
     CHECK_FALSE(pluginsNav->isVisible());
     const auto* libraryControls = findDescendantWithID(*panel, "settingsAlwaysOverwrite");
     REQUIRE(libraryControls != nullptr); // the Editing group still applies in the plugin
+    const auto* disposal = dynamic_cast<const juce::ComboBox*>(
+        findDescendantWithID(*panel, "settingsOverwriteDisposal"));
+    REQUIRE(disposal != nullptr);
+    // The disposal choice only applies to an overwrite, so it follows the overwrite toggle.
+    CHECK_FALSE(disposal->isEnabled());
     panel->selectSection(SettingsSection::about);
     REQUIRE(panel->selectedSection() == SettingsSection::about);
 }

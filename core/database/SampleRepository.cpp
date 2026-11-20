@@ -14,7 +14,7 @@
 #include <variant>
 namespace sonicator {
 namespace {
-constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path";
+constexpr auto columns = "id,path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,starred,compatibility,container_path,disc_entry,disc_parent,disc_partner,disc_path,is_link";
 constexpr int schemaVersion = catalogSchemaVersion;
 // Tag history started at schema 15 and must not follow later database bumps.
 constexpr int tagHistorySchemaVersion = 15;
@@ -32,6 +32,7 @@ SampleRecord read(const detail::Statement& s)
     r.compatibility = assetCompatibilityFromInt((int) s.integer(21));
     r.containerPath = s.text(22); r.discEntry = s.text(23); r.discParent = s.text(24);
     r.discPartner = s.text(25); r.discPath = s.text(26);
+    r.isLink = s.integer(27) != 0;
     return r;
 }
 struct StandardTag { const char* name; uint32_t colour; };
@@ -431,6 +432,9 @@ FilterSql buildFilterSql(const LibraryFilter& filter, const std::vector<IgnoredP
                      " AND samples.compatibility NOT IN (2,3)";
     if (filter.hideDuplicates)
         sql.where += " AND NOT EXISTS(SELECT 1 FROM duplicates d WHERE d.sample_id=samples.id AND d.is_representative=0)";
+    // Aliases created by duplicate cleanup or present on disk. The flag is written on analysis and
+    // by the cleanup itself, so the view needs no per-row stat.
+    if (filter.ignoreSymlinks) sql.where += " AND samples.is_link=0";
     if (filter.duplicateHash.isNotEmpty())
         addText(" AND samples.hash=?", filter.duplicateHash);
     if (! filter.showIgnored) appendIgnore(sql, ignored);
@@ -568,6 +572,85 @@ void SampleRepository::removeByPaths(const juce::StringArray& paths)
         throw;
     }
 }
+bool SampleRepository::refreshSymlinkFlags(const std::function<bool()>& cancel)
+{
+    const auto cancelled = [&cancel] { return cancel && cancel(); };
+    if (cancelled()) return false;
+    constexpr int chunk = 2000;
+    int64_t lastId = 0;
+    for (;;)
+    {
+        std::vector<std::pair<int64_t, juce::String>> batch;
+        {
+            std::lock_guard lock(db.mutex);
+            detail::Statement s(db.handle,
+                "SELECT id,path FROM samples WHERE id>? ORDER BY id LIMIT ?");
+            s.integer(1, lastId); s.integer(2, chunk);
+            while (s.step()) batch.push_back({ s.integer(0), s.text(1) });
+        }
+        if (batch.empty()) break;
+        // The stat happens outside the catalog lock; the update below is one short transaction.
+        std::vector<std::pair<int64_t, int>> states;
+        states.reserve(batch.size());
+        for (const auto& [id, path] : batch)
+        {
+            if (cancelled()) return false;
+            states.push_back({ id, juce::File(path).isSymbolicLink() ? 1 : 0 });
+        }
+        {
+            std::lock_guard lock(db.mutex);
+            detail::exec(db.handle, "BEGIN IMMEDIATE;");
+            try
+            {
+                detail::Statement update(db.handle,
+                    "UPDATE samples SET is_link=? WHERE id=? AND is_link<>?");
+                for (const auto& [id, link] : states)
+                {
+                    update.integer(1, link); update.integer(2, id); update.integer(3, link);
+                    update.step(); update.reset();
+                }
+                detail::exec(db.handle, "COMMIT;");
+            }
+            catch (...)
+            {
+                try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+                throw;
+            }
+        }
+        lastId = batch.back().first;
+    }
+    if (cancelled()) return false;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle,
+        "INSERT OR REPLACE INTO smart_meta(key,value) VALUES('symlink_flags_v1',1);");
+    return true;
+}
+bool SampleRepository::symlinkFlagsComplete() const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle, "SELECT value FROM smart_meta WHERE key='symlink_flags_v1'");
+    return s.step() && s.integer(0) != 0;
+}
+void SampleRepository::setSymlinkFlags(const juce::StringArray& paths, const bool link)
+{
+    if (paths.isEmpty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        detail::Statement s(db.handle, "UPDATE samples SET is_link=? WHERE path=?");
+        for (const auto& path : paths)
+        {
+            s.integer(1, link ? 1 : 0); s.text(2, path); s.step(); s.reset();
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
+}
 int SampleRepository::schemaVersionOnDisk()
 {
     std::lock_guard lock(db.mutex);
@@ -612,7 +695,7 @@ void SampleRepository::createTables()
             "pair_key TEXT NOT NULL DEFAULT '', pair_side INTEGER NOT NULL DEFAULT 0,"
             "container_path TEXT NOT NULL DEFAULT '', disc_entry TEXT NOT NULL DEFAULT '',"
             "disc_parent TEXT NOT NULL DEFAULT '', disc_partner TEXT NOT NULL DEFAULT '',"
-            "disc_path TEXT NOT NULL DEFAULT '');"
+            "disc_path TEXT NOT NULL DEFAULT '', is_link INTEGER NOT NULL DEFAULT 0);"
             "CREATE INDEX IF NOT EXISTS samples_hash ON samples(hash);"
             "CREATE INDEX IF NOT EXISTS samples_name_id ON samples(name COLLATE NOCASE, id);"
             "CREATE TABLE IF NOT EXISTS roots(path TEXT PRIMARY KEY);"
@@ -744,6 +827,14 @@ void SampleRepository::createTables()
         ensureColumn(db.handle, "samples", "disc_parent", "TEXT NOT NULL DEFAULT ''");
         ensureColumn(db.handle, "samples", "disc_partner", "TEXT NOT NULL DEFAULT ''");
         ensureColumn(db.handle, "samples", "disc_path", "TEXT NOT NULL DEFAULT ''");
+        // Additive and readable by older builds: a row is a symbolic link. The catalog version is
+        // not raised, so a 0.1.x build can still open the same catalog (it ignores the column).
+        ensureColumn(db.handle, "samples", "is_link", "INTEGER NOT NULL DEFAULT 0");
+        // removeByPaths asks for container members by this column; without the index every
+        // deleted path scanned the whole samples table on the message thread. Created after the
+        // column itself exists, so an old catalog can be upgraded in one open.
+        detail::exec(db.handle,
+            "CREATE INDEX IF NOT EXISTS samples_container ON samples(container_path);");
         detail::exec(db.handle,
             "CREATE TABLE IF NOT EXISTS disc_index ("
             "image_path TEXT PRIMARY KEY, image_size INTEGER NOT NULL DEFAULT 0,"
@@ -946,8 +1037,8 @@ int64_t SampleRepository::upsertLocked(const SampleRecord& r,
         || (r.containerPath.isNotEmpty() && isPathIgnored(r.containerPath, entries));
     const auto [pairKey, pairSide] = makePairKey(r);
     detail::Statement s(db.handle,
-        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred,compatibility,ignored,pair_key,pair_side,container_path,disc_entry,disc_parent,disc_partner,disc_path)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
+        "INSERT INTO samples(path,name,hash,format,error,size,modified,analyzed,duration,rate,bits,channels,version,peak,rms,centroid,rolloff,flatness,missing,search_key,starred,compatibility,ignored,pair_key,pair_side,container_path,disc_entry,disc_parent,disc_partner,disc_path,is_link)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET "
         "name=excluded.name,hash=excluded.hash,format=excluded.format,error=excluded.error,size=excluded.size,"
         "modified=excluded.modified,analyzed=excluded.analyzed,duration=excluded.duration,rate=excluded.rate,"
         "bits=excluded.bits,channels=excluded.channels,version=excluded.version,peak=excluded.peak,rms=excluded.rms,"
@@ -955,7 +1046,7 @@ int64_t SampleRepository::upsertLocked(const SampleRecord& r,
         "search_key=excluded.search_key,compatibility=excluded.compatibility,ignored=excluded.ignored,"
         "pair_key=excluded.pair_key,pair_side=excluded.pair_side,container_path=excluded.container_path,"
         "disc_entry=excluded.disc_entry,disc_parent=excluded.disc_parent,"
-        "disc_partner=excluded.disc_partner,disc_path=excluded.disc_path RETURNING id");
+        "disc_partner=excluded.disc_partner,disc_path=excluded.disc_path,is_link=excluded.is_link RETURNING id");
     s.text(1,r.filePath); s.text(2,r.fileName); s.text(3,r.fileHash); s.text(4,r.format); s.text(5,r.error);
     s.integer(6,r.fileSize); s.integer(7,r.dateModified); s.integer(8,r.dateAnalyzed);
     s.real(9,r.duration); s.real(10,r.sampleRate); s.integer(11,r.bitsPerSample); s.integer(12,r.numChannels);
@@ -966,6 +1057,7 @@ int64_t SampleRepository::upsertLocked(const SampleRecord& r,
     s.text(24, pairKey); s.integer(25, pairSide);
     s.text(26, r.containerPath); s.text(27, r.discEntry); s.text(28, r.discParent);
     s.text(29, r.discPartner); s.text(30, r.discPath);
+    s.integer(31, r.isLink ? 1 : 0);
     if (! s.step()) throw std::runtime_error("Insert did not return a sample ID");
     const auto id = s.integer(0);
     // Reanalysed audio makes the derived smart result stale; candidates, overrides and the last
@@ -2561,6 +2653,81 @@ std::vector<SampleRecord> SampleRepository::duplicateMembers(int64_t sampleId) c
     std::vector<SampleRecord> out;
     while (s.step()) out.push_back(read(s));
     return out;
+}
+std::vector<SampleRepository::DuplicateGroup> SampleRepository::duplicateGroups(int maxGroups) const
+{
+    std::vector<DuplicateGroup> out;
+    if (maxGroups <= 0) return out;
+    std::lock_guard lock(db.mutex);
+    // The representative sorts first inside its group, so the natural kept original is on top.
+    detail::Statement s(db.handle,
+        "SELECT d.group_hash,s.id,s.path,s.size,s.missing FROM duplicates d"
+        " JOIN samples s ON s.id=d.sample_id"
+        " ORDER BY d.group_size DESC,d.group_hash,d.is_representative DESC,length(s.path),s.id");
+    juce::String current;
+    while (s.step())
+    {
+        const auto hash = s.text(0);
+        if (hash != current)
+        {
+            if ((int) out.size() >= maxGroups) break;
+            out.push_back({ hash, s.integer(3), {} });
+            current = hash;
+        }
+        out.back().members.push_back({ s.integer(1), s.text(2), s.integer(3), s.integer(4) != 0 });
+    }
+    return out;
+}
+void SampleRepository::refreshDuplicateHashes(const juce::StringArray& hashes)
+{
+    if (hashes.isEmpty()) return;
+    std::lock_guard lock(db.mutex);
+    detail::exec(db.handle, "BEGIN IMMEDIATE;");
+    try
+    {
+        struct Member { int64_t id = 0; bool starred = false, missing = false; bool failed = false; int pathLength = 0; };
+        detail::Statement select(db.handle,
+            "SELECT id,path,starred,missing,error FROM samples INDEXED BY samples_hash"
+            " WHERE hash=? AND ignored=0"
+            " AND NOT EXISTS (SELECT 1 FROM stereo_pairs sp"
+            "                 WHERE sp.sample_id=samples.id AND sp.is_representative=0)");
+        detail::Statement insert(db.handle,
+            "INSERT OR REPLACE INTO duplicates(sample_id,representative_id,group_hash,group_size,is_representative)"
+            " VALUES(?,?,?,?,?)");
+        detail::Statement del(db.handle, "DELETE FROM duplicates WHERE group_hash=?");
+        for (const auto& hash : hashes)
+        {
+            del.reset(); del.text(1, hash); del.step();
+            select.reset(); select.text(1, hash);
+            std::vector<Member> members;
+            while (select.step())
+                members.push_back({ select.integer(0), select.integer(2) != 0, select.integer(3) != 0,
+                                    ! select.text(4).isEmpty(), select.text(1).length() });
+            if (members.size() < 2) continue;
+            const auto better = [](const Member& a, const Member& b)
+            {
+                if (a.starred != b.starred) return a.starred;
+                if (a.missing != b.missing) return ! a.missing;
+                if (a.failed != b.failed) return ! a.failed;
+                if (a.pathLength != b.pathLength) return a.pathLength < b.pathLength;
+                return a.id < b.id;
+            };
+            const auto representative = std::min_element(members.begin(), members.end(), better);
+            const auto groupSize = (int) members.size();
+            for (const auto& member : members)
+            {
+                insert.reset(); insert.integer(1, member.id); insert.integer(2, representative->id);
+                insert.text(3, hash); insert.integer(4, groupSize);
+                insert.integer(5, member.id == representative->id ? 1 : 0); insert.step();
+            }
+        }
+        detail::exec(db.handle, "COMMIT;");
+    }
+    catch (...)
+    {
+        try { detail::exec(db.handle, "ROLLBACK;"); } catch (...) {}
+        throw;
+    }
 }
 namespace {
 SmartOverrideMap readOverrides(sqlite3* h, int64_t sampleId)

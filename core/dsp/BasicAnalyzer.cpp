@@ -9,6 +9,7 @@ SampleRecord BasicAnalyzer::analyze(const juce::File& file, CancelCheck cancel) 
 {
     SampleRecord r;
     r.filePath = file.getFullPathName(); r.fileName = file.getFileName();
+    r.isLink = file.isSymbolicLink();
     // A bank file name is a bare sequence ("Orbit 8080SL289.ebl"); the sample's own name is in
     // the header, and that is what a user searches for. An empty header keeps the file name.
     if (isEblFile(file))

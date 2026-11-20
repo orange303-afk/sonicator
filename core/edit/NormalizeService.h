@@ -1,4 +1,5 @@
 #pragma once
+#include "core/files/FileDisposal.h"
 #include "core/scanner/FileScanner.h"
 #include <atomic>
 #include <juce_core/juce_core.h>
@@ -23,12 +24,16 @@ struct NormalizeFileResult
     float peak = 0.0f;
     float gain = 1.0f;
     juce::String error;
+    // A successful replacement whose old copy could not be disposed of; names the retained file.
+    juce::String warning;
 };
 
 struct NormalizeOptions
 {
     // False always writes a "<stem> edit" copy; formats without a writer always get a WAV copy.
     bool overwriteOriginals = true;
+    // Applies only to a replaced original: Trash keeps it recoverable, DeletePermanently does not.
+    files::DisposalPolicy originalDisposal = files::DisposalPolicy::Trash;
 };
 
 struct NormalizeProgress

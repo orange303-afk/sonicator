@@ -80,6 +80,8 @@ public:
     void applyPersistedSettings(const AppSettings&);
     // Settings -> Editing. Kept separate so a theme change does not reapply every preview toggle.
     void setAlwaysOverwriteOriginalFiles(bool overwrite) { alwaysOverwrite = overwrite; }
+    // Settings -> Editing: what happens to the original an Overwrite replaces.
+    void setOverwriteDisposal(files::DisposalPolicy policy) { overwriteDisposal = policy; }
     bool midiPreviewEnabled() const { return engine.isMidiPreview(); }
     bool skipSilenceEnabled() const { return engine.isSkipSilence(); }
     bool autoPreviewEnabled() const { return autoPreview.getToggleState(); }
@@ -200,6 +202,7 @@ private:
     bool clearSelectionAfterEdit = false, checkClipping = false;
     // Settings -> Editing: skip the Save dialog and replace a writable original directly.
     bool alwaysOverwrite = false;
+    files::DisposalPolicy overwriteDisposal = files::DisposalPolicy::Trash;
     studio::CheckChip rexGate { "Gate", true };
     juce::Label rexInfo;
     studio::CheckChip loop { "Loop", true };

@@ -93,7 +93,8 @@ private:
     juce::Label title, appearance, themeLabel, scaleLabel, languageHeading, languageLabel,
                  languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
                  tagsHeading, roundTagMenuNote,
-                 editingHeading, alwaysOverwriteNote, workspaceHeading, workspaceNote,
+                 editingHeading, alwaysOverwriteNote, overwriteDisposalLabel,
+                 workspaceHeading, workspaceNote,
                  audioHeading, audioNote, reportHeading, aboutHeading, productLabel, authorLabel,
                  versionLabel, linksHeading, supportHeading, creditsHeading, prototypesLabel,
                  pluginsHeading, pluginsNote, privacyHeading;
@@ -101,6 +102,7 @@ private:
     // their own height, so a longer sentence wraps instead of clipping.
     studio::Paragraph reportNote, supportNote, creditsText;
     juce::ComboBox themeBox, scaleBox, languageBox;
+    juce::ComboBox overwriteDisposalBox;
     juce::ToggleButton contributeDataToggle;
     juce::ToggleButton roundTagMenuToggle { "Round tag menu" };
     juce::ToggleButton alwaysOverwriteToggle { "Always overwrite original files" };

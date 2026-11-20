@@ -107,6 +107,28 @@ the downloaded file: three independent choices, fixed install locations, univers
 signatures, bundled licences, and both packaged postinstall runs (quarantine removed, signatures
 and unrelated attributes intact).
 
+## Windows icon evidence (0.1.1 artifact)
+
+The published `SONICATOR-0.1.1-Windows-x64.msi` (SHA-256
+`fa6927919f85715f1e0cc601e91f712a6850b795fa62bc7b95265279173fa10c`) was inspected on macOS by
+extracting its CAB and parsing the PE resource directory:
+
+- `SONICATOR.exe` (x64, 15,045,120 bytes) carries two icon groups with 16, 32, 48 and 256 px
+  images.
+- The MSI database contains the property `ARPPRODUCTICON` with the value `AppIcon.ico`, so the
+  Apps & features entry has an icon source.
+- The generated Start-menu shortcut is plain (not advertised) and targets `SONICATOR.exe`; the
+  source and generator tests enforce this.
+
+The same inspection of `0.1.0` found the executable icons present there too, so the executable was
+never the missing piece. `0.1.0` used an advertised Start-menu shortcut while the MSI had no Icon
+row, which is the documented cause of a blank shortcut and of a pin created from it. A taskbar pin
+made under `0.1.0` can keep that blank image until it is recreated.
+
+This is artifact evidence, not shell acceptance. The visual matrix in `docs/RELEASE_INSTALLERS.md`
+(pins, Alt+Tab, upgrade with an existing pin, repair, Explorer restart, 100% and 150% scaling) is
+still required on real Windows machines and is not claimed here.
+
 ## Manual checks still open
 
 - Installer approval UX is untouched by automation on macOS: an unsigned, unnotarized PKG can be

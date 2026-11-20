@@ -37,6 +37,7 @@ SampleRecord analyzeMetadataAsset(const juce::File& file, CancelCheck cancel)
     SampleRecord r;
     r.filePath = file.getFullPathName();
     r.fileName = file.getFileName();
+    r.isLink = file.isSymbolicLink();
     r.format = file.getFileExtension().trimCharactersAtStart(".").toUpperCase();
     r.fileSize = file.getSize();
     r.dateModified = file.getLastModificationTime().toMilliseconds();

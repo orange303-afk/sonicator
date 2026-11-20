@@ -210,6 +210,51 @@ class WindowsPayloadTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Symlink", result.stderr)
 
+    def test_start_menu_shortcut_is_plain_and_targets_the_executable(self):
+        result = self.generate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tree = ET.parse(self.root / "Payload.wxs")
+        ns = {"w": "http://wixtoolset.org/schemas/v4/wxs"}
+        shortcuts = tree.findall(".//w:Shortcut", ns)
+        self.assertEqual(len(shortcuts), 1)
+        shortcut = shortcuts[0]
+        # An advertised shortcut takes its icon from an MSI Icon row and shows a blank icon when
+        # that row is missing; a plain shortcut uses the executable's embedded icon.
+        self.assertNotEqual(shortcut.attrib.get("Advertise"), "yes")
+        files = tree.findall(".//w:File[w:Shortcut]", ns)
+        self.assertEqual(len(files), 1)
+        self.assertTrue(files[0].attrib["Source"].endswith("SONICATOR.exe"))
+        self.assertEqual(files[0].attrib.get("KeyPath"), "yes")
+        # A shortcut is advertised through its component's attribute, never a Shortcut attribute.
+        for component in tree.findall(".//w:Component", ns):
+            self.assertNotEqual(component.attrib.get("Advertise"), "yes")
+
+
+class WindowsIconTests(unittest.TestCase):
+    def test_package_declares_one_icon_for_apps_and_features(self):
+        tree = ET.parse(ROOT / "packaging/windows/Sonicator.wxs")
+        ns = {"w": "http://wixtoolset.org/schemas/v4/wxs"}
+        icons = tree.findall(".//w:Icon", ns)
+        self.assertEqual(len(icons), 1, "the MSI must carry exactly one icon row")
+        self.assertEqual(icons[0].attrib.get("Id"), "AppIcon.ico")
+        self.assertEqual(icons[0].attrib.get("SourceFile"), "$(var.AppIcon)")
+        properties = {p.attrib.get("Id"): p.attrib.get("Value")
+                      for p in tree.findall(".//w:Property", ns)}
+        self.assertEqual(properties.get("ARPPRODUCTICON"), "AppIcon.ico")
+
+    def test_executable_icon_comes_from_the_branding_png(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn('ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/', cmake)
+        branding = ROOT / "resources/branding/icon-window-256.png"
+        self.assertTrue(branding.is_file())
+        with branding.open("rb") as stream:
+            self.assertEqual(stream.read(8), b"\x89PNG\r\n\x1a\n")
+
+    def test_msi_builder_requires_the_generated_windows_icon(self):
+        script = (ROOT / "packaging/windows/build-msi.ps1").read_text(encoding="utf-8")
+        self.assertIn("JuceLibraryCode/icon.ico", script)
+        self.assertIn('AppIcon=$Stage/app-icon.ico', script)
+
 
 if __name__ == "__main__":
     unittest.main()

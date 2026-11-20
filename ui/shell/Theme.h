@@ -9,6 +9,8 @@ inline juce::Colour hover { 0xff3a3c40 }, selection { 0xff484b50 };
 inline juce::Colour table { 0xff131416 }, rowAlternate { 0xff191a1d };
 inline juce::Colour text { 0xffeeeef0 }, muted { 0xffa3a5a9 };
 inline juce::Colour line { 0xff34363a }, accent { 0xfff39a43 };
+// Destructive actions only: Delete from disk, permanent disposal confirmations.
+inline juce::Colour danger { 0xffe05a5a };
 inline bool isDark = true;
 
 inline bool systemPrefersDark()
@@ -25,6 +27,7 @@ inline void apply(ThemeMode mode)
         table = juce::Colour(0xff131416); rowAlternate = juce::Colour(0xff191a1d);
         text = juce::Colour(0xffeeeef0); muted = juce::Colour(0xffa3a5a9);
         line = juce::Colour(0xff34363a); accent = juce::Colour(0xfff39a43);
+        danger = juce::Colour(0xffe05a5a);
     }
     else
     {
@@ -33,6 +36,7 @@ inline void apply(ThemeMode mode)
         table = juce::Colour(0xfffbfbfc); rowAlternate = juce::Colour(0xfff3f4f6);
         text = juce::Colour(0xff1a1b1d); muted = juce::Colour(0xff63666a);
         line = juce::Colour(0xffd4d7db); accent = juce::Colour(0xffc2611c);
+        danger = juce::Colour(0xffb3261e);
     }
 }
 // Tag colours are chosen for dots and borders; their label needs extra contrast on light panels.

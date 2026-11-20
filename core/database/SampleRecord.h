@@ -19,6 +19,9 @@ struct SampleRecord
     double peakLevel = 0, rmsLevel = 0;
     double spectralCentroid = 0, spectralRolloff = 0, spectralFlatness = 0;
     bool missing = false, starred = false;
+    // The row's path is a symbolic link. Set when the file is analysed or when Sonicator itself
+    // replaces a duplicate with a link, so a view can exclude aliases without statting every row.
+    bool isLink = false;
     AssetCompatibility compatibility = AssetCompatibility::unknown;
     // A sample inside a disc image. The path is synthetic (<image>::<internal path>); the source
     // file itself is never extracted. Ordinary files leave these empty.

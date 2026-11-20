@@ -3,6 +3,10 @@
 #include "core/match/SourceMetadata.h"
 #include "core/match/MatchedDrag.h"
 #include "core/export/ExternalFileDrag.h"
+#include "core/export/AudioExporter.h"
+#include "core/files/FileDisposal.h"
+#include "core/files/DuplicateCleanup.h"
+#include "ui/library/DuplicateCleanupDialog.h"
 #include <unordered_set>
 #include "core/dsp/FeatureExtractorV2.h"
 #include "core/ml/FeatureV2Backfill.h"
@@ -28,6 +32,7 @@
 #include "core/smart/NameHeuristics.h"
 #include "core/smart/GenreContextExtractor.h"
 #include "core/Version.h"
+#include "core/updates/UpdateCheck.h"
 #include "core/ml/AdaptiveClassifier.h"
 #include <algorithm>
 #include <cmath>
@@ -42,6 +47,35 @@
 #include <thread>
 namespace sonicator {
 namespace {
+// A launch check must not fight the first-run consent or any other modal. If one is open, the
+// dialog waits a few seconds and tries again; on the last try the launch check is simply skipped
+// (Settings still offers Check for updates).
+void presentUpdateDialog(juce::Component::SafePointer<MainComponent> safe, updates::Release release,
+                         int attemptsLeft)
+{
+    if (safe == nullptr) return;
+    if (juce::Component::getCurrentlyModalComponent() != nullptr)
+    {
+        if (attemptsLeft <= 0) return;
+        juce::Timer::callAfterDelay(3000, [safe, release, attemptsLeft]() mutable
+        {
+            presentUpdateDialog(safe, release, attemptsLeft - 1);
+        });
+        return;
+    }
+    const auto download = updates::downloadUrlFor(release, updates::currentPlatform());
+    dialogs::showAlert(*safe, "SONICATOR " + release.tag + " is available",
+        juce::String("You are running ") + version() + ".\n\n"
+        "Download the installer for this platform from GitHub, read what changed, or get the "
+        "release from Gumroad.",
+        { { "Download from GitHub", 1 }, { "Release notes", 2 }, { "Gumroad", 3 }, { "Later", 0 } },
+        [download, page = release.url](int id)
+        {
+            if (id == 1) juce::URL(download).launchInDefaultBrowser();
+            else if (id == 2) juce::URL(page).launchInDefaultBrowser();
+            else if (id == 3) juce::URL(updates::gumroadUrl()).launchInDefaultBrowser();
+        }, juce::MessageBoxIconType::InfoIcon);
+}
 // The file ships in the bundle (an empty label list when there is not enough data), so a broken
 // resource degrades to today's local-only behaviour instead of stopping startup.
 void loadShippedGlobalPrototypes()
@@ -176,6 +210,14 @@ class SplitDialogWindow final : public juce::DialogWindow
 {
 public:
     SplitDialogWindow() : juce::DialogWindow("Split by silence", theme::panel, true) {}
+    void closeButtonPressed() override { if (onClose) onClose(); }
+    void inputAttemptWhenModal() override {}
+    std::function<void()> onClose;
+};
+class DuplicateDialogWindow final : public juce::DialogWindow
+{
+public:
+    DuplicateDialogWindow() : juce::DialogWindow("Duplicate files", theme::panel, true) {}
     void closeButtonPressed() override { if (onClose) onClose(); }
     void inputAttemptWhenModal() override {}
     std::function<void()> onClose;
@@ -666,6 +708,15 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
       preview(engine,dbPath.getParentDirectory().getChildFile("cache"))
 {
     theme::apply(appSettings.theme);
+    // A save interrupted between its two renames leaves the previous file beside its path; finish
+    // or undo that before anything reads the library.
+    if (const auto recovered = edit::recoverInterruptedReplacement(); recovered.isNotEmpty())
+        juce::Logger::writeToLog(recovered);
+    // The same for a duplicate link replacement that stopped between its staging rename and link.
+    if (const auto notes = files::DuplicateCleanupService::recoverInterrupted(
+            files::DuplicateCleanupService::defaultJournalFile());
+        ! notes.isEmpty())
+        juce::Logger::writeToLog(notes.joinIntoString("; "));
     // A DAW project owns its own session; only the standalone application may write the shared
     // settings file, register system packs or contact the contribution endpoint.
     persistSessionState = ! embeddedUi && juce::JUCEApplicationBase::getInstance() != nullptr;
@@ -675,8 +726,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     addChildComponent(*roundTagMenu);
     roundTagMenu->setAlwaysOnTop(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,34>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
-         &pause,&cancel,&settings,&tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
+    for (auto* c : std::array<juce::Component*,35>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
+         &pause,&cancel,&settings,&tagFilter,&starredButton,&hideEmpty,&ignoreSymlinks,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&activityDot,&countLabel,&analysisHeading,&analysisCard,&keyBpm,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel,&selectionStatus})
         if (c != nullptr) addAndMakeVisible(c);
@@ -997,6 +1048,12 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
             menu.addSeparator();
         }
         menu.addItem(6, "Show ignored", true, filter.showIgnored);
+        menu.addItem(8, "Ignore symlinks", true, filter.ignoreSymlinks);
+        if (! embeddedUi)
+        {
+            menu.addSeparator();
+            menu.addItem(7, "Find duplicates...");
+        }
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&libraryMenu),
             [safe = juce::Component::SafePointer<MainComponent>(this)](int result)
             {
@@ -1008,6 +1065,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
                     case 3: safe->scanRoots(false, true); break;
                     case 4: safe->requestScan(true); break;
                     case 5: safe->smartButton.onClick(); break;
+                    case 7: safe->openDuplicateCleanup(); break;
+                    case 8: safe->setIgnoreSymlinks(! safe->filter.ignoreSymlinks); break;
                     case 6:
                         if (safe->readRepo == nullptr) break;
                         safe->filter.showIgnored = ! safe->filter.showIgnored;
@@ -1055,6 +1114,12 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         filter.hideEmpty = hideEmpty.getToggleState();
         persistHideEmpty(); pageOffset = 0; reloadLibrary();
     };
+    ignoreSymlinks.setComponentID("ignoreSymlinks");
+    filter.ignoreSymlinks = appSettings.ignoreSymlinks;
+    ignoreSymlinks.setToggleState(filter.ignoreSymlinks, juce::dontSendNotification);
+    ignoreSymlinks.setTooltip("Hide files whose path is a symbolic link, such as copies replaced "
+                              "by links in duplicate cleanup");
+    ignoreSymlinks.onClick = [this] { setIgnoreSymlinks(ignoreSymlinks.getToggleState()); };
     clearFilters.onClick = [this]
     {
         search.clear(); pendingSearch.clear();
@@ -1062,7 +1127,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         filter.matchAnyTag = false; filter.starredOnly = false;
         filter.hideDuplicates = false; filter.hideEmpty = false; filter.duplicateHash.clear();
         persistHideEmpty();
-        pageOffset = 0; reloadLibrary();
+        pageOffset = 0;
+        setIgnoreSymlinks(false);
     };
     editTags.onClick = [this] { showEditTagsMenu(); };
     pageSize = appSettings.pageSize;
@@ -1122,6 +1188,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         AcousticClassifierService::getSharedAdaptiveClassifier().loadFromRepository(*readRepo);
         loadShippedGlobalPrototypes();
         folderIndexRunner = std::make_unique<FolderIndexRunner>(*readRepo);
+        // A catalog written before the flag existed needs one pass before the view can hide links.
+        if (! embeddedUi && filter.ignoreSymlinks && ! readRepo->symlinkFlagsComplete())
+            startSymlinkFlagRefresh();
         indexer = std::make_unique<IndexingService>(*writeRepo);
         // Only a real application startup may register the user's system pack folders.
         if (persistSessionState)
@@ -1220,6 +1289,25 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     // From here on every selection change is the user's, and may be stored in the project.
     sessionLive = true;
     if (appSettings.cloudView) setCloudMode(true);
+    if (persistSessionState && ! embeddedUi)
+    {
+        // One check per launch, off the message thread. A failed or equal release stays silent.
+        juce::Component::SafePointer<MainComponent> safe(this);
+        juce::Timer::callAfterDelay(3000, [safe]
+        {
+            if (safe == nullptr) return;
+            juce::Thread::launch([safe]
+            {
+                const auto release = updates::checkForUpdate(version());
+                juce::MessageManager::callAsync([safe, release]
+                {
+                    if (safe == nullptr || release.error.isNotEmpty() || ! release.published
+                        || ! release.newer) return;
+                    presentUpdateDialog(safe, release, 20);
+                });
+            });
+        });
+    }
 }
 MainComponent::~MainComponent()
 {
@@ -1231,6 +1319,9 @@ MainComponent::~MainComponent()
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
     stopTimer(); chooser.reset(); relocateDialog.deleteAndZero();
     engine.hover().stop(); // the plug-in's engine outlives this editor: never leave it sounding
+    cancelSymlinkFlags = true;
+    if (symlinkFlagWork.valid()) symlinkFlagWork.wait();
+    if (cleanupCatalogWork.valid()) cleanupCatalogWork.wait();
     if (folderGenreWork.valid()) folderGenreWork.wait();
     if (cloudBuilder) cloudBuilder.reset(); // joins the layout worker
     if (hoverPool) { hoverPool->removeAllJobs(true, -1); hoverPool.reset(); }
@@ -1239,6 +1330,24 @@ MainComponent::~MainComponent()
     embeddedSettingsHost.deleteAndZero();
     embeddedDialogHost.deleteAndZero();
     settingsDialog.deleteAndZero(); audioDialog.deleteAndZero();
+    // The duplicate window auditions through this component's preview; close it while that still
+    // exists, so its destructor can restore the preview instead of touching a dying one.
+    if (duplicateDialog != nullptr)
+    {
+        // Detach first: the window may be deleted after this destructor body, when the preview is
+        // already gone. Nothing it reports may reach a half-destroyed component.
+        if (auto* content = dynamic_cast<DuplicateCleanupDialog*>(
+                duplicateDialog->getContentComponent()))
+        {
+            content->onAudition = nullptr;
+            content->onStopAudition = nullptr;
+            content->onFinished = nullptr;
+            content->onCancel = nullptr;
+            content->onRun = nullptr;
+        }
+        duplicateDialog->exitModalState(0);
+        duplicateDialog = nullptr;
+    }
     if (splitDialog != nullptr)
     {
         splitDialog->setLookAndFeel(nullptr);
@@ -1981,6 +2090,7 @@ void MainComponent::updateTagControls()
     tagFilter.setToggleState(active > 0 || filter.matchAnyTag, juce::dontSendNotification);
     starredButton.setToggleState(filter.starredOnly,juce::dontSendNotification);
     hideEmpty.setToggleState(filter.hideEmpty,juce::dontSendNotification);
+    ignoreSymlinks.setToggleState(filter.ignoreSymlinks,juce::dontSendNotification);
     clearFilters.setEnabled(filter.hasTextOrTagFilter());
     // Chips measure their own text, and "Tags (2)" is wider than "Tags".
     resized();
@@ -3255,6 +3365,7 @@ void MainComponent::showFavoriteContextMenu(const juce::String& path, juce::Poin
     menu.setLookAndFeel(&look);
     menu.addItem(7201, "Remove from favorites");
     menu.addItem(7202, "Rename folder...");
+    if (! embeddedUi) menu.addItem(7203, "Find duplicates...");
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&favorites).withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 })
                            .withMaximumNumColumns(1)
@@ -3264,6 +3375,7 @@ void MainComponent::showFavoriteContextMenu(const juce::String& path, juce::Poin
             if (safe == nullptr) return;
             if (result == 7201) safe->toggleFavoriteFolder(path);
             else if (result == 7202) safe->promptRenameFolder(path);
+            else if (result == 7203) safe->openDuplicateCleanup(path);
         });
 }
 void MainComponent::promptRenameFolder(const juce::String& path)
@@ -4359,6 +4471,7 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
     {
         if (isDiscImage) menu.addItem(7012, "Extract samples...", extractIdle);
         menu.addItem(7013, "Batch Processing...", catalogued > 0 && ! isBatchRunning() && ! splitBusy);
+        menu.addItem(7015, "Find duplicates...", catalogued > 1 && ! splitBusy && ! isBatchRunning());
         menu.addItem(7002, "Scan folder", indexer != nullptr && ! indexer->progress().running && ! splitBusy);
         menu.addItem(7003, "Analyze smart metadata (" + juce::String(catalogued) + ")",
                      smart != nullptr && ! smart->progress().running && ! splitBusy
@@ -4443,7 +4556,11 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                         });
                     return;
                 }
-                if (result == 7012)
+                if (result == 7015)
+                {
+                    safe->openDuplicateCleanup(folderPath);
+                }
+                else if (result == 7012)
                 {
                     const juce::File image(folderPath);
                     if (isDiscExtractSource(image)) safe->startExtract({ image });
@@ -4614,6 +4731,47 @@ void MainComponent::finishFolderGenre()
                        juce::dontSendNotification);
     }
 }
+void MainComponent::setIgnoreSymlinks(const bool enabled)
+{
+    filter.ignoreSymlinks = enabled;
+    ignoreSymlinks.setToggleState(enabled, juce::dontSendNotification);
+    appSettings.ignoreSymlinks = enabled;
+    try
+    {
+        settingsStore.update([enabled](AppSettings& saved) { saved.ignoreSymlinks = enabled; });
+    }
+    catch (...) {}
+    pageOffset = 0;
+    // Older catalogs have no per-row flag yet; the one-time pass fills it before the view reloads.
+    if (enabled && readRepo != nullptr && ! readRepo->symlinkFlagsComplete())
+        startSymlinkFlagRefresh();
+    else
+        reloadLibrary();
+}
+void MainComponent::startSymlinkFlagRefresh()
+{
+    if (readRepo == nullptr || symlinkFlagWork.valid()) return;
+    cancelSymlinkFlags = false;
+    status.setText("Checking symbolic links...", juce::dontSendNotification);
+    status.setTooltip({});
+    // The future is joined (and cancelled) in the destructor, so the repository cannot outlive it.
+    symlinkFlagWork = std::async(std::launch::async, [this, repo = readRepo.get()]
+    {
+        return repo->refreshSymlinkFlags([this] { return cancelSymlinkFlags.load(); });
+    });
+}
+void MainComponent::finishSymlinkFlagRefresh()
+{
+    if (! symlinkFlagWork.valid()
+        || symlinkFlagWork.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
+    const bool complete = symlinkFlagWork.get();
+    status.setText(complete ? "Symbolic links checked"
+                            : "Symbolic link check stopped before it finished",
+                   juce::dontSendNotification);
+    pageOffset = 0;
+    reloadLibrary();
+}
 std::vector<SampleRecord> MainComponent::normalizeCandidates(
     const std::vector<SampleRecord>& selection)
 {
@@ -4685,7 +4843,18 @@ void MainComponent::startNormalizeSelected(const std::vector<SampleRecord>& sele
     if (appSettings.alwaysOverwriteOriginalFiles)
     {
         // Settings -> Editing: no confirmation, the safe write path still replaces atomically and
-        // formats without a writer still get a copy.
+        // formats without a writer still get a copy. Permanent disposal is the one exception: the
+        // person asked for the overwrite shortcut, never for an unannounced irreversible delete.
+        if (appSettings.overwriteOriginalDisposal == files::DisposalPolicy::DeletePermanently)
+        {
+            dialogs::showAlert(*this, "Normalize and delete the originals?",
+                juce::String((int) files.size()) + " file(s) will be replaced in place and the "
+                    "previous copies deleted permanently. This cannot be recovered through Trash.",
+                { { "Overwrite and delete", 1 }, { "Cancel", 0 } },
+                [begin](int id) { if (id == 1) begin(true); },
+                juce::MessageBoxIconType::WarningIcon);
+            return;
+        }
         begin(true);
         return;
     }
@@ -4804,6 +4973,7 @@ void MainComponent::beginNormalize(const std::vector<juce::File>& files,
     }
     NormalizeOptions options;
     options.overwriteOriginals = overwriteOriginals;
+    options.originalDisposal = appSettings.overwriteOriginalDisposal;
     if (! normalizer->start(files, options))
     {
         status.setText("Normalize could not start.", juce::dontSendNotification);
@@ -4831,6 +5001,8 @@ void MainComponent::finishNormalize()
     for (const auto& result : normalizeResults)
         if (result.state == NormalizeFileState::failed || result.state == NormalizeFileState::skipped)
             problems.add(result.source.getFileName() + ": " + result.error);
+        else if (result.state == NormalizeFileState::normalized && result.warning.isNotEmpty())
+            problems.add(result.source.getFileName() + ": " + result.warning);
     status.setText(text, juce::dontSendNotification);
     status.setTooltip(problems.isEmpty() ? text : problems.joinIntoString("\n"));
     // The open preview may be showing a file that was just rewritten; reload it so the waveform
@@ -4847,6 +5019,277 @@ void MainComponent::finishNormalize()
     syncNormalizedCatalog();
 }
 
+bool MainComponent::isProtectedExportPath(const juce::File& file) const
+{
+    // Exports (selection and drag caches) may be referenced by DAW projects. They are project
+    // media, not cleanup candidates.
+    if (file.isAChildOf(AudioExporter::defaultExportFolder())) return true;
+    const auto testDirectory = AppSettings::testSettingsDirectory();
+    return testDirectory != juce::File() && file.isAChildOf(testDirectory.getChildFile("exports"));
+}
+void MainComponent::deleteFilesFromDisk(std::vector<SampleRecord> records)
+{
+    if (records.empty() || writeRepo == nullptr || readRepo == nullptr || embeddedUi) return;
+    if (isSplitRunning() || isExtractRunning() || isBatchRunning() || isNormalizeRunning()
+        || cleanupCatalogWork.valid()
+        || (indexer && indexer->progress().running) || (smart && smart->progress().running)
+        || (tagging && tagging->progress().running) || (autoTag && autoTag->progress().running))
+    {
+        status.setText("Wait for the running job to finish before deleting files.",
+                       juce::dontSendNotification);
+        return;
+    }
+    for (const auto& record : records)
+        if (preview.hasUnsavedEditsFor(juce::File(record.filePath)))
+        {
+            status.setText("A selected file has unsaved edits. Save or discard them first.",
+                           juce::dontSendNotification);
+            return;
+        }
+    juce::int64 bytes = 0;
+    juce::StringArray lines;
+    for (const auto& record : records)
+    {
+        bytes += juce::File(record.filePath).getSize();
+        if (lines.size() < 12) lines.add(record.filePath);
+    }
+    juce::String message = juce::String((int) records.size())
+        + (records.size() == 1 ? " file" : " files") + ", "
+        + juce::File::descriptionOfSizeInBytes(bytes) + ":\n\n"
+        + lines.joinIntoString("\n");
+    if ((int) records.size() > lines.size())
+        message += "\nand " + juce::String((int) records.size() - lines.size()) + " more";
+    message += "\n\nThey will be moved to Trash / Recycle Bin, not just removed from the library. "
+               "Their catalog rows, tags and analysis are removed. DAW projects and other "
+               "applications that reference these files will lose them.";
+    const auto title = "Delete " + juce::String((int) records.size())
+        + (records.size() == 1 ? " file" : " files") + " from disk?";
+    dialogs::showAlert(*this, title, message,
+        { { "Move to Trash", 1 }, { "Cancel", 0 } },
+        [safe = juce::Component::SafePointer<MainComponent>(this), records](int id)
+        {
+            if (safe != nullptr && id == 1) safe->performDeleteFromDisk(records);
+        }, juce::MessageBoxIconType::WarningIcon);
+}
+void MainComponent::performDeleteFromDisk(std::vector<SampleRecord> records)
+{
+    if (writeRepo == nullptr) return;
+    juce::StringArray trashedPaths, failed, hashes;
+    juce::int64 bytes = 0;
+    for (const auto& record : records)
+    {
+        const juce::File file(record.filePath);
+        if (preview.loadedFilePath() == file) preview.clearSource();
+        const auto outcome = files::disposeFile(file, files::DisposalPolicy::Trash);
+        if (! outcome.ok)
+        {
+            failed.add(outcome.error);
+            continue;
+        }
+        bytes += file.getSize();
+        trashedPaths.add(record.filePath);
+        if (record.fileHash.isNotEmpty()) hashes.addIfNotAlreadyThere(record.fileHash);
+    }
+    if (! trashedPaths.isEmpty())
+    {
+        try
+        {
+            writeRepo->removeByPaths(trashedPaths);
+            if (! hashes.isEmpty()) writeRepo->refreshDuplicateHashes(hashes);
+        }
+        catch (const std::exception& e)
+        {
+            failed.add(std::string("Catalog update failed: ") + e.what());
+        }
+        clearSampleSelection();
+        reloadLibrary();
+        requestFolderTreeRefresh();
+        refreshFavorites();
+    }
+    juce::String text;
+    if (! trashedPaths.isEmpty())
+        text = "Moved " + juce::String(trashedPaths.size()) + " file(s), "
+            + juce::File::descriptionOfSizeInBytes(bytes) + ", to Trash";
+    else
+        text = "No file was deleted";
+    if (! failed.isEmpty()) text += " \u00b7 " + juce::String(failed.size()) + " failed";
+    status.setText(text, juce::dontSendNotification);
+    status.setTooltip(failed.isEmpty() ? text : failed.joinIntoString("\n"));
+}
+void MainComponent::openDuplicateCleanup(const juce::String& folder)
+{
+    if (embeddedUi || readRepo == nullptr || writeRepo == nullptr) return;
+    if (duplicateDialog != nullptr) { duplicateDialog->toFront(true); return; }
+    if (cleanupCatalogWork.valid())
+    {
+        status.setText("Wait for the catalog update to finish.", juce::dontSendNotification);
+        return;
+    }
+    if (isSplitRunning() || isExtractRunning() || isBatchRunning() || isNormalizeRunning())
+    {
+        status.setText("Wait for the running job to finish before cleaning duplicates.",
+                       juce::dontSendNotification);
+        return;
+    }
+    std::vector<SampleRepository::DuplicateGroup> groups;
+    try
+    {
+        // A previous run may have crashed between moving a copy aside and creating its link.
+        const auto recovered = files::DuplicateCleanupService::recoverInterrupted(
+            files::DuplicateCleanupService::defaultJournalFile());
+        juce::ignoreUnused(recovered);
+        const auto all = readRepo->duplicateGroups();
+        if (folder.isEmpty())
+        {
+            groups = all;
+        }
+        else
+        {
+            // A folder scope only offers copies inside that folder: keeping an outside original
+            // here would hide a cross-folder decision the person did not ask for.
+            const juce::File root(folder);
+            for (const auto& group : all)
+            {
+                SampleRepository::DuplicateGroup scoped;
+                scoped.hash = group.hash;
+                scoped.size = group.size;
+                for (const auto& member : group.members)
+                    if (juce::File(member.path).isAChildOf(root))
+                        scoped.members.push_back(member);
+                if (scoped.members.size() >= 2) groups.push_back(std::move(scoped));
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        status.setText("Could not read duplicate groups: " + juce::String::fromUTF8(e.what()),
+                       juce::dontSendNotification);
+        return;
+    }
+    if (groups.empty())
+    {
+        status.setText(folder.isEmpty()
+                           ? "No byte-identical duplicates were found in this catalog."
+                           : "No byte-identical duplicates were found in " + folder + ".",
+                       juce::dontSendNotification);
+        return;
+    }
+    auto* dialog = new DuplicateCleanupDialog(std::move(groups), folder);
+    const auto previousPreview = preview.loadedFilePath();
+    dialog->onAudition = [safe = juce::Component::SafePointer<MainComponent>(this)]
+        (const juce::File& file)
+    {
+        if (safe == nullptr || ! file.existsAsFile()) return;
+        const auto play = [safe, file]
+        {
+            if (safe == nullptr) return;
+            // loadFile also restarts a source that is already loaded and stopped.
+            if (! safe->preview.loadFile(file, true)) return;
+            if (! safe->preview.transportPlaying()) safe->preview.playPause();
+        };
+        // Auditioning replaces the preview source; never discard unsaved waveform edits silently.
+        if (safe->preview.hasUnsavedEdits())
+            safe->preview.withUnsavedEditsConfirmed(
+                [play](bool proceed) { if (proceed) play(); });
+        else
+            play();
+    };
+    dialog->onStopAudition = [safe = juce::Component::SafePointer<MainComponent>(this),
+                              previousPreview]
+    {
+        if (safe == nullptr) return;
+        safe->preview.stopPlayback();
+        if (previousPreview != juce::File() && previousPreview.existsAsFile())
+            safe->preview.loadFile(previousPreview, false);
+        else
+            safe->preview.clearSource();
+    };
+    dialog->onRun = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe != nullptr) safe->preview.stopPlayback();
+    };
+    dialog->onFinished = [safe = juce::Component::SafePointer<MainComponent>(this),
+                          catalogPath = dbPath](const juce::StringArray& removed,
+                                                const juce::StringArray& linked,
+                                                const juce::String& summary)
+    {
+        if (safe != nullptr && safe->dbPath == catalogPath)
+            safe->applyDuplicateCleanupResult(removed, linked, summary);
+    };
+    dialog->onCancel = [safe = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        if (safe == nullptr || safe->duplicateDialog == nullptr) return;
+        safe->duplicateDialog->exitModalState(0);
+        safe->duplicateDialog = nullptr;
+    };
+    auto* window = new DuplicateDialogWindow();
+    window->setContentOwned(dialog, true);
+    window->setLookAndFeel(&look);
+    window->setUsingNativeTitleBar(false);
+    window->setResizable(false, false);
+    window->setSize(dialog->getWidth(), dialog->getHeight());
+    window->centreAroundComponent(this, window->getWidth(), window->getHeight());
+    window->onClose = [safe = juce::Component::SafePointer<MainComponent>(this), dialog]
+    {
+        if (safe == nullptr || safe->duplicateDialog == nullptr) return;
+        // Closing during a run stops it first, so no window disappears under a live thread.
+        if (dialog->isRunning()) { dialog->requestStop(); return; }
+        safe->duplicateDialog->exitModalState(0);
+        safe->duplicateDialog = nullptr;
+    };
+    duplicateDialog = window;
+    window->enterModalState(true, nullptr, true);
+}
+void MainComponent::applyDuplicateCleanupResult(const juce::StringArray& removedPaths,
+                                                const juce::StringArray& linkedPaths,
+                                                const juce::String& summary)
+{
+    pendingCleanupSummary = summary;
+    juce::StringArray hashes;
+    if (readRepo != nullptr && ! removedPaths.isEmpty())
+        for (const auto& path : removedPaths)
+            if (const auto record = readRepo->findByPath(path))
+                if (record->fileHash.isNotEmpty()) hashes.addIfNotAlreadyThere(record->fileHash);
+    if (writeRepo == nullptr || (removedPaths.isEmpty() && linkedPaths.isEmpty()))
+    {
+        status.setText(summary, juce::dontSendNotification);
+        return;
+    }
+    // Deleting hundreds of rows used to run on the message thread; that work is now off it.
+    status.setText("Updating the catalog...", juce::dontSendNotification);
+    status.setTooltip({});
+    auto* repo = writeRepo.get();
+    cleanupCatalogWork = std::async(std::launch::async,
+        [repo, removedPaths, linkedPaths, hashes]
+        {
+            if (! removedPaths.isEmpty()) repo->removeByPaths(removedPaths);
+            // The library needs to know these rows are now aliases, both for the Ignore symlinks
+            // view and for the next duplicate review.
+            if (! linkedPaths.isEmpty()) repo->setSymlinkFlags(linkedPaths, true);
+            if (! hashes.isEmpty()) repo->refreshDuplicateHashes(hashes);
+        });
+}
+void MainComponent::finishCleanupCatalogUpdate()
+{
+    if (! cleanupCatalogWork.valid()
+        || cleanupCatalogWork.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
+    try
+    {
+        cleanupCatalogWork.get();
+    }
+    catch (const std::exception& e)
+    {
+        status.setText("Duplicate cleanup finished, but the catalog update failed: "
+                       + juce::String::fromUTF8(e.what()), juce::dontSendNotification);
+        return;
+    }
+    clearSampleSelection();
+    reloadLibrary();
+    requestFolderTreeRefresh();
+    refreshFavorites();
+    status.setText(pendingCleanupSummary, juce::dontSendNotification);
+}
 void MainComponent::syncNormalizedCatalog()
 {
     if (writeRepo == nullptr) return;
@@ -4890,6 +5333,19 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         if (! FileScanner::isSupportedFormat(file)) continue;
         existingFiles.push_back(file);
         if (! FileScanner::isMetadataOnlyFormat(file)) splitCandidates.push_back(file);
+    }
+    // Physical deletion works only on ordinary files: no container member, no link, no export.
+    std::vector<SampleRecord> deleteCandidates;
+    juce::StringArray deletePaths;
+    for (const auto& record : selection)
+    {
+        if (record.isDiscEntry() || record.containerPath.isNotEmpty()) continue;
+        const juce::File file(record.filePath);
+        if (! file.existsAsFile() || file.isSymbolicLink()) continue;
+        if (isProtectedExportPath(file)) continue;
+        if (deletePaths.contains(file.getFullPathName())) continue;
+        deletePaths.add(file.getFullPathName());
+        deleteCandidates.push_back(record);
     }
     // Embedded banks and disc images are metadata-only for scanning, and a disc sample row has a
     // synthetic path, so they are collected from the records rather than from the file list.
@@ -5096,13 +5552,23 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
     const auto duplicate = readRepo->duplicateInfo(lead.id);
     if (duplicate.has_value() && duplicate->groupSize > 1)
         menu.addItem(9004, "Show all " + juce::String(duplicate->groupSize) + " copies");
+    if (! embeddedUi)
+    {
+        menu.addSeparator();
+        menu.addColouredItem(9028, "Delete from disk...", theme::danger,
+                             ! deleteCandidates.empty(), false, juce::Image());
+        // Duplicate cleanup is a whole-catalog action; it lives in the library menu and here.
+        menu.addItem(9029, "Find duplicates...", ! isSplitRunning() && ! isExtractRunning()
+                                                   && ! isNormalizeRunning() && ! isBatchRunning());
+    }
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&library).withTargetScreenArea(
                            { screenPosition.x, screenPosition.y, 1, 1 })
                            .withMaximumNumColumns(1)
                            .withPreferredPopupDirection(juce::PopupMenu::Options::PopupDirection::downwards),
         [safe = juce::Component::SafePointer<MainComponent>(this), ids, allStarred, allHave, recent,
          files = selection, leadPath = lead.filePath, leadHash = lead.fileHash,
-         ignoredPaths, allIgnored, anyInherited, splitCandidates, extractCandidates, customList,
+         deleteCandidates, ignoredPaths, allIgnored, anyInherited, splitCandidates,
+         extractCandidates, customList,
           standardTypes, normalizeRecords, genreNames, catalogPath = dbPath,
           roundTagPillCentre](int result)
         {
@@ -5116,7 +5582,8 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
             }
             // Defence in depth: the plugin hides these items, and no path may start them either.
             if (safe->embeddedUi && (result == 9005 || result == 9006 || result == 9007
-                                     || result == 9008 || result == 9010 || result == 9025))
+                                     || result == 9008 || result == 9010 || result == 9025
+                                     || result == 9028 || result == 9029))
                 return;
             if ((safe->isSplitRunning() || safe->isExtractRunning())
                 && result != 9000 && result != 9002 && result != 9004)
@@ -5126,6 +5593,16 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
             }
             try
             {
+                if (result == 9028)
+                {
+                    safe->deleteFilesFromDisk(deleteCandidates);
+                    return;
+                }
+                if (result == 9029)
+                {
+                    safe->openDuplicateCleanup();
+                    return;
+                }
                 if (result == 9025)
                 {
                     batch::SourceSelection batchSelection;
@@ -5874,6 +6351,8 @@ void MainComponent::timerCallback()
         reloadLibrary();
     }
     finishFolderGenre();
+    finishSymlinkFlagRefresh();
+    finishCleanupCatalogUpdate();
 }
 void MainComponent::lookAndFeelChanged()
 {
@@ -6135,10 +6614,12 @@ void MainComponent::applySettings(const AppSettings& next)
     appSettings.scalePercent = AppSettings::clampScale(next.scalePercent);
     appSettings.language = next.language;
     appSettings.alwaysOverwriteOriginalFiles = next.alwaysOverwriteOriginalFiles;
+    appSettings.overwriteOriginalDisposal = next.overwriteOriginalDisposal;
     appSettings.roundTagMenu = next.roundTagMenu;
     if (! appSettings.roundTagMenu && roundTagMenu != nullptr)
         roundTagMenu->close();
     preview.setAlwaysOverwriteOriginalFiles(appSettings.alwaysOverwriteOriginalFiles);
+    preview.setOverwriteDisposal(appSettings.overwriteOriginalDisposal);
     refreshTheme();
     // The global scale factor belongs to the whole process: inside a DAW it would resize the
     // host's own windows. The plugin follows the host's scaling instead.
@@ -6155,6 +6636,7 @@ void MainComponent::applySettings(const AppSettings& next)
             saved.scalePercent = appSettings.scalePercent;
             saved.language = appSettings.language;
             saved.alwaysOverwriteOriginalFiles = appSettings.alwaysOverwriteOriginalFiles;
+            saved.overwriteOriginalDisposal = appSettings.overwriteOriginalDisposal;
             saved.roundTagMenu = appSettings.roundTagMenu;
         });
     }
@@ -6362,6 +6844,11 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
         error = "Wait for folder genre assignment to finish before switching catalogs.";
         return false;
     }
+    if (cleanupCatalogWork.valid())
+    {
+        error = "Wait for the catalog update to finish before switching catalogs.";
+        return false;
+    }
     if (indexer && indexer->progress().running)
     {
         error = "Stop indexing before switching catalogs.";
@@ -6481,7 +6968,8 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     favorites.clearSelection();
     filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
     filter.matchAnyTag = false; filter.starredOnly = false;
-    filter.hideDuplicates = false; filter.hideEmpty = appSettings.hideEmpty; filter.duplicateHash.clear();
+    filter.hideDuplicates = false; filter.hideEmpty = appSettings.hideEmpty;
+    filter.ignoreSymlinks = appSettings.ignoreSymlinks; filter.duplicateHash.clear();
     search.clear(); pendingSearch.clear();
     showAnalysisPlaceholder();
     selectedTags.setTags({});
@@ -6489,6 +6977,8 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     requestFolderTreeRefresh();
     refreshFavorites();
     reloadLibrary();
+    if (filter.ignoreSymlinks && readRepo != nullptr && ! readRepo->symlinkFlagsComplete())
+        startSymlinkFlagRefresh();
     juce::String message = "Catalog: " + dbPath.getFullPathName();
     if (moveCurrent) message += "  |  previous catalog kept at " + previous.getFullPathName();
     try
@@ -6652,9 +7142,12 @@ void MainComponent::resized()
     placeChip(starredButton, 0);
     placeChip(hideEmpty, 24);   // the tick box needs its own room inside the pill
     filterSeparatorBounds = {};
-    // Clear filters is the first control to go: it is also in the LIBRARY menu. Hide it only when
-    // the measured row really cannot hold it, so a 880 px window keeps it.
+    // Clear filters is also in the LIBRARY menu, so it is the last control to give up its place.
+    // The link chip yields first; at a narrow width it stays reachable through that menu.
     const int clearNeeds = studio::spacingUnit + 1 + studio::spacingTight + chipWidth(clearFilters, 0);
+    const int linkNeeds = studio::spacingTight + chipWidth(ignoreSymlinks, 24);
+    ignoreSymlinks.setVisible(filterBar.getWidth() - linkNeeds >= clearNeeds);
+    if (ignoreSymlinks.isVisible()) placeChip(ignoreSymlinks, 24);
     clearFilters.setVisible(filterBar.getWidth() >= clearNeeds);
     if (clearFilters.isVisible())
     {

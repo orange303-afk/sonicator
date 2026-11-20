@@ -6,6 +6,7 @@ namespace
 {
 constexpr const char* api = "https://api.github.com/repos/orange303-afk/sonicator/releases";
 constexpr const char* releasesPage = "https://github.com/orange303-afk/sonicator/releases";
+constexpr const char* gumroad = "https://ilyaorange.gumroad.com";
 
 // "v0.2.0" → { 0, 2, 0 }. A suffix such as "-beta.2" stops that part at its digits, so a stable
 // release still compares above nothing while the build metadata cannot make it look newer.
@@ -82,6 +83,16 @@ Release parseLatestRelease(const juce::String& json, const juce::String& current
     if (release.url.isEmpty())
         release.url = releasesPage;
 
+    if (const auto* assets = item->getProperty("assets").getArray())
+        for (const auto& value : *assets)
+            if (const auto* asset = value.getDynamicObject())
+            {
+                const auto name = asset->getProperty("name").toString().trim();
+                const auto url = asset->getProperty("browser_download_url").toString().trim();
+                if (name.isNotEmpty() && url.isNotEmpty())
+                    release.assets.push_back({ name, url });
+            }
+
     release.published = true;
     release.newer = compareVersions(release.tag, currentVersion) > 0;
     return release;
@@ -129,8 +140,48 @@ Release checkForUpdate(const juce::String& currentVersion)
     return parseLatestRelease(body, currentVersion);
 }
 
+juce::String downloadUrlFor(const Release& release, const Platform platform)
+{
+    juce::String best;
+    for (const auto& asset : release.assets)
+    {
+        const auto& name = asset.name;
+        if (platform == Platform::macOS && name.endsWithIgnoreCase(".pkg"))
+        {
+            // The universal package runs on both architectures; another slice is the fallback.
+            if (best.isEmpty() || name.containsIgnoreCase("universal")) best = asset.url;
+        }
+        else if (platform == Platform::windows && name.endsWithIgnoreCase(".msi"))
+        {
+            return asset.url;
+        }
+        else if (platform == Platform::linux)
+        {
+            if (name.endsWithIgnoreCase(".AppImage")) return asset.url;
+            if (name.endsWithIgnoreCase(".deb") && best.isEmpty()) best = asset.url;
+        }
+    }
+    return best.isNotEmpty() ? best : release.url;
+}
+
+Platform currentPlatform()
+{
+#if JUCE_WINDOWS
+    return Platform::windows;
+#elif JUCE_LINUX || JUCE_BSD
+    return Platform::linux;
+#else
+    return Platform::macOS;
+#endif
+}
+
 juce::String releasesPageUrl()
 {
     return releasesPage;
+}
+
+juce::String gumroadUrl()
+{
+    return gumroad;
 }
 } // namespace sonicator::updates

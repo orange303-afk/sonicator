@@ -1,5 +1,6 @@
 #pragma once
 #include "ShortcutPreferences.h"
+#include "core/files/FileDisposal.h"
 #include <juce_core/juce_core.h>
 #include <functional>
 namespace sonicator {
@@ -42,6 +43,7 @@ struct AppSettings
     juce::String lastFolder;           // restored on the next launch when still in the catalog
     juce::String lastSamplePath;       // restored selection without starting preview playback
     bool hideEmpty = true;
+    bool ignoreSymlinks = false;  // the library hides rows whose path is a symbolic link
     bool cloudView = false;       // the library opens as the tag map instead of the list
     bool roundTagMenu = false;    // the Tags pill and Ctrl/Cmd+T open the radial tag menu
     bool showIgnored = false;          // reveal catalog rows hidden by ignored_paths
@@ -67,6 +69,9 @@ struct AppSettings
     // Skips the Save / Normalize confirmation dialogs and replaces the original file directly.
     // Formats without a writer still get a copy.
     bool alwaysOverwriteOriginalFiles = false;
+    // What happens to the file an overwrite replaces. Never applies to Delete from disk or to
+    // duplicate cleanup, which always ask separately.
+    files::DisposalPolicy overwriteOriginalDisposal = files::DisposalPolicy::Trash;
     bool contributeTrainingData = false;
     // Consent to the contribution text above. Sending needs both the toggle and this version:
     // an earlier build promised it sent nothing, so a stored `true` alone is not consent.

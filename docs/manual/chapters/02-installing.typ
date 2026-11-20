@@ -1,7 +1,7 @@
 #import "../style.typ": *
 
 #chapter(2, "Installing and first launch",
-  lead: [Two installers, both unsigned. Here is what macOS and Windows will say about that, where the application keeps its data, and how to get the first folder indexed.],
+  lead: [Three installers, all unsigned. Here is what macOS and Windows will say about that, where the application keeps its data, and how to get the first folder indexed.],
   inthis: (
     [What the macOS and Windows installers contain],
     [Getting past Gatekeeper and SmartScreen without disabling them],
@@ -12,25 +12,32 @@
 
 #section("What is in the package")
 
-The release ships two installers and a source archive. They are built from the same commit; keep
-each installer with the source archive for its platform.
+The release ships three installers and a source archive for each build. They are built from the
+same commit; keep each installer with the source archive for its build.
 
 #data-table(
   header: ("Artifact", "Platform", "Contents"),
   widths: (2.2fr, 1fr, 2.2fr),
   rows: (
-    ("`SONICATOR-0.1.1-macOS-universal.pkg`", "macOS 11 or newer", "Application, VST3 and AU, arm64 and x86_64"),
-    ("`SONICATOR-0.1.1-Windows-x64.msi`", "Windows 10 or newer, 64-bit", "Application and VST3 (AU is macOS-only)"),
-    ("`SONICATOR-0.1.1-sources.tar.gz`", "One per platform", "Project and pinned dependency sources; the two archives share a name and differ in content"),
+    ("`SONICATOR-0.2.0-macOS-universal.pkg`", "macOS 11 or newer", "Application, VST3 and AU, arm64 and x86_64"),
+    ("`SONICATOR-0.2.0-macOS-x86_64-10.15.pkg`", "macOS 10.15, Intel only", "Application, VST3 and AU for Macs that cannot install the universal package; no ONNX runtime"),
+    ("`SONICATOR-0.2.0-Windows-x64.msi`", "Windows 10 or newer, 64-bit", "Application and VST3 (AU is macOS-only)"),
+    ("`SONICATOR-0.2.0-sources.tar.gz`", "Universal and Windows builds", "Project and pinned dependency sources"),
+    ("`SONICATOR-0.2.0-sources-x86_64-10.15.tar.gz`", "Catalina build", "Project and pinned dependency sources for the Intel-only package"),
   ),
 )
+
+The Catalina package leaves out ONNX Runtime, whose bundled dylib needs macOS 13.3. The application
+and plug-ins work normally; the optional neural classifier falls back to the built-in acoustic rules
+on that machine.
 
 Every artifact has a `.sha256` file. If you downloaded the files by hand, compare the checksum
 before installing:
 
 ```sh
-shasum -a 256 SONICATOR-0.1.1-macOS-universal.pkg     # macOS
-certutil -hashfile SONICATOR-0.1.1-Windows-x64.msi SHA256   # Windows
+shasum -a 256 SONICATOR-0.2.0-macOS-universal.pkg     # macOS 11+
+shasum -a 256 SONICATOR-0.2.0-macOS-x86_64-10.15.pkg  # macOS 10.15, Intel
+certutil -hashfile SONICATOR-0.2.0-Windows-x64.msi SHA256   # Windows
 ```
 
 Both installers are *unsigned and not notarised*. That is a fact about this build, not a mistake in

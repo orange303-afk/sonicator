@@ -1,11 +1,40 @@
 #include "AudioEditWriter.h"
 #include "AudioFileWriter.h"
+#include "core/settings/AppSettings.h"
 
 namespace sonicator::edit
 {
 namespace
 {
 constexpr int chunkFrames = 65536;
+
+juce::CriticalSection& replaceJournalLock()
+{
+    static juce::CriticalSection lock;
+    return lock;
+}
+juce::File replaceJournalFile()
+{
+    const auto testDirectory = AppSettings::testSettingsDirectory();
+    const auto directory = testDirectory != juce::File() ? testDirectory
+        : juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+              .getChildFile("Sonicator");
+    return directory.getChildFile("replace-in-place.json");
+}
+void writeReplaceJournal(const juce::File& target, const juce::File& staged,
+                         const files::DisposalPolicy policy)
+{
+    auto* root = new juce::DynamicObject();
+    root->setProperty("target", target.getFullPathName());
+    root->setProperty("staged", staged.getFullPathName());
+    root->setProperty("policy", files::disposalPolicyToString(policy));
+    auto file = replaceJournalFile();
+    file.getParentDirectory().createDirectory();
+    juce::TemporaryFile temporary(file);
+    if (temporary.getFile().replaceWithText(juce::JSON::toString(juce::var(root), false)))
+        temporary.overwriteTargetFileWithTemporary();
+}
+void clearReplaceJournal() { replaceJournalFile().deleteFile(); }
 
 juce::String extensionOf(const juce::File& file)
 {
@@ -105,7 +134,77 @@ juce::File uniqueCopyPath(const juce::File& original, const juce::String& stem)
     return candidate;
 }
 
-SaveResult overwrite(const juce::File& target, const AudioEditBuffer& buffer, CancelCheck cancel)
+juce::String recoverInterruptedReplacement(const juce::File& journal)
+{
+    const juce::ScopedLock lock(replaceJournalLock());
+    const auto file = journal == juce::File() ? replaceJournalFile() : journal;
+    if (! file.existsAsFile()) return {};
+    const auto parsed = juce::JSON::parse(file);
+    const auto* root = parsed.getDynamicObject();
+    if (root == nullptr)
+    {
+        file.deleteFile();
+        return "Discarded an unreadable replace-in-place journal";
+    }
+    const juce::File target(root->getProperty("target").toString());
+    const juce::File staged(root->getProperty("staged").toString());
+    const auto policy = files::disposalPolicyFromString(root->getProperty("policy").toString(),
+                                                        files::DisposalPolicy::Trash);
+    juce::String message;
+    if (staged.existsAsFile())
+    {
+        if (! target.exists())
+        {
+            if (staged.moveFileTo(target)) message = "Restored " + target.getFullPathName();
+            else message = "Could not restore " + target.getFullPathName()
+                + "; the previous file is at " + staged.getFullPathName();
+        }
+        else
+        {
+            const auto outcome = files::disposeFile(staged, policy);
+            message = outcome.ok ? "Removed an old copy left by an interrupted save"
+                                 : outcome.error;
+        }
+    }
+    // Keep the journal only when the staged file still needs attention.
+    if (! staged.existsAsFile()) file.deleteFile();
+    return message;
+}
+
+PublishResult publishReplacement(const juce::File& target, juce::TemporaryFile& prepared,
+                                 const files::DisposalPolicy policy)
+{
+    if (! prepared.getFile().existsAsFile())
+        return { false, false, "The prepared file is missing", {} };
+    const juce::ScopedLock lock(replaceJournalLock());
+    // The old file moves aside first: a failed rename of the new file can then restore it
+    // instead of leaving the path empty. The journal covers a crash between the two renames.
+    const auto staged = target.getSiblingFile(
+        "." + target.getFileName() + ".sonicator-old-" + juce::Uuid().toString());
+    writeReplaceJournal(target, staged, policy);
+    if (! target.moveFileTo(staged))
+    {
+        clearReplaceJournal();
+        return { false, false, "Cannot move the original aside", {} };
+    }
+    if (! prepared.getFile().moveFileTo(target))
+    {
+        staged.moveFileTo(target);
+        clearReplaceJournal();
+        return { false, false, "Cannot replace the file", {} };
+    }
+    const auto disposed = files::disposeFile(staged, policy);
+    clearReplaceJournal();
+    if (! disposed.ok)
+    {
+        // The replacement is published; only the old copy could not be disposed of.
+        return { true, true, disposed.error, staged };
+    }
+    return { true, false, {}, {} };
+}
+
+SaveResult overwrite(const juce::File& target, const AudioEditBuffer& buffer, CancelCheck cancel,
+                     const files::DisposalPolicy policy)
 {
     if (! canOverwriteInPlace(target))
         return { false, target, "This format cannot be overwritten; save a copy instead" };
@@ -120,9 +219,10 @@ SaveResult overwrite(const juce::File& target, const AudioEditBuffer& buffer, Ca
         return { false, target, result.error };
     }
     copyFileAttributes(writeTarget, temporary.getFile());
-    if (! temporary.overwriteTargetFileWithTemporary())
-        return { false, target, "Cannot replace the file" };
-    return { true, writeTarget, {} };
+    auto published = publishReplacement(writeTarget, temporary, policy);
+    if (! published.success) return { false, target, published.error };
+    // A disposal failure is reported as a warning on an otherwise successful save.
+    return { true, writeTarget, published.error };
 }
 
 SaveResult saveCopy(const juce::File& original, const juce::String& stem,

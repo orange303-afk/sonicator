@@ -12,13 +12,15 @@ catalog path becomes `<catalog>` and your account name becomes `<user>`. File na
 catalog stay, because a report without the failing file is usually useless. Details:
 `docs/DIAGNOSTICS.md`.
 
-## Update check: only when you press it
+## Update check
 
-Settings → About → "Check for updates" asks `https://api.github.com` for the newest published
-release of the project and compares its version with the running one. The request carries the app
-version in its `User-Agent` and the project name in the URL; it sends no catalog, file, path,
-machine or account data. The application never checks on its own, and a failed check changes
-nothing.
+The standalone asks `https://api.github.com` for the newest published release of the project once,
+three seconds after launch, and Settings → About → "Check for updates" asks again when pressed.
+Both compare the release tag with the running version. The request carries the app version in its
+`User-Agent` and the project name in the URL; it sends no catalog, file, path, machine or account
+data. Only a genuinely newer release shows a dialog; a failed or equal check changes nothing and is
+silent. The DAW plugin never checks. Download and release-notes links open in the browser and are
+not fetched by the app.
 
 ## Training data: off by default
 

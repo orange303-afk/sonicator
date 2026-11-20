@@ -55,3 +55,28 @@ TEST_CASE("The newest published release is read from the GitHub answer", "[updat
     }
 }
 
+TEST_CASE("Each platform gets its own installer from the release", "[updates]")
+{
+    using updates::downloadUrlFor;
+    using updates::Platform;
+    const auto release = updates::parseLatestRelease(R"([{
+        "tag_name":"v0.2.0",
+        "html_url":"https://example.test/tag",
+        "assets":[
+            {"name":"SONICATOR-0.2.0-Windows-x64.msi","browser_download_url":"https://example.test/win.msi"},
+            {"name":"SONICATOR-0.2.0-macOS-x86_64-10.15.pkg","browser_download_url":"https://example.test/mac-intel.pkg"},
+            {"name":"SONICATOR-0.2.0-macOS-universal.pkg","browser_download_url":"https://example.test/mac-universal.pkg"},
+            {"name":"SONICATOR-0.2.0-Linux-x86_64.AppImage","browser_download_url":"https://example.test/linux.AppImage"},
+            {"name":"SONICATOR-0.2.0-Linux-amd64.deb","browser_download_url":"https://example.test/linux.deb"}
+        ]}])", "0.1.1");
+    REQUIRE(release.assets.size() == 5);
+    REQUIRE(downloadUrlFor(release, Platform::macOS) == "https://example.test/mac-universal.pkg");
+    REQUIRE(downloadUrlFor(release, Platform::windows) == "https://example.test/win.msi");
+    REQUIRE(downloadUrlFor(release, Platform::linux) == "https://example.test/linux.AppImage");
+
+    updates::Release noAssets;
+    noAssets.url = "https://example.test/page";
+    REQUIRE(downloadUrlFor(noAssets, Platform::macOS) == "https://example.test/page");
+    REQUIRE(downloadUrlFor(noAssets, Platform::windows) == "https://example.test/page");
+}
+

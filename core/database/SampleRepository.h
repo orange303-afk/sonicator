@@ -97,6 +97,13 @@ public:
     std::vector<juce::String> errorPathsWithFormats(const juce::StringArray& formats) const;
     // Deletes catalog rows for paths whose files were removed, together with exact ignore entries.
     void removeByPaths(const juce::StringArray& paths);
+    // Marks rows whose file is a symbolic link. One pass over every path in id order, in small
+    // transactions so a scan or the UI is not blocked; the completion marker is catalog-local.
+    // Returns false when cancelled. Older catalogs need this once before the view can hide links.
+    bool refreshSymlinkFlags(const std::function<bool()>& cancel = {});
+    bool symlinkFlagsComplete() const;
+    // Used by duplicate cleanup: a replaced copy becomes a link, a restored one stops being one.
+    void setSymlinkFlags(const juce::StringArray& paths, bool link);
     void setMissing(const std::vector<int64_t>& ids);
     int count(bool includeIgnored = false) const;
     int countInFolder(const juce::String& folder, bool includeDiscContents = true) const;
@@ -212,6 +219,13 @@ public:
     struct DuplicateInfo { int groupSize = 0; int64_t representativeId = 0; juce::String representativePath; };
     std::optional<DuplicateInfo> duplicateInfo(int64_t sampleId) const;
     std::vector<SampleRecord> duplicateMembers(int64_t sampleId) const;
+    // Byte-identical groups from the duplicates table, largest first. Members keep path order;
+    // the catalog's representative is first. At most `maxGroups` groups are returned.
+    struct DuplicateMember { int64_t id = 0; juce::String path; int64_t size = 0; bool missing = false; };
+    struct DuplicateGroup { juce::String hash; int64_t size = 0; std::vector<DuplicateMember> members; };
+    std::vector<DuplicateGroup> duplicateGroups(int maxGroups = 500) const;
+    // Rebuilds only these groups after rows or files changed in them.
+    void refreshDuplicateHashes(const juce::StringArray& hashes);
     // Lower-cased name + newline + lower-cased path, used by whole-catalog text search.
     static juce::String searchKey(const juce::String& name, const juce::String& path);
     // Phase 2 smart analysis. Candidates and overrides are stored separately from measured

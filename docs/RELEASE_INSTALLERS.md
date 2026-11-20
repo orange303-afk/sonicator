@@ -6,11 +6,11 @@ remaining limits are in [RELEASE_INSTALLERS_ACCEPTANCE.md](RELEASE_INSTALLERS_AC
 
 ## Deliverables
 
-- `SONICATOR-0.1.1-macOS-universal.pkg`: independently selectable application, VST3 and AU;
+- `SONICATOR-0.2.0-macOS-universal.pkg`: independently selectable application, VST3 and AU;
   arm64 + x86_64, macOS 11 or newer.
-- `SONICATOR-0.1.1-macOS-x86_64-10.15.pkg`: the same three components for the Intel Macs that
+- `SONICATOR-0.2.0-macOS-x86_64-10.15.pkg`: the same three components for the Intel Macs that
   cannot install the universal package; x86_64 only, macOS 10.15 or newer, no ONNX Runtime.
-- `SONICATOR-0.1.1-Windows-x64.msi`: independently selectable application and VST3;
+- `SONICATOR-0.2.0-Windows-x64.msi`: independently selectable application and VST3;
   64-bit Windows 10 or newer. AU is macOS-only.
 - `sonicator-manual.pdf`: the user manual.
 
@@ -122,8 +122,34 @@ the Apps & features entry. The window also sets its icon on the peer at startup,
 and taskbar do not depend on Explorer's icon cache. `test-install.ps1` checks the shortcut target
 and the executable icon.
 
-The release preset serializes MSBuild projects and sets `SONICATOR_MSVC_COMPILER_JOBS=2` for
-parallel translation-unit compilation. CI selects 4 workers only with at least 12 GiB RAM.
+### Icon acceptance on Windows
+
+The icon comes from one chain, and every link is checked in CI:
+`resources/branding/icon-window-256.png` -> juceaide -> `SONICATOR.exe` resources -> the plain
+Start-menu shortcut -> `WM_SETICON` on the window; the same generated `.ico` is the MSI
+`ARPPRODUCTICON` for Apps & features. `packaging/tests/test_release.py` checks the package
+declares exactly one icon and a plain (not advertised) shortcut pointing at the executable, and
+`test-install.ps1` checks the installed executable carries an icon of at least 32 px and that the
+running window answers `WM_GETICON` with both a large and a small icon.
+
+Manual shell checks remain, because a runner cannot pin a taskbar item reliably and Windows keeps
+its own icon cache. On Windows 10 and 11, at 100% and 150% scaling, record the build number,
+installer version and SHA-256 first:
+
+- Explorer shows the icon at small, medium and large sizes, and so do the Start-menu entry and
+  Windows search.
+- A desktop shortcut created by hand shows the icon.
+- The running window shows it in the title bar, taskbar button and Alt+Tab.
+- Pin from the Start menu and from the running application; the pinned icon is correct while the
+  app is closed and after relaunch.
+- Upgrade from the previous release with an existing shortcut and pin still shows the icon.
+- Repair/reinstall keeps it.
+- Restart Explorer and sign out/in to separate a persistent configuration error from a stale icon
+  cache. A cache refresh is never applied automatically to a user's machine.
+
+If a pinned item is still blank while the executable, shortcut and window checks pass, investigate
+application identity and grouping (AppUserModelID) rather than adding one blindly; record the
+`Get-StartApps` AppID printed by the installer test.
 Other presets retain their original compiler-parallelism behavior.
 
 Never run `packaging/windows/test-install.ps1` on a working user's installation. It is guarded
@@ -148,10 +174,9 @@ Deliverables: `SONICATOR-<version>-Linux-x86_64.AppImage` and
 `SONICATOR-<version>-Linux-amd64.deb`, published alone like the other platforms. The script also
 writes `SONICATOR-<version>-Linux.sha256` and CI keeps it with the build artifacts.
 
-Version 0.1.1 publishes these next to the stable macOS and Windows assets with an explicit
-in-development warning in the release notes: the package contents, the suite and the headless start
-are verified, the desktop behaviour is not. Keep that wording until `docs/LINUX_ACCEPTANCE.md` is
-filled in.
+This release publishes these next to the macOS and Windows assets with an explicit in-development
+warning in the release notes: the package contents, the suite and the headless start are verified,
+the desktop behaviour is not. Keep that wording until `docs/LINUX_ACCEPTANCE.md` is filled in.
 
 **The container is the release baseline.** An AppImage carries no glibc, so the glibc of the machine
 that builds it becomes the floor for every user. Release artifacts are therefore built inside

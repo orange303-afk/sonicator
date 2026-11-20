@@ -58,9 +58,9 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
              &editingHeading, &alwaysOverwriteToggle, &alwaysOverwriteNote,
              &workspaceHeading, &workspaceNote, &themeBox, &scaleBox, &languageBox, &moveDatabase })
         generalContent.addAndMakeVisible(c);
-    for (auto* c : std::array<juce::Component*, 6> {
+    for (auto* c : std::array<juce::Component*, 8> {
              &openDatabase, &backupDatabase, &relocateDatabase, &contributeDataToggle,
-             &contributionNote, &resetLayout })
+             &contributionNote, &resetLayout, &overwriteDisposalLabel, &overwriteDisposalBox })
         generalContent.addAndMakeVisible(c);
     generalContent.addAndMakeVisible(contributionPreview);
     generalContent.addAndMakeVisible(contributionDelete);
@@ -180,14 +180,35 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     alwaysOverwriteToggle.onClick = [this]
     {
         current.alwaysOverwriteOriginalFiles = alwaysOverwriteToggle.getToggleState();
+        overwriteDisposalBox.setEnabled(current.alwaysOverwriteOriginalFiles);
         notifySettings();
     };
     alwaysOverwriteNote.setText("Save and Normalize selected replace the file without asking. "
                                 "WAV, AIFF and FLAC only; other formats are saved as a new copy. "
-                                "The prompt for unsaved edits before leaving a file stays.",
+                                "The prompt for unsaved edits before leaving a file stays. "
+                                "Replaced originals move to Trash unless Delete permanently is chosen.",
                                 juce::dontSendNotification);
     alwaysOverwriteNote.setFont(noteFont());
     alwaysOverwriteNote.setJustificationType(juce::Justification::centredLeft);
+    overwriteDisposalLabel.setText("Replaced originals", juce::dontSendNotification);
+    overwriteDisposalLabel.setFont(noteFont());
+    overwriteDisposalLabel.setJustificationType(juce::Justification::centredLeft);
+    overwriteDisposalBox.setComponentID("settingsOverwriteDisposal");
+    overwriteDisposalBox.addItem(files::disposalPolicyLabel(files::DisposalPolicy::Trash), 1);
+    overwriteDisposalBox.addItem(files::disposalPolicyLabel(
+                                     files::DisposalPolicy::DeletePermanently), 2);
+    overwriteDisposalBox.setSelectedId(
+        initial.overwriteOriginalDisposal == files::DisposalPolicy::DeletePermanently ? 2 : 1,
+        juce::dontSendNotification);
+    overwriteDisposalBox.setEnabled(initial.alwaysOverwriteOriginalFiles);
+    overwriteDisposalBox.setTooltip("Delete permanently is not recoverable through Trash. "
+                                    "Delete from disk and duplicate cleanup always ask separately.");
+    overwriteDisposalBox.onChange = [this]
+    {
+        current.overwriteOriginalDisposal = overwriteDisposalBox.getSelectedId() == 2
+            ? files::DisposalPolicy::DeletePermanently : files::DisposalPolicy::Trash;
+        notifySettings();
+    };
     privacyHeading.setText("PRIVACY & DATA", juce::dontSendNotification);
     privacyHeading.setFont(sectionFont());
     privacyHeading.setColour(juce::Label::textColourId, theme::muted);
@@ -677,7 +698,8 @@ void SettingsPanel::showUpdateResult(const updates::Release& release)
         updateStatus.setText("Version " + release.tag + " is available.", fonts::font(12.5f),
                              theme::accent, 4);
         releasesLink.setButtonText("Download " + release.tag);
-        releasesLink.setURL(juce::URL(release.url));
+        releasesLink.setURL(juce::URL(
+            updates::downloadUrlFor(release, updates::currentPlatform())));
         releasesLink.setVisible(true);
     }
     else
@@ -819,7 +841,12 @@ void SettingsPanel::layoutGeneralPage(juce::Rectangle<int> area)
     section(editingHeading, studio::spacingSection);
     add(26, studio::spacingTight, [this](juce::Rectangle<int> area)
     { alwaysOverwriteToggle.setBounds(area.withTrimmedLeft(labelColumn)); });
-    note(alwaysOverwriteNote, 38, 2);
+    note(alwaysOverwriteNote, 58, 2);
+    add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)
+    {
+        overwriteDisposalLabel.setBounds(area.removeFromLeft(labelColumn));
+        overwriteDisposalBox.setBounds(area.removeFromLeft(220));
+    });
 
     section(workspaceHeading, studio::spacingSection);
     add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)
