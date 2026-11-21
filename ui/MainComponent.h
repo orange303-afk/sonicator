@@ -276,6 +276,10 @@ private:
     juce::CriticalSection contributionLock;
     std::shared_ptr<contribute::Uploader> contributionUploader;
     std::unique_ptr<contribute::Scheduler> contributionScheduler;
+    // Last reported attempt, shown in Settings and written to the log. Empty until one runs.
+    juce::String contributionStatus;
+    // Coalesces the upload requests a tag change or a type confirmation can produce in a burst.
+    std::atomic<int64_t> contributionRequestedAt { 0 };
     juce::Component::SafePointer<juce::DialogWindow> splitDialog;
     juce::Component::SafePointer<SplitDialog> splitContent;
     juce::Component::SafePointer<juce::DialogWindow> duplicateDialog;
@@ -395,6 +399,9 @@ private:
     void startContribution();
     void askContributionConsent();
     bool contributionConsentCurrent() const;
+    // Sends the pending confirmations now, unless the same burst already asked a moment ago.
+    void requestContributionUpload(bool force);
+    void reportContributionOutcome(const juce::String& message, bool attempted);
     void setContributionEnabledFromPanel(bool wanted, juce::Component::SafePointer<SettingsPanel> panel);
     void deleteContributionData(std::function<void(bool, juce::String)> done);
     void wireContributionPanel(SettingsPanel&);

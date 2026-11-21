@@ -9,6 +9,8 @@
 #include "core/smart/NameHeuristics.h"
 #include "TestHelpers.h"
 #include <sqlite3.h>
+#include <atomic>
+#include <functional>
 using namespace sonicator;
 using namespace sonicator::contribute;
 
@@ -654,4 +656,75 @@ TEST_CASE("The reported platform name is one the intake accepts", "[contribute]"
    #elif JUCE_MAC
     CHECK(name == "mac");
    #endif
+}
+
+namespace {
+bool waitFor(std::function<bool()> done, int timeoutMs = 4000)
+{
+    const auto until = juce::Time::getMillisecondCounter() + (juce::uint32) timeoutMs;
+    while (juce::Time::getMillisecondCounter() < until)
+    {
+        if (done()) return true;
+        juce::Thread::sleep(5);
+    }
+    return done();
+}
+} // namespace
+
+TEST_CASE("Contribution schedule retries a rejected batch long before the daily cycle", "[contribute]")
+{
+    Uploader::Outcome accepted;
+    accepted.sent = true;
+    accepted.status = 204;
+    accepted.recordCount = 1;
+
+    Uploader::Outcome rejected;
+    rejected.status = 400;
+    rejected.error = "invalid record";
+    rejected.recordCount = 4;
+
+    Uploader::Outcome nothingToSend;
+
+    CHECK(schedule::delayAfter(accepted, true, 0) == schedule::cycleMs);
+    CHECK(schedule::delayAfter(nothingToSend, true, 0) == schedule::cycleMs);
+    CHECK(schedule::delayAfter(rejected, true, 1) == schedule::retryMs);
+    CHECK(schedule::delayAfter(rejected, true, 2) == schedule::retryMs * 2);
+    CHECK(schedule::delayAfter(rejected, true, 3) == schedule::retryMs * 4);
+    CHECK(schedule::delayAfter(rejected, true, 40) == schedule::retryCapMs);
+    CHECK(schedule::delayAfter(accepted, false, 0) == schedule::cycleMs);
+}
+
+TEST_CASE("Contribution scheduler uploads on request instead of waiting out its cycle", "[contribute]")
+{
+    Harness harness;
+    auto uploader = harness.make();
+    Scheduler scheduler(uploader, [] { return true; });
+    std::atomic<int> outcomes { 0 };
+    std::atomic<int> lastStatus { 0 };
+    scheduler.onOutcome = [&outcomes, &lastStatus](const Uploader::Outcome& outcome, bool attempted)
+    {
+        if (! attempted) return;
+        lastStatus = outcome.status;
+        ++outcomes;
+    };
+
+    scheduler.start();
+    // The first attempt is a minute away; asking for one must not wait for it.
+    juce::Thread::sleep(300);
+    CHECK(harness.transport->posts == 0);
+
+    scheduler.requestNow();
+    CHECK(waitFor([&harness] { return harness.transport->posts == 1; }));
+    CHECK(waitFor([&outcomes] { return outcomes.load() == 1; }));
+    CHECK(lastStatus.load() == 204);
+
+    // A failed attempt is reported too, so the person can see why nothing arrives.
+    harness.records[0].updatedAt += 1000;   // a new confirmation queued after the first upload
+    harness.transport->postResult = { 400, "invalid record" };
+    scheduler.requestNow();
+    CHECK(waitFor([&harness] { return harness.transport->posts == 2; }));
+    CHECK(waitFor([&outcomes] { return outcomes.load() == 2; }));
+    CHECK(lastStatus.load() == 400);
+
+    scheduler.stop();
 }

@@ -58,6 +58,7 @@ public:
     std::function<void(SettingsSection)> onSectionChanged;
     std::function<void()> onResetLayout;
     void setContributionEnabled(bool);
+    void setContributionStatus(const juce::String&);
 
     // A check is in flight while the worker talks to GitHub.
     bool updateInFlight = false;
@@ -107,6 +108,8 @@ private:
     juce::ToggleButton roundTagMenuToggle { "Round tag menu" };
     juce::ToggleButton alwaysOverwriteToggle { "Always overwrite original files" };
     juce::Label contributionNote;
+    // What the last upload attempt did; filled by the application, empty until one runs.
+    juce::Label contributionStatus;
     juce::TextButton contributionPreview { "What will be sent..." },
                      contributionDelete { "Delete my contributed data..." };
     juce::TextButton moveDatabase { "Move catalog..." }, openDatabase { "Open catalog..." },

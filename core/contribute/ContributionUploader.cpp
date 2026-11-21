@@ -1,10 +1,6 @@
 #include "ContributionUploader.h"
 
 namespace sonicator::contribute {
-namespace {
-constexpr int firstDelayMs = 60 * 1000;
-constexpr int cycleMs = 24 * 60 * 60 * 1000;
-}
 
 Uploader::Uploader(std::unique_ptr<Transport> transportToUse, Source sourceToUse,
                    juce::String appVersionToUse, juce::String osNameToUse)
@@ -111,6 +107,19 @@ Scheduler::~Scheduler()
     stop();
 }
 
+int64_t schedule::delayAfter (const Uploader::Outcome& outcome, bool attempted, int consecutiveFailures)
+{
+    if (! attempted || outcome.sent) return cycleMs;
+    // Nothing was queued, or the contribution is not configured: there is no point retrying sooner.
+    if (outcome.recordCount == 0 && outcome.status == 0) return cycleMs;
+
+    int64_t delay = retryMs;
+    const int failures = juce::jlimit(1, 8, consecutiveFailures);
+    for (int i = 1; i < failures; ++i)
+        delay = juce::jmin(delay * 2, retryCapMs);
+    return delay;
+}
+
 void Scheduler::start()
 {
     if (! isThreadRunning()) startThread();
@@ -118,17 +127,43 @@ void Scheduler::start()
 
 void Scheduler::stop()
 {
-    stopEvent.signal();
+    wakeEvent.signal();
     stopThread(20000);
+}
+
+void Scheduler::requestNow()
+{
+    wakeEvent.signal();
 }
 
 void Scheduler::run()
 {
-    if (stopEvent.wait(firstDelayMs)) return;
+    int64_t dueAt = juce::Time::currentTimeMillis() + schedule::firstDelayMs;
+    int failures = 0;
     while (! threadShouldExit())
     {
-        if (enabled && enabled()) uploader.uploadOnce();
-        if (stopEvent.wait(cycleMs)) return;
+        const auto now = juce::Time::currentTimeMillis();
+        if (now >= dueAt)
+        {
+            const bool attempted = enabled != nullptr && enabled();
+            Uploader::Outcome outcome;
+            if (attempted) outcome = uploader.uploadOnce();
+            const bool failed = attempted && ! outcome.sent && outcome.recordCount > 0;
+            failures = failed ? failures + 1 : 0;
+            if (onOutcome != nullptr) onOutcome(outcome, attempted);
+            dueAt = juce::Time::currentTimeMillis()
+                  + schedule::delayAfter(outcome, attempted, juce::jmax(1, failures));
+            continue;
+        }
+
+        // Wake early on stop() and requestNow(); a short cap keeps the clock honest across sleep.
+        const auto waitMs = (int) juce::jmin<int64_t>(dueAt - now, 60 * 1000);
+        if (wakeEvent.wait((int) juce::jmax(1, waitMs)))
+        {
+            wakeEvent.reset();
+            if (threadShouldExit()) return;
+            dueAt = 0;
+        }
     }
 }
 

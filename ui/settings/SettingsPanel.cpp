@@ -64,6 +64,11 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
         generalContent.addAndMakeVisible(c);
     generalContent.addAndMakeVisible(contributionPreview);
     generalContent.addAndMakeVisible(contributionDelete);
+    contributionStatus.setFont(noteFont());
+    contributionStatus.setJustificationType(juce::Justification::centredLeft);
+    contributionStatus.setColour(juce::Label::textColourId, theme::muted);
+    contributionStatus.setVisible(false);
+    generalContent.addAndMakeVisible(contributionStatus);
     audioContent.addAndMakeVisible(audio);
     audioHeading.setText("AUDIO & MIDI", juce::dontSendNotification);
     audioHeading.setFont(sectionFont());
@@ -485,19 +490,22 @@ void SettingsPanel::updateSectionVisibility()
 
     // Plugin mode hides the controls the host owns, not the whole General page.
     const bool showLibrary = !pluginMode;
-    for (auto* c : std::array<juce::Component*, 13> {
+    for (auto* c : std::array<juce::Component*, 14> {
              &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
              &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
-             &contributeDataToggle, &contributionNote, &contributionPreview, &contributionDelete })
+             &contributeDataToggle, &contributionNote, &contributionStatus, &contributionPreview,
+             &contributionDelete })
         if (!showLibrary) c->setVisible(false);
     if (showLibrary)
     {
         // Restore the ordinary state; the values are already owned by the controls.
-        for (auto* c : std::array<juce::Component*, 13> {
+        for (auto* c : std::array<juce::Component*, 14> {
                  &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
                  &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
-                 &contributeDataToggle, &contributionNote, &contributionPreview, &contributionDelete })
+                 &contributeDataToggle, &contributionNote, &contributionStatus, &contributionPreview,
+                 &contributionDelete })
             c->setVisible(true);
+        contributionStatus.setVisible(contributionStatus.getText().isNotEmpty());
     }
     close.setVisible(true);
     nav[(size_t) SettingsSection::audioMidi].setVisible(!pluginMode);
@@ -714,6 +722,13 @@ void SettingsPanel::setContributionEnabled(bool enabled)
     contributeDataToggle.setToggleState(enabled, juce::dontSendNotification);
 }
 
+void SettingsPanel::setContributionStatus(const juce::String& text)
+{
+    contributionStatus.setText(text, juce::dontSendNotification);
+    contributionStatus.setVisible(text.isNotEmpty() && contributeDataToggle.isVisible());
+    resized();
+}
+
 void SettingsPanel::showContributionPreview()
 {
     // The window deletes itself when dismissed, so it cannot live on the stack.
@@ -859,6 +874,8 @@ void SettingsPanel::layoutGeneralPage(juce::Rectangle<int> area)
         add(26, studio::spacingTight, [this](juce::Rectangle<int> area)
         { contributeDataToggle.setBounds(area.withTrimmedLeft(labelColumn)); });
         note(contributionNote, 34, 4);
+        if (contributionStatus.isVisible())
+            note(contributionStatus, 34, 2);
         add(studio::controlHeight, studio::spacingTight, [this](juce::Rectangle<int> area)
         {
             auto right = area.withTrimmedLeft(labelColumn);

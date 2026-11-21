@@ -49,8 +49,21 @@ private:
     juce::String appVersion, osName;
 };
 
-// Runs Uploader on a background thread: once after a short delay, then once a day. Every failure
-// is silent to the user by design; the next cycle simply tries again.
+// When the background cycle may try again. A rejected or unreachable batch is retried within the
+// session instead of waiting a whole day, so a broken deploy or a transient outage costs minutes.
+namespace schedule {
+constexpr int64_t firstDelayMs = 60 * 1000;
+constexpr int64_t cycleMs = 24 * 60 * 60 * 1000;
+constexpr int64_t retryMs = 10 * 60 * 1000;
+constexpr int64_t retryCapMs = 6 * 60 * 60 * 1000;
+
+// attempted == false means the toggle, consent or install id was missing: nothing was sent.
+// consecutiveFailures is 1 for the first failure and grows while the intake keeps refusing.
+int64_t delayAfter (const Uploader::Outcome& outcome, bool attempted, int consecutiveFailures);
+}
+
+// Runs Uploader on a background thread: once shortly after start, then once a day, and sooner after
+// a failure. Every attempt is reported through onOutcome; the thread never touches the UI itself.
 class Scheduler final : private juce::Thread
 {
 public:
@@ -58,11 +71,16 @@ public:
     ~Scheduler() override;
     void start();
     void stop();
+    // Uploads as soon as the thread can, instead of waiting for the next scheduled attempt.
+    // Safe from any thread: the settings toggle and a new confirmed label both use it.
+    void requestNow();
+    // Called on the scheduler thread after every attempt, including a refused one.
+    std::function<void(const Uploader::Outcome&, bool attempted)> onOutcome;
 private:
     void run() override;
     Uploader& uploader;
     std::function<bool()> enabled;
-    juce::WaitableEvent stopEvent;
+    juce::WaitableEvent wakeEvent;
 };
 
 } // namespace sonicator::contribute

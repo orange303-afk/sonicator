@@ -5953,18 +5953,15 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
 {
     if (ids.empty() || writeRepo == nullptr) return;
 
-    if (contributionScheduler != nullptr)
-    {
-        contributionScheduler->stop();
-        contributionScheduler.reset();
-    }
-    contributionUploader.reset();
     cancelFeedback = true;
     if (typeFeedbackWorker && typeFeedbackWorker->joinable())
         typeFeedbackWorker->join();
     cancelFeedback = false;
 
-    typeFeedbackWorker = std::make_unique<std::thread>([this, sampleIds = ids, repo = writeRepo.get()]()
+    // The contribution thread reads the same repository under its own lock, so a confirmation must
+    // not stop it: it sends the rows this worker writes as soon as they are visible.
+    juce::Component::SafePointer<MainComponent> safeContribution(this);
+    typeFeedbackWorker = std::make_unique<std::thread>([this, sampleIds = ids, repo = writeRepo.get(), safeContribution]()
     {
         if (repo == nullptr) return;
         for (auto id : sampleIds)
@@ -6036,6 +6033,12 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
                     id, type, tagNames, features, featuresV2);
             }
         }
+        // The rows are written; send them now rather than at tomorrow's cycle.
+        if (! cancelFeedback.load())
+            juce::MessageManager::callAsync([safeContribution]() mutable
+            {
+                if (safeContribution != nullptr) safeContribution->requestContributionUpload(false);
+            });
     });
 }
 void MainComponent::timerCallback()
@@ -6382,6 +6385,26 @@ void MainComponent::refreshTheme()
     sendLookAndFeelChange();
     repaint();
 }
+namespace {
+juce::String describeContributionOutcome(const contribute::Uploader::Outcome& outcome, bool attempted)
+{
+    const auto at = juce::Time::getCurrentTime().formatted("%H:%M");
+    if (! attempted)
+        return "Sending paused: the toggle, consent or install id is missing.";
+    if (outcome.sent)
+        return "Sent " + juce::String(outcome.recordCount) + " confirmed record(s) at " + at + ".";
+    if (outcome.replacedId)
+        return "The intake no longer knows this install; a new id was issued and the data is resent.";
+    if (outcome.recordCount == 0 && outcome.status == 0)
+        return "Nothing new to send at " + at + ".";
+    auto message = outcome.status > 0 ? "Not sent at " + at + " - the intake answered "
+                                             + juce::String(outcome.status)
+                                      : "Not sent at " + at + " - no connection";
+    if (outcome.error.isNotEmpty()) message += ": " + outcome.error.substring(0, 120);
+    return message + " Retrying in the background.";
+}
+} // namespace
+
 bool MainComponent::contributionConsentCurrent() const
 {
     return appSettings.contributionConsentVersion >= AppSettings::currentContributionConsentVersion;
@@ -6486,7 +6509,42 @@ void MainComponent::startContribution()
             return self != nullptr && self->appSettings.contributeTrainingData
                 && self->contributionConsentCurrent() && self->appSettings.contributionInstallId.isNotEmpty();
         });
+    // The scheduler thread owns no UI: marshal the one-line result to the message thread.
+    contributionScheduler->onOutcome = [safe](const contribute::Uploader::Outcome& outcome, bool attempted)
+    {
+        if (safe == nullptr) return;
+        const auto message = describeContributionOutcome(outcome, attempted);
+        juce::MessageManager::callAsync([safe, message, attempted]() mutable
+        {
+            if (safe != nullptr) safe->reportContributionOutcome(message, attempted);
+        });
+    };
     contributionScheduler->start();
+}
+
+void MainComponent::requestContributionUpload(bool force)
+{
+    // Only the application sends; a plugin shares the catalog and leaves the records for it.
+    if (embeddedUi || ! persistSessionState) return;
+    if (contributionUploader == nullptr) startContribution();
+    if (contributionScheduler == nullptr) return;
+    // A tag assignment or a type confirmation arrives in bursts; the intake allows 30 requests an
+    // hour from one address, so one request a minute is enough and keeps the page honest.
+    const auto now = juce::Time::currentTimeMillis();
+    const auto last = contributionRequestedAt.load();
+    if (! force && last > 0 && now - last < 60 * 1000) return;
+    contributionRequestedAt = now;
+    contributionScheduler->requestNow();
+}
+
+void MainComponent::reportContributionOutcome(const juce::String& message, bool attempted)
+{
+    // Nothing is tried while the toggle is off; that is not news for the panel.
+    if (! attempted && ! appSettings.contributeTrainingData) return;
+    contributionStatus = message;
+    juce::Logger::writeToLog("contribution: " + message);
+    if (settingsPanel != nullptr)
+        settingsPanel->setContributionStatus(message);
 }
 
 void MainComponent::askContributionConsent()
@@ -6523,6 +6581,11 @@ void MainComponent::askContributionConsent()
                 });
             }
             catch (...) {}
+            if (safe != nullptr && accepted)
+            {
+                safe->contributionStatus.clear();
+                safe->requestContributionUpload(true);
+            }
         });
 }
 
@@ -6548,6 +6611,12 @@ void MainComponent::setContributionEnabledFromPanel(bool wanted,
     }
     catch (...) {}
     if (panel != nullptr) panel->setContributionEnabled(appSettings.contributeTrainingData);
+    // Turning the toggle on sends what is already waiting instead of waiting out the daily cycle.
+    if (appSettings.contributeTrainingData)
+    {
+        contributionStatus.clear();
+        requestContributionUpload(true);
+    }
 }
 
 void MainComponent::deleteContributionData(std::function<void(bool, juce::String)> done)
@@ -6586,6 +6655,7 @@ void MainComponent::wireContributionPanel(SettingsPanel& panel)
 {
     juce::Component::SafePointer<SettingsPanel> safePanel(&panel);
     panel.setContributionEnabled(appSettings.contributeTrainingData && contributionConsentCurrent());
+    panel.setContributionStatus(contributionStatus);
     panel.onContributionToggle = [this, safePanel](bool wanted)
     {
         setContributionEnabledFromPanel(wanted, safePanel);
@@ -6997,6 +7067,8 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
             if (safe != nullptr) safe->showRelocateDialog();
         });
     }
+    // The contribution thread was stopped with the old repositories; the new catalog needs its own.
+    startContribution();
     return true;
 }
 void MainComponent::showAudioSettings()
