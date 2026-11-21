@@ -68,6 +68,9 @@ Uploader::Outcome Uploader::uploadOnce()
     if (source.commitWatermark) source.commitWatermark(batch.watermark);
     outcome.sent = true;
     outcome.error.clear();
+    // One cheap query tells the scheduler whether another request is waiting.
+    if (source.fetch)
+        outcome.morePending = ! source.fetch(batch.watermark, 1).empty();
     return outcome;
 }
 
@@ -109,7 +112,10 @@ Scheduler::~Scheduler()
 
 int64_t schedule::delayAfter (const Uploader::Outcome& outcome, bool attempted, int consecutiveFailures)
 {
-    if (! attempted || outcome.sent) return cycleMs;
+    if (! attempted) return cycleMs;
+    // A full batch usually means the watermark still has rows, so keep going instead of waiting
+    // a day for the rest.
+    if (outcome.sent) return outcome.morePending ? drainMs : cycleMs;
     // Nothing was queued, or the contribution is not configured: there is no point retrying sooner.
     if (outcome.recordCount == 0 && outcome.status == 0) return cycleMs;
 

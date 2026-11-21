@@ -87,6 +87,7 @@ struct Harness
     int64_t watermark = 0;
     int64_t committed = -1;
     std::vector<Record> records = oneRecord();
+    int perFetch = 1000;   // a backlog larger than one batch, for the drain test
 
     Uploader make()
     {
@@ -102,8 +103,9 @@ struct Harness
         source.fetch = [this](int64_t after, int limit)
         {
             std::vector<Record> out;
+            const int cap = juce::jmin(limit, perFetch);
             for (const auto& record : records)
-                if (record.updatedAt > after && (int) out.size() < limit) out.push_back(record);
+                if (record.updatedAt > after && (int) out.size() < cap) out.push_back(record);
             return out;
         };
         source.vocabulary = [] { return vocabulary(); };
@@ -727,4 +729,42 @@ TEST_CASE("Contribution scheduler uploads on request instead of waiting out its 
     CHECK(lastStatus.load() == 400);
 
     scheduler.stop();
+}
+
+TEST_CASE("Contribution uploader reports a backlog left after a full batch", "[contribute]")
+{
+    Harness harness;
+    auto second = harness.records[0];
+    second.recordId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    second.updatedAt += 1;
+    harness.records.push_back(second);
+    harness.perFetch = 1;   // the first batch can carry only one record
+
+    auto uploader = harness.make();
+    const auto first = uploader.uploadOnce();
+    CHECK(first.sent);
+    CHECK(first.recordCount == 1);
+    CHECK(first.morePending);
+
+    const auto last = uploader.uploadOnce();
+    CHECK(last.sent);
+    CHECK_FALSE(last.morePending);
+}
+
+TEST_CASE("Contribution schedule drains a backlog instead of waiting a day", "[contribute]")
+{
+    Uploader::Outcome withBacklog;
+    withBacklog.sent = true;
+    withBacklog.status = 204;
+    withBacklog.recordCount = 400;
+    withBacklog.morePending = true;
+
+    Uploader::Outcome finished;
+    finished.sent = true;
+    finished.status = 204;
+    finished.recordCount = 400;
+
+    CHECK(schedule::delayAfter(withBacklog, true, 0) == schedule::drainMs);
+    CHECK(schedule::delayAfter(finished, true, 0) == schedule::cycleMs);
+    CHECK(schedule::drainMs >= 2 * 60 * 1000);   // stays under the intake's 30 requests an hour
 }

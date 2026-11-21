@@ -26,6 +26,7 @@ public:
     {
         bool sent = false;        // a 2xx arrived and the watermark moved
         bool replacedId = false;  // the intake answered 410 and a fresh install id was issued
+        bool morePending = false; // a full batch went out and the watermark still has records
         int status = 0;
         int recordCount = 0;
         juce::String error;
@@ -56,6 +57,9 @@ constexpr int64_t firstDelayMs = 60 * 1000;
 constexpr int64_t cycleMs = 24 * 60 * 60 * 1000;
 constexpr int64_t retryMs = 10 * 60 * 1000;
 constexpr int64_t retryCapMs = 6 * 60 * 60 * 1000;
+// A batch is bounded by the intake's body size, so a large backlog needs several requests. Three
+// minutes keeps the drain under the intake's 30 requests an hour from one address.
+constexpr int64_t drainMs = 3 * 60 * 1000;
 
 // attempted == false means the toggle, consent or install id was missing: nothing was sent.
 // consecutiveFailures is 1 for the first failure and grows while the intake keeps refusing.
