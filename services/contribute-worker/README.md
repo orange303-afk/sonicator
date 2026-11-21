@@ -30,6 +30,34 @@ The public address is `https://contribute.sampledicer.pro`, served by a Worker r
 with a proxied CNAME. `*.workers.dev` also works but is blocked by HTTP/2 on some networks (including
 the development machine), so the app uses the custom domain.
 
+**Deploy this Worker whenever the intake schema changes.** A released app sends the newest
+`featureSchema` it knows, and the intake rejects a batch as a whole when any record fails validation,
+so a stale Worker silently stops all contribution: the app ignores a non-2xx response, keeps its
+watermark and retries at the next launch. Production ran a 14-feature-only Worker from 2026-11-11 to
+2026-11-21, which rejected every 84-feature record with `400 invalid record` while `/v1/health`
+still answered `ok`.
+
+After a deploy, check both schemas against the live endpoint (it writes one test object and removes
+it again):
+
+```sh
+node --input-type=module -e '
+const installId = crypto.randomUUID();
+const post = (features, featureSchema) => fetch("https://contribute.sampledicer.pro/v1/contribute", {
+  method: "POST", headers: { "content-type": "application/json" },
+  body: JSON.stringify({ schema: "contribute.v1", installId, batchId: crypto.randomUUID(),
+    appVersion: "0.0.0-diagnostic", os: "mac", sentAt: new Date().toISOString(),
+    records: [{ recordId: crypto.randomUUID(), featureSchema, features, tags: [] }] }),
+});
+for (const [count, schema] of [[14, 1], [84, 2]]) {
+  const response = await post(Array.from({ length: count }, () => 0.5), schema);
+  console.log(`schema ${schema}:`, response.status, (await response.text()).trim());
+}'
+```
+
+`204` for both is a working intake; remove the test objects under `raw/<installId>/` in the bucket
+afterwards.
+
 The first deploy needs the bucket to exist and the route to be enabled for the script:
 
 ```sh
