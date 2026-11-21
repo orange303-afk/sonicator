@@ -51,10 +51,13 @@ have unknown origin and stay on your computer. A custom
 tag is text you typed, so it is the one field that could carry something personal by accident: tags
 that look like a path, an address or a URL are dropped, and tags are limited to 32 characters.
 
-A batched request is one `POST` of at most 256 KB, made on a background thread about once a day,
-to `https://contribute.sampledicer.pro` (the Worker code is in
-`services/contribute-worker/`). No request is made while indexing or playback is in trouble; a
-failed request changes nothing and is retried the next day.
+A batched request is one `POST` of at most 256 KB to `https://contribute.sampledicer.pro` (the
+Worker code is in `services/contribute-worker/`), made on a background thread: about a minute after
+the application starts, after you confirm a type or assign a tag, when you switch contribution on,
+and otherwise about once a day. A request the server refuses is retried after ten minutes, then with
+a growing pause up to six hours; the last result is written to the application log and shown in
+Settings. Sending never blocks the interface, and a failed request changes nothing that is already
+on your computer.
 
 ## What you can check and undo
 
