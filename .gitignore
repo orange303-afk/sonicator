@@ -2,6 +2,7 @@
 /.superpowers/
 /services/contribute-worker/out/
 /services/training/out/
+/data/
 .DS_Store
 /graphify-out/
 /dist/

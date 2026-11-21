@@ -79,3 +79,16 @@ CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... node scripts/export.mjs --out
 The script drops deleted install ids, keeps the last received version of each `recordId`, writes
 JSONL and prints the most frequent custom tags and types. The dataset and the model prototypes are
 always rebuilt from R2 this way, so a deletion lands in the next release.
+
+## Scheduled local copy
+
+`tools/contribution-sync.mjs` does the same export into the project and is what the training stage
+reads: `data/contributions/latest/contribute.jsonl` plus `report.md`, and one row per run in
+`data/contributions/history.csv`. That directory is git-ignored and never committed. Credentials come
+from the login keychain (service `Sonicator.Cloudflare.R2`, account `sonicator-contribute`), so an
+unattended run needs no environment. Run it by hand with `node tools/contribution-sync.mjs`.
+
+On macOS a LaunchAgent runs it every six hours:
+`~/Library/LaunchAgents/pro.sampledicer.sonicator.contribution.plist`, logging to
+`data/contributions/sync.log`. Remove it with
+`launchctl bootout gui/$(id -u)/pro.sampledicer.sonicator.contribution`.
