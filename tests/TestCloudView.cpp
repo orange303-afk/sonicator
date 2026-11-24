@@ -204,7 +204,11 @@ TEST_CASE("Painting 35k points stays inside a frame budget", "[cloud][view][perf
     // red test, while a real regression (one fill per point again) still shows up. The Windows
     // ceiling is wider on purpose: MSVC's Debug build draws the same geometry through Direct2D and
     // measures about twice the Apple toolchain's Debug time on the same frame.
-    const double settleBudget = JUCE_WINDOWS ? 100.0 : 45.0;
+    #if defined (_WIN32)
+    const double settleBudget = 100.0;
+    #else
+    const double settleBudget = 45.0;
+    #endif
     REQUIRE(cpu.front() < settleBudget);   // Debug settle frame: layers composed, labels shaped once
     REQUIRE(cpu.back() < 10.0);    // cached frame: what a hover repaint actually costs
 }
