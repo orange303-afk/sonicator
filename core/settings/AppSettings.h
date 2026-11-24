@@ -43,6 +43,13 @@ struct AppSettings
     juce::String lastFolder;           // restored on the next launch when still in the catalog
     juce::String lastSamplePath;       // restored selection without starting preview playback
     bool hideEmpty = true;
+    // Library structure filters. Persisted like Hide empty: the view keeps the user's choice across
+    // restarts, and Clear filters restores both.
+    bool showLoops = true;
+    bool showOneShots = true;
+    // A plain click in the search field places the caret and types; the history opens from its own
+    // button. True restores the earlier behaviour for anyone who preferred it.
+    bool searchHistoryOnClick = false;
     bool ignoreSymlinks = false;  // the library hides rows whose path is a symbolic link
     bool cloudView = false;       // the library opens as the tag map instead of the list
     bool roundTagMenu = false;    // the Tags pill and Ctrl/Cmd+T open the radial tag menu

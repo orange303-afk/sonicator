@@ -6,6 +6,19 @@
 #include <cmath>
 #include <cstdlib>
 namespace sonicator {
+juce::String formatLengthText(const double seconds)
+{
+    if (! (seconds > 0) || ! std::isfinite(seconds)) return "--";
+    // 59.999 rounds to 60.00, which reads as a minute that is still in seconds; hand that edge to
+    // the clock form instead of printing "60.00 s".
+    if (seconds < 59.995) return juce::String(seconds, 2) + " s";
+    const auto total = (int64_t) std::llround(seconds);
+    const auto hours = total / 3600, minutes = (total / 60) % 60, rest = total % 60;
+    juce::String out;
+    if (hours > 0) out << juce::String(hours).paddedLeft('0', 2) << ":";
+    out << juce::String(minutes).paddedLeft('0', 2) << ":" << juce::String(rest).paddedLeft('0', 2);
+    return out;
+}
 juce::String sampleStatusText(const SampleRecord& r, bool ignored)
 {
     if (r.missing) return "Missing";
@@ -386,6 +399,7 @@ void FileListPanel::setVirtualSamples(std::vector<int64_t> orderedIds, RowLoader
     if (leadRow >= 0 && leadRow < getNumRows()) leadId = idAt(leadRow);
     const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
     virtualMode = true;
+    ownerOrdered = true;
     virtualIds = std::move(orderedIds);
     virtualRows.clear();
     all.clear(); visible.clear(); search.clear();
@@ -409,7 +423,7 @@ void FileListPanel::setVirtualSamples(std::vector<int64_t> orderedIds, RowLoader
     else table.scrollToEnsureRowIsOnscreen(0);
     repaint();
 }
-void FileListPanel::setSamples(std::vector<SampleRecord> records)
+void FileListPanel::setSamples(std::vector<SampleRecord> records, bool alreadyOrdered)
 {
     std::vector<int64_t> selectedIds;
     int64_t leadId = 0;
@@ -419,6 +433,7 @@ void FileListPanel::setSamples(std::vector<SampleRecord> records)
     if (leadRow >= 0 && leadRow < getNumRows()) leadId = idAt(leadRow);
     const juce::ScopedValueSetter<bool> restoring(restoringSelection, true);
     virtualMode = false; virtualIds.clear(); virtualRows.clear(); rowLoader = nullptr;
+    ownerOrdered = alreadyOrdered;
     rowTags.clear(); duplicateCounts.clear(); smartDisplays.clear(); stereoPartners.clear();
     all = std::move(records); rebuild();
     if (selectedIds.empty()) return;
@@ -474,7 +489,10 @@ void FileListPanel::rebuild()
 {
     visible.clear();
     for (auto& r : all) if (search.isEmpty() || r.fileName.containsIgnoreCase(search)) visible.push_back(r);
-    sortVisible(sortColumn,ascending);
+    // A page that came from the catalog query keeps the catalog's order. Sorting it again here
+    // would order only the rows of this page, and for Type/BPM/Key/Genre there is no local key at
+    // all, which is how an ascending BPM page could read 95, 100, 90.
+    if (! ownerOrdered) sortVisible(sortColumn, ascending);
     table.deselectAllRows(); table.updateContent(); repaint();
 }
 void FileListPanel::sortOrderChanged(int column, bool forwards)
@@ -487,13 +505,17 @@ void FileListPanel::sortOrderChanged(int column, bool forwards)
         return;
     }
     sortColumn = column; ascending = forwards;
-    sortVisible(column, forwards);
+    // An owner-ordered page is re-queried; its new order arrives with the next setSamples call.
+    if (! ownerOrdered) sortVisible(column, forwards);
     table.updateContent(); table.repaint();
     // Rebuilding a page re-applies its order locally; only a real header click reaches the owner.
     if (! restoringSelection && onSortChanged != nullptr) onSortChanged(column, forwards);
 }
 void FileListPanel::sortVisible(int column, bool forwards)
 {
+    // Type, BPM, Key and Genre are resolved by the catalog query, which knows the manual overrides
+    // and the "unknown last" rule; a page has no local key for them.
+    if (column >= 10) return;
     std::stable_sort(visible.begin(),visible.end(),[column,forwards](const auto& a,const auto& b)
     {
         int order = 0;
@@ -624,7 +646,7 @@ void FileListPanel::paintCell(juce::Graphics& g,int row,int col,int w,int h,bool
     {
         case 1: value = r.fileName; break;
         case 2: value = r.format; break;
-        case 3: value = r.duration > 0 ? juce::String(r.duration,2) + " s" : "--"; break;
+        case 3: value = formatLengthText(r.duration); break;
         case 4: value = r.sampleRate > 0 ? juce::String(r.sampleRate/1000,1) + " kHz" : "--"; break;
         case 5: value = stereoPartners.count(r.id) != 0 ? "L+R"
             : (r.numChannels > 0 ? juce::String(r.numChannels) : "--"); break;

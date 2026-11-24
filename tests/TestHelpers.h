@@ -3,6 +3,18 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <cmath>
 #include <vector>
+// The catalog stores the separator of the platform, so a test that builds a path from a folder and
+// a relative name joins them the same way instead of hard-coding '/'. On macOS and Linux the result
+// is byte-identical to the old string, which keeps those expectations readable.
+inline juce::String testPath(const juce::String& folder, const juce::String& relative)
+{
+    return juce::File(folder).getChildFile(relative).getFullPathName();
+}
+// A path written with '/' in a test, as it ends up in the catalog on this platform.
+inline juce::String testCatalogPath(const juce::String& path)
+{
+    return path.replaceCharacter('/', juce::File::getSeparatorChar());
+}
 // Recursive component-ID lookup: JUCE's own findChildWithID only searches direct children.
 inline juce::Component* findDescendantWithID(juce::Component& root, const juce::String& id)
 {

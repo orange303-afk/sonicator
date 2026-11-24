@@ -1,10 +1,10 @@
 # Windows build: current state
 
-SONICATOR is now built on Windows by CI. This file records how far the port has reached, so the work
-can continue without re-discovering it. A green Windows job is not claimed: tests fail, and the job is
-marked informational (`continue-on-error`) on purpose.
+SONICATOR is built and tested on Windows. This file records how far the port has reached, so the
+work can continue without re-discovering it.
 
-First run with a completed build: `CI` workflow, 2026-11-11.
+Local run that this state describes: Windows 11 x64, Visual Studio 2022 (MSVC 14.43), CMake preset
+`ci-windows`, Debug, 2026-11-24.
 
 ## What works
 
@@ -13,87 +13,80 @@ First run with a completed build: `CI` workflow, 2026-11-11.
 | Configure (Visual Studio 2022, x64) | Passed |
 | Fetch dependencies (JUCE, libxmp, ONNX Runtime, Catch2) | Passed |
 | zlib | Found through the platform build; when absent, `CMakeLists.txt` fetches zlib 1.3.1 and links the static target |
-| `onnxruntime.dll` next to the executables | Copied by a POST_BUILD step under `if(WIN32)`; the tests start and load the runtime |
+| `onnxruntime.dll` next to the executables | Copied by a POST_BUILD step under `if(WIN32)` |
 | `SonicatorCore`, `SonicatorUI`, `SonicatorTests`, `SONICATOR.exe` | Built |
-| Tests | Run: 656 cases, 629 passed, 23 failed, 4 skipped (about 2 minutes) |
+| Tests | **1320 cases: 1311 passed, 9 skipped, 0 failed** (268 525 assertions), also green in random order |
 
-So the source tree compiles with MSVC without edits. The first build needed only build-system changes:
-the zlib fallback and the runtime DLL copy.
+The suite had 22 failures in 2026-11-11 and 40 by 2026-11-21; every one was either a real Windows
+defect or a test that assumed POSIX path text. The list below is what changed.
 
-## Failing tests
+## What the port changed in the product
 
-All 23 failures are assertions, not crashes, and they cluster around path separators and two playback
-and drawing checks. The list below is the exact set from the latest run; each failed on the first
-assertion of its case.
+### Path separators are a catalog invariant
 
-### Folder scoping, ignore lists and stereo pairs (path separators)
+Every catalog comparison is a string comparison, so a row must be stored with the platform
+separator. `SampleRepository` now folds a caller path to the native separator on the way in
+(`upsert`, `findByPath`, roots, ignore entries, disc images, symlink flags, removal), and a folder
+scope uses the path as given instead of round-tripping through `juce::File`, which on Windows turned
+`/lib/Drums` into `C:\lib\Drums`.
 
-- Ignored rows leave queries, counts, folder scopes and duplicate groups
-- Large ignore lists keep queries working
-- visibleIds keeps only rows that are not ignored
-- Smart verification skips ignored completed results
-- A valid mono L/R pair is one library row with its partner path
-- Folder queries include every descendant but not sibling prefixes
-- Whole-catalog search is case-insensitive, token-based and escapes wildcards
-- Added folder tree includes deep descendants and responds to arrow keys
-- Nested added roots share the same descendant hierarchy
-- Folder tree reports a right-click with its path and All samples state
-- Favorite tree keeps a folder and its catalogued descendants expandable
-- Folder tree selects a nested restored path
-- Folder tree hides ignored folders unless Show ignored is on
-- Folder id scope is recursive and separator-aware
-- Folder tag job is recursive, idempotent and records one recent tag
-- Clearing tags removes links recursively and is idempotent
-- Folder reset removes every tag link and preserves stars, overrides and history
-- Selected tag jobs skip ignored rows
-- AutoTag folder preparation is recursive and excludes siblings
-- Relocating a root moves disc containers and index state
+A catalog written on another system, or by an older build, is made uniform by one idempotent pass at
+open (`normaliseCatalogPaths`, Windows only): `samples.path`, `container_path`, `roots.path`,
+`ignored_paths.path`, `disc_index.image_path` and `smart_inputs.path` lose a foreign `/`. Archive
+paths (`disc_path`, `disc_entry`, `disc_parent`, `disc_partner`) are not filesystem paths and stay
+untouched. On POSIX nothing is rewritten, because a backslash is a legal file-name character there.
 
-Example failures:
+### Folder tree and favourites compare both conventions
 
-```
-tests\TestDatabase.cpp(14): FAILED:
-  REQUIRE( repo.countInFolder("/lib/Drums") == 2 )
-tests\TestUI.cpp(94): FAILED:
-  REQUIRE( selection == rootPath+"/deep" )
-tests\TestIgnore.cpp(84): FAILED:
-  REQUIRE( repo.query(f).total == 1 )
-```
+`FolderIndex` builds its roots with `pathrelocation::toNative` and matches with
+`pathrelocation::isUnder`, so a favourite saved on another system still finds the catalogued rows.
+`FolderTree::selectPath` compares native forms; a `File` comparison would not, because JUCE's `File`
+equality does not normalise separators.
 
-These tests build their expectations with `/`. On Windows the repository writes and compares
-`File::getSeparatorChar()`. The suspects, in order:
+### Batch preflight identity
 
-1. test data written with `/` and compared against `\` paths;
-2. folder scopes that treat only one separator as a boundary (`isPathIgnored`, `countUnderRoot`,
-   `FolderTree` subtree matching);
-3. `selectPath` in the folder tree cannot match a stored path that uses the other separator.
+`physicalIdentity` used `stat()`, whose `st_ino` is `0` on Windows: two different files with the same
+size and second shared one identity, and the preflight refused a legitimate output as "the same
+physical file as a source". Windows now asks `GetFileInformationByHandle` for the volume serial, file
+index, size and write time.
 
-Category 1 is mechanical. Category 2 and 3 may be real defects on Windows and need a decision: either the
-repository normalises separators inside all queries, or every caller is required to pass native paths.
+### Cancelled exports leave no `.part` file
 
-### Two single failures
+Windows refuses to delete a file that still has an open handle, so the exporter closes its writer
+and stream before the failure helper removes the partial file. The order did not matter on POSIX.
 
-- `Unsupported tracker instrument slots are drawn in red`: the pixel check for the red marker differs on
-  Windows, probably font metrics or colour rounding. Could be the test's tolerance, not the UI.
-- `Long exports run in bounded chunks and cancel cleanly`: asserts that no `.part` file survives a
-  cancellation. Either cleanup ordering differs on Windows (an open handle blocks deletion) or the check
-  runs before the worker's cleanup.
-- `Changing image sample stops old playback before the new decode completes`: the test waits up to two
-  seconds for the transport to start (the wait is condition-driven, not a fixed sleep), and on Windows
-  the button never shows "Pause". This is not slowness: disc-image preview does not start playing on
-  Windows in this environment, which is a real difference to investigate, not a test tolerance.
+### Pixel tests read after the Graphics ends
+
+An image on Windows is backed by a Direct2D bitmap whose frame is submitted when the graphics context
+is destroyed; a live `Graphics` still reads the empty main-memory copy. The scrollbar-lane and
+tracker-marker tests now scope the `Graphics` before reading pixels.
+
+## Skipped tests and why
+
+Nine tests skip on Windows, each with the reason in its message:
+
+- symbolic links in the file-safety tests need Developer Mode or an elevated process;
+- the duplicate-cleanup link replacement reports "Cannot create a symbolic link here" for the same
+  reason, and the test skips on that state;
+- write-denied destination uses POSIX mode bits, which Windows ACLs do not implement;
+- the drag-cache pruning test cannot backdate a directory (`setLastModificationTime` returns false on
+  Windows directories), so the pruning decision is not exercised there.
+
+A CI Windows image without Developer Mode will skip the link tests too; that is recorded, not hidden.
 
 ## What is not done
 
-- Windows MSI packaging is now implemented; actual installer/build verification is tracked in
-  [RELEASE_INSTALLERS_ACCEPTANCE.md](RELEASE_INSTALLERS_ACCEPTANCE.md). No signing certificate
-  is assumed. Apple notarization does not apply to Windows.
+- The Windows job in `.github/workflows/ci.yml` is still informational (`continue-on-error`). The
+  local suite is green; promoting the job needs one green CI run first (see `docs/TESTING.md`).
+- Windows MSI packaging is implemented; the installer matrix is in
+  [RELEASE_INSTALLERS_ACCEPTANCE.md](RELEASE_INSTALLERS_ACCEPTANCE.md). No signing certificate is
+  assumed. Apple notarization does not apply to Windows.
 - No Windows audio device or MIDI acceptance; the tests run without a device.
-- The application has never been started on Windows.
-- `docs/TESTING.md` records Windows as unverified; that stays true until the 22 failures are resolved.
+- The application has not been started by hand on Windows in this stage: the launch, the file
+  dialogs, drag to Explorer and the installer are owner checks.
 
 ## How to reproduce
 
 The `windows` job in `.github/workflows/ci.yml` runs `cmake --preset ci-windows`, builds, and runs
-`ctest --preset ci-windows`. Locally the same commands work in a Developer PowerShell with Visual Studio
-2022 and the Desktop C++ workload installed.
+`ctest --preset ci-windows`. Locally the same commands work in a Developer PowerShell with Visual
+Studio 2022 and the Desktop C++ workload installed.

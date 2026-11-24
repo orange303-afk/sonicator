@@ -1,5 +1,8 @@
 #include "BatchTypes.h"
 #include <sys/stat.h>
+#if JUCE_WINDOWS
+#include <windows.h>
+#endif
 
 namespace sonicator::batch
 {
@@ -371,11 +374,32 @@ juce::String sourceFingerprint(const SourceSnapshot& source) { return source.ide
 
 juce::String physicalIdentity(const juce::File& file)
 {
+   #if JUCE_WINDOWS
+    // stat() on Windows leaves st_ino at 0, so two different files of the same size and second
+    // would share an identity and the preflight would refuse a legitimate output path. The file
+    // index from the handle is the real identity; a file that cannot be opened has none.
+    const auto widePath = file.getFullPathName().toWideCharPointer();
+    const auto handle = CreateFileW(widePath, 0,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return file.getFullPathName();
+    BY_HANDLE_FILE_INFORMATION info {};
+    const bool read = GetFileInformationByHandle(handle, &info) != 0;
+    CloseHandle(handle);
+    if (! read) return file.getFullPathName();
+    const auto index = ((juce::int64) info.nFileIndexHigh << 32) | (juce::int64) info.nFileIndexLow;
+    const auto size = ((juce::int64) info.nFileSizeHigh << 32) | (juce::int64) info.nFileSizeLow;
+    const auto modified = ((juce::int64) info.ftLastWriteTime.dwHighDateTime << 32)
+                        | (juce::int64) info.ftLastWriteTime.dwLowDateTime;
+    return juce::String((juce::int64) info.dwVolumeSerialNumber) + ":" + juce::String(index)
+        + ":" + juce::String(size) + ":" + juce::String(modified);
+   #else
     struct stat info {};
     if (stat(file.getFullPathName().toRawUTF8(), &info) != 0) return file.getFullPathName();
     return juce::String((juce::int64) info.st_dev) + ":" + juce::String((juce::int64) info.st_ino)
         + ":" + juce::String((juce::int64) info.st_size) + ":"
         + juce::String((juce::int64) info.st_mtime);
+   #endif
 }
 
 bool checkedFrameMath(int64_t frames, int inRate, int outRate, int64_t& out)

@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.22)
 # systems). 10.15 is the last system the Intel Macs that cannot run Big Sur receive; an arm64 slice
 # is promoted to 11.0 by the toolchain because no Apple Silicon Mac runs anything older.
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version")
-project(Sonicator VERSION 0.2.0 LANGUAGES C CXX)
+project(Sonicator VERSION 0.3.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -328,9 +328,17 @@ endif()
 if(SONICATOR_BUILD_PLUGIN)
     add_subdirectory(plugin)
 endif()
+# A Windows shell icon sits at 16-48 px beside icons that fill their box, so its artwork is trimmed
+# to a small margin (resources/branding/make-icon.py); Apple's grid expects the inset canvas, so
+# macOS keeps the glossy 1024 derivative untouched.
+if(WIN32)
+    set(SONICATOR_APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/icon-windows-1024.png")
+else()
+    set(SONICATOR_APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/icon-glossy-chevron-1024.png")
+endif()
 juce_add_gui_app(Sonicator PRODUCT_NAME "SONICATOR" COMPANY_NAME "Sonicator"
     BUNDLE_ID "com.sonicator.browser" MICROPHONE_PERMISSION_ENABLED FALSE
-    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/icon-glossy-chevron-1024.png")
+    ICON_BIG "${SONICATOR_APP_ICON}")
 target_sources(Sonicator PRIVATE app/Main.cpp)
 target_link_libraries(Sonicator PRIVATE SonicatorUI)
 if(APPLE)

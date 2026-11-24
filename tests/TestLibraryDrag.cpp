@@ -151,9 +151,14 @@ TEST_CASE("The scrollbar lane is 14 px and its thumb is 8 px wide", "[ui][librar
     SonicatorLookAndFeel lookAndFeel;
     REQUIRE(lookAndFeel.getDefaultScrollbarWidth() == 14);
     juce::Image image(juce::Image::ARGB, 14, 200, true);
-    juce::Graphics g(image);
     juce::ScrollBar bar(false);
-    lookAndFeel.drawScrollbar(g, bar, 0, 0, 14, 200, true, 40, 80, false, false);
+    // The Graphics must end before the pixels are read: on Windows an image is backed by a Direct2D
+    // bitmap whose frame is submitted when the context is destroyed, so a live context still reads
+    // the empty main-memory copy.
+    {
+        juce::Graphics g(image);
+        lookAndFeel.drawScrollbar(g, bar, 0, 0, 14, 200, true, 40, 80, false, false);
+    }
     int painted = 0;
     for (int x = 0; x < 14; ++x)
         if (image.getPixelAt(x, 60).getAlpha() > 0) ++painted;

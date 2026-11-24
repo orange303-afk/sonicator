@@ -51,9 +51,10 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     setWantsKeyboardFocus(true);
 
     // --- general page controls -------------------------------------------------------------
-    for (auto* c : std::array<juce::Component*, 23> {
+    for (auto* c : std::array<juce::Component*, 26> {
              &appearance, &themeLabel, &scaleLabel, &languageHeading, &languageLabel, &languageNote,
              &libraryHeading, &databaseKey, &databaseLabel, &libraryNote, &databaseStatus,
+             &searchHeading, &searchHistoryOnClickToggle, &searchHistoryNote,
              &tagsHeading, &roundTagMenuToggle, &roundTagMenuNote,
              &editingHeading, &alwaysOverwriteToggle, &alwaysOverwriteNote,
              &workspaceHeading, &workspaceNote, &themeBox, &scaleBox, &languageBox, &moveDatabase })
@@ -164,6 +165,22 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     databaseLabel.setMinimumHorizontalScale(0.8f);
     libraryNote.setFont(noteFont()); libraryNote.setJustificationType(juce::Justification::centredLeft);
     databaseStatus.setFont(noteFont()); databaseStatus.setJustificationType(juce::Justification::centredLeft);
+    searchHeading.setText("SEARCH", juce::dontSendNotification);
+    searchHeading.setFont(sectionFont());
+    searchHeading.setColour(juce::Label::textColourId, theme::muted);
+    searchHistoryOnClickToggle.setComponentID("settingsSearchHistoryOnClick");
+    searchHistoryOnClickToggle.setToggleState(initial.searchHistoryOnClick, juce::dontSendNotification);
+    searchHistoryOnClickToggle.onClick = [this]
+    {
+        current.searchHistoryOnClick = searchHistoryOnClickToggle.getToggleState();
+        notifySettings();
+    };
+    searchHistoryNote.setText("Off, a click in the search field places the caret so typing starts at once; "
+                              "the clock button next to Clear opens the last 10 searches. On, the "
+                              "history opens on every click, as earlier builds did.",
+                              juce::dontSendNotification);
+    searchHistoryNote.setFont(noteFont());
+    searchHistoryNote.setJustificationType(juce::Justification::centredLeft);
     tagsHeading.setText("TAGS", juce::dontSendNotification); tagsHeading.setFont(sectionFont());
     tagsHeading.setColour(juce::Label::textColourId, theme::muted);
     roundTagMenuToggle.setComponentID("settingsRoundTagMenu");
@@ -847,6 +864,13 @@ void SettingsPanel::layoutGeneralPage(juce::Rectangle<int> area)
         note(libraryNote, 36, 6);
         note(databaseStatus, 22, 2);
     }
+
+    // Search behaviour is not a catalog control, so the plugin window shows it too: typing in the
+    // plug-in is exactly where a history popup in front of the field hurts most.
+    section(searchHeading, studio::spacingSection);
+    add(26, studio::spacingTight, [this](juce::Rectangle<int> area)
+    { searchHistoryOnClickToggle.setBounds(area.withTrimmedLeft(labelColumn)); });
+    note(searchHistoryNote, 52, 2);
 
     section(tagsHeading, studio::spacingSection);
     add(26, studio::spacingTight, [this](juce::Rectangle<int> area)

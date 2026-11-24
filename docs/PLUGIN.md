@@ -95,6 +95,15 @@ The toolbar and the library menu show a one-line explanation instead of the disa
 MIDI come from the host: `processBlock` feeds `AudioEngine` host mode, so preview audio and the DAW
 keyboard play the selected sample and no device is opened.
 
+## Keyboard focus
+
+The editor asks for keyboard focus on the click that lands in it (`PluginEditor::mouseDown`), and
+`EDITOR_WANTS_KEYBOARD_FOCUS` is on in the wrapper build. Some Windows hosts (Fender Studio Pro /
+Studio One, reported on 0.2.0) deliver the click into the plug-in window but leave the keys with the
+arrangement, so typing only worked through the clipboard; taking focus on the click is what makes the
+next keystroke text. A click back in the arrangement returns its shortcuts, because the plug-in never
+holds a global grab.
+
 ## Project state
 
 Each DAW project stores a versioned XML block (`SONICATOR_PLUGIN`, version 1): the last folder, the

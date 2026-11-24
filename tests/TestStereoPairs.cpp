@@ -36,7 +36,7 @@ TEST_CASE("A valid mono L/R pair is one library row with its partner path", "[st
     REQUIRE(repo.visibleIds({ left, right }) == std::vector<int64_t>{ left });
     const auto partners = repo.stereoPairPartners({ left });
     REQUIRE(partners.size() == 1);
-    REQUIRE(partners.at(left) == folder + "/10A01DRM14-R.wav");
+    REQUIRE(partners.at(left) == testPath(folder, "10A01DRM14-R.wav"));
     REQUIRE(repo.stereoPairPartners({ right }).empty());
 }
 

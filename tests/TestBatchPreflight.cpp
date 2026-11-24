@@ -95,7 +95,9 @@ TEST_CASE("A batch folder snapshot is recursive, ignores table state and never p
     REQUIRE(prepared.ok);
     REQUIRE(prepared.batch.sources.size() == 1);
     REQUIRE(prepared.batch.sources[0].path == a);
-    REQUIRE(prepared.batch.sources[0].root == lib.getFullPathName());
+    // The batch keeps its own internal form with '/', independent of the platform separator.
+    REQUIRE(prepared.batch.sources[0].root.replaceCharacter('\\', '/')
+            == lib.getFullPathName().replaceCharacter('\\', '/'));
     REQUIRE(prepared.batch.skipped.size() == 1);
     REQUIRE(prepared.batch.skipped[0].code == ErrorCode::unsupported_source);
 
@@ -298,7 +300,8 @@ TEST_CASE("Frame and byte estimates are checked and the 4 GiB container limit is
     REQUIRE(outputByteEstimate(3000000000LL, 2, 24) > containerByteLimit);
     REQUIRE_FALSE(checkedFrameMath(9000000000000000000LL, 44100, 192000, out));
     REQUIRE(outputByteEstimate(44100, 2, 24) > 44100 * 2 * 3);
-    REQUIRE(physicalIdentity(juce::File("/definitely/missing/file.wav")).contains("/"));
+    REQUIRE(physicalIdentity(juce::File("/definitely/missing/file.wav"))
+                .contains(juce::File::getSeparatorString()));
     REQUIRE(isWarningCode(ErrorCode::unknown_free_space));
     REQUIRE_FALSE(isWarningCode(ErrorCode::insufficient_space));
 }

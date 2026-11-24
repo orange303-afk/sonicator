@@ -97,18 +97,26 @@ ExportResult AudioExporter::exportRange(const juce::File& source, double start, 
                 + juce::String(bits) + " bits");
         }
         juce::AudioBuffer<float> buffer(channels, (int) juce::jmin<juce::int64>(exportChunkFrames, endFrame - startFrame));
+        // Windows refuses to delete a file that still has an open handle, so a failure inside the
+        // writer scope closes it before the .part file is removed. On POSIX the order did not matter.
+        auto abort = [&part, &writer, &stream](const juce::String& message)
+        {
+            writer.reset();
+            stream.reset();
+            return failure(part, message);
+        };
         const auto totalFrames = endFrame - startFrame;
         const auto fadeFrames = juce::jlimit<juce::int64>(0, totalFrames / 2,
             (juce::int64) std::llround(fadeSeconds * rate));
         auto frame = startFrame;
         while (frame < endFrame)
         {
-            if (cancel && cancel()) return failure(part, "Export cancelled");
+            if (cancel && cancel()) return abort("Export cancelled");
             const auto remaining = endFrame - frame;
             const int count = (int) juce::jmin<juce::int64>(exportChunkFrames, remaining);
             buffer.setSize(channels, count, false, false, true);
             if (! reader->read(buffer.getArrayOfWritePointers(), channels, frame, count))
-                return failure(part, "Cannot read source audio: " + source.getFileName());
+                return abort("Cannot read source audio: " + source.getFileName());
             if (fadeFrames > 0)
             {
                 for (int ch = 0; ch < channels; ++ch)
@@ -126,10 +134,10 @@ ExportResult AudioExporter::exportRange(const juce::File& source, double start, 
                 }
             }
             if (! writer->writeFromFloatArrays(buffer.getArrayOfReadPointers(), channels, count))
-                return failure(part, "Cannot write export audio: " + destination.getFileName());
+                return abort("Cannot write export audio: " + destination.getFileName());
             frame += count;
         }
-        if (! writer->flush()) return failure(part, "Cannot finalise export file: " + destination.getFileName());
+        if (! writer->flush()) return abort("Cannot finalise export file: " + destination.getFileName());
         writer.reset();
         const auto validation = validateWavOutput(part, endFrame - startFrame, rate, channels, bits, floatingOutput);
         if (validation.isNotEmpty()) return failure(part, validation);

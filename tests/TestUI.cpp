@@ -24,8 +24,20 @@ TEST_CASE("The embedded window icon loads at 256 px", "[ui]")
     REQUIRE(icon.isValid());
     REQUIRE(icon.getWidth() == 256);
     REQUIRE(icon.getHeight() == 256);
+    // The mark must reach the edge of the canvas: a wide transparent margin makes the shell draw a
+    // smaller taskbar icon than the applications beside it do.
+    int left = icon.getWidth(), right = -1;
+    for (int y = 0; y < icon.getHeight(); ++y)
+        for (int x = 0; x < icon.getWidth(); ++x)
+            if (icon.getPixelAt(x, y).getAlpha() >= 16)
+            {
+                left = juce::jmin(left, x);
+                right = juce::jmax(right, x);
+            }
+    REQUIRE(right > left);
+    REQUIRE((right - left + 1) * 100 >= icon.getWidth() * 90);
 }
-TEST_CASE("Search field requests history on left click, not on typing or right click", "[ui][search-history]")
+TEST_CASE("Search field opens history only when asked, and a plain click types", "[ui][search-history]")
 {
     SearchField field;
     field.setPopupMenuEnabled(false);
@@ -38,6 +50,10 @@ TEST_CASE("Search field requests history on left click, not on typing or right c
             { 4.0f, 4.0f }, juce::ModifierKeys(flags), 1.0f, 0, 0, 0, 0,
             &field, &field, now, { 4.0f, 4.0f }, now, 1, false));
     };
+    // The default: the click places the caret, so the first keystroke is text and not a dismissal.
+    click(juce::ModifierKeys::leftButtonModifier);
+    REQUIRE(requests == 0);
+    field.setHistoryOnClick(true);
     click(juce::ModifierKeys::leftButtonModifier);
     REQUIRE(requests == 1);
     field.setText("pad c4");
@@ -46,6 +62,16 @@ TEST_CASE("Search field requests history on left click, not on typing or right c
     REQUIRE(requests == 2); // repeat click while the field already has focus
     click(juce::ModifierKeys::rightButtonModifier);
     REQUIRE(requests == 2);
+    // The history keeps its own control, so it is reachable without the click preference.
+    auto* history = dynamic_cast<juce::Button*>(field.findChildWithID("searchHistory"));
+    REQUIRE(history != nullptr);
+    REQUIRE_FALSE(history->isVisible()); // nothing to show before a search is recorded
+    field.setHistoryAvailable(true);
+    REQUIRE(history->isVisible());
+    requests = 0;
+    history->onClick();
+    REQUIRE(requests == 1);
+    REQUIRE_FALSE(history->getWantsKeyboardFocus());
 }
 TEST_CASE("Auto Preview is independently switchable while MIDI remains enabled", "[ui][auto-preview]")
 {
@@ -100,14 +126,14 @@ TEST_CASE("Added folder tree includes deep descendants and responds to arrow key
     REQUIRE(tree->keyPressed(juce::KeyPress(juce::KeyPress::rightKey)));
     REQUIRE(audio->isOpen()); REQUIRE(audio->getNumSubItems() == 1);
     auto* deep = audio->getSubItem(0); deep->setSelected(true,true);
-    REQUIRE(selection == rootPath+"/deep");
+    REQUIRE(selection == testPath(rootPath, "deep"));
     REQUIRE(tree->keyPressed(juce::KeyPress(juce::KeyPress::rightKey)));
     REQUIRE(deep->isOpen()); REQUIRE(deep->getNumSubItems() == 1);
     REQUIRE(tree->keyPressed(juce::KeyPress(juce::KeyPress::leftKey)));
     REQUIRE_FALSE(deep->isOpen());
     folders.refresh(repo);
     REQUIRE(tree->getSelectedItem(0) != nullptr);
-    REQUIRE(tree->getSelectedItem(0)->getUniqueName() == rootPath+"/deep");
+    REQUIRE(tree->getSelectedItem(0)->getUniqueName() == testPath(rootPath, "deep"));
 }
 TEST_CASE("Nested added roots share the same descendant hierarchy", "[ui][folders]")
 {
@@ -119,7 +145,7 @@ TEST_CASE("Nested added roots share the same descendant hierarchy", "[ui][folder
     REQUIRE(tree->getRootItem()->getNumSubItems() == 2);
     auto* nested = tree->getRootItem()->getSubItem(1); nested->setOpen(true);
     REQUIRE(nested->getNumSubItems() == 1);
-    REQUIRE(nested->getSubItem(0)->getUniqueName() == path+"/Drums/deep");
+    REQUIRE(nested->getSubItem(0)->getUniqueName() == testPath(path, "Drums/deep"));
 }
 TEST_CASE("Refreshing a selected row does not trigger preview again", "[ui][regression]")
 {
@@ -154,6 +180,106 @@ TEST_CASE("Library filters names and keeps selection identity after sorting", "[
     list.selectedRowsChanged(0); REQUIRE(selected == 1);
     list.setSearchText("no-match"); REQUIRE(list.getNumRows() == 0);
     list.selectedRowsChanged(-1); REQUIRE(selected == 1);
+}
+TEST_CASE("A catalog-ordered page keeps its order, whatever the column", "[ui][sort]")
+{
+    FileListPanel list;
+    // The query returned 95, 100, 90 by effective BPM; the names sort in another order entirely.
+    SampleRecord bpm95, bpm100, bpm90;
+    bpm95.id = 1; bpm95.fileName = "c.wav"; bpm95.duration = 5;
+    bpm100.id = 2; bpm100.fileName = "a.wav"; bpm100.duration = 1;
+    bpm90.id = 3; bpm90.fileName = "b.wav"; bpm90.duration = 3;
+    list.setSamples({ bpm95, bpm100, bpm90 }, true);
+    int64_t selected = 0;
+    list.onSelected = [&](const auto& r) { selected = r.id; };
+    list.selectRow(1); list.selectedRowsChanged(1);
+    REQUIRE(selected == 2); // still the middle row of the catalog's order
+    int column = 0; bool forwards = true;
+    list.onSortChanged = [&](int c, bool f) { column = c; forwards = f; };
+    list.sortOrderChanged(11, false);
+    REQUIRE(column == 11);
+    REQUIRE_FALSE(forwards);
+    // The owner re-queries; until then the page must not be re-sorted locally by file name.
+    list.selectedRowsChanged(1);
+    REQUIRE(selected == 2);
+    // A page without the owner's order is still sorted locally: that is the view-only case.
+    list.setSamples({ bpm95, bpm100, bpm90 });
+    list.sortOrderChanged(3, true);
+    list.selectedRowsChanged(0);
+    REQUIRE(selected == 2);
+}
+TEST_CASE("Length reads as a clock once it passes a minute", "[ui][length]")
+{
+    REQUIRE(formatLengthText(0.35) == "0.35 s");
+    REQUIRE(formatLengthText(59.5) == "59.50 s");
+    REQUIRE(formatLengthText(59.999) == "01:00");
+    REQUIRE(formatLengthText(60.0) == "01:00");
+    REQUIRE(formatLengthText(90.0) == "01:30");
+    REQUIRE(formatLengthText(3661.0) == "01:01:01");
+    REQUIRE(formatLengthText(3600.0) == "01:00:00");
+    REQUIRE(formatLengthText(0.0) == "--");
+    REQUIRE(formatLengthText(-1.0) == "--");
+}
+TEST_CASE("Show loops and Show one-shots filter the library from the toolbar", "[ui][filter]")
+{
+    TestDirectory t;
+    const auto catalog = t.dir.getChildFile("structure-filter.sqlite");
+    const auto settingsFile = t.dir.getChildFile("settings.json");
+    {
+        Database db(catalog); SampleRepository repo(db); repo.createTables();
+        auto add = [&repo](const juce::String& name)
+        {
+            SampleRecord r; r.filePath = "/lib/" + name; r.fileName = name; r.format = "WAV";
+            r.duration = 1.0; r.sampleRate = 44100; r.numChannels = 1; r.peakLevel = 0.5f;
+            return repo.upsert(r);
+        };
+        auto publish = [&repo](int64_t id, const juce::String& type, const juce::String& structure)
+        {
+            SmartPublication publication; publication.sampleId = id;
+            SmartCandidate typeCandidate;
+            typeCandidate.field = SmartField::Type; typeCandidate.source = "filename";
+            typeCandidate.textValue = type; typeCandidate.extractorId = "filename";
+            typeCandidate.extractorVersion = smartExtractorsVersion;
+            SmartCandidate structureCandidate = typeCandidate;
+            structureCandidate.field = SmartField::Structure;
+            structureCandidate.textValue = structure;
+            publication.candidates = { typeCandidate, structureCandidate };
+            publication.catalogPath = repo.catalogPath();
+            REQUIRE(repo.publishSmartAnalysis(publication).published);
+        };
+        publish(add("loop.wav"), "loop", "loop");
+        publish(add("snare-shot.wav"), "snare", "one-shot");
+        publish(add("pad-phrase.wav"), "pad", "phrase");
+        add("plain.wav"); // no analysis at all: it belongs to neither category
+    }
+    AppSettings settings; settings.hideEmpty = false;
+    MainComponent app(catalog, false, settings, settingsFile);
+    app.setSize(1440, 900);
+    auto* list = dynamic_cast<FileListPanel*>(app.findChildWithID("library")); REQUIRE(list != nullptr);
+    REQUIRE(list->getNumRows() == 4);
+    auto* loops = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("showLoops")); REQUIRE(loops != nullptr);
+    auto* shots = dynamic_cast<juce::ToggleButton*>(app.findChildWithID("showOneShots")); REQUIRE(shots != nullptr);
+    REQUIRE(loops->getToggleState());
+    REQUIRE(shots->getToggleState());
+    // Loops only: the confirmed loop, not the file whose tempo is unknown, and not a guess.
+    shots->setToggleState(false, juce::dontSendNotification); shots->onClick();
+    REQUIRE(list->getNumRows() == 1);
+    // One-shots only.
+    loops->setToggleState(false, juce::dontSendNotification); loops->onClick();
+    shots->setToggleState(true, juce::dontSendNotification); shots->onClick();
+    REQUIRE(list->getNumRows() == 1);
+    // Neither: the phrase and the unanalysed file remain, which is the honest answer.
+    shots->setToggleState(false, juce::dontSendNotification); shots->onClick();
+    REQUIRE(list->getNumRows() == 2);
+    // The All view runs the same filtered id query, so the flags hold there too.
+    auto* pageSize = dynamic_cast<juce::ComboBox*>(app.findChildWithID("pageSize"));
+    REQUIRE(pageSize != nullptr);
+    pageSize->setSelectedId(1000000, juce::sendNotificationSync);
+    REQUIRE(list->getNumRows() == 2);
+    REQUIRE(SettingsStore(settingsFile).load().showOneShots == false);
+    auto* type = dynamic_cast<juce::Button*>(app.findChildWithID("typeFilter"));
+    REQUIRE(type != nullptr);
+    REQUIRE(type->getButtonText() == "Type");
 }
 TEST_CASE("Unicode filenames survive filesystem indexing, database reopen and preview", "[ui][unicode]")
 {
@@ -445,7 +571,7 @@ TEST_CASE("Folder tree reports a right-click with its path and All samples state
     drums->itemClicked(click);
     REQUIRE(requests == 1);
     REQUIRE_FALSE(requestedAll);
-    REQUIRE(requestedPath == rootPath + "/Drums");
+    REQUIRE(requestedPath == testPath(rootPath, "Drums"));
     REQUIRE(drums->isSelected());
     root->itemClicked(click);
     REQUIRE(requests == 2);
@@ -586,33 +712,34 @@ TEST_CASE("Favorite tree keeps a folder and its catalogued descendants expandabl
     const auto rootPath = t.dir.getChildFile("lib").getFullPathName(); repo.addRoot(rootPath);
     auto add = [&](const juce::String& relative)
     {
-        SampleRecord r; r.filePath = rootPath + "/" + relative;
+        SampleRecord r; r.filePath = testPath(rootPath, relative);
         r.fileName = juce::File(r.filePath).getFileName(); repo.upsert(r);
     };
     add("Drums/kick.wav"); add("Drums/deep/more/snare.wav"); add("Bass/bass.wav");
-    FolderTree favorites; favorites.refresh(repo, { rootPath + "/Drums" }, false);
+    const auto favorite = testPath(rootPath, "Drums");
+    FolderTree favorites; favorites.refresh(repo, { favorite }, false);
     auto* tree = dynamic_cast<juce::TreeView*>(favorites.getChildComponent(0)); REQUIRE(tree != nullptr);
     auto* root = tree->getRootItem(); REQUIRE(root != nullptr);
     REQUIRE(root->getNumSubItems() == 1);
     auto* drums = root->getSubItem(0); REQUIRE(drums != nullptr);
-    REQUIRE(drums->getUniqueName() == rootPath + "/Drums");
+    REQUIRE(drums->getUniqueName() == favorite);
     REQUIRE(drums->mightContainSubItems());
     juce::String selected; favorites.onFolder = [&](juce::String path) { selected = path; };
     drums->setSelected(true, true);
-    REQUIRE(selected == rootPath + "/Drums");
+    REQUIRE(selected == favorite);
     drums->setOpen(true);
     REQUIRE(drums->getNumSubItems() == 1);
     auto* deep = drums->getSubItem(0);
-    REQUIRE(deep->getUniqueName() == rootPath + "/Drums/deep");
+    REQUIRE(deep->getUniqueName() == testPath(rootPath, "Drums/deep"));
     deep->setOpen(true);
     REQUIRE(deep->getNumSubItems() == 1);
-    REQUIRE(deep->getSubItem(0)->getUniqueName() == rootPath + "/Drums/deep/more");
+    REQUIRE(deep->getSubItem(0)->getUniqueName() == testPath(rootPath, "Drums/deep/more"));
     // A missing favorite remains a root and does not fall back to another folder.
-    FolderTree missing; missing.refresh(repo, { rootPath + "/NotThere" }, false);
+    FolderTree missing; missing.refresh(repo, { testPath(rootPath, "NotThere") }, false);
     tree = dynamic_cast<juce::TreeView*>(missing.getChildComponent(0)); REQUIRE(tree != nullptr);
     root = tree->getRootItem(); REQUIRE(root != nullptr);
     REQUIRE(root->getNumSubItems() == 1);
-    REQUIRE(root->getSubItem(0)->getUniqueName() == rootPath + "/NotThere");
+    REQUIRE(root->getSubItem(0)->getUniqueName() == testPath(rootPath, "NotThere"));
 }
 TEST_CASE("Selecting a sample by id does not fire the row action", "[ui][session]")
 {
@@ -633,12 +760,12 @@ TEST_CASE("Folder tree selects a nested restored path", "[ui][session][folders]"
     const auto rootPath = t.dir.getChildFile("lib").getFullPathName(); repo.addRoot(rootPath);
     SampleRecord r; r.filePath = rootPath + "/Drums/deep/snare.wav"; r.fileName = "snare.wav"; repo.upsert(r);
     FolderTree folders; folders.refresh(repo);
-    const auto path = rootPath + "/Drums/deep";
+    const auto path = testPath(rootPath, "Drums/deep");
     REQUIRE(folders.selectPath(path));
     auto* tree = dynamic_cast<juce::TreeView*>(folders.getChildComponent(0)); REQUIRE(tree != nullptr);
     auto* selected = tree->getSelectedItem(0); REQUIRE(selected != nullptr);
     REQUIRE(selected->getUniqueName() == path);
-    REQUIRE_FALSE(folders.selectPath(rootPath + "/NotThere"));
+    REQUIRE_FALSE(folders.selectPath(testPath(rootPath, "NotThere")));
 }
 TEST_CASE("Preview can load the restored file without starting playback", "[ui][session][preview]")
 {

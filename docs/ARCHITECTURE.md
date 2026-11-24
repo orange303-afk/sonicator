@@ -157,6 +157,35 @@ within ±2000 of the current position are kept up to a 4000-row cap. Selection i
 ID, and a reload keeps the selected row on screen instead of jumping to the top. The row itself
 remains virtualized by `TableListBox`; scrolling does not build widgets for off-screen rows.
 
+A page arrives already ordered by the catalog query, and the table does not sort it again: a local
+sort can only order the rows of that page, and Type, BPM, Key and Genre have no local key at all.
+`setSamples(records, ownerOrdered)` says which mode the panel is in, so an ascending BPM page reads
+90, 95, 100 and never 95, 100, 90.
+
+## Library filters
+
+Text, folder, tags, the effective Type and the confirmed program structure form one SQL `WHERE`, so
+they apply to the whole catalog before paging and a page can never disagree with the row count.
+`LibraryFilter::types` matches `samples.eff_type` case-insensitively, which keeps a manual Type
+override authoritative. `showLoops` and `showOneShots` read the effective structure (override first,
+then `smart_results.structure`) and are deliberately independent of tempo: a loop with no known BPM
+passes and an analysed phrase passes neither. Both on adds no clause, so unclassified files stay
+visible; one on keeps only that category; both off keeps only the rows that are neither.
+
+## Catalog paths and separators
+
+Every catalog comparison is a string comparison, so a stored path uses the platform separator: the
+repository folds a caller's path on the way in (`upsert`, `findByPath`, roots, ignore entries, disc
+images) and a folder scope uses the folder as given rather than resolving it through `juce::File`,
+which on Windows would turn `/lib/Drums` into `C:\lib\Drums`. A catalog that already contains a
+foreign separator — written on another system or by an older build — is made uniform by one
+idempotent pass at open, on Windows only: the filesystem path columns lose a `/`; archive paths
+(`disc_path`, `disc_entry`, `disc_parent`, `disc_partner`) are not filesystem paths and stay as they
+are. On POSIX nothing is rewritten, because a backslash is a legal file-name character there.
+`pathrelocation` remains the separator-agnostic layer for values that are not yet in the catalog
+(`isUnder`, `toNative`, `remap`); the folder tree and favourites use it so a path saved on another
+system still finds its rows.
+
 ## Duplicate groups
 
 Byte-identical duplicates are grouped by the full SHA-256 already stored at analysis time plus a
@@ -166,7 +195,9 @@ ID. Missing copies never beat present ones. The `DUPLICATES` column shows the gr
 `Show all copies` filters by the group hash. The internal `hideDuplicates` filter still exists but
 has no toolbar control in this stage. `LibraryFilter::hideEmpty` is the one **Hide empty and
 unsupported** control: it adds `peak >= 0.001` (or metadata-only `version = -1`) and excludes
-`compatibility IN (unsupported, invalid)`. `AssetCompatibility` is stored per sample (schema 10,
+`compatibility IN (unsupported, invalid)`. `showLoops` and `showOneShots` sit next to it and filter
+the confirmed structure, described under Library filters above; the Type pill is
+`LibraryFilter::types`. `AssetCompatibility` is stored per sample (schema 10,
 default `unknown`); legacy rows, missing files, cancellations and transient I/O stay `unknown` and
 are never hidden by a guess. An incompatible row draws a red prohibition sign in the 14x14 star
 cell instead of a star; the stored star is untouched and returns once the asset is compatible. The

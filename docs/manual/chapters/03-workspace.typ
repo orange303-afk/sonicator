@@ -18,8 +18,10 @@ Settings pages and the Cloud view.
 #section("Header")
 
 The wordmark is inert. The search field is not: typing filters the library after a 250 ms pause,
-Enter applies immediately, Escape clears the query or closes the search history. Clicking the field
-opens the last ten searches applied in this installation.
+Enter applies immediately, Escape clears the query or closes the search history. A click in the
+field places the caret so typing starts at once; the clock button at its right opens the last ten
+searches applied in this installation. Settings → *Open search history on click* puts the history
+back on the click itself.
 
 *Settings* on the right opens the panel described in chapter 23. In the DAW plug-in the same button
 opens a reduced Settings with the audio and catalog pages hidden.
@@ -32,9 +34,11 @@ the menu next to them sets the page size — 100, 1 000, 10 000 or *All*. *All* 
 prepares matching ids and fetches records in blocks while you scroll, so a 300 000-row catalog stays
 usable.
 
-The second row holds the filters: *Tags*, *Starred*, *Hide empty* and *Clear filters*. They combine.
-*Clear filters* turns off the tag, star and empty-file filters and saves that choice; it does not
-clear the search field.
+The second row holds the filters: *Tags*, *Starred*, *Type*, *Hide empty*, *Show loops*,
+*Show one-shots* and *Clear filters*. They combine. When the window is narrow the visibility filters
+(*Hide empty*, *Show loops*, *Show one-shots*) move to a second row instead of being clipped.
+*Clear filters* turns off the tag, star, type, empty-file and structure filters and saves that
+choice; it does not clear the search field.
 
 The *LIBRARY* menu on the left of the toolbar holds the scan actions: *Add folder…*, *Rescan*,
 *Rescan and analyze new files*, *Reanalyze all* and *Smart metadata*, plus *Show ignored*. Chapter 4
@@ -60,7 +64,10 @@ divider between the two trees can be dragged, and its height is remembered.
 
 Each row is one catalogued file. The columns are the sample name, Type, BPM, Key, Genre, Format,
 Length, Rate, CH, Tags, Duplicates and Status. Clicking a header sorts the whole result, not
-the current page; clicking again reverses it. Unknown values sort last in both directions.
+the current page; clicking again reverses it. Unknown values sort last in both directions. The
+table keeps the order the catalog returned for that page, so a page sorted by BPM reads 90, 95, 100
+and never 95, 100, 90. Length shows two decimals of seconds below a minute, then minutes and
+seconds, and hours once a file passes an hour: `0.35 s`, `59.50 s`, `01:30`, `01:02:05`.
 
 Selecting a row loads it into the preview. Cmd-click (Ctrl-click on Windows) toggles a row,
 Shift-click selects a range. The bottom bar shows the full path of the selection and its metadata;

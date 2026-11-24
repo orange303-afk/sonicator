@@ -77,8 +77,8 @@ still sorts the whole filtered result.
 *Starred* is a separate filter and combines with the tag filter. Stars are a quick personal mark, not
 a tag: they do not appear in the tag menu and cannot be renamed.
 
-*Clear filters* turns off the tag filter, the star filter and *Hide empty*, and saves that state. It
-does not clear the search field.
+*Clear filters* turns off the tag filter, the star filter, the Type filter, *Hide empty* and the
+two structure filters, and saves that state. It does not clear the search field.
 
 #section("Reset tags")
 

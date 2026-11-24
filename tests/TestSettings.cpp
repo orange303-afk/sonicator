@@ -210,6 +210,24 @@ TEST_CASE("Round tag menu persists and defaults to off", "[settings][tags]")
     store.update([](AppSettings& s) { s.roundTagMenu = true; });
     REQUIRE(store.load().roundTagMenu);
 }
+TEST_CASE("Structure filters and the search-click preference persist", "[settings][filters]")
+{
+    TestDirectory t; SettingsStore store(t.dir.getChildFile("settings.json"));
+    auto defaults = store.load();
+    REQUIRE(defaults.showLoops);
+    REQUIRE(defaults.showOneShots);
+    REQUIRE_FALSE(defaults.searchHistoryOnClick);
+    store.update([](AppSettings& s)
+    {
+        s.showLoops = false;
+        s.showOneShots = false;
+        s.searchHistoryOnClick = true;
+    });
+    const auto loaded = store.load();
+    REQUIRE_FALSE(loaded.showLoops);
+    REQUIRE_FALSE(loaded.showOneShots);
+    REQUIRE(loaded.searchHistoryOnClick);
+}
 
 TEST_CASE("Split defaults persist and clamp to the supported ranges", "[settings][split]")
 {

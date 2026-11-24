@@ -92,7 +92,7 @@ TEST_CASE("AutoTag folder preparation is recursive and excludes siblings", "[aut
     REQUIRE(result.checked == 2);
     REQUIRE(result.proposals.size() == 2);
     for (const auto& proposal : result.proposals)
-        REQUIRE(proposal.filePath.contains("/Drums/"));
+        REQUIRE(juce::File(proposal.filePath).isAChildOf(f.t.dir.getChildFile("lib/Drums")));
 }
 TEST_CASE("AutoTag marks already assigned tags without counting them as new", "[autotag][service]")
 {

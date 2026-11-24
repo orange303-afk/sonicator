@@ -108,6 +108,14 @@ IconShape makeIcon(ActionIcon icon)
             for (const float cy : { 0.28f, 0.5f, 0.72f })
                 p.addEllipse(0.41f, cy - 0.09f, 0.18f, 0.18f);
             return { p, true };
+        case ActionIcon::history:
+        {
+            // A clock face: the one sign a search field's history reads as without a label.
+            p.addEllipse(0.16f, 0.16f, 0.68f, 0.68f);
+            p.startNewSubPath(0.5f, 0.30f); p.lineTo(0.5f, 0.52f);
+            p.startNewSubPath(0.5f, 0.52f); p.lineTo(0.66f, 0.62f);
+            return { p, false };
+        }
     }
     return { p, false };
 }

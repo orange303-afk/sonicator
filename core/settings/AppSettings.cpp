@@ -113,6 +113,9 @@ AppSettings SettingsStore::load() const
     };
     settings.midiPreview = readBool("midiPreview", settings.midiPreview);
     settings.showIgnored = readBool("showIgnored", settings.showIgnored);
+    settings.showLoops = readBool("showLoops", settings.showLoops);
+    settings.showOneShots = readBool("showOneShots", settings.showOneShots);
+    settings.searchHistoryOnClick = readBool("searchHistoryOnClick", settings.searchHistoryOnClick);
     settings.ignoreSymlinks = readBool("ignoreSymlinks", settings.ignoreSymlinks);
     settings.roundTagMenu = readBool("roundTagMenu", settings.roundTagMenu);
     settings.reasonPacksAdded = readBool("reasonPacksAdded", settings.reasonPacksAdded);
@@ -204,6 +207,9 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("hideEmpty", settings.hideEmpty);
     object->setProperty("cloudView", settings.cloudView);
     object->setProperty("showIgnored", settings.showIgnored);
+    object->setProperty("showLoops", settings.showLoops);
+    object->setProperty("showOneShots", settings.showOneShots);
+    object->setProperty("searchHistoryOnClick", settings.searchHistoryOnClick);
     object->setProperty("ignoreSymlinks", settings.ignoreSymlinks);
     object->setProperty("roundTagMenu", settings.roundTagMenu);
     object->setProperty("reasonPacksAdded", settings.reasonPacksAdded);

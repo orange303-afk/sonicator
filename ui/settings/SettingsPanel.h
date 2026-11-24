@@ -94,6 +94,7 @@ private:
     juce::Label title, appearance, themeLabel, scaleLabel, languageHeading, languageLabel,
                  languageNote, libraryHeading, databaseKey, databaseLabel, libraryNote, databaseStatus,
                  tagsHeading, roundTagMenuNote,
+                 searchHeading, searchHistoryNote,
                  editingHeading, alwaysOverwriteNote, overwriteDisposalLabel,
                  workspaceHeading, workspaceNote,
                  audioHeading, audioNote, reportHeading, aboutHeading, productLabel, authorLabel,
@@ -106,6 +107,7 @@ private:
     juce::ComboBox overwriteDisposalBox;
     juce::ToggleButton contributeDataToggle;
     juce::ToggleButton roundTagMenuToggle { "Round tag menu" };
+    juce::ToggleButton searchHistoryOnClickToggle { "Open search history on click" };
     juce::ToggleButton alwaysOverwriteToggle { "Always overwrite original files" };
     juce::Label contributionNote;
     // What the last upload attempt did; filled by the application, empty until one runs.

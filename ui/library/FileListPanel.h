@@ -11,6 +11,9 @@ namespace sonicator {
 // Human-readable STATUS cell. Decode problems win over ignore, so a hidden broken file still
 // says why it is broken once shown.
 juce::String sampleStatusText(const SampleRecord&, bool ignored);
+// LENGTH cell. Under a minute keeps the two decimals a short sample is compared by; longer files
+// read as mm:ss or hh:mm:ss, because a sound designer manages minutes and hours, not 423.75 s.
+juce::String formatLengthText(double seconds);
 class FileListPanel final : public juce::Component, public juce::TableListBoxModel
 {
 public:
@@ -29,7 +32,9 @@ public:
         std::map<int64_t, juce::String> stereoPairs;
     };
     using RowLoader = std::function<LoadedRows(const std::vector<int64_t>&)>;
-    void setSamples(std::vector<SampleRecord>);
+    // `ownerOrdered` says the rows already arrive in the requested order from the catalog query.
+    // A page must then never be sorted again locally: its own order is a page, not a library.
+    void setSamples(std::vector<SampleRecord>, bool ownerOrdered = false);
     // Virtual mode: the row count is known, records are loaded in blocks on demand.
     void setVirtualSamples(std::vector<int64_t> orderedIds, RowLoader);
     void setRowTags(std::map<int64_t, std::vector<Tag>>);
@@ -101,6 +106,9 @@ private:
     RowDragListener rowDragListener { *this };
     std::vector<SampleRecord> all, visible;
     bool virtualMode = false;
+    // The owner's query already applied the requested order (pagination and the virtual page both
+    // do). Re-sorting here would replace a whole-catalog order with a page-local one.
+    bool ownerOrdered = false;
     std::vector<int64_t> virtualIds;
     std::map<int, SampleRecord> virtualRows;
     RowLoader rowLoader;

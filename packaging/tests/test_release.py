@@ -244,11 +244,15 @@ class WindowsIconTests(unittest.TestCase):
 
     def test_executable_icon_comes_from_the_branding_png(self):
         cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-        self.assertIn('ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/', cmake)
-        branding = ROOT / "resources/branding/icon-window-256.png"
-        self.assertTrue(branding.is_file())
-        with branding.open("rb") as stream:
-            self.assertEqual(stream.read(8), b"\x89PNG\r\n\x1a\n")
+        self.assertIn('ICON_BIG "${SONICATOR_APP_ICON}"', cmake)
+        # Windows takes the trimmed canvas: the shell draws the icon at 16-48 px beside icons that
+        # fill their box, so a 25 % transparent margin reads as a smaller icon.
+        self.assertIn("resources/branding/icon-windows-1024.png", cmake)
+        for name in ("icon-windows-1024.png", "icon-window-256.png"):
+            branding = ROOT / "resources/branding" / name
+            self.assertTrue(branding.is_file(), name)
+            with branding.open("rb") as stream:
+                self.assertEqual(stream.read(8), b"\x89PNG\r\n\x1a\n")
 
     def test_msi_builder_requires_the_generated_windows_icon(self):
         script = (ROOT / "packaging/windows/build-msi.ps1").read_text(encoding="utf-8")

@@ -31,8 +31,10 @@ Everything combines with *and*. Prefixes and masks can sit next to plain words i
 #section("Details that save time")
 
 - The field applies after a 250 ms pause; Enter applies immediately; Escape clears or closes history.
-- Click the field to reopen the last ten applied searches; the list is shared by every catalog.
-- Header sorting sorts the whole filtered result, not the page.
-- *Clear filters* clears tags, stars and Hide empty; it does not clear the query.
+- A click in the field places the caret; the clock button reopens the last ten applied searches, and
+  the list is shared by every catalog.
+- Header sorting sorts the whole filtered result, not the page, and a page keeps the catalog's order.
+- *Clear filters* clears tags, stars, Type, Hide empty, Show loops and Show one-shots; it does not
+  clear the query.
 - A value the application could not resolve does not match `type:`, `key:`, `note:` or `genre:`.
   Ambiguous is not silently turned into a guess.

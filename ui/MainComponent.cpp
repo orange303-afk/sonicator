@@ -726,8 +726,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     addChildComponent(*roundTagMenu);
     roundTagMenu->setAlwaysOnTop(true);
     logoWordmark = juce::ImageFileFormat::loadFrom(BinaryData::logosilver_png, BinaryData::logosilver_pngSize);
-    for (auto* c : std::array<juce::Component*,35>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
-         &pause,&cancel,&settings,&tagFilter,&starredButton,&hideEmpty,&ignoreSymlinks,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
+    for (auto* c : std::array<juce::Component*,38>{&preview,&library,&search,&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,
+         &pause,&cancel,&settings,&tagFilter,&starredButton,&typeFilter,&hideEmpty,&showLoops,&showOneShots,&ignoreSymlinks,&clearFilters,&editTags,&previousPage,&nextPage,&pageSizeBox,&heading,&subtitle,
          &libraryHeading,&rootsLabel,&status,&activityDot,&countLabel,&analysisHeading,&analysisCard,&keyBpm,&tagsLabel,
          &selectedTags,&analysisViewport,&stageLabel,&selectionStatus})
         if (c != nullptr) addAndMakeVisible(c);
@@ -758,6 +758,10 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     tagsLabel.setFont(fonts::font(11)); tagsLabel.setColour(juce::Label::textColourId,theme::muted);
     search.setTextToShowWhenEmpty("Search: *.rx2, ext:wav, type:pad, key:Am, C4",theme::muted);
     search.setJustification(juce::Justification::centredLeft);
+    // A click types; the history has its own control next to Clear unless the preference asks for
+    // the earlier click-to-open behaviour.
+    search.setHistoryOnClick(appSettings.searchHistoryOnClick);
+    search.setHistoryAvailable(! appSettings.searchHistory.isEmpty());
     search.onTextChanged = [this]
     {
         pendingSearch = search.getText();
@@ -770,7 +774,9 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         recordSearchHistory(filter.text);
     };
     search.onFocusLost = [this] { recordSearchHistory(search.getText().trim()); };
-    search.setTooltip("Click for the last 10 searches; Escape dismisses history");
+    search.setTooltip(appSettings.searchHistoryOnClick
+        ? "Click for the last 10 searches; Escape dismisses history"
+        : "Click to type; the clock button opens the last 10 searches");
     search.onHistoryRequest = [this] { showSearchHistory(); };
     search.onEscapeKey = [this]
     {
@@ -1049,6 +1055,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
         }
         menu.addItem(6, "Show ignored", true, filter.showIgnored);
         menu.addItem(8, "Ignore symlinks", true, filter.ignoreSymlinks);
+        menu.addItem(9, "Show loops", true, filter.showLoops);
+        menu.addItem(10, "Show one-shots", true, filter.showOneShots);
         if (! embeddedUi)
         {
             menu.addSeparator();
@@ -1067,6 +1075,20 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
                     case 5: safe->smartButton.onClick(); break;
                     case 7: safe->openDuplicateCleanup(); break;
                     case 8: safe->setIgnoreSymlinks(! safe->filter.ignoreSymlinks); break;
+                    case 9:
+                        safe->filter.showLoops = ! safe->filter.showLoops;
+                        safe->showLoops.setToggleState(safe->filter.showLoops, juce::dontSendNotification);
+                        safe->persistStructureFilters();
+                        safe->pageOffset = 0;
+                        safe->reloadLibrary();
+                        break;
+                    case 10:
+                        safe->filter.showOneShots = ! safe->filter.showOneShots;
+                        safe->showOneShots.setToggleState(safe->filter.showOneShots, juce::dontSendNotification);
+                        safe->persistStructureFilters();
+                        safe->pageOffset = 0;
+                        safe->reloadLibrary();
+                        break;
                     case 6:
                         if (safe->readRepo == nullptr) break;
                         safe->filter.showIgnored = ! safe->filter.showIgnored;
@@ -1120,13 +1142,44 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     ignoreSymlinks.setTooltip("Hide files whose path is a symbolic link, such as copies replaced "
                               "by links in duplicate cleanup");
     ignoreSymlinks.onClick = [this] { setIgnoreSymlinks(ignoreSymlinks.getToggleState()); };
+    showLoops.setComponentID("showLoops");
+    filter.showLoops = appSettings.showLoops;
+    showLoops.setToggleState(filter.showLoops, juce::dontSendNotification);
+    showLoops.setTooltip("Show files the analysis confirmed as loops. With Show one-shots off, "
+                         "only loops remain");
+    showLoops.onClick = [this]
+    {
+        filter.showLoops = showLoops.getToggleState();
+        persistStructureFilters(); pageOffset = 0; reloadLibrary();
+    };
+    showOneShots.setComponentID("showOneShots");
+    filter.showOneShots = appSettings.showOneShots;
+    showOneShots.setToggleState(filter.showOneShots, juce::dontSendNotification);
+    showOneShots.setTooltip("Show files the analysis confirmed as one-shots. With Show loops off, "
+                            "only one-shots remain");
+    showOneShots.onClick = [this]
+    {
+        filter.showOneShots = showOneShots.getToggleState();
+        persistStructureFilters(); pageOffset = 0; reloadLibrary();
+    };
+    typeFilter.setComponentID("typeFilter");
+    typeFilter.setTooltip("Show one sample type, such as snare. Combines with tags, search and the "
+                          "other filters");
+    typeFilter.onClick = [this] { showTypeFilterMenu(); };
+    updateTypeFilterChip();
     clearFilters.onClick = [this]
     {
         search.clear(); pendingSearch.clear();
         filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
         filter.matchAnyTag = false; filter.starredOnly = false;
         filter.hideDuplicates = false; filter.hideEmpty = false; filter.duplicateHash.clear();
+        filter.types.clear();
+        filter.showLoops = true; filter.showOneShots = true;
+        showLoops.setToggleState(true, juce::dontSendNotification);
+        showOneShots.setToggleState(true, juce::dontSendNotification);
+        updateTypeFilterChip();
         persistHideEmpty();
+        persistStructureFilters();
         pageOffset = 0;
         setIgnoreSymlinks(false);
     };
@@ -1155,8 +1208,8 @@ MainComponent::MainComponent(const juce::File& databaseFile,bool openDevice,AppS
     preview.onAction = [this] { if (isShowing()) library.focusForNavigation(); };
     preview.onSettingsChanged = [this] { persistPreviewSettings(); };
     preview.applyPersistedSettings(appSettings);
-    for (auto* button : std::array<juce::Button*,15>{&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,&pause,&cancel,&settings,
-          &tagFilter,&starredButton,&hideEmpty,&clearFilters,&editTags,&previousPage,&nextPage})
+    for (auto* button : std::array<juce::Button*,18>{&addFolder,&rescan,&reanalyze,&newFiles,&smartButton,&pause,&cancel,&settings,
+          &tagFilter,&starredButton,&typeFilter,&hideEmpty,&showLoops,&showOneShots,&clearFilters,&editTags,&previousPage,&nextPage})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         if (button == &addFolder || button == &settings) continue; // Modal dialogs must retain their own focus.
@@ -1406,6 +1459,7 @@ void MainComponent::recordSearchHistory(const juce::String& text)
         appSettings.searchHistory.insert(0, text);
         while (appSettings.searchHistory.size() > 10) appSettings.searchHistory.remove(appSettings.searchHistory.size() - 1);
         try { settingsStore.update([this](AppSettings& saved) { saved.searchHistory = appSettings.searchHistory; }); } catch (...) {}
+        search.setHistoryAvailable(true);
     }
 }
 void MainComponent::showSearchHistory()
@@ -1620,6 +1674,71 @@ void MainComponent::persistShowIgnored()
     try { settingsStore.update([this](AppSettings& saved) { saved.showIgnored = filter.showIgnored; }); }
     catch (const std::exception& e)
     { status.setText("Cannot save Show ignored: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification); }
+}
+void MainComponent::persistStructureFilters()
+{
+    appSettings.showLoops = filter.showLoops;
+    appSettings.showOneShots = filter.showOneShots;
+    try
+    {
+        settingsStore.update([this](AppSettings& saved)
+        {
+            saved.showLoops = filter.showLoops;
+            saved.showOneShots = filter.showOneShots;
+        });
+    }
+    catch (const std::exception& e)
+    { status.setText("Cannot save the structure filters: " + juce::String::fromUTF8(e.what()),
+                     juce::dontSendNotification); }
+}
+void MainComponent::updateTypeFilterChip()
+{
+    typeFilter.setButtonText(filter.types.empty() ? juce::String("Type")
+                                                  : "Type: " + filter.types.front());
+    typeFilter.setToggleState(! filter.types.empty(), juce::dontSendNotification);
+    // The chip measures its own text, so a longer "Type: Percussion" needs the bar laid out again.
+    resized();
+}
+void MainComponent::clearTypeFilter()
+{
+    if (filter.types.empty()) return;
+    filter.types.clear();
+    updateTypeFilterChip();
+    pageOffset = 0;
+    reloadLibrary();
+}
+void MainComponent::showTypeFilterMenu()
+{
+    juce::PopupMenu menu;
+    menu.setLookAndFeel(&look);
+    menu.addItem(1, "All types", true, filter.types.empty());
+    juce::StringArray entries;
+    for (const auto& type : standardSampleTypeNames()) entries.addIfNotAlreadyThere(type);
+    if (readRepo != nullptr)
+    {
+        try { for (const auto& type : readRepo->customTypes()) entries.addIfNotAlreadyThere(type); }
+        catch (const std::exception&) {}
+    }
+    if (! entries.isEmpty()) menu.addSeparator();
+    for (int i = 0; i < entries.size(); ++i)
+    {
+        const bool active = filter.types.size() == 1
+            && filter.types.front().equalsIgnoreCase(entries[(size_t) i]);
+        menu.addItem(100 + i, entries[(size_t) i], true, active);
+    }
+    juce::Component::SafePointer<MainComponent> safe(this);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&typeFilter),
+        [safe, entries](int result)
+        {
+            if (safe == nullptr || result <= 0) return;
+            if (result == 1) { safe->clearTypeFilter(); return; }
+            const int index = result - 100;
+            if (index < 0 || index >= entries.size()) return;
+            safe->filter.types = { entries[(size_t) index] };
+            safe->updateTypeFilterChip();
+            safe->pageOffset = 0;
+            safe->reloadLibrary();
+        });
 }
 bool MainComponent::isFolderVisible(const juce::String& path) const
 {
@@ -2036,7 +2155,7 @@ void MainComponent::reloadLibrary()
             std::vector<int64_t> ids;
             ids.reserve(page.samples.size());
             for (const auto& sample : page.samples) ids.push_back(sample.id);
-            library.setSamples(std::move(page.samples));
+            library.setSamples(std::move(page.samples), true);
             library.setRowTags(readRepo->tagsForSamples(ids));
             library.setDuplicateCounts(readRepo->duplicateCounts(ids));
             library.setSmartDisplays(readRepo->smartDisplays(ids));
@@ -2090,6 +2209,8 @@ void MainComponent::updateTagControls()
     tagFilter.setToggleState(active > 0 || filter.matchAnyTag, juce::dontSendNotification);
     starredButton.setToggleState(filter.starredOnly,juce::dontSendNotification);
     hideEmpty.setToggleState(filter.hideEmpty,juce::dontSendNotification);
+    showLoops.setToggleState(filter.showLoops, juce::dontSendNotification);
+    showOneShots.setToggleState(filter.showOneShots, juce::dontSendNotification);
     ignoreSymlinks.setToggleState(filter.ignoreSymlinks,juce::dontSendNotification);
     clearFilters.setEnabled(filter.hasTextOrTagFilter());
     // Chips measure their own text, and "Tags (2)" is wider than "Tags".
@@ -2384,7 +2505,7 @@ AnalysisContent MainComponent::analysisFor(const SampleRecord& r) const
     card.meta = r.format + " · " + juce::String(r.numChannels) + " ch · "
         + (r.sampleRate > 0 ? juce::String(r.sampleRate / 1000, 1) + " kHz" : juce::String("unknown rate"))
         + " · " + (r.bitsPerSample > 0 ? juce::String(r.bitsPerSample) + " bit" : juce::String("unknown depth"));
-    card.stats.push_back({ juce::String(r.duration,3) + " s", "Length" });
+    card.stats.push_back({ formatLengthText(r.duration), "Length" });
     card.stats.push_back({ r.sampleRate > 0 ? juce::String(r.sampleRate/1000,1) + " kHz" : juce::String("N/A"), "Rate" });
     card.stats.push_back({ r.bitsPerSample > 0 ? juce::String(r.bitsPerSample) : juce::String("N/A"), "Bit depth" });
     card.stats.push_back({ dbfs(r.peakLevel), "Peak" });
@@ -6688,6 +6809,11 @@ void MainComponent::applySettings(const AppSettings& next)
     appSettings.roundTagMenu = next.roundTagMenu;
     if (! appSettings.roundTagMenu && roundTagMenu != nullptr)
         roundTagMenu->close();
+    appSettings.searchHistoryOnClick = next.searchHistoryOnClick;
+    search.setHistoryOnClick(appSettings.searchHistoryOnClick);
+    search.setTooltip(appSettings.searchHistoryOnClick
+        ? "Click for the last 10 searches; Escape dismisses history"
+        : "Click to type; the clock button opens the last 10 searches");
     preview.setAlwaysOverwriteOriginalFiles(appSettings.alwaysOverwriteOriginalFiles);
     preview.setOverwriteDisposal(appSettings.overwriteOriginalDisposal);
     refreshTheme();
@@ -6708,6 +6834,7 @@ void MainComponent::applySettings(const AppSettings& next)
             saved.alwaysOverwriteOriginalFiles = appSettings.alwaysOverwriteOriginalFiles;
             saved.overwriteOriginalDisposal = appSettings.overwriteOriginalDisposal;
             saved.roundTagMenu = appSettings.roundTagMenu;
+            saved.searchHistoryOnClick = appSettings.searchHistoryOnClick;
         });
     }
     catch (const std::exception& e)
@@ -7039,6 +7166,9 @@ bool MainComponent::switchCatalog(const juce::File& target, bool moveCurrent, ju
     filter.text.clear(); filter.includeTags.clear(); filter.excludeTags.clear();
     filter.matchAnyTag = false; filter.starredOnly = false;
     filter.hideDuplicates = false; filter.hideEmpty = appSettings.hideEmpty;
+    filter.showLoops = appSettings.showLoops; filter.showOneShots = appSettings.showOneShots;
+    filter.types.clear();
+    updateTypeFilterChip();
     filter.ignoreSymlinks = appSettings.ignoreSymlinks; filter.duplicateHash.clear();
     search.clear(); pendingSearch.clear();
     showAnalysisPlaceholder();
@@ -7197,7 +7327,6 @@ void MainComponent::resized()
     countLabel.setBounds(bar);
     list.removeFromTop(4);
     // Chips measure themselves from their text, so "Tags (2)" and the page count never clip.
-    auto filterBar = list.removeFromTop(studio::chipHeight);
     auto chipWidth = [](const juce::Button& button, int extra)
     {
         return juce::jmax(studio::chipMinWidth,
@@ -7205,28 +7334,59 @@ void MainComponent::resized()
                                                                     button.getButtonText())
                               + 2 * studio::spacing + extra);
     };
-    auto placeChip = [&filterBar, &chipWidth](juce::Button& chip, int extra)
+    auto chipNeeds = [&chipWidth](const juce::Button& chip, int extra)
     {
-        chip.setBounds(filterBar.removeFromLeft(chipWidth(chip, extra)));
-        filterBar.removeFromLeft(studio::spacingTight);
+        return chipWidth(chip, extra) + studio::spacingTight;
     };
-    placeChip(tagFilter, 0);
-    placeChip(starredButton, 0);
-    placeChip(hideEmpty, 24);   // the tick box needs its own room inside the pill
-    filterSeparatorBounds = {};
-    // Clear filters is also in the LIBRARY menu, so it is the last control to give up its place.
-    // The link chip yields first; at a narrow width it stays reachable through that menu.
     const int clearNeeds = studio::spacingUnit + 1 + studio::spacingTight + chipWidth(clearFilters, 0);
-    const int linkNeeds = studio::spacingTight + chipWidth(ignoreSymlinks, 24);
-    ignoreSymlinks.setVisible(filterBar.getWidth() - linkNeeds >= clearNeeds);
-    if (ignoreSymlinks.isVisible()) placeChip(ignoreSymlinks, 24);
-    clearFilters.setVisible(filterBar.getWidth() >= clearNeeds);
+    // Clear filters is also in the LIBRARY menu, so it is the last control to give up its place.
+    // The link chip yields before it; at a narrow width both stay reachable through that menu.
+    const int linkNeeds = chipNeeds(ignoreSymlinks, 24);
+    const int contentNeeds = chipNeeds(tagFilter, 0) + chipNeeds(starredButton, 0)
+                           + chipNeeds(typeFilter, 0);
+    const int visibilityNeeds = chipNeeds(hideEmpty, 24) + chipNeeds(showLoops, 24)
+                              + chipNeeds(showOneShots, 24);
+    // One row when the whole set fits. Otherwise the visibility filters (Hide empty, the structure
+    // pair) move to a second row instead of a chip being clipped to nothing: a filter a user cannot
+    // see is a filter they will report as broken.
+    const bool oneRow = contentNeeds + visibilityNeeds + clearNeeds + linkNeeds <= list.getWidth();
+    auto filterBar = list.removeFromTop(oneRow ? studio::chipHeight
+                                               : studio::chipHeight * 2 + studio::spacingTight);
+    auto placeChip = [&chipWidth](juce::Rectangle<int>& bar, juce::Button& chip, int extra)
+    {
+        chip.setBounds(bar.removeFromLeft(chipWidth(chip, extra)));
+        bar.removeFromLeft(studio::spacingTight);
+    };
+    auto secondRow = oneRow ? juce::Rectangle<int>()
+                            : filterBar.removeFromBottom(studio::chipHeight);
+    if (! oneRow) filterBar.removeFromBottom(studio::spacingTight);
+    auto contentRow = filterBar;
+    placeChip(contentRow, tagFilter, 0);
+    placeChip(contentRow, starredButton, 0);
+    placeChip(contentRow, typeFilter, 0);
+    if (oneRow)
+    {
+        placeChip(contentRow, hideEmpty, 24);
+        placeChip(contentRow, showLoops, 24);
+        placeChip(contentRow, showOneShots, 24);
+    }
+    else
+    {
+        auto visibilityRow = secondRow;
+        placeChip(visibilityRow, hideEmpty, 24);
+        placeChip(visibilityRow, showLoops, 24);
+        placeChip(visibilityRow, showOneShots, 24);
+    }
+    filterSeparatorBounds = {};
+    ignoreSymlinks.setVisible(contentRow.getWidth() >= linkNeeds + clearNeeds);
+    if (ignoreSymlinks.isVisible()) placeChip(contentRow, ignoreSymlinks, 24);
+    clearFilters.setVisible(contentRow.getWidth() >= clearNeeds);
     if (clearFilters.isVisible())
     {
-        filterBar.removeFromLeft(studio::spacingUnit);
-        filterSeparatorBounds = filterBar.removeFromLeft(1).withSizeKeepingCentre(1, 20);
-        filterBar.removeFromLeft(1 + studio::spacingTight);
-        placeChip(clearFilters, 0);
+        contentRow.removeFromLeft(studio::spacingUnit);
+        filterSeparatorBounds = contentRow.removeFromLeft(1).withSizeKeepingCentre(1, 20);
+        contentRow.removeFromLeft(1 + studio::spacingTight);
+        placeChip(contentRow, clearFilters, 0);
     }
     list.removeFromTop(8); library.setBounds(list);
     if (discBrowser != nullptr) discBrowser->setBounds(library.getBounds());

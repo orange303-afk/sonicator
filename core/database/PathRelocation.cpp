@@ -35,6 +35,11 @@ juce::String withSeparator(const juce::String& root, juce::juce_wchar separator)
     return trimmed + juce::String::charToString(separator);
 }
 
+juce::String toNative(const juce::String& path)
+{
+    return withNativeSeparators(path, juce::File::getSeparatorChar());
+}
+
 bool isUnder(const juce::String& path, const juce::String& root)
 {
     const auto r = canonical(trimTrailingSeparators(root));

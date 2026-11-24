@@ -38,8 +38,9 @@ Notes:
 - Each job caches `build/_deps`, keyed by the hash of `CMakeLists.txt`, `tests/CMakeLists.txt` and
   `CMakePresets.json`. Without the cache the first configure re-downloads about 0.5 GB per job.
 - On failure the job uploads `build/Testing/Temporary/LastTest.log`.
-- The Windows job builds the whole project and runs the suite, but 22 tests fail on Windows; the state
-  is recorded in `docs/WINDOWS_PORT.md` and the job is informational until they are resolved.
+- The Windows job builds the whole project and runs the suite. Since 2026-11-24 the suite passes on
+  Windows (1320 cases, 9 platform skips, no failures); the job stays informational until one CI run
+  confirms it on `windows-2022`. The current state is recorded in `docs/WINDOWS_PORT.md`.
 - The Linux job runs inside `ubuntu:22.04` because that container is the release baseline: an AppImage
   carries no glibc, so a build on a newer distribution would lock users to it. About twenty test files
   open windows, so the suite runs under `xvfb-run`. Its state is recorded in `docs/LINUX_PORT.md`.

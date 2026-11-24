@@ -468,6 +468,62 @@ TEST_CASE("Whole-catalog sort uses effective Type, BPM and Key with unknown last
     filter.sort = LibrarySort::Key; filter.ascending = false;
     REQUIRE(idsOf(repo.query(filter)) == std::vector<int64_t>{ b, d, a, c });
 }
+TEST_CASE("Structure and Type filters cover the whole catalog and follow overrides", "[smart][columns][filter]")
+{
+    TestDirectory t; Database db(t.dir.getChildFile("smart-filter.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    auto add = [&repo](const juce::String& name)
+    {
+        SampleRecord r; r.filePath = "/lib/" + name; r.fileName = name; r.fileHash = "h";
+        return repo.upsert(r);
+    };
+    auto publishStructure = [&repo](int64_t id, const juce::String& type, const juce::String& structure)
+    {
+        SmartPublication publication; publication.sampleId = id;
+        publication.candidates = { candidate(SmartField::Type, "filename", type, 0),
+                                   candidate(SmartField::Structure, "dsp", structure, 0) };
+        publication.catalogPath = repo.catalogPath();
+        REQUIRE(repo.publishSmartAnalysis(publication).published);
+    };
+    const auto loop = add("loop.wav");
+    const auto shot = add("shot.wav");
+    const auto phrase = add("phrase.wav");
+    const auto plain = add("plain.wav");
+    publishStructure(loop, "loop", "loop");
+    publishStructure(shot, "kick", "one-shot");
+    publishStructure(phrase, "pad", "phrase");
+
+    LibraryFilter filter;
+    REQUIRE(idsOf(repo.query(filter)) == std::vector<int64_t>{ loop, phrase, plain, shot });
+    // Only the confirmed loop stays; an unclassified file never passes as one.
+    filter.showOneShots = false;
+    REQUIRE(idsOf(repo.query(filter)) == std::vector<int64_t>{ loop });
+    // Only the confirmed one-shot stays.
+    filter.showOneShots = true;
+    filter.showLoops = false;
+    REQUIRE(idsOf(repo.query(filter)) == std::vector<int64_t>{ shot });
+    // Neither: the phrase and the file without any analysis.
+    filter.showOneShots = false;
+    REQUIRE(idsOf(repo.query(filter)) == std::vector<int64_t>{ phrase, plain });
+
+    // Type is the effective value, so a manual override wins over the analyzer.
+    LibraryFilter none;
+    none.types = { "snare" };
+    REQUIRE(idsOf(repo.query(none)).empty());
+    SmartOverride manual; manual.textValue = "Snare";
+    repo.setSmartOverride(loop, SmartField::Type, manual);
+    REQUIRE(idsOf(repo.query(none)) == std::vector<int64_t>{ loop });
+    repo.clearSmartOverride(loop, SmartField::Type);
+    REQUIRE(idsOf(repo.query(none)).empty());
+
+    // The Type filter combines with the structure pair instead of replacing it.
+    LibraryFilter combined;
+    combined.showLoops = false;
+    combined.types = { "Kick" };
+    REQUIRE(idsOf(repo.query(combined)) == std::vector<int64_t>{ shot });
+    combined.showOneShots = false;
+    REQUIRE(idsOf(repo.query(combined)).empty());
+}
 TEST_CASE("A key display keeps a tonic without an invented mode", "[smart][columns]")
 {
     REQUIRE(keyDisplayName(9, "minor") == "A minor");

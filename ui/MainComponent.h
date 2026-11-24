@@ -134,6 +134,12 @@ public:
     void showSearchHistory();
     void persistHideEmpty();
     void persistShowIgnored();
+    // The Type menu is the library's own filter, not the row Type override: it lists the same
+    // standard and custom types the override menu does.
+    void showTypeFilterMenu();
+    void clearTypeFilter();
+    void updateTypeFilterChip();
+    void persistStructureFilters();
     void ensureSelectedFolderVisible();
     bool isFolderVisible(const juce::String& path) const;
     void persistPreviewSettings();
@@ -206,7 +212,10 @@ private:
     studio::Chip tagFilter { "Tags" }, starredButton { "Starred" },
                  clearFilters { "Clear filters" };
     juce::TextButton editTags { "Edit tags..." };
+    studio::Chip typeFilter { "Type" };
     studio::CheckChip hideEmpty { "Hide empty" };
+    studio::CheckChip showLoops { "Show loops" };
+    studio::CheckChip showOneShots { "Show one-shots" };
     studio::CheckChip ignoreSymlinks { "Ignore symlinks" };
     studio::IconButton previousPage { ActionIcon::chevronLeft, "<" };
     studio::IconButton nextPage { ActionIcon::chevronRight, ">" };

@@ -100,7 +100,8 @@ TEST_CASE("Disposal removes a file and refuses links and missing paths", "[files
     const auto target = writeText(t.dir.getChildFile("target.wav"), "audio");
     const auto link = t.dir.getChildFile("alias.wav");
     // JUCE names the new link by the argument; the object it is called on is the target.
-    REQUIRE(target.createSymbolicLink(link, false));
+    if (! target.createSymbolicLink(link, false))
+        SKIP("Symbolic links need Developer Mode or an elevated process on Windows");
     const auto refused = files::disposeFile(link, files::DisposalPolicy::DeletePermanently);
     REQUIRE_FALSE(refused.ok);
     REQUIRE(link.isSymbolicLink());
@@ -204,6 +205,9 @@ TEST_CASE("Link replacement keeps the path usable and points at the original",
     REQUIRE(service.waitUntilFinished(10000));
     const auto results = service.results();
     REQUIRE(results.size() == 1);
+    if (results[0].state == files::DuplicateCleanupState::failed
+        && results[0].message.containsIgnoreCase("symbolic link"))
+        SKIP("Symbolic links need Developer Mode or an elevated process on Windows");
     REQUIRE(results[0].state == files::DuplicateCleanupState::linked);
     REQUIRE(copy.isSymbolicLink());
     REQUIRE(copy.getLinkedTarget() == original);
@@ -266,7 +270,8 @@ TEST_CASE("The library can hide rows that are symbolic links", "[links][database
     const auto real = writeText(folder.getChildFile("real.wav"), "audio bytes");
     const auto link = folder.getChildFile("alias.wav");
     // JUCE names the new link by the argument; the object it is called on is the target.
-    REQUIRE(real.createSymbolicLink(link, false));
+    if (! real.createSymbolicLink(link, false))
+        SKIP("Symbolic links need Developer Mode or an elevated process on Windows");
 
     const auto add = [&repo](const juce::File& file)
     {

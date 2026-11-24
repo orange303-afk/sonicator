@@ -266,7 +266,8 @@ TEST_CASE("The drag cache prunes old siblings", "[bpm][drag]")
     const auto old = cache.getChildFile("old");
     keep.createDirectory();
     old.createDirectory();
-    old.setLastModificationTime(juce::Time::getCurrentTime() - juce::RelativeTime::days(30));
+    if (! old.setLastModificationTime(juce::Time::getCurrentTime() - juce::RelativeTime::days(30)))
+        SKIP("This platform does not allow backdating a directory; the cache prunes by the real write time");
     pruneDragCache(cache, keep, 7);
     REQUIRE(keep.isDirectory());
     REQUIRE_FALSE(old.isDirectory());

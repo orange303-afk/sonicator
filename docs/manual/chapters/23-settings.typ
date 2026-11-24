@@ -5,7 +5,7 @@
   inthis: (
     [Theme, interface scale and language],
     [Move, open, relocate and back up the catalog],
-    [Editing policy and workspace reset],
+    [Search behaviour, editing policy and workspace reset],
     [Audio & MIDI, Hotkeys and Plugins],
     [Update check, contribution and REPORT],
   ),
@@ -48,6 +48,13 @@ The *Library* block shows the current database path and four actions:
 Relocation checks a sample of 200 paths and warns when the chosen folder looks wrong. Folder structure
 inside each root must be preserved: the tool rewrites stored paths, it does not copy audio. Running it
 twice on the same library is unnecessary; one successful relocation per machine is enough.
+
+#section("Search")
+
+*Open search history on click* decides what a click in the search field does. Off, the click places
+the caret so typing starts at once, and the clock button at the right of the field opens the last ten
+searches. On, the history opens on the click itself, as earlier builds did. The setting applies to the
+standalone application and to the DAW plug-in, and it is stored in `settings.json`.
 
 #section("Editing")
 

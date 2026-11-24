@@ -1,4 +1,5 @@
 #include "FolderIndex.h"
+#include "PathRelocation.h"
 #include "core/database/AssetCompatibility.h"
 #include "core/disc/DiscContentIndexer.h"
 
@@ -14,15 +15,12 @@ juce::String withoutTrailingSeparator(juce::String path)
     return path;
 }
 
-// True when `path` is the folder `root` itself or something inside it. A plain prefix test would
-// treat "/a/bc" as a child of "/a/b", so the character after the root must be a separator.
+// True when `path` is the folder `root` itself or something inside it. A folder root can be written
+// with either separator (favourites outlive the system that wrote them), and a plain prefix test
+// would treat "/a/bc" as a child of "/a/b", so the boundary character is checked too.
 bool isUnder(const juce::String& path, const juce::String& root)
 {
-    const auto base = withoutTrailingSeparator(root);
-    if (path == base) return true;
-    if (path.length() <= base.length() || ! path.startsWith(base)) return false;
-    const auto next = path[base.length()];
-    return next == '/' || next == '\\';
+    return pathrelocation::isUnder(path, root);
 }
 
 bool isUnderAny(const juce::String& path, const juce::StringArray& roots)
@@ -56,7 +54,9 @@ FolderIndex buildFolderIndex(SampleRepository& repo, const FolderIndexRequest& r
                              const std::function<bool()>& cancelled)
 {
     FolderIndex index;
-    index.roots = request.roots;
+    // A root may be written with the other separator (a favourite saved on another system), so the
+    // index keys every folder the way the catalog does and the parent chains still line up.
+    for (const auto& root : request.roots) index.roots.add(pathrelocation::toNative(withoutTrailingSeparator(root)));
     if (request.showAllSamples && ! request.revealIgnored)
         for (int i = index.roots.size(); --i >= 0;)
             if (isPathIgnored(index.roots[i], request.ignored)) index.roots.remove(i);

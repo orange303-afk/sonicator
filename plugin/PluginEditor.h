@@ -17,6 +17,10 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    // A click that lands in the window also asks the window for keyboard focus: some Windows hosts
+    // (Fender Studio Pro / Studio One reported it on 0.2.0) deliver the click but leave keys with the
+    // arrangement, so typing only worked through the clipboard.
+    void mouseDown(const juce::MouseEvent&) override;
 
 private:
     PluginProcessor& processor;

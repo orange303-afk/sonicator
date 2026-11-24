@@ -68,8 +68,9 @@ own panel sizes, separate from the standalone application.
 
 #section("Where preferences live")
 
-Theme, scale, language, catalog path, window geometry, Hide empty, the last ten searches and the
-shortcut overrides live in `settings.json` in the application-data folder (chapter 2). Shortcut
-profiles are separate for macOS and Windows: Command and Control are never silently converted.
+Theme, scale, language, catalog path, window geometry, Hide empty, Show loops, Show one-shots, the
+search-history click preference, the last ten searches and the shortcut overrides live in
+`settings.json` in the application-data folder (chapter 2). Shortcut profiles are separate for macOS
+and Windows: Command and Control are never silently converted.
 
 ]

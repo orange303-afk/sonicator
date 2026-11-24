@@ -1,4 +1,5 @@
 #include "FolderTree.h"
+#include "core/database/PathRelocation.h"
 #include "ui/shell/Theme.h"
 #include "core/disc/DiscContentIndexer.h"
 namespace sonicator {
@@ -93,9 +94,12 @@ bool FolderTree::selectPath(const juce::String& path)
     if (path.isEmpty()) return false;
     auto* item = tree.getRootItem();
     if (item == nullptr) return false;
-    if (item->getUniqueName() == path) { item->setSelected(true, true); return true; }
+    // Favourite and session paths may carry the other separator; the tree holds catalog paths.
+    const auto wanted = pathrelocation::toNative(path);
+    if (pathrelocation::toNative(item->getUniqueName()) == wanted)
+    { item->setSelected(true, true); return true; }
     item->setOpen(true);
-    return selectPath(*item, path);
+    return selectPath(*item, wanted);
 }
 bool FolderTree::selectPath(juce::TreeViewItem& parent, const juce::String& path)
 {
@@ -103,7 +107,7 @@ bool FolderTree::selectPath(juce::TreeViewItem& parent, const juce::String& path
     {
         auto* child = parent.getSubItem(i);
         if (child == nullptr) continue;
-        const auto name = child->getUniqueName();
+        const auto name = pathrelocation::toNative(child->getUniqueName());
         if (name == path)
         {
             child->setSelected(true, true);
@@ -111,7 +115,7 @@ bool FolderTree::selectPath(juce::TreeViewItem& parent, const juce::String& path
             return true;
         }
         if (name == "All samples" || name == "Favorites") continue;
-        if (juce::File(path).isAChildOf(juce::File(name)))
+        if (pathrelocation::isUnder(path, name))
         {
             child->setOpen(true);
             if (selectPath(*child, path)) return true;

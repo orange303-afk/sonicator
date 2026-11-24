@@ -8,7 +8,7 @@ namespace sonicator
 enum class ActionIcon
 {
     settings, search, play, pause, stop, folder, favorite, reset, close, add, remove,
-    chevronRight, chevronLeft, chevronDown, more
+    chevronRight, chevronLeft, chevronDown, more, history
 };
 
 juce::Path actionIconPath(ActionIcon icon);

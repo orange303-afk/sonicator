@@ -12,9 +12,11 @@
 )[
 
 Typing filters after a 250 ms pause. Enter applies the query immediately; Escape clears it, or
-closes an open history menu. Clicking the field opens the last ten applied searches, shared by every catalog;
-choosing one applies it. The history is stored in `settings.json`, so it survives a restart and is the
-same whichever catalog is open.
+closes an open history menu. A click in the field places the caret so the next keystroke is text; the
+clock button at the right of the field opens the last ten applied searches, shared by every catalog,
+and choosing one applies it. Settings → *Open search history on click* makes a plain click open the
+history instead. The history is stored in `settings.json`, so it survives a restart and is the same
+whichever catalog is open.
 
 
 #section("Plain words")

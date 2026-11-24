@@ -671,8 +671,12 @@ TEST_CASE("Unsupported tracker instrument slots are drawn in red", "[tracker][ui
     REQUIRE(preview.loadFile(file, false));
     REQUIRE(engine.trackerSlots().front().fmInstrument);
     juce::Image image(juce::Image::RGB, 240, 30, true);
-    juce::Graphics g(image);
-    preview.containerSourceList().getListBoxModel()->paintListBoxItem(1, g, 240, 30, false);
+    // The Graphics ends before the pixels are read: a Windows image is backed by a Direct2D bitmap
+    // whose frame is submitted when the context is destroyed.
+    {
+        juce::Graphics g(image);
+        preview.containerSourceList().getListBoxModel()->paintListBoxItem(1, g, 240, 30, false);
+    }
     bool red = false;
     for (int y = 0; y < image.getHeight(); ++y)
         for (int x = 0; x < image.getWidth(); ++x)

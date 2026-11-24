@@ -75,6 +75,10 @@ PluginEditor::PluginEditor(PluginProcessor& owner)
 
     // The host owns window resizing; omit JUCE's diagonal bottom-right grip.
     setResizable(true, false);
+    // Keys belong to this window once it is the one the user clicked. The wrapper already sets the
+    // same flag from EDITOR_WANTS_KEYBOARD_FOCUS; stating it here keeps the editor correct when it
+    // is created outside a host wrapper (the tests and the embedded tests do that).
+    setWantsKeyboardFocus(true);
     applyInterfaceScale(main != nullptr ? main->interfaceScale() : 1.0f);
     setSize(juce::roundToInt(editorScale * juce::jlimit(PluginState::minimumWidth,
                                                      PluginState::maximumWidth, saved.windowWidth)),
@@ -169,6 +173,18 @@ void PluginEditor::persistWindowSize()
     {
         juce::Logger::writeToLog("Plugin window size was not saved: " + juce::String::fromUTF8(e.what()));
     }
+}
+
+void PluginEditor::mouseDown(const juce::MouseEvent& event)
+{
+    // The click already belongs to this window, so asking for focus cannot pull it away from the
+    // host mid-gesture; it only makes the next keystroke land here instead of in the arrangement.
+    if (main != nullptr)
+    {
+        if (! main->hasKeyboardFocus(true)) main->grabKeyboardFocus();
+    }
+    else grabKeyboardFocus();
+    juce::AudioProcessorEditor::mouseDown(event);
 }
 
 void PluginEditor::applyInterfaceScale(float scale)

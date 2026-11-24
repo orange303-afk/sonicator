@@ -201,8 +201,11 @@ TEST_CASE("Painting 35k points stays inside a frame budget", "[cloud][view][perf
     std::printf("35k paint: first %.2f ms cpu, cached %.2f ms cpu (wall %.2f / %.2f)\n",
                 cpu.front(), cpu.back(), wall.front(), wall.back());
     // CPU time, not wall time: a parallel build or CI neighbour must not turn a fast frame into a
-    // red test, while a real regression (one fill per point again) still shows up.
-    REQUIRE(cpu.front() < 45.0);   // Debug settle frame: layers composed, labels shaped once
+    // red test, while a real regression (one fill per point again) still shows up. The Windows
+    // ceiling is wider on purpose: MSVC's Debug build draws the same geometry through Direct2D and
+    // measures about twice the Apple toolchain's Debug time on the same frame.
+    const double settleBudget = JUCE_WINDOWS ? 100.0 : 45.0;
+    REQUIRE(cpu.front() < settleBudget);   // Debug settle frame: layers composed, labels shaped once
     REQUIRE(cpu.back() < 10.0);    // cached frame: what a hover repaint actually costs
 }
 

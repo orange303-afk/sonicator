@@ -57,6 +57,29 @@ catalogs. *Clear filters* turns it off and saves that choice.
 Metadata-only rows — RX2, SF2 and similar containers that were indexed without decoding — stay
 visible even when they have no measured peak.
 
+#section("Show loops and Show one-shots")
+
+These two checkboxes filter by the structure the analysis confirmed, not by tempo or length. A loop
+whose BPM is unknown still passes *Show loops*; a one-shot that carries a tempo still passes
+*Show one-shots*.
+
+- Both on: the whole library, including files the analysis has not classified.
+- One on: only files confirmed as that category. A phrase or an unanalysed file does not pass.
+- Both off: only the rows that are neither, which keeps phrases and unclassified files visible.
+
+Both are saved between launches, and *Clear filters* turns both back on.
+
+#section("Type")
+
+The *Type* pill selects one sample type from the standard list and your custom types, such as
+*Snare*. It reads the same value the Type column shows, so a manual Type correction wins over the
+analyzer's guess. The pill shows the chosen type (`Type: Snare`) and *All types* in its menu clears
+it. The filter combines with tags, search and the structure pair: *Type: Snare* with *Show one-shots*
+alone leaves snare one-shots.
+
+Typing `type:snare` in the search field remains the quick way to the same filter, and a typed query
+and the pill add up.
+
 #section("Duplicates")
 
 The `DUPLICATES` column groups files that are byte-identical: the same full SHA-256 and the same

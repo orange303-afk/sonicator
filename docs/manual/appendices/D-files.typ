@@ -12,7 +12,7 @@ on macOS.
   rows: (
     ("`sonicator.sqlite`", "The catalog: rows, tags, stars, metadata, measured features.", "No — back it up instead."),
     ("`sonicator.sqlite-wal`, `-shm`", "Live SQLite sidecars.", "No, not while the application runs."),
-    ("`settings.json`", "Theme, scale, catalog path, window geometry, Hide empty, searches, shortcuts.", "Yes — settings return to defaults."),
+    ("`settings.json`", "Theme, scale, catalog path, window geometry, Hide empty, Show loops, Show one-shots, search behaviour, searches, shortcuts.", "Yes — settings return to defaults."),
     ("`backups/`", "Manual catalog copies.", "Only copies you no longer need."),
     ("`<catalog>.relocate-<timestamp>.sqlite`", "A pre-relocation backup beside the catalog.", "After a successful relocation, when you are sure."),
     ("`exports/`", "Selection WAVs and prepared drag audio.", "Only files no project or message references."),

@@ -320,12 +320,13 @@ TEST_CASE("The header keeps the search clear control in place", "[ui][studio]")
     app.resized();
     auto* search = dynamic_cast<SearchField*>(app.findChildWithID("search"));
     REQUIRE(search != nullptr);
-    juce::Button* clear = nullptr;
-    for (auto* child : search->getChildren())
-        if (auto* button = dynamic_cast<juce::Button*>(child)) clear = button;
+    auto* clear = dynamic_cast<juce::Button*>(search->findChildWithID("clearSearch"));
     REQUIRE(clear != nullptr);
     // The owner wants the control always in place: a control that vanishes is one a user hunts.
     REQUIRE(clear->isVisible());
+    // The history control is a second button in the same field, so it must not be mistaken for the
+    // clear control, and it only appears once a search is recorded.
+    REQUIRE(search->findChildWithID("searchHistory") != nullptr);
     const auto pump = [] { juce::MessageManager::getInstance()->runDispatchLoopUntil(50); };
     search->setText("pad", true);
     pump();

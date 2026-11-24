@@ -358,7 +358,7 @@ TEST_CASE("A catalog write failure ends the scan instead of stranding its worker
         REQUIRE(sqlite3_open(dbFile.getFullPathName().toRawUTF8(), &raw) == SQLITE_OK);
         REQUIRE(sqlite3_exec(raw,
             "CREATE TRIGGER fail_insert BEFORE INSERT ON samples"
-            " WHEN NEW.path LIKE '%/abort/%' BEGIN SELECT RAISE(ABORT,'boom'); END;",
+            " WHEN NEW.path LIKE '%abort%' BEGIN SELECT RAISE(ABORT,'boom'); END;",
             nullptr, nullptr, nullptr) == SQLITE_OK);
         sqlite3_close(raw);
     }
