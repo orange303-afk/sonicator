@@ -6,7 +6,7 @@
   keywords: ("sample browser", "SONICATOR", "user manual"),
 )
 
-#let version = "0.3.0"
+#let version = "0.3.1"
 #let build-date = "November 2026"
 
 #show: book
