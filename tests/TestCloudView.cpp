@@ -202,10 +202,11 @@ TEST_CASE("Painting 35k points stays inside a frame budget", "[cloud][view][perf
                 cpu.front(), cpu.back(), wall.front(), wall.back());
     // CPU time, not wall time: a parallel build or CI neighbour must not turn a fast frame into a
     // red test, while a real regression (one fill per point again) still shows up. The Windows
-    // ceiling is wider on purpose: MSVC's Debug build draws the same geometry through Direct2D and
-    // measures about twice the Apple toolchain's Debug time on the same frame.
+    // ceiling is wider on purpose: MSVC's Debug build draws the same geometry through Direct2D,
+    // and a shared CI runner without a GPU uses the software rasteriser, which measures several
+    // times the local time on the same frame.
     #if defined (_WIN32)
-    const double settleBudget = 100.0;
+    const double settleBudget = 250.0;
     #else
     const double settleBudget = 45.0;
     #endif

@@ -1,5 +1,10 @@
 #include "DuplicateCleanup.h"
 #include <cstring>
+#include <optional>
+#include <utility>
+#if JUCE_WINDOWS
+#include <windows.h>
+#endif
 #include <juce_core/juce_core.h>
 
 namespace sonicator::files
@@ -9,8 +14,10 @@ namespace
 constexpr int compareChunkBytes = 65536;
 
 // A symlink read back on Windows carries the NT namespace prefix (`\\?\` or `\??\`), so comparing
-// it with the original as a raw File fails even though the link is correct. The comparison is
-// separator- and case-tolerant for the same reason the catalog allows both separators.
+// it with the original as a raw string fails even though the link is correct. The same comparison
+// also has to survive an 8.3 short path: `GetTempPath` returns `C:\Users\NAME~1\...` while the
+// reparse point resolves to the long form. Identity is therefore taken from the file system, not
+// from the text.
 juce::String comparablePath(const juce::File& file)
 {
     auto path = file.getFullPathName();
@@ -24,10 +31,22 @@ juce::String comparablePath(const juce::File& file)
    #endif
 }
 
-bool pointsAt(const juce::File& link, const juce::File& original)
+#if JUCE_WINDOWS
+std::optional<std::pair<juce::uint32, juce::int64>> fileIdentity(const juce::File& file)
 {
-    return comparablePath(link) == comparablePath(original);
+    const auto handle = CreateFileW(file.getFullPathName().toWideCharPointer(), 0,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return std::nullopt;
+    BY_HANDLE_FILE_INFORMATION info {};
+    const bool read = GetFileInformationByHandle(handle, &info) != 0;
+    CloseHandle(handle);
+    if (! read) return std::nullopt;
+    return std::make_pair((juce::uint32) info.dwVolumeSerialNumber,
+                          ((juce::int64) info.nFileIndexHigh << 32)
+                              | (juce::int64) info.nFileIndexLow);
 }
+#endif
 
 struct JournalEntry
 {
@@ -137,6 +156,17 @@ bool filesAreIdentical(const juce::File& a, const juce::File& b, juce::String& e
     return true;
 }
 
+bool sameFile(const juce::File& a, const juce::File& b)
+{
+   #if JUCE_WINDOWS
+    const auto first = fileIdentity(a);
+    const auto second = fileIdentity(b);
+    return first.has_value() && second.has_value() && *first == *second;
+   #else
+    return comparablePath(a) == comparablePath(b);
+   #endif
+}
+
 DuplicateCleanupService::DuplicateCleanupService() : Thread("Duplicate cleanup") {}
 DuplicateCleanupService::~DuplicateCleanupService()
 {
@@ -212,7 +242,7 @@ juce::StringArray DuplicateCleanupService::recoverInterrupted(const juce::File& 
         }
         // The link is in place and the staged copy is redundant. Keep both when the link does
         // not point at the expected original: that needs a person, not an automatic choice.
-        if (link.isSymbolicLink() && pointsAt(link.getLinkedTarget(), entry.original))
+        if (link.isSymbolicLink() && sameFile(link.getLinkedTarget(), entry.original))
         {
             if (! staged.deleteFile())
             {
@@ -318,7 +348,7 @@ void DuplicateCleanupService::run()
                         fail("Cannot create a symbolic link here; the copy was restored");
                     }
                     else if (! job.copy.isSymbolicLink()
-                             || ! pointsAt(job.copy.getLinkedTarget(), job.original))
+                             || ! sameFile(job.copy.getLinkedTarget(), job.original))
                     {
                         job.copy.deleteFile();
                         entry.staging.moveFileTo(job.copy);

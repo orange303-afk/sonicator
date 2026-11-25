@@ -42,6 +42,11 @@ struct DuplicateCleanupProgress
 // Same size and identical bytes. A link is compared through its target.
 bool filesAreIdentical(const juce::File& a, const juce::File& b, juce::String& error);
 
+// True when both paths name the same file on disk, whatever the spelling: a symbolic link and its
+// target, an 8.3 short path and the long one, or a different letter case. A link whose target is
+// missing is not the same file.
+bool sameFile(const juce::File& a, const juce::File& b);
+
 // One background job at a time. Each copy is verified against its original immediately before
 // the action, never from catalog metadata alone.
 class DuplicateCleanupService final : private juce::Thread
