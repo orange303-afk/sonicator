@@ -63,7 +63,11 @@ bool writeCloudLayout(const CloudLayout& layout, const juce::File& file)
     return temporary.moveFileTo(file);
 }
 
-std::optional<CloudLayout> readCloudLayout(const juce::File& file, uint64_t expectedFingerprint)
+namespace
+{
+// A file on disk only carries its own fingerprint; the caller may also demand a specific one. The
+// startup path asks for none, because the previous map is worth showing before the catalog is read.
+std::optional<CloudLayout> parseCloudLayout(const juce::File& file, std::optional<uint64_t> expected)
 {
     if (! file.existsAsFile()) return std::nullopt;
     juce::MemoryBlock block;
@@ -72,9 +76,10 @@ std::optional<CloudLayout> readCloudLayout(const juce::File& file, uint64_t expe
     char readMagic[4] = {};
     if (in.read(readMagic, 4) != 4 || std::memcmp(readMagic, magic, 4) != 0) return std::nullopt;
     if (in.readInt() != formatVersion) return std::nullopt;
-    if ((uint64_t) in.readInt64() != expectedFingerprint) return std::nullopt;
+    const auto storedFingerprint = (uint64_t) in.readInt64();
+    if (expected.has_value() && storedFingerprint != *expected) return std::nullopt;
     CloudLayout layout;
-    layout.fingerprint = expectedFingerprint;
+    layout.fingerprint = storedFingerprint;
     layout.algorithmVersion = in.readInt();
     const auto x = in.readFloat(), y = in.readFloat(), w = in.readFloat(), h = in.readFloat();
     if (! std::isfinite(x) || ! std::isfinite(y) || ! std::isfinite(w) || ! std::isfinite(h) || w <= 0 || h <= 0)
@@ -118,6 +123,44 @@ std::optional<CloudLayout> readCloudLayout(const juce::File& file, uint64_t expe
     if (in.getNumBytesRemaining() != 0) return std::nullopt;
     return layout;
 }
+} // namespace
+
+std::optional<CloudLayout> readCloudLayout(const juce::File& file, uint64_t expectedFingerprint)
+{
+    return parseCloudLayout(file, expectedFingerprint);
+}
+
+juce::File cloudLayoutCatalogFile(const juce::File& layoutFile)
+{
+    return layoutFile.getSiblingFile(layoutFile.getFileName() + ".catalog");
+}
+
+bool writeCloudLayoutCatalog(const juce::File& layoutFile, const juce::File& catalogFile)
+{
+    if (! layoutFile.existsAsFile()) return false;
+    return cloudLayoutCatalogFile(layoutFile).replaceWithText(catalogFile.getFullPathName());
+}
+
+std::optional<CloudLayout> readNewestCloudLayout(const juce::File& folder, const juce::File& catalogFile)
+{
+    if (! folder.isDirectory() || catalogFile.getFullPathName().isEmpty()) return std::nullopt;
+    auto files = folder.findChildFiles(juce::File::findFiles, false, "layout-*.bin");
+    std::sort(files.begin(), files.end(), [](const juce::File& a, const juce::File& b)
+    {
+        return a.getLastModificationTime() > b.getLastModificationTime();
+    });
+    const auto wanted = catalogFile.getFullPathName();
+    for (const auto& file : files)
+    {
+        // No tag, or a tag for another library: showing it would put files from one catalog on the
+        // map while another is open. Skip it and let the build start from nothing, as before.
+        const auto tag = cloudLayoutCatalogFile(file);
+        if (! tag.existsAsFile()) continue;
+        if (tag.loadFileAsString().trim() != wanted) continue;
+        if (auto layout = parseCloudLayout(file, std::nullopt)) return layout;
+    }
+    return std::nullopt;
+}
 
 void pruneCloudCache(const juce::File& folder, int keep)
 {
@@ -127,6 +170,14 @@ void pruneCloudCache(const juce::File& folder, int keep)
     {
         return a.getLastModificationTime() > b.getLastModificationTime();
     });
-    for (int i = std::max(0, keep); i < files.size(); ++i) files[i].deleteFile();
+    for (int i = std::max(0, keep); i < files.size(); ++i)
+    {
+        cloudLayoutCatalogFile(files[i]).deleteFile();
+        files[i].deleteFile();
+    }
+    // A tag left behind by a layout that was already gone would never be read again.
+    auto tags = folder.findChildFiles(juce::File::findFiles, false, "layout-*.bin.catalog");
+    for (const auto& tag : tags)
+        if (! tag.getSiblingFile(tag.getFileName().dropLastCharacters(8)).existsAsFile()) tag.deleteFile();
 }
 }

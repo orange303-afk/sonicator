@@ -87,6 +87,17 @@ TEST_CASE("Cloud input batches tagged files, descriptors and vectors", "[cloud]"
     REQUIRE(input.fingerprint != 0);
 }
 
+TEST_CASE("Cloud input gives the worker back as soon as the build is cancelled", "[cloud]")
+{
+    CloudFixture f;
+    // The first check runs before the batch query, so a superseded generation never reads a 50k-file
+    // catalog to the end just to throw the result away.
+    const auto cancelled = cloud::loadCloudInput(*f.repo, [] { return true; });
+    REQUIRE(cancelled.nodes.empty());
+    REQUIRE(cancelled.tags.empty());
+    REQUIRE(cancelled.fingerprint == 0);
+}
+
 TEST_CASE("Cloud fingerprint follows tags and features, not stars or filters", "[cloud]")
 {
     CloudFixture f;
@@ -102,6 +113,23 @@ TEST_CASE("Cloud fingerprint follows tags and features, not stars or filters", "
 
     const auto again = cloud::loadCloudInput(*f.repo);
     REQUIRE(again.fingerprint == retagged.fingerprint); // stable across reads
+}
+
+TEST_CASE("Cloud fingerprint ignores the analysis time and follows the descriptors", "[cloud]")
+{
+    CloudFixture f;
+    const auto before = cloud::loadCloudInput(*f.repo);
+
+    // A background reanalysis that lands on the same numbers must not rebuild an identical map.
+    auto record = *f.repo->findById(f.kickId);
+    record.dateAnalyzed += 5000;
+    f.repo->upsert(record);
+    REQUIRE(cloud::loadCloudInput(*f.repo).fingerprint == before.fingerprint);
+
+    // A real change of a descriptor that moves the point must rebuild it.
+    record.rmsLevel *= 0.5;
+    f.repo->upsert(record);
+    REQUIRE(cloud::loadCloudInput(*f.repo).fingerprint != before.fingerprint);
 }
 
 TEST_CASE("Cloud colour blends the tag colours per file", "[cloud]")

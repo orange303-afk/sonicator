@@ -64,6 +64,38 @@ TEST_CASE("Cloud cache round-trips and rejects stale or broken files", "[cloud]"
     REQUIRE_FALSE(readCloudLayout(file, 0x1234).has_value());
 }
 
+TEST_CASE("The last cached map is shown only for its own catalog", "[cloud]")
+{
+    TestDirectory t;
+    const auto folder = t.dir.getChildFile("cache");
+    const auto catalogA = t.dir.getChildFile("a.sqlite");
+    const auto catalogB = t.dir.getChildFile("b.sqlite");
+    catalogA.replaceWithText("a");
+    catalogB.replaceWithText("b");
+    const auto layout = buildCloudLayout(smallInput(0x55));
+    const auto fileA = cloudCacheFile(0x55, folder);
+    REQUIRE(writeCloudLayout(layout, fileA));
+    // Untagged: the file cannot prove it belongs to this library, so nothing is shown.
+    REQUIRE_FALSE(readNewestCloudLayout(folder, catalogA).has_value());
+
+    REQUIRE(writeCloudLayoutCatalog(fileA, catalogA));
+    const auto forA = readNewestCloudLayout(folder, catalogA);
+    REQUIRE(forA.has_value());
+    REQUIRE(forA->fingerprint == 0x55);
+    REQUIRE(forA->points.size() == 8);
+
+    // A newer layout without a tag never hides the tagged one, and no catalog sees another's map.
+    const auto fileB = cloudCacheFile(0x66, folder);
+    REQUIRE(writeCloudLayout(buildCloudLayout(smallInput(0x66)), fileB));
+    REQUIRE(readNewestCloudLayout(folder, catalogA)->fingerprint == 0x55);
+    REQUIRE_FALSE(readNewestCloudLayout(folder, catalogB).has_value());
+
+    // Pruning drops the sidecar with its layout so the folder cannot fill with orphan tags.
+    pruneCloudCache(folder, 0);
+    REQUIRE_FALSE(fileA.existsAsFile());
+    REQUIRE_FALSE(cloudLayoutCatalogFile(fileA).existsAsFile());
+}
+
 TEST_CASE("Cloud cache pruning keeps the newest files and never touches others", "[cloud]")
 {
     TestDirectory t;

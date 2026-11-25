@@ -57,28 +57,35 @@ std::array<float, 8> basicFeaturesOf(const SampleRecord& r)
              (float) std::log2((double) std::max(1, r.numChannels)) };
 }
 
-CloudInput loadCloudInput(SampleRepository& repository)
+CloudInput loadCloudInput(SampleRepository& repository, const std::function<bool()>& isCancelled)
 {
+    auto cancelled = [&]() { return isCancelled && isCancelled(); };
     CloudInput input;
     auto samples = repository.taggedSamples();
+    if (cancelled()) return {};
     std::sort(samples.begin(), samples.end(),
               [](const SampleRecord& a, const SampleRecord& b) { return a.id < b.id; });
 
     auto tags = repository.tags();
+    if (cancelled()) return {};
     std::sort(tags.begin(), tags.end(), [](const Tag& a, const Tag& b) { return a.id < b.id; });
 
     std::vector<int64_t> ids;
     ids.reserve(samples.size());
     for (const auto& s : samples) ids.push_back(s.id);
     auto bySample = repository.tagsForSamples(ids);
+    if (cancelled()) return {};
     auto vectors = repository.feedbackV2();
+    if (cancelled()) return {};
 
     std::map<int64_t, int> tagUse;
     std::map<std::pair<int64_t, int64_t>, int> pairUse;
     input.nodes.reserve(samples.size());
     input.v2.reserve(samples.size());
-    for (const auto& s : samples)
+    for (size_t index = 0; index < samples.size(); ++index)
     {
+        if ((index & 4095) == 0 && cancelled()) return {};
+        const auto& s = samples[index];
         CloudNode node;
         node.sampleId = s.id;
         node.name = s.fileName;
@@ -135,10 +142,13 @@ uint64_t fingerprintCloudInput(const CloudInput& input)
     {
         const auto& n = input.nodes[i];
         hashInt(h, n.sampleId);
-        hashInt(h, n.dateAnalyzed);
         hashInt(h, (int64_t) n.tagIds.size());
         for (auto id : n.tagIds) hashInt(h, id);
         hashByte(h, (uint8_t) (n.hasBasic ? 1 : 0));
+        // The descriptor values, not the analysis timestamp: a reanalysis that produces the same
+        // numbers leaves the map identical, and hashing the time used to rebuild it for nothing.
+        if (n.hasBasic)
+            for (auto value : n.basic) hashFloat(h, value);
         hashByte(h, (uint8_t) (n.hasV2 ? 1 : 0));
         if (n.hasV2 && i < input.v2.size())
             for (auto value : input.v2[i]) hashFloat(h, value);

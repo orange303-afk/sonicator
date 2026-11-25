@@ -365,6 +365,7 @@ private:
     void reloadLibrary();
     void updateTagControls();
     void setCloudMode(bool show);
+    void showLastCachedCloudMap();
     void requestCloudBuild();
     void pollCloudBuild();
     void updateCloudMatches();

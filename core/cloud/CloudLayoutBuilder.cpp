@@ -484,6 +484,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
                 std::map<std::pair<int, int>, std::vector<size_t>> grid;
                 for (size_t i = 0; i < vectorRows.size(); ++i)
                 {
+                    if ((i & 8191) == 0 && cancelled()) return {};
                     const auto& p = layout.points[vectorRows[i]];
                     grid[{ (int) std::floor(p.x / cell), (int) std::floor(p.y / cell) }].push_back(i);
                 }
@@ -491,6 +492,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
                 std::vector<Vec2> target(vectorRows.size());
                 for (size_t i = 0; i < vectorRows.size(); ++i)
                 {
+                    if ((i & 2047) == 0 && cancelled()) return {};
                     const auto& p = layout.points[vectorRows[i]];
                     const auto cx = (int) std::floor(p.x / cell), cy = (int) std::floor(p.y / cell);
                     std::vector<std::pair<float, size_t>> candidates;
@@ -527,6 +529,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
                 }
                 for (size_t i = 0; i < vectorRows.size(); ++i)
                 {
+                    if ((i & 2047) == 0 && cancelled()) return {};
                     const auto index = vectorRows[i];
                     const auto anchor = anchorOf(index);
                     const auto& node = input.nodes[index];
@@ -606,6 +609,7 @@ CloudLayout buildCloudLayout(const CloudInput& input, const CloudLayoutOptions& 
         std::map<std::pair<int, int>, std::vector<size_t>> occupied;
         for (size_t i = 0; i < layout.points.size(); ++i)
         {
+            if ((i & 4095) == 0 && cancelled()) return {};
             auto& p = layout.points[i];
             for (int attempt = 0; attempt < 8; ++attempt)
             {

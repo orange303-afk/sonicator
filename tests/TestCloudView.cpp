@@ -39,6 +39,39 @@ CloudLayout gridLayout()
     layout.bounds = { 0, 0, 1000, 1000 };
     return layout;
 }
+
+// The owner's catalog shape: 46 tags, tens of thousands of points on a 3200x2400 map. Shared by
+// the settled-frame and the hover-lens measurements so both see the same geometry.
+CloudLayout bigLayout(int points)
+{
+    CloudLayout layout;
+    layout.fingerprint = 7;
+    for (int t = 0; t < 46; ++t)
+    {
+        CloudIsland island;
+        island.tagId = t + 1;
+        island.name = "Tag" + juce::String(t);
+        island.colour = (uint32_t) (0xff000000 | (uint32_t) (t * 0x010203));
+        island.x = 200.0f + (float) (t % 7) * 400.0f;
+        island.y = 200.0f + (float) (t / 7) * 400.0f;
+        island.radius = 180.0f;
+        island.count = 700;
+        layout.islands.push_back(island);
+    }
+    for (int i = 0; i < points; ++i)
+    {
+        CloudPoint point;
+        point.sampleId = i + 1;
+        point.x = 200.0f + (float) (i % 7) * 400.0f + (float) (i % 97) * 2.0f;
+        point.y = 200.0f + (float) ((i / 7) % 9) * 400.0f + (float) (i % 89) * 2.0f;
+        point.colour = (uint32_t) (0xff000000 | (uint32_t) ((i % 46) * 0x010203));
+        point.islandIndex = (int) (i % 46);
+        point.flags = cloudHasBasic;
+        layout.points.push_back(point);
+    }
+    layout.bounds = { 0, 0, 3200, 2400 };
+    return layout;
+}
 } // namespace
 
 TEST_CASE("Cloud view fits the whole map and keeps the aspect", "[cloud][view]")
@@ -152,32 +185,7 @@ TEST_CASE("A filter change never reflows the map", "[cloud][view]")
 
 TEST_CASE("Painting 35k points stays inside a frame budget", "[cloud][view][perf]")
 {
-    CloudLayout layout;
-    layout.fingerprint = 7;
-    for (int t = 0; t < 46; ++t)
-    {
-        CloudIsland island;
-        island.tagId = t + 1;
-        island.name = "Tag" + juce::String(t);
-        island.colour = (uint32_t) (0xff000000 | (uint32_t) (t * 0x010203));
-        island.x = 200.0f + (float) (t % 7) * 400.0f;
-        island.y = 200.0f + (float) (t / 7) * 400.0f;
-        island.radius = 180.0f;
-        island.count = 700;
-        layout.islands.push_back(island);
-    }
-    for (int i = 0; i < 35636; ++i)
-    {
-        CloudPoint point;
-        point.sampleId = i + 1;
-        point.x = 200.0f + (float) (i % 7) * 400.0f + (float) (i % 97) * 2.0f;
-        point.y = 200.0f + (float) ((i / 7) % 9) * 400.0f + (float) (i % 89) * 2.0f;
-        point.colour = (uint32_t) (0xff000000 | (uint32_t) ((i % 46) * 0x010203));
-        point.islandIndex = (int) (i % 46);
-        point.flags = cloudHasBasic;
-        layout.points.push_back(point);
-    }
-    layout.bounds = { 0, 0, 3200, 2400 };
+    CloudLayout layout = bigLayout(35636);
 
     CloudView view;
     view.setSize(1200, 800);
@@ -212,6 +220,109 @@ TEST_CASE("Painting 35k points stays inside a frame budget", "[cloud][view][perf
     #endif
     REQUIRE(cpu.front() < settleBudget);   // Debug settle frame: layers composed, labels shaped once
     REQUIRE(cpu.back() < 10.0);    // cached frame: what a hover repaint actually costs
+}
+
+TEST_CASE("A dense 52k map builds its point layer quickly", "[cloud][view][perf]")
+{
+    CloudLayout layout;
+    layout.fingerprint = 9;
+    CloudIsland island;
+    island.tagId = 1;
+    island.name = "Kick";
+    island.colour = 0xffe05a5a;
+    island.x = 300;
+    island.y = 380;
+    island.radius = 300;
+    island.count = 52814;
+    layout.islands.push_back(island);
+    // 73 colours with the real skew: 19k files in the largest group.
+    const int shares[8] = { 19187, 13493, 5371, 2871, 2162, 1500, 900, 700 };
+    std::vector<uint32_t> palette;
+    for (int t = 0; t < 73; ++t)
+        palette.push_back(0xff000000u | (uint32_t) ((t * 37) & 0xff) << 16
+                          | (uint32_t) ((t * 61) & 0xff) << 8 | (uint32_t) ((t * 17) & 0xff));
+    int made = 0;
+    for (int g = 0; g < 8; ++g)
+    {
+        for (int i = 0; i < shares[g] && made < 52814; ++i, ++made)
+        {
+            CloudPoint point;
+            point.sampleId = made + 1;
+            point.x = 20.0f + (float) (made % 600);
+            point.y = 20.0f + (float) ((made / 600) % 740);
+            point.colour = palette[(size_t) g];
+            point.islandIndex = 0;
+            point.flags = cloudHasBasic;
+            layout.points.push_back(point);
+        }
+    }
+    while (made < 52814)
+    {
+        CloudPoint point;
+        point.sampleId = made + 1;
+        point.x = 20.0f + (float) (made % 600);
+        point.y = 20.0f + (float) ((made / 600) % 740);
+        point.colour = palette.back();
+        point.islandIndex = 0;
+        point.flags = cloudHasBasic;
+        layout.points.push_back(point);
+        ++made;
+    }
+    layout.bounds = { 0, 0, 629, 767 };
+    CloudView view;
+    view.setSize(390, 480); // the real panel during construction: layerScale ~0.4, dense dots
+    const auto start = juce::Time::getMillisecondCounterHiRes();
+    view.setLayout(layout);
+    const auto elapsed = juce::Time::getMillisecondCounterHiRes() - start;
+    std::printf("52k dense layer: %.0f ms\n", elapsed);
+    REQUIRE(view.layout().points.size() == 52814);
+    // The layer used to be one juce::Path per colour: a 19k-dot path held the message thread for
+    // tens of seconds on the owner's catalog. Direct fills keep it in the hundreds of milliseconds.
+    #if defined (_WIN32)
+    REQUIRE(elapsed < 3000.0);
+    #else
+    REQUIRE(elapsed < 1500.0);
+    #endif
+}
+
+TEST_CASE("A map laid out before the panel is sized still loads", "[cloud][view]")
+{
+    CloudView view; // no setSize yet: this is the constructor path of the real window
+    view.setLayout(bigLayout(52814));
+    REQUIRE(view.hasLayout());
+    view.setSize(1000, 700);
+    REQUIRE(view.layout().points.size() == 52814);
+}
+
+TEST_CASE("The hover lens repaint stays inside a frame budget", "[cloud][view][perf]")
+{
+    CloudView view;
+    view.setSize(1200, 800);
+    view.setLayout(bigLayout(35636));
+    for (int i = 0; i < 120; ++i) view.onFrameForTest();
+    juce::Thread::sleep(140);
+    view.pointerForTest({ 600, 400 });
+    for (int i = 0; i < 90; ++i) view.onFrameForTest();
+    REQUIRE(view.lensStrengthForTest() > 0.9f);
+    juce::Image image(juce::Image::RGB, 1200, 800, true);
+    juce::Graphics g(image);
+    std::vector<double> cpu;
+    for (int pass = 0; pass < 5; ++pass)
+    {
+        const auto cpuStart = std::clock();
+        view.paint(g);
+        cpu.push_back(1000.0 * (double) (std::clock() - cpuStart) / (double) CLOCKS_PER_SEC);
+    }
+    std::printf("35k lens paint: %.2f ms cpu\n", cpu.back());
+    // A hover frame must redraw the lens neighbourhood, not the whole map. Redrawing every point
+    // measured 65 ms here and was what made the 52k-point map crawl; the patch measures ~19 ms in
+    // Debug. The Windows ceiling leaves room for the software rasteriser of a shared CI runner.
+    #if defined (_WIN32)
+    const double lensBudget = 60.0;
+    #else
+    const double lensBudget = 25.0;
+    #endif
+    REQUIRE(cpu.back() < lensBudget);
 }
 
 TEST_CASE("The map builds from a real catalog inside the window", "[ui][cloud]")

@@ -1376,7 +1376,7 @@ MainComponent::~MainComponent()
     if (symlinkFlagWork.valid()) symlinkFlagWork.wait();
     if (cleanupCatalogWork.valid()) cleanupCatalogWork.wait();
     if (folderGenreWork.valid()) folderGenreWork.wait();
-    if (cloudBuilder) cloudBuilder.reset(); // joins the layout worker
+    if (cloudBuilder) cloudBuilder.reset(); // stops and waits for the layout worker
     if (hoverPool) { hoverPool->removeAllJobs(true, -1); hoverPool.reset(); }
     ++(*cloudHoverGeneration);
     embeddedSettingsPanel = nullptr;
@@ -1538,6 +1538,13 @@ void MainComponent::setCloudMode(bool show)
     pageSizeBox.setVisible(! show);
     if (show)
     {
+        // Never build the first point layer inside the constructor: the graphics backend is not up
+        // before the window is shown, and the map waits for the message loop instead.
+        if (cloudPanel != nullptr && ! cloudPanel->hasLayout())
+            juce::MessageManager::callAsync([safe = juce::Component::SafePointer<MainComponent>(this)]
+            {
+                if (safe != nullptr) safe->showLastCachedCloudMap();
+            });
         updateCloudMatches();
         requestCloudBuild();
     }
@@ -1553,6 +1560,22 @@ void MainComponent::persistCloudMode()
     try { settingsStore.update([this](AppSettings& saved) { saved.cloudView = cloudVisible; }); }
     catch (const std::exception& e)
     { status.setText("Cannot save the view mode: " + juce::String::fromUTF8(e.what()), juce::dontSendNotification); }
+}
+
+void MainComponent::showLastCachedCloudMap()
+{
+    if (cloudPanel == nullptr || cloudPanel->hasLayout()) return;
+    // The previous map goes on screen before the catalog is read: opening a retagged library no
+    // longer starts with "Building the map" over an empty view. The build then checks whether the
+    // catalog actually changed and replaces this map only when it did.
+    if (auto last = cloud::readNewestCloudLayout(cloud::defaultCloudCacheFolder(), dbPath))
+    {
+        const auto points = last->points.size();
+        cloudPanel->setLayout(std::move(*last));
+        cloudPanel->setSelectedSample(selectedSampleId);
+        juce::Logger::writeToLog("[cloud] showing the last cached map, "
+                                 + juce::String((int) points) + " points");
+    }
 }
 
 void MainComponent::requestCloudBuild()
@@ -1576,10 +1599,14 @@ void MainComponent::pollCloudBuild()
         }
         return;
     }
-    if (cloudVisible && cloudBuilder->isRunning() && ! cloudPanel->hasLayout())
+    // A build started by a tag change keeps the previous map on screen; the caption says why it is
+    // busy instead of leaving the view looking frozen for the thirty seconds a full catalog takes.
+    if (cloudVisible && cloudBuilder->isRunning())
         cloudPanel->setLoading(true, "Building the map...");
-    else if (cloudVisible && ! cloudBuilder->isRunning() && ! cloudBuildScheduled && ! cloudPanel->hasLayout())
+    else if (cloudVisible && ! cloudBuildScheduled && ! cloudPanel->hasLayout())
         cloudPanel->setLoading(false); // the build ended without a map: show the empty message
+    else if (cloudPanel->hasLayout())
+        cloudPanel->setLoading(false); // the build ended and published: drop the caption
 }
 
 void MainComponent::updateCloudMatches()
