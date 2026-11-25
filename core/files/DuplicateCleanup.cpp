@@ -8,6 +8,27 @@ namespace
 {
 constexpr int compareChunkBytes = 65536;
 
+// A symlink read back on Windows carries the NT namespace prefix (`\\?\` or `\??\`), so comparing
+// it with the original as a raw File fails even though the link is correct. The comparison is
+// separator- and case-tolerant for the same reason the catalog allows both separators.
+juce::String comparablePath(const juce::File& file)
+{
+    auto path = file.getFullPathName();
+    while (path.startsWith("\\\\?\\") || path.startsWith("\\??\\"))
+        path = path.substring(4);
+    path = path.replaceCharacter('\\', '/');
+   #if JUCE_WINDOWS
+    return path.toLowerCase();
+   #else
+    return path;
+   #endif
+}
+
+bool pointsAt(const juce::File& link, const juce::File& original)
+{
+    return comparablePath(link) == comparablePath(original);
+}
+
 struct JournalEntry
 {
     juce::File staging, link, original;
@@ -191,7 +212,7 @@ juce::StringArray DuplicateCleanupService::recoverInterrupted(const juce::File& 
         }
         // The link is in place and the staged copy is redundant. Keep both when the link does
         // not point at the expected original: that needs a person, not an automatic choice.
-        if (link.isSymbolicLink() && link.getLinkedTarget() == entry.original)
+        if (link.isSymbolicLink() && pointsAt(link.getLinkedTarget(), entry.original))
         {
             if (! staged.deleteFile())
             {
@@ -297,7 +318,7 @@ void DuplicateCleanupService::run()
                         fail("Cannot create a symbolic link here; the copy was restored");
                     }
                     else if (! job.copy.isSymbolicLink()
-                             || job.copy.getLinkedTarget() != job.original)
+                             || ! pointsAt(job.copy.getLinkedTarget(), job.original))
                     {
                         job.copy.deleteFile();
                         entry.staging.moveFileTo(job.copy);

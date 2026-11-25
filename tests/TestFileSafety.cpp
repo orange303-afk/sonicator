@@ -210,7 +210,19 @@ TEST_CASE("Link replacement keeps the path usable and points at the original",
         SKIP("Symbolic links need Developer Mode or an elevated process on Windows");
     REQUIRE(results[0].state == files::DuplicateCleanupState::linked);
     REQUIRE(copy.isSymbolicLink());
-    REQUIRE(copy.getLinkedTarget() == original);
+    // A link read back on Windows carries the NT namespace prefix, so the comparison normalises it
+    // the same way the service does.
+    const auto comparable = [](const juce::File& file)
+    {
+        auto path = file.getFullPathName();
+        while (path.startsWith("\\\\?\\") || path.startsWith("\\??\\")) path = path.substring(4);
+        path = path.replaceCharacter('\\', '/');
+       #if JUCE_WINDOWS
+        return path.toLowerCase();
+       #endif
+        return path;
+    };
+    REQUIRE(comparable(copy.getLinkedTarget()) == comparable(original));
     REQUIRE(copy.loadFileAsString() == "snare bytes");
     REQUIRE(original.loadFileAsString() == "snare bytes");
     REQUIRE(countStagingFiles(t.dir.getChildFile("drop")) == 0);
