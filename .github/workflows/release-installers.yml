@@ -237,11 +237,10 @@ jobs:
           if ($Positive -ne 0 -or -not $PositiveText.Contains('All tests passed')) {
             throw 'Bundled ONNX runtime positive control failed'
           }
-      - name: Full Windows suite (diagnostic; known port failures)
-        continue-on-error: true
+      - name: Full Windows suite
         run: |
           & build/tests/Release/SonicatorTests.exe --reporter compact *> validation/full-suite.log
-          exit $LASTEXITCODE
+          if ($LASTEXITCODE -ne 0) { Get-Content validation/full-suite.log -Tail 60; exit $LASTEXITCODE }
       - name: Installer artifacts
         uses: actions/upload-artifact@v4
         with:

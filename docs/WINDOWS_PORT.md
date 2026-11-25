@@ -76,8 +76,9 @@ A CI Windows image without Developer Mode will skip the link tests too; that is 
 
 ## What is not done
 
-- The Windows job in `.github/workflows/ci.yml` is still informational (`continue-on-error`). The
-  local suite is green; promoting the job needs one green CI run first (see `docs/TESTING.md`).
+- The Windows jobs are required checks now: `ci.yml` runs the Debug suite on every push and
+  `release-installers.yml` runs the Release suite next to the MSI lifecycle tests. The 0.3.0 release
+  run passed both.
 - Windows MSI packaging is implemented; the installer matrix is in
   [RELEASE_INSTALLERS_ACCEPTANCE.md](RELEASE_INSTALLERS_ACCEPTANCE.md). No signing certificate is
   assumed. Apple notarization does not apply to Windows.

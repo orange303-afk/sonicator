@@ -161,12 +161,11 @@ jobs:
           killall -9 AudioComponentRegistrar 2>/dev/null || true
           auval -v aumu Sncr Orng
 
-  # Windows has never been built. This job is informational: it must not fail the run while the port
-  # is being established. The state it reaches is recorded in docs/WINDOWS_PORT.md.
+  # Windows runs the whole suite and gates the branch, like the macOS jobs. The state the port
+  # reached is recorded in docs/WINDOWS_PORT.md.
   windows:
-    name: Windows Debug (informational)
+    name: Windows Debug
     runs-on: windows-2022
-    continue-on-error: true
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4

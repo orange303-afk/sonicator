@@ -219,7 +219,8 @@ The binary is still universal, but arm64 AU execution remains an explicit open g
 back to arm64, the workflow also checks x86_64 through Rosetta. Both pluginval GUI tests and
 manual DAW/audio acceptance remain separate.
 
-The Windows job runs the full suite as a required check. The suite passes on Windows since
+The Windows job runs the full suite as a required check (the `continue-on-error` flag was removed
+after the 0.3.0 Release run passed). The suite passes on Windows since
 2026-11-24 (1320 cases, 9 platform skips: symbolic links without Developer Mode, Windows ACLs instead
 of POSIX mode bits, and a directory timestamp Windows refuses to backdate). `docs/WINDOWS_PORT.md`
 records what the port changed in the product itself.
