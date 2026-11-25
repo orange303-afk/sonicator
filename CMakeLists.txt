@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.22)
 # systems). 10.15 is the last system the Intel Macs that cannot run Big Sur receive; an arm64 slice
 # is promoted to 11.0 by the toolchain because no Apple Silicon Mac runs anything older.
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version")
-project(Sonicator VERSION 0.3.1 LANGUAGES C CXX)
+project(Sonicator VERSION 0.3.2 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
