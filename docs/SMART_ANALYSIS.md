@@ -153,6 +153,9 @@ visible underneath, including when it is stale.
 - Type taxonomy, the inspector and global metadata filters are later slices.
   `docs/superpowers/plans/2026-11-07-smart-catalog-foundation.md` tracks the
   foundation; the columns use its stored results.
+- The shipped type model and how it merges with a person's own confirmations are measured on real
+  libraries by `services/training/evaluate-shipped.mjs`; the numbers, the vocabulary gap and the
+  open defects are in `docs/AUTODETECT.md` and `docs/AUTODETECT_HELDOUT.md`.
 
 ## Library columns and selection bar
 

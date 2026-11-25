@@ -10,6 +10,7 @@
     "evaluate": "node evaluate.mjs",
     "candidates": "node candidates.mjs",
     "credits": "node generate-credits.mjs",
-    "train": "node train.mjs"
+    "train": "node train.mjs",
+    "heldout": "node evaluate-shipped.mjs"
   }
 }
