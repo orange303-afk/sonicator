@@ -15,6 +15,12 @@ Always consult `~/Documents/orange303/Sonicator Features.md` when:
 - Proposing roadmap features or discussing backlog priorities.
 - Reviewing feature requests or integration ideas (e.g., Sample Dicer / Loop Dicer integration, crash reporting, tag cloud, VST3/AU DAW plugins, AI agents, etc.).
 
+## Releases
+Publishing a release goes to **both** GitHub and Gumroad in the same pass, without asking for a
+separate confirmation, once the installer builds are green. Tokens and authorisations are kept
+outside the repository and reused. The exact recipe, product and page identifiers are in
+`docs/RELEASE_INSTALLERS.md#publishing`.
+
 ## Knowledge Graph & Architecture
 - Graphify knowledge graph is stored in `graphify-out/`.
 - After modifying code, run `graphify update .` to keep the graph current.

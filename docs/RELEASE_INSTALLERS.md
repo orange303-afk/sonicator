@@ -232,5 +232,44 @@ No installer writes/removes the catalog, preferences, user sample libraries, or
 Before publication: review logs/hashes and matching source commit, complete clean-machine/DAW
 acceptance, settle outstanding Windows suite failures, and confirm the release notes name the source
 tag and commit. Publish installers only: an asset list a user has to interpret loses downloads.
-Obtain explicit owner authorization to publish a release. Developer ID/notarization and Windows
-signing can be added later without changing plugin identities or installer UpgradeCode.
+The owner authorised publishing each release to GitHub and Gumroad without a separate confirmation;
+do both in the same pass. Developer ID/notarization and Windows signing can be added later without
+changing plugin identities or installer UpgradeCode.
+
+## Publishing
+
+**GitHub.** Tag the release commit with `v<version>` and create the release from
+`docs/release-notes/<version>.md` (title `SONICATOR <version>`). Six assets, nothing else:
+`SONICATOR-<version>-macOS-universal.pkg`, `SONICATOR-<version>-macOS-x86_64-10.15.pkg`,
+`SONICATOR-<version>-Windows-x64.msi`, `SONICATOR-<version>-Linux-amd64.deb`,
+`SONICATOR-<version>-Linux-x86_64.AppImage`, `sonicator-manual.pdf`. Checksums, per-platform source
+archives and `source-commit.txt` stay in the workflow artifacts. The Windows machine keeps a
+user-only token at `%USERPROFILE%\.config\sonicator\github-token`; `git-askpass.cmd` next to it lets
+`git` and the REST API work without a prompt (never copy the token into the repository).
+
+```powershell
+$env:GIT_ASKPASS = "$env:USERPROFILE\.config\sonicator\git-askpass.cmd"
+git push https://x-access-token@github.com/orange303-afk/sonicator.git main
+```
+
+Dispatch `.github/workflows/release-installers.yml` and `.github/workflows/release-catalina.yml` on
+the release commit (`workflow_dispatch`), wait for green, download the four workflow artifacts
+(`SONICATOR-macOS-universal`, `SONICATOR-macOS-x86_64-10.15`, `SONICATOR-Windows-x64`,
+`SONICATOR-Linux-x86_64`), verify every SHA-256 file and assemble the six release assets.
+
+**Gumroad.** The store product is `Sonicator - Intelligent Sample Explorer`
+(`QuzwhvY61TR63Hgia8YyZg==`, content page `xNwfoHa_KK4PEPoYxP6juQ==`) on
+`https://ilyaorange.gumroad.com/l/sonicator`. The `gumroad` CLI lives on the Mac
+(`/opt/homebrew/bin/gumroad`, logged in with its stored config); reach the Mac over SSH with
+`~/.ssh/sonicator_mac` as `ilyaorange@192.168.2.123`, after copying the six release files there:
+
+```sh
+gumroad products update <product-id> --file <each of the six> --file-name <same names> --json
+gumroad products content get <product-id> --page <page-id> > page.json
+# keep only the six new fileEmbed blocks, drop the previous version's embeds
+gumroad products content set <product-id> page-fixed.json --page <page-id> --yes
+gumroad products update <product-id> --description "$(cat gumroad-block-<version>.html)"
+```
+
+The description is one `Version <version>` block plus the release link; update the block, not the
+whole page. The product content holds exactly one version's six files: replace, never accumulate.
