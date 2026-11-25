@@ -150,6 +150,28 @@ function localBlock(summary, level) {
   return lines.join("\n");
 }
 
+function curveBlock(summary, level) {
+  if (summary.named.cold.records === 0) return "";
+  const named = summary.named.cold.curves;
+  const standard = summary.standard.cold.curves;
+  const lines = [heading(level, "What the acceptance threshold decides, cold start"), ""];
+  lines.push("The threshold is a trade: a lower one publishes more answers and is right less often. Nothing");
+  lines.push("here changes it; the table is what a decision would be made on.");
+  lines.push("");
+  lines.push(table(
+    ["threshold", "coverage, labels the model can name", "precision there", "coverage, all standard", "precision there"],
+    named.map((entry, index) => [
+      entry.threshold.toFixed(2),
+      pct(entry.coverage),
+      pct(entry.precision),
+      pct(standard[index].coverage),
+      pct(standard[index].precision),
+    ]),
+  ));
+  lines.push("");
+  return lines.join("\n");
+}
+
 function labelsBlock(summary, level) {
   if (summary.perLabel.length === 0) return "";
   const lines = [heading(level, "Per type, cold start"), ""];
@@ -282,6 +304,7 @@ function scoreBlock(summary, data, level) {
     installsBlock(summary, data, level),
     localBlock(summary, level),
     labelsBlock(summary, level),
+    curveBlock(summary, level),
     missingBlock(summary, level),
     customBlock(summary, level),
     calibrationBlock(summary, level),

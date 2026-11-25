@@ -110,6 +110,20 @@ The median best cosine is already above the 0.80 threshold, so the threshold can
 | `vocal` | 13 | 1 (7.7%) | 0.0% | 38.5% | 46.2% | 0.505 | clap ×1 |
 | `hat` | 10 | — | — | 40.0% | 50.0% | 0.337 | — |
 
+### What the acceptance threshold decides, cold start
+
+The threshold is a trade: a lower one publishes more answers and is right less often. Nothing
+here changes it; the table is what a decision would be made on.
+
+| threshold | coverage, labels the model can name | precision there | coverage, all standard | precision there |
+|---|---|---|---|---|
+| 0.50 | 64.7% | 86.4% | 64.1% | 85.3% |
+| 0.60 | 57.0% | 88.7% | 56.4% | 87.7% |
+| 0.70 | 46.1% | 90.2% | 45.5% | 89.2% |
+| 0.80 | 29.5% | 92.7% | 29.1% | 91.8% |
+| 0.90 | 12.7% | 96.0% | 12.4% | 96.0% |
+| 0.95 | 4.2% | 94.8% | 4.1% | 94.8% |
+
 ### Types the model cannot name
 
 These labels sit outside the model's vocabulary, so every answer it gives them is one of its
@@ -244,6 +258,20 @@ The median best cosine is already above the 0.80 threshold, so the threshold can
 | `shaker` | 21 | 1 (4.8%) | 0.0% | 9.5% | 33.3% | 0.452 | tamb ×1 |
 | `rim` | 15 | — | — | 0.0% | 20.0% | 0.411 | — |
 | `tom` | 6 | — | — | 50.0% | 100.0% | 0.477 | — |
+
+### What the acceptance threshold decides, cold start
+
+The threshold is a trade: a lower one publishes more answers and is right less often. Nothing
+here changes it; the table is what a decision would be made on.
+
+| threshold | coverage, labels the model can name | precision there | coverage, all standard | precision there |
+|---|---|---|---|---|
+| 0.50 | 51.8% | 80.5% | 49.0% | 73.8% |
+| 0.60 | 42.8% | 83.6% | 40.1% | 77.5% |
+| 0.70 | 32.2% | 86.7% | 29.9% | 80.9% |
+| 0.80 | 16.1% | 89.3% | 15.0% | 83.3% |
+| 0.90 | 4.6% | 85.0% | 4.4% | 78.3% |
+| 0.95 | 0.9% | 76.9% | 0.9% | 71.4% |
 
 ### Types the model cannot name
 
