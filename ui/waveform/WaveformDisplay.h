@@ -181,6 +181,9 @@ private:
     int wandToleranceDb = 6;
     // A press on the selection itself lifts it out instead of drawing over it.
     bool spectralPressInMask = false, spectralDragTriggered = false;
+    // Where a lift-capable press landed: a drag that stays inside the card draws from there, only
+    // leaving the window starts the external drag.
+    juce::Point<float> spectralPressPosition;
 
     void timerCallback() override;
     void drawSpectrum(juce::Graphics&, juce::Rectangle<float> area, waveview::View);
@@ -203,12 +206,15 @@ private:
     void mouseExit(const juce::MouseEvent&) override;
     void beginSpectralGesture(const juce::MouseEvent&, juce::Rectangle<float> area,
                               waveview::View view);
+    void beginSpectralGestureAt(juce::Point<float> position, juce::Rectangle<float> area,
+                                waveview::View view, juce::ModifierKeys mods);
     void updateSpectralGesture(const juce::MouseEvent&, juce::Rectangle<float> area,
                                waveview::View view);
     void commitSpectralGesture(const juce::MouseEvent&, juce::Rectangle<float> area,
                                waveview::View view);
     void commitMaskWindow(double start, double end, bool replace);
-    void runWand(const juce::MouseEvent&, juce::Rectangle<float> area, waveview::View view);
+    void runWand(juce::Point<float> position, juce::Rectangle<float> area, waveview::View view,
+                 juce::ModifierKeys mods);
     double frequencyAtY(float y, juce::Rectangle<float> area, waveview::View) const;
     double nyquist() const;
     int spectralToolbarHit(int x, int y) const;

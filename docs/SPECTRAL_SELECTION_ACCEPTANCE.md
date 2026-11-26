@@ -56,8 +56,8 @@ build/tests/Debug/SonicatorTests.exe "[spectral],[spectrogram]"
       overlay stays exactly on the selected time and band, follows zoom and pan, and each tool has
       its own cursor.
 - [ ] Wand tolerance cycles 3/6/12/24 dB and the filled region stops at the requested level.
-- [ ] Grab the highlighted area and drag it into a DAW: the cursor turns into a hand, the WAV
-      contains only the selected band and time, and the mask stays after the drag.
+- [ ] A drag inside the selection draws a new selection; dragging the selection out of the card
+      starts the DAW drag and the mask stays after it.
 - [ ] Play auditions the masked result; Loop wraps it without dropouts on the second and later
       passes; Stop returns to the original source.
 - [ ] MIDI Preview with a 2D selection: a key plays the masked fragment and stops at its end;

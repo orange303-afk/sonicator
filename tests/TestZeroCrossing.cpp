@@ -146,18 +146,20 @@ TEST_CASE("The Snap chip drives the card and survives the settings round trip",
     TestDirectory t;
     AudioEngine engine(false);
     PreviewPanel preview(engine, t.dir.getChildFile("cache"));
-    CHECK_FALSE(preview.snapToZeroCrossing());
-    preview.setSnapToZeroCrossing(true, false);
+    // On before any settings arrive, and for good once they do.
     CHECK(preview.snapToZeroCrossing());
     CHECK(preview.waveformForTest().snapToZeroCrossing());
-    preview.toggleSnapToZeroCrossing();
+    preview.setSnapToZeroCrossing(false, false);
     CHECK_FALSE(preview.snapToZeroCrossing());
     CHECK_FALSE(preview.waveformForTest().snapToZeroCrossing());
+    preview.toggleSnapToZeroCrossing();
+    CHECK(preview.snapToZeroCrossing());
+    CHECK(preview.waveformForTest().snapToZeroCrossing());
 
     AppSettings settings;
-    CHECK_FALSE(settings.snapToZeroCrossing);
-    settings.snapToZeroCrossing = true;
+    CHECK(settings.snapToZeroCrossing);
+    settings.snapToZeroCrossing = false;
     SettingsStore store(t.dir.getChildFile("settings.json"));
     store.save(settings);
-    CHECK(store.load().snapToZeroCrossing);
+    CHECK_FALSE(store.load().snapToZeroCrossing);
 }

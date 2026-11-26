@@ -101,10 +101,11 @@ bin is scaled by the mask with a one-row feather, and the inverse transform is o
 Hann, so only the selected time and frequency survive and everything else in the window is silence.
 The fragment is as long as the selection, which keeps its place in a DAW.
 
-To drag it out, grab the highlighted area itself: a plain press on the selection lifts the fragment
-and dragging starts the ordinary prepared-file drag (the cursor changes to a hand over it). Shift
-and Alt still draw and edit the mask on top of it, and the magic wand always fills on click, so the
-selection never blocks the tools. Play auditions the masked result through the engine's separate
+To drag it out, grab the highlighted area itself: a press on the selection turns the cursor into a
+hand, and dragging it out of the card starts the ordinary prepared-file drag of that fragment. A
+drag that stays inside the card draws a new selection instead, so the mask is never un-editable
+under the pointer; Shift and Alt edit the mask on top of it, and the magic wand always fills on
+click. Play auditions the masked result through the engine's separate
 matched transport (the card keeps showing the original spectrum, the playhead maps into the
 selection), Loop wraps inside it — the looped transport reads straight from the file, so no
 read-ahead buffer is attached and the second pass sounds like the first — and Stop returns to the

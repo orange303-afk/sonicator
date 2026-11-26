@@ -1,10 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include "core/spectral/SpectrogramCache.h"
 #include "ui/preview/PreviewPanel.h"
 #include "ui/waveform/WaveformDisplay.h"
 #include "TestHelpers.h"
 
 using namespace sonicator;
+using Catch::Approx;
 
 namespace
 {
@@ -121,7 +123,7 @@ TEST_CASE("The spectral overlay covers its band and nothing else", "[spectral][u
     REQUIRE(bottom <= 112); // 200 Hz sits at y = 104
 }
 
-TEST_CASE("A press on the selection lifts it instead of drawing over it", "[spectral][ui]")
+TEST_CASE("A press on the selection lifts it only when the drag leaves the card", "[spectral][ui]")
 {
     TestDirectory t;
     CacheFolderScope scope(t.dir.getChildFile("spectra"));
@@ -136,14 +138,25 @@ TEST_CASE("A press on the selection lifts it instead of drawing over it", "[spec
     display.onExternalDragRequested = [&requests] { ++requests; };
 
     const auto inside = spectrumPoint(0.3, 500.0, 480, 160);
-    const auto dragged = inside + juce::Point<float>(30.0f, 0.0f);
     display.mouseDown(spectralMouseEvent(display, inside, inside, false));
-    display.mouseDrag(spectralMouseEvent(display, dragged, inside, true));
-    display.mouseUp(spectralMouseEvent(display, dragged, inside, true));
+
+    // Leaving the card is the lift: the prepared masked WAV goes to the DAW and the mask stays.
+    const juce::Point<float> farOutside(520.0f, 80.0f);
+    display.mouseDrag(spectralMouseEvent(display, farOutside, inside, true));
+    display.mouseUp(spectralMouseEvent(display, farOutside, inside, true));
     REQUIRE(requests == 1);
-    // The mask survived the drag: a lifted fragment is not a new selection.
     REQUIRE(display.spectralMask() != nullptr);
     REQUIRE(display.spectralMask()->maskedCellCount() == mask.maskedCellCount());
+
+    // A drag that stays inside the card draws a new selection instead of lifting anything.
+    const auto insideEnd = spectrumPoint(0.42, 1200.0, 480, 160);
+    display.mouseDown(spectralMouseEvent(display, inside, inside, false));
+    display.mouseDrag(spectralMouseEvent(display, insideEnd, inside, true));
+    display.mouseUp(spectralMouseEvent(display, insideEnd, inside, true));
+    REQUIRE(requests == 1);
+    REQUIRE(display.spectralMask() != nullptr);
+    REQUIRE(display.spectralMask()->startSeconds > 0.29);
+    REQUIRE(display.spectralMask()->endSeconds < 0.43);
 
     // A press outside the selection keeps drawing there, replacing it.
     const auto outside = spectrumPoint(0.45, 5000.0, 480, 160);
@@ -347,6 +360,92 @@ TEST_CASE("A prepared spectral mask becomes the MIDI fragment", "[spectral][ui]"
     preview.clearSpectralSelection();
     REQUIRE_FALSE(preview.spectralSelectionActive());
     REQUIRE(engine.midiFragmentFile() == juce::File());
+}
+
+TEST_CASE("A rectangle drag in the card's spectrum creates and draws a mask", "[spectral][ui]")
+{
+    TestDirectory t;
+    CacheFolderScope scope(t.dir.getChildFile("spectra"));
+    AudioEngine engine(false);
+    PreviewPanel preview(engine, t.dir.getChildFile("cache"), t.dir.getChildFile("exports"));
+    preview.setSize(900, 260);
+    REQUIRE(preview.loadFile(t.wave("sine.wav", 440.0, 1, 44100), false));
+    preview.setSpectrumView(true, false);
+    auto& display = preview.waveformForTest();
+    REQUIRE(pumpUntil([&] { return display.spectrumImageReadyForTest(); }, 20000));
+    display.setSelectionTool(WaveformDisplay::SelectionTool::rectangle);
+    REQUIRE(display.getWidth() > 200);
+
+    const auto before = display.createComponentSnapshot(display.getLocalBounds(), true);
+    const auto duration = (double) display.totalLength();
+    REQUIRE(duration > 0.5);
+    const juce::Point<float> from(
+        (float) (selection::inset + 0.2 / duration * ((double) display.getWidth() - 2 * selection::inset)),
+        (float) display.getHeight() * 0.35f);
+    const juce::Point<float> to(
+        (float) (selection::inset + 0.7 / duration * ((double) display.getWidth() - 2 * selection::inset)),
+        (float) display.getHeight() * 0.7f);
+    const auto press = spectralMouseEvent(display, from, from, false);
+    display.mouseDown(press);
+    display.mouseDrag(spectralMouseEvent(display, to, from, true));
+    display.mouseUp(spectralMouseEvent(display, to, from, true));
+
+    INFO("mask: " << (display.spectralMask() != nullptr));
+    REQUIRE(display.spectralMask() != nullptr);
+    CHECK(display.spectralMask()->maskedCellCount() > 0);
+
+    const auto after = display.createComponentSnapshot(display.getLocalBounds(), true);
+    int changed = 0;
+    for (int y = 0; y < before.getHeight(); ++y)
+        for (int x = 0; x < before.getWidth(); ++x)
+            if (before.getPixelAt(x, y) != after.getPixelAt(x, y)) ++changed;
+    INFO("changed pixels " << changed);
+    CHECK(changed > 500);
+}
+
+TEST_CASE("A plain drag in the spectrum still makes a time selection", "[spectral][ui]")
+{
+    TestDirectory t;
+    CacheFolderScope scope(t.dir.getChildFile("spectra"));
+    WaveformDisplay display(t.dir.getChildFile("waveforms"));
+    prepareDisplay(display, t.wave("sine.wav", 440.0, 1, 22050));
+    REQUIRE(pumpUntil([&] { return display.spectrumImageReadyForTest(); }, 20000));
+    REQUIRE(display.selectionTool() == WaveformDisplay::SelectionTool::time);
+
+    const auto from = spectrumPoint(0.1, 3000.0, 480, 160);
+    const auto to = spectrumPoint(0.4, 3000.0, 480, 160);
+    display.mouseDown(spectralMouseEvent(display, from, from, false));
+    display.mouseDrag(spectralMouseEvent(display, to, from, true));
+    display.mouseUp(spectralMouseEvent(display, to, from, true));
+    INFO("selection " << display.selection().start << ".." << display.selection().end);
+    REQUIRE(display.selection().valid());
+    CHECK(display.selection().start == Approx(0.1).margin(0.01));
+    CHECK(display.selection().end == Approx(0.4).margin(0.01));
+    CHECK(display.spectralMask() == nullptr);
+}
+
+TEST_CASE("Clicking the Rect chip and dragging makes a mask", "[spectral][ui]")
+{
+    TestDirectory t;
+    CacheFolderScope scope(t.dir.getChildFile("spectra"));
+    WaveformDisplay display(t.dir.getChildFile("waveforms"));
+    prepareDisplay(display, t.wave("sine.wav", 440.0, 1, 22050));
+    REQUIRE(pumpUntil([&] { return display.spectrumImageReadyForTest(); }, 20000));
+
+    // The chip sits in the card's top-left strip: 34 px wide, a 3 px gap, 18 px tall, inset by 4.
+    const auto chip = juce::Point<float>(6.0f + 4.0f + 34.0f + 3.0f + 17.0f, 10.0f + 4.0f + 9.0f);
+    display.mouseDown(spectralMouseEvent(display, chip, chip, false));
+    display.mouseUp(spectralMouseEvent(display, chip, chip, false));
+    INFO("tool after the click: " << (int) display.selectionTool());
+    REQUIRE(display.selectionTool() == WaveformDisplay::SelectionTool::rectangle);
+
+    const auto from = spectrumPoint(0.2, 400.0, 480, 160);
+    const auto to = spectrumPoint(0.4, 2000.0, 480, 160);
+    display.mouseDown(spectralMouseEvent(display, from, from, false));
+    display.mouseDrag(spectralMouseEvent(display, to, from, true));
+    display.mouseUp(spectralMouseEvent(display, to, from, true));
+    REQUIRE(display.spectralMask() != nullptr);
+    CHECK(display.spectralMask()->maskedCellCount() > 0);
 }
 
 TEST_CASE("A spectral mask prepares a masked export and auditions it", "[spectral][ui]")

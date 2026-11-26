@@ -61,6 +61,37 @@ TEST_CASE("A lasso polygon fills the same band", "[spectral][mask]")
     REQUIRE_FALSE(mask.contains(0.1, 1000.0));
 }
 
+TEST_CASE("A drag thinner than one cell still selects that cell", "[spectral][mask]")
+{
+    SpectralMask mask;
+    mask.setWindow(0.0, 1.0, 24000.0);
+    // The same frequency at both ends used to round to an empty row range: one row now.
+    mask.addRectangle(0.2, 0.4, 800.0, 800.0, false);
+    REQUIRE_FALSE(mask.empty());
+    CHECK(mask.contains(0.3, 800.0));
+    CHECK(mask.maskedCellCount() <= mask.columns * 2);
+
+    SpectralMask thin;
+    thin.setWindow(0.0, 1.0, 24000.0);
+    // A time span narrower than one column keeps the column it falls in.
+    thin.addRectangle(0.2, 0.2001, 200.0, 2000.0, false);
+    REQUIRE_FALSE(thin.empty());
+    CHECK(thin.contains(0.2, 1000.0));
+}
+
+TEST_CASE("A hairline lasso marks the row it sits in", "[spectral][mask]")
+{
+    SpectralMask mask;
+    mask.setWindow(0.0, 1.0, 24000.0);
+    // Thinner than the row spacing, so no row centre is inside it: the fallback still selects it.
+    const std::vector<juce::Point<double>> line {
+        { 0.2, 1000.0 }, { 0.4, 1000.0 }, { 0.4, 1000.4 }, { 0.2, 1000.4 }
+    };
+    mask.addPolygon(line, false);
+    REQUIRE_FALSE(mask.empty());
+    CHECK(mask.contains(0.3, 1000.0));
+}
+
 TEST_CASE("A magic-wand raster maps grid cells into the canonical mask", "[spectral][mask]")
 {
     SpectrogramGrid grid;

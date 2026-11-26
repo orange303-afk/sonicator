@@ -265,6 +265,9 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     skipSilence.setTooltip("Next trigger starts one frame before the first nonzero frame; original audio is unchanged");
     snap.setComponentID("previewSnap");
     snap.setTooltip("Dragged range edges land on the nearest zero crossing, so the cut starts and ends without a click (Z)");
+    // On before any settings arrive: a panel built without them still cuts at silence.
+    snap.setToggleState(true, juce::dontSendNotification);
+    waveform.setSnapToZeroCrossing(true);
     snap.onClick = [this]
     {
         waveform.setSnapToZeroCrossing(snap.getToggleState());

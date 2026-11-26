@@ -139,9 +139,13 @@ void SpectralMask::addRectangle(double start, double end, double lowHz, double h
         return (int) std::floor(position * (double) rowCount);
     };
     const int firstColumn = juce::jlimit(0, columns - 1, columnAt(fromTime));
-    const int lastColumn = juce::jlimit(0, columns - 1, columnAt(toTime) - 1);
+    int lastColumn = juce::jlimit(0, columns - 1, columnAt(toTime) - 1);
     const int firstRow = juce::jlimit(0, rowCount - 1, rowAt(juce::jmax(fromHz, minFrequency)));
-    const int lastRow = juce::jlimit(0, rowCount - 1, rowAt(juce::jmin(toHz, maxFrequency)) - 1);
+    int lastRow = juce::jlimit(0, rowCount - 1, rowAt(juce::jmin(toHz, maxFrequency)) - 1);
+    // A drag thinner than one cell still selects that cell: an empty result reads as "nothing was
+    // selected" and silently loses the gesture.
+    lastColumn = juce::jmax(firstColumn, lastColumn);
+    lastRow = juce::jmax(firstRow, lastRow);
     for (int row = firstRow; row <= lastRow; ++row)
         for (int column = firstColumn; column <= lastColumn; ++column)
         {
@@ -159,6 +163,7 @@ void SpectralMask::addPolygon(const std::vector<juce::Point<double>>& pointsHz, 
     {
         return (time - startSeconds) / length * (double) columns;
     };
+    int touchedRows = 0;
     for (int row = 0; row < rowCount; ++row)
     {
         const auto frequency = frequencyForRow(row);
@@ -176,12 +181,41 @@ void SpectralMask::addPolygon(const std::vector<juce::Point<double>>& pointsHz, 
         std::sort(crossings.begin(), crossings.end());
         for (size_t i = 0; i + 1 < crossings.size(); i += 2)
         {
-            const int first = juce::jmax(0, (int) std::ceil(crossings[i]));
-            const int last = juce::jmin(columns - 1, (int) std::floor(crossings[i + 1]));
+            // A span narrower than one column still marks the column it sits in, so a hairline
+            // lasso selects something instead of nothing.
+            const int first = juce::jlimit(0, columns - 1, (int) std::ceil(crossings[i]));
+            const int last = juce::jlimit(0, columns - 1,
+                                          juce::jmax(first, (int) std::floor(crossings[i + 1])));
             for (int column = first; column <= last; ++column)
                 cells[(size_t) row * (size_t) columns + (size_t) column] = subtract ? 0 : 1;
         }
-        // Close the scanline: the loop above only sets cells; subtract also clears inside spans.
+        ++touchedRows;
+    }
+    // A polygon thinner than the row spacing falls between two row centres; it still has to select
+    // its own band, so mark the row nearest its middle over the columns it covers.
+    if (touchedRows == 0 && ! subtract)
+    {
+        double lowHz = pointsHz.front().y, highHz = pointsHz.front().y;
+        double firstTime = pointsHz.front().x, lastTime = pointsHz.front().x;
+        for (const auto& point : pointsHz)
+        {
+            lowHz = juce::jmin(lowHz, point.y);
+            highHz = juce::jmax(highHz, point.y);
+            firstTime = juce::jmin(firstTime, point.x);
+            lastTime = juce::jmax(lastTime, point.x);
+        }
+        if (highHz >= lowHz && maxFrequency > minFrequency && minFrequency > 0.0)
+        {
+            const auto position = std::log(juce::jmax(lowHz, minFrequency) / minFrequency)
+                / std::log(maxFrequency / minFrequency);
+            const int row = juce::jlimit(0, rowCount - 1,
+                                         (int) std::floor(position * (double) rowCount));
+            const int first = juce::jlimit(0, columns - 1, (int) std::ceil(columnAt(firstTime)));
+            const int last = juce::jlimit(0, columns - 1,
+                                          juce::jmax(first, (int) std::floor(columnAt(lastTime))));
+            for (int column = first; column <= last; ++column)
+                cells[(size_t) row * (size_t) columns + (size_t) column] = 1;
+        }
     }
     recount();
 }

@@ -1,4 +1,4 @@
-#include "WaveformDisplay.h"
+﻿#include "WaveformDisplay.h"
 #include "core/audio/SonicatorFormats.h"
 #include "core/dsp/ZeroCrossing.h"
 #include "core/preview/SpectrogramService.h"
@@ -633,7 +633,9 @@ void WaveformDisplay::paint(juce::Graphics& g)
         {
             const auto x1 = waveview::xAtTime(currentSelection.start, getWidth(), view);
             const auto x2 = waveview::xAtTime(currentSelection.end, getWidth(), view);
-            g.setColour(theme::accent.withAlpha(0.20f));
+            // The card is the target: a time range over a bright spectrum needs a stronger wash
+            // than over the dark waveform to read as a selection.
+            g.setColour(theme::accent.withAlpha(mode == RenderMode::spectrum ? 0.3f : 0.2f));
             g.fillRect(juce::Rectangle<float>(x1, 6.0f, juce::jmax(1.0f, x2 - x1), (float) getHeight() - 12.0f));
             g.setColour(theme::accent.withAlpha(0.85f));
             g.drawVerticalLine((int) x1, 5.0f, (float) getHeight() - 5.0f);
@@ -701,15 +703,17 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         }
         if (tool != SelectionTool::time)
         {
-            // A plain press on the selection lifts the fragment: that is how a 2D selection is
-            // dragged into a DAW. Shift and Alt still draw, so the mask stays editable without
-            // clearing it first, and the wand always fills, since a click is its whole gesture.
+            // A press on the selection can lift the fragment into a DAW, but only a drag that leaves
+            // the card does that: a drag that stays inside draws a new selection, so the mask is
+            // never un-editable under the pointer. Shift and Alt always draw, and the wand always
+            // fills, because a click is its whole gesture.
             if (tool != SelectionTool::wand && ! e.mods.isShiftDown() && ! e.mods.isAltDown()
                 && pointInMask(e.position, contentArea(), effectiveView()))
             {
                 externalDragTriggered = false;
                 spectralDragTriggered = false;
                 spectralPressInMask = true;
+                spectralPressPosition = e.position;
                 dragOrigin = e.getPosition();
                 return;
             }
@@ -755,11 +759,22 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
     if (spectralPressInMask)
     {
         const auto delta = e.getPosition() - dragOrigin;
-        if (! spectralDragTriggered && selection::exceedsDragThreshold(delta.x, delta.y))
+        if (! selection::exceedsDragThreshold(delta.x, delta.y)) return;
+        auto* window = getTopLevelComponent();
+        const bool outside = window != nullptr
+            && ! window->getLocalBounds().contains(window->getLocalPoint(this, e.getPosition()));
+        if (outside)
         {
+            // Leaving the card is the lift: the prepared masked WAV goes to the DAW.
+            spectralPressInMask = false;
             spectralDragTriggered = true;
             if (onExternalDragRequested) onExternalDragRequested();
+            return;
         }
+        // Still inside: this was a new selection after all, drawn from where the press landed.
+        spectralPressInMask = false;
+        beginSpectralGestureAt(spectralPressPosition, contentArea(), effectiveView(), e.mods);
+        updateSpectralGesture(e, contentArea(), effectiveView());
         return;
     }
     if (spectralGesture)
@@ -1493,13 +1508,20 @@ double WaveformDisplay::nyquist() const
 void WaveformDisplay::beginSpectralGesture(const juce::MouseEvent& e, juce::Rectangle<float> area,
                                            waveview::View view)
 {
-    if (! area.contains(e.position)) return;
+    beginSpectralGestureAt(e.position, area, view, e.mods);
+}
+
+void WaveformDisplay::beginSpectralGestureAt(juce::Point<float> position,
+                                             juce::Rectangle<float> area, waveview::View view,
+                                             juce::ModifierKeys mods)
+{
+    if (! area.contains(position)) return;
     if (displayedGrid(view) == nullptr) return;
-    const double time = waveview::timeAtX(e.position.x, getWidth(), view);
-    const double hz = frequencyAtY(e.position.y, area, view);
+    const double time = waveview::timeAtX(position.x, getWidth(), view);
+    const double hz = frequencyAtY(position.y, area, view);
     if (tool == SelectionTool::wand)
     {
-        runWand(e, area, view);
+        runWand(position, area, view, mods);
         return;
     }
     spectralGesture = true;
@@ -1581,21 +1603,21 @@ void WaveformDisplay::commitMaskWindow(double start, double end, bool replace)
     }
 }
 
-void WaveformDisplay::runWand(const juce::MouseEvent& e, juce::Rectangle<float> area,
-                              waveview::View view)
+void WaveformDisplay::runWand(juce::Point<float> position, juce::Rectangle<float> area,
+                              waveview::View view, juce::ModifierKeys mods)
 {
     const auto* grid = displayedGrid(view);
-    if (grid == nullptr || ! grid->valid() || ! area.contains(e.position)) return;
-    const auto time = waveview::timeAtX(e.position.x, getWidth(), view);
-    const auto hz = frequencyAtY(e.position.y, area, view);
+    if (grid == nullptr || ! grid->valid() || ! area.contains(position)) return;
+    const auto time = waveview::timeAtX(position.x, getWidth(), view);
+    const auto hz = frequencyAtY(position.y, area, view);
     const auto column = juce::jlimit(0, grid->columns - 1,
         (int) std::floor((time - grid->startSeconds) / (grid->endSeconds - grid->startSeconds)
                          * (double) grid->columns));
-    const auto position = juce::jlimit(0.0, 1.0,
+    const auto ratio = juce::jlimit(0.0, 1.0,
         grid->logFrequency && grid->minFrequency > 0.0
             ? std::log(hz / grid->minFrequency) / std::log(grid->maxFrequency / grid->minFrequency)
             : (hz - grid->minFrequency) / (grid->maxFrequency - grid->minFrequency));
-    const auto row = juce::jlimit(0, grid->rows - 1, (int) std::floor(position * (double) grid->rows));
+    const auto row = juce::jlimit(0, grid->rows - 1, (int) std::floor(ratio * (double) grid->rows));
     const auto base = grid->at(row, column);
     const auto tolerance = (double) wandToleranceDb;
     std::vector<uint8_t> filled((size_t) grid->rows * (size_t) grid->columns, 0);
@@ -1636,8 +1658,8 @@ void WaveformDisplay::runWand(const juce::MouseEvent& e, juce::Rectangle<float> 
             start = juce::jmin(start, cellTime);
             end = juce::jmax(end, cellTime);
         }
-    const bool subtract = e.mods.isAltDown();
-    const bool replace = ! e.mods.isShiftDown() && ! subtract;
+    const bool subtract = mods.isAltDown();
+    const bool replace = ! mods.isShiftDown() && ! subtract;
     commitMaskWindow(start, end, replace);
     mask->addRaster(*grid, filled, subtract);
     notifyMaskChanged();
