@@ -4,8 +4,9 @@ Date: 2026-11-13. Source: a full walk of `/Volumes/1TBSSD/samples` (≈1.1M file
 and magic-signature sampling; counts and sizes are from that walk. This document is a study, not a
 plan: nothing here is implemented.
 
-Formats Sonicator already reads: WAV/AIFF/FLAC/MP3/OGG, Kurzweil `.krz/.k25/.k26`, E-mu `.ebl`,
-SF2, EXS24, NKI (external samples), REX2, MOD/XM/S3M, disc images (ISO/BIN/CUE), Reason `.repatch`.
+Formats Sonicator already reads: WAV/AIFF/FLAC/MP3/OGG, CAF (linear PCM, µ-law, A-law, Apple IMA4),
+Kurzweil `.krz/.k25/.k26`, E-mu `.ebl`, SF2, EXS24, NKI (external samples), REX2, MOD/XM/S3M, disc
+images (ISO/BIN/CUE), Reason `.repatch`.
 
 ## Inventory (what is actually in the library)
 

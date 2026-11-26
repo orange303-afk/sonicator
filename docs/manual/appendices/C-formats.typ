@@ -16,6 +16,7 @@ Four words are used throughout this book:
     ("WAV, AIFF, FLAC", "indexed", "Measured, editable, overwriteable by the editor."),
     ("MP3, OGG Vorbis", "indexed", "Decoded; editing saves a copy, never overwrites."),
     ("VOC", "indexed", "Creative Voice, including Creative ADPCM."),
+    ("CAF", "indexed", "Core Audio Format: linear PCM, mu-law, A-law and Apple IMA4; ALAC and AAC are refused; mono and stereo only."),
     ("EBL", "indexed", "E-mu Emulator X sample; drag materialises a WAV."),
     ("RX2", "previewed", "Slices mapped to MIDI; no tempo sync or stretch. `.rex`/`.rcy` are not indexed."),
     ("SF2", "previewed", "Presets, samples, kit sampler; 16-bit PCM."),

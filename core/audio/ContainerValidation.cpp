@@ -15,7 +15,31 @@ juce::String validateContainer(const juce::File& file, AssetCompatibility* compa
     auto is = [](const char* bytes,const char* tag) { return std::memcmp(bytes,tag,4) == 0; };
     bool wav = (is(header,"RIFF") || is(header,"RIFX") || is(header,"RF64")) && is(header+8,"WAVE");
     bool aiff = is(header,"FORM") && (is(header+8,"AIFF") || is(header+8,"AIFC"));
-    if (! wav && ! aiff) return {};
+    bool caf = is(header,"caff");
+    if (! wav && ! aiff && ! caf) return {};
+    if (caf)
+    {
+        // Every CAF chunk states its own 64-bit size; a data chunk that does not fit the file is a
+        // physically truncated download and belongs in the library as invalid, not as a late
+        // generic decode error.
+        uint64_t length = (uint64_t) stream->getTotalLength();
+        for (uint64_t offset = 8; length - offset >= 12;)
+        {
+            stream->setPosition((int64_t) offset);
+            char chunk[12] {};
+            if (stream->read(chunk,12) != 12)
+                return fail("Truncated CAF chunk header", AssetCompatibility::invalid);
+            const int64_t size = juce::ByteOrder::bigEndianInt64(chunk + 4);
+            const uint64_t available = length - offset - 12;
+            if (size < 0) break; // -1: the last chunk runs to the end of the file
+            if ((uint64_t) size > available)
+                return is(chunk,"data")
+                    ? fail("Truncated CAF audio chunk", AssetCompatibility::invalid) : juce::String();
+            offset += 12 + (uint64_t) size;
+        }
+        return stream->getStatus().failed()
+            ? fail("CAF container read failed", AssetCompatibility::unknown) : juce::String();
+    }
     bool big = aiff || is(header,"RIFX"), rf64 = is(header,"RF64");
     auto u32 = [big](const void* p) -> uint32_t
     { return big ? juce::ByteOrder::bigEndianInt(p) : juce::ByteOrder::littleEndianInt(p); };

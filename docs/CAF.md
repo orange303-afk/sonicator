@@ -1,20 +1,43 @@
-# CAF (Core Audio Format): study and implementation plan
+# CAF (Core Audio Format): study and implementation
 
-Date: 2026-11-18. Status: study. Nothing here is implemented; the code plan is what a later
-stage would follow.
+Date: 2026-11-18, implemented on 2026-11-26 for 0.4.0. Status: `core/caf/CafAudioFormat` reads CAF
+on every platform; the study below is what the implementation followed.
 
 CAF is Apple's Core Audio Format: a chunked container for linear PCM and compressed audio, used by
 Logic Pro, Pro Tools on macOS, iOS captures and `afconvert`. The owner's backlog asks for `.caf`
 support. The live catalog had no `.caf` row at the time of this study (0 of 375 828 samples), so
 the work is a format addition, not a repair of an existing corpus.
 
-## Where the format has to plug in today
+## What shipped
 
-- `core/scanner/FileScanner.cpp` decides what becomes a library row: its extension list is
-  `wav;aif;aiff;flac;mp3;ogg;ebl;voc`. `.caf` is not there, so a CAF file is never scanned.
-- `core/audio/SonicatorFormats.cpp` registers JUCE's basic formats (WAV/AIFF/FLAC) plus EBL and
-  VOC. JUCE's `registerBasicFormats()` does not include CAF, and `juce::CoreAudioFormat` is not
-  registered.
+- `core/caf/CafAudioFormat.h/.cpp`: a bounded pure parser (`decodeCaf`) plus an
+  `AudioFormatReader`. Packed linear PCM (8/16/24/32-bit integers, 32/64-bit float, either
+  endianness), µ-law, A-law and Apple IMA4 are decoded; ALAC, AAC and every other codec are refused
+  with a named reason; more than two channels and unpacked frames are refused as well. The same
+  256 MiB file and 128 MiB decoded-frame caps as VOC apply.
+- `registerSonicatorFormats` registers CAF **before** `registerBasicFormats()`: on macOS JUCE's
+  `CoreAudioFormat` also claims `.caf`, and the catalog must not decode differently per platform.
+- `FileScanner` indexes `.caf`; `validateContainer` walks the chunk table and marks a physically
+  truncated `data` chunk invalid instead of leaving it to a late decode error. Rhythm analysis,
+  drag metadata and the batch converter's source path already listed `.caf` and now have a reader
+  behind them.
+- IMA4 follows the QuickTime/Apple layout exactly, which is the opposite of the common IMA
+  variants: the 16-bit big-endian preamble packs the step index in its low seven bits and the
+  predictor in the rest, and each byte holds two samples with the **low** nibble first. The decoder
+  and the test encoder were checked against FFmpeg's `adpcm_ima_qt` reference, which is the only
+  independent specification available without macOS tooling.
+- `tests/TestCafFormat.cpp`: big-endian 16-bit stereo, little-endian 24-bit mono, float32,
+  µ-law and A-law codes, an IMA4 packet round trip and `pakt` tail trimming, six refusal cases, the
+  scanner/format-manager/preview path, and a truncated file's invalid verdict.
+- Writing CAF stays out of scope: the batch converter keeps its own outputs.
+
+## Where the format plugs in
+
+- `core/scanner/FileScanner.cpp` decides what becomes a library row; `.caf` was added to its
+  extension list.
+- `core/audio/SonicatorFormats.cpp` registers JUCE's basic formats (WAV/AIFF/FLAC) plus CAF, EBL
+  and VOC. JUCE's `registerBasicFormats()` does not include CAF, and `juce::CoreAudioFormat` is not
+  registered outside macOS.
 - Waveform, analysis, preview, the editor, drag and the plug-in all share that manager, so one
   correct reader makes the format work everywhere at once.
 
@@ -101,9 +124,12 @@ tests plus docs). Fixtures are cheap: `afconvert -f caff -d LEI16@48000` and `-d
 
 ## Fixtures and verification
 
-`afconvert` on macOS can produce every variant above. During development the decoder is compared
-against CoreAudio's own decode of the same file (sample values and length) rather than against
-hand-computed samples; the committed fixtures then pin the result in CI on all platforms.
+The decoder is currently pinned by files the test suite builds byte by byte (`tests/TestCafFormat.cpp`)
+and by FFmpeg's `adpcm_ima_qt` reference for the IMA4 layout. A `tone.caf` produced with
+`afconvert -f caff -d LEI16@48000` (and an `-d ima4` twin) still belongs in `tests/fixtures` next to
+`tone.wav`: it would pin a real encoder's output the way the EBL and VOC corpora do, and macOS is the
+only place such a fixture can be produced. `afconvert` writes every variant above; `sox` and
+`libsndfile` read most of them, which is enough for a cross-check.
 
 ## Non-goals
 
