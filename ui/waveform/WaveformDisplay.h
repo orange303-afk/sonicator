@@ -1,13 +1,57 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <memory>
 #include <vector>
 #include "WaveformSelection.h"
 #include "WaveformView.h"
 #include "core/sampler/SamplerTypes.h"
+#include "core/spectral/SpectralMask.h"
 namespace sonicator {
-class WaveformDisplay final : public juce::Component, private juce::ChangeListener
+class SpectrogramService;
+struct SpectrogramGrid;
+// The preview card draws either the waveform or a spectrogram. The card, the visible time range,
+// the selection, the playhead, the overview strip and every mouse gesture are shared; only the
+// content branch of paint() changes. The spectrum is analysed on a background worker, never in
+// paint and never on the audio thread.
+class WaveformDisplay final : public juce::Component, private juce::ChangeListener,
+                              private juce::Timer
 {
 public:
+    enum class RenderMode { peaks, spectrum };
+    // How a drag inside the spectrum is interpreted. The time tool is the ordinary selection the
+    // waveform uses; the other three build a time-frequency mask.
+    enum class SelectionTool { time, rectangle, lasso, wand };
+    void setRenderMode(RenderMode);
+    RenderMode renderMode() const { return mode; }
+    void setSelectionTool(SelectionTool);
+    SelectionTool selectionTool() const { return tool; }
+    void setSpectralCacheEnabled(bool enabled) { spectralCache = enabled; }
+    // The committed 2D selection, or nullptr when there is none.
+    const SpectralMask* spectralMask() const;
+    void clearSpectralMask();
+    std::function<void()> onSpectralMaskChanged;
+    std::function<void()> onSelectionToolChanged;
+    // Full decoded snapshot for sources the thumbnail cannot read (REX2, sampler, tracker, disc,
+    // edits). `revision` distinguishes two snapshots of the same length.
+    void setSpectrogramAudio(SampleAudioPtr, juce::uint64 revision = 0);
+    void setSpectrumLogScale(bool);
+    bool spectrumLogScale() const { return spectroLog; }
+    // True when the current source can produce a spectrum at all.
+    bool spectrumAvailable() const;
+    // Test hooks: a committed 2D selection without synthesising mouse events.
+    void setSpectralMaskForTest(const SpectralMask& value);
+    // Test hook: the glyph the current spectrum tool shows (0 rect, 1 lasso, 2 wand, -1 none).
+    int spectralCursorKindForTest() const
+    {
+        return tool == SelectionTool::time ? -1 : (int) tool - 1;
+    }
+    // Test hooks: what was requested and what arrived.
+    juce::String spectrumRequestKeyForTest() const { return spectroRequestKey; }
+    juce::String spectrumReadyKeyForTest() const { return spectroReadyKey; }
+    bool spectrumImageReadyForTest() const
+    {
+        return overviewImage.isValid() || detailImage.isValid();
+    }
     explicit WaveformDisplay(const juce::File& cacheFolder);
     ~WaveformDisplay() override;
     void setFile(const juce::File&);
@@ -36,6 +80,8 @@ public:
     void zoomAtTime(double seconds, double factor);
     void panBySeconds(double seconds);
     void setSampleRateForZoom(int rate) { zoomSampleRate = rate; }
+    // The mask image carries the accent colour of the moment it was built.
+    void lookAndFeelChanged() override { maskImage = {}; repaint(); }
     int sampleRate() const { return zoomSampleRate; }
     void mouseMagnify(const juce::MouseEvent&, float scaleFactor) override;
     double totalLength() const
@@ -99,5 +145,66 @@ private:
     void drawEditedPeaks(juce::Graphics&, juce::Rectangle<float> area, waveview::View);
     void drawFileSamples(juce::Graphics&, juce::Rectangle<float> area, waveview::View);
     void changeListenerCallback(juce::ChangeBroadcaster*) override { repaint(); }
+
+    // Spectrum. `sourceFile` survives an edit so clearing the edit falls back to the file.
+    juce::File sourceFile;
+    RenderMode mode = RenderMode::peaks;
+    std::unique_ptr<SpectrogramService> spectroService;
+    juce::File spectroFile;
+    SampleAudioPtr spectroAudio;
+    juce::String spectroSource, spectroRequestKey, spectroReadyKey, spectroError;
+    juce::uint64 spectroRevision = 0;
+    bool spectroLog = true;
+    juce::uint32 spectroDirtyAt = 0;
+    static constexpr int spectrumDebounceMs = 150;
+    // Cached whole-file overview and the on-demand detail pass for a zoomed view.
+    std::shared_ptr<const SpectrogramGrid> overviewGrid, detailGrid;
+    juce::Image overviewImage, detailImage;
+    bool pendingIsOverview = false, spectralCache = true, spectralGesture = false;
+    SelectionTool tool = SelectionTool::time;
+    std::unique_ptr<SpectralMask> mask;
+    juce::Image maskImage;
+    // The frequency axis the cached overlay image was built for; a zoom, a scale change or another
+    // grid rebuilds it.
+    double maskImageMinHz = 0, maskImageMaxHz = 0;
+    bool maskImageLog = true;
+    double gestureStartTime = 0, gestureEndTime = 0, gestureStartHz = 0, gestureEndHz = 0;
+    std::vector<juce::Point<double>> lassoPointsHz;
+    int wandToleranceDb = 6;
+    // A press on the selection itself lifts it out instead of drawing over it.
+    bool spectralPressInMask = false, spectralDragTriggered = false;
+
+    void timerCallback() override;
+    void drawSpectrum(juce::Graphics&, juce::Rectangle<float> area, waveview::View);
+    void drawMask(juce::Graphics&, juce::Rectangle<float> area, waveview::View);
+    void drawSpectralGesture(juce::Graphics&, juce::Rectangle<float> area, waveview::View);
+    void drawSpectralToolbar(juce::Graphics&, juce::Rectangle<float> area);
+    void invalidateSpectrum(bool dropResult);
+    void ensureSpectrum(waveview::View, juce::Rectangle<float> area);
+    juce::String spectrumKey(waveview::View, juce::Rectangle<float> area, bool overview) const;
+    juce::Rectangle<float> contentArea() const;
+    double sourceDuration() const;
+    SpectrogramService& spectrumService();
+    const SpectrogramGrid* displayedGrid(waveview::View) const;
+    const juce::Image* displayedImage(waveview::View) const;
+    void refreshFromCache();
+    void rebuildMaskImage();
+    bool pointInMask(juce::Point<float> position, juce::Rectangle<float> area,
+                     waveview::View view) const;
+    void refreshSpectrumCursor(bool overMask);
+    void mouseExit(const juce::MouseEvent&) override;
+    void beginSpectralGesture(const juce::MouseEvent&, juce::Rectangle<float> area,
+                              waveview::View view);
+    void updateSpectralGesture(const juce::MouseEvent&, juce::Rectangle<float> area,
+                               waveview::View view);
+    void commitSpectralGesture(const juce::MouseEvent&, juce::Rectangle<float> area,
+                               waveview::View view);
+    void commitMaskWindow(double start, double end, bool replace);
+    void runWand(const juce::MouseEvent&, juce::Rectangle<float> area, waveview::View view);
+    double frequencyAtY(float y, juce::Rectangle<float> area, waveview::View) const;
+    double nyquist() const;
+    int spectralToolbarHit(int x, int y) const;
+    juce::Rectangle<int> spectralToolbarBounds() const;
+    void notifyMaskChanged();
 };
 } // namespace sonicator

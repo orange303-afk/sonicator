@@ -97,6 +97,7 @@ plugin) falls back to General.
 | `preview.seekBack` | Seek back one second | ← | |
 | `preview.seekForward` | Seek forward one second | → | |
 | `preview.clearSelection` | Clear selection / stop | Escape | Instrument mode keeps its pin |
+| `preview.toggleSpectrum` | Waveform / spectrum view | V | The card keeps selection, zoom and drag in both modes |
 
 ## Menu-only commands (not yet rebindable)
 

@@ -48,7 +48,9 @@ disabled button.
 
 Each DAW project stores a versioned XML block: the last folder, the selected sample and the editor
 size. Opening a project selects the sample and shows its waveform without starting playback. Panel
-sizes live in the shared settings, not in the project, so they are the same in every project.
+sizes live in the shared settings, not in the project, so they are the same in every project. The
+card's *Waveform* / *Spectrum* tabs work in the editor exactly as in the application, including on
+the matched preview.
 
 Unknown, truncated or foreign state blocks are ignored and fall back to defaults. A block larger than
 64 KB is treated as foreign data. A window that cannot open the catalog never writes project state, so

@@ -346,6 +346,24 @@ TEST_CASE("Manual plates render from the real components", "[.manual-shots]")
     manual::captureArea(*preview, preview->getLocalBounds().withWidth(
         (int) (preview->getWidth() * 0.66f)), 2, "selection.png");
 
+    // The same card in spectrum mode: tabs, heat map, frequency guides and the selection overlay.
+    preview->setSpectrumView(true, false);
+    CHECK(pumpUntil([preview] { return preview->spectrumImageReady(); }, 20000));
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
+    manual::capture(*preview, 2, "preview-spectrum.png");
+
+    // A 2D spectral selection: the rectangle overlay and the tool strip.
+    SpectralMask spectralSelection;
+    const auto spectralLength = juce::jmax(0.001, preview->waveformLength());
+    spectralSelection.setWindow(0.0, spectralLength, 22050.0);
+    spectralSelection.addRectangle(spectralLength * 0.18, spectralLength * 0.72, 250.0, 6000.0,
+                                   false);
+    preview->waveformForTest().setSpectralMaskForTest(spectralSelection);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(400);
+    manual::capture(*preview, 2, "preview-spectral-selection.png");
+    preview->clearSpectralSelection();
+    preview->setSpectrumView(false, false);
+
     // Plate 9: the cloud map, overview and a zoomed neighbourhood.
     library->selectRows({});
     app.showCloudView(true);

@@ -435,6 +435,24 @@ void MainComponent::registerCommands()
                  { juce::KeyPress(juce::KeyPress::rightKey) }, [this] { preview.seekBy(1.0); });
     addTransport("preview.clearSelection", "Clear selection / stop",
                  { juce::KeyPress(juce::KeyPress::escapeKey) }, [this] { preview.stopAndClearSelection(); });
+    {
+        // The card keeps every gesture in both modes; this only swaps what is drawn.
+        CommandSpec spec;
+        spec.id = "preview.toggleSpectrum";
+        spec.name = "Waveform / spectrum view";
+        spec.description = "Switch the preview card between the waveform and a spectrogram";
+        spec.scope = CommandScope::waveform;
+        spec.category = "Preview";
+        spec.defaults = { juce::KeyPress('v') };
+        addCommand(std::move(spec),
+                   [this]() -> CommandState
+                   {
+                       return preview.waveformLength() > 0
+                           ? CommandState::ready()
+                           : CommandState::unavailable("No source in the preview");
+                   },
+                   [this] { preview.toggleSpectrumView(); });
+    }
 
     {
         CommandSpec spec;
@@ -1489,6 +1507,8 @@ void MainComponent::persistPreviewSettings()
     appSettings.autoPreview = preview.autoPreviewEnabled();
     appSettings.loopPreview = preview.loopEnabled();
     appSettings.rexGate = preview.rexGateEnabled();
+    appSettings.spectrumView = preview.spectrumViewEnabled();
+    appSettings.spectrumLogScale = preview.spectrumLogScale();
     try
     {
         settingsStore.update([this](AppSettings& saved)
@@ -1498,6 +1518,8 @@ void MainComponent::persistPreviewSettings()
             saved.autoPreview = appSettings.autoPreview;
             saved.loopPreview = appSettings.loopPreview;
             saved.rexGate = appSettings.rexGate;
+            saved.spectrumView = appSettings.spectrumView;
+            saved.spectrumLogScale = appSettings.spectrumLogScale;
         });
     }
     catch (const std::exception& e)
@@ -4636,6 +4658,9 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
         menu.addItem(7003, "Analyze smart metadata (" + juce::String(catalogued) + ")",
                      smart != nullptr && ! smart->progress().running && ! splitBusy
                          && (indexer == nullptr || ! indexer->progress().running));
+        menu.addItem(7016, "Spectral analysis (" + juce::String(catalogued) + ")...",
+                     catalogued > 0 && ! splitBusy && ! isBatchRunning()
+                         && (spectralAnalysis == nullptr || ! spectralAnalysis->isRunning()));
         menu.addItem(7004, "AutoTag folder...", autoTagIdle && catalogued > 0);
     }
     menu.addSeparator();
@@ -4696,6 +4721,20 @@ void MainComponent::showFolderContextMenu(const juce::String& path, bool allSamp
                 batchSelection.kind = batch::SourceSelection::Kind::folder;
                 batchSelection.folder = folderPath;
                 safe->openBatchProcessing(batchSelection);
+                return;
+            }
+            if (result == 7016)
+            {
+                std::vector<juce::File> spectralFiles;
+                if (safe->readRepo != nullptr)
+                {
+                    for (const auto& record : safe->readRepo->pageInFolder(folderPath, 100000))
+                    {
+                        const juce::File file(record.filePath);
+                        if (file.existsAsFile()) spectralFiles.push_back(file);
+                    }
+                }
+                safe->startSpectralAnalysis(std::move(spectralFiles));
                 return;
             }
             try
@@ -5578,6 +5617,9 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
         menu.addItem(editCommandMenuItem(EditAction::normalizeSelected,
                                          ! normalizeRecords.empty() && ! isNormalizeRunning()));
         menu.addItem(9025, "Batch Processing...", ! existingFiles.empty() && ! isBatchRunning());
+        menu.addItem(9030, "Spectral analysis (" + juce::String((int) existingFiles.size()) + ")...",
+                     ! existingFiles.empty() && ! isBatchRunning()
+                         && (spectralAnalysis == nullptr || ! spectralAnalysis->isRunning()));
     }
     if (! appSettings.roundTagMenu)
     {
@@ -5769,6 +5811,17 @@ void MainComponent::showSampleContextMenu(const std::vector<SampleRecord>& selec
                     batchSelection.kind = batch::SourceSelection::Kind::rows;
                     batchSelection.rows = ids;
                     safe->openBatchProcessing(batchSelection);
+                    return;
+                }
+                if (result == 9030)
+                {
+                    std::vector<juce::File> spectralFiles;
+                    for (const auto& record : files)
+                    {
+                        const juce::File file(record.filePath);
+                        if (file.existsAsFile()) spectralFiles.push_back(file);
+                    }
+                    safe->startSpectralAnalysis(std::move(spectralFiles));
                     return;
                 }
                 if (result == 25001)
@@ -6203,6 +6256,7 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
 }
 void MainComponent::timerCallback()
 {
+    pollSpectralAnalysis();
     pollCloudBuild();
     if (cloudVisible && cloudPanel != nullptr && cloudBuilder != nullptr)
     {
@@ -6846,6 +6900,8 @@ void MainComponent::applySettings(const AppSettings& next)
     appSettings.alwaysOverwriteOriginalFiles = next.alwaysOverwriteOriginalFiles;
     appSettings.overwriteOriginalDisposal = next.overwriteOriginalDisposal;
     appSettings.roundTagMenu = next.roundTagMenu;
+    appSettings.spectralCache = next.spectralCache;
+    preview.setSpectralCacheEnabled(appSettings.spectralCache);
     if (! appSettings.roundTagMenu && roundTagMenu != nullptr)
         roundTagMenu->close();
     appSettings.searchHistoryOnClick = next.searchHistoryOnClick;
@@ -6874,6 +6930,7 @@ void MainComponent::applySettings(const AppSettings& next)
             saved.overwriteOriginalDisposal = appSettings.overwriteOriginalDisposal;
             saved.roundTagMenu = appSettings.roundTagMenu;
             saved.searchHistoryOnClick = appSettings.searchHistoryOnClick;
+            saved.spectralCache = appSettings.spectralCache;
         });
     }
     catch (const std::exception& e)
@@ -7509,5 +7566,47 @@ std::optional<MatchSource> MainComponent::buildMatchSource(const juce::File& fil
     sourceSize = file.getSize();
     sourceModified = file.getLastModificationTime().toMilliseconds();
     return source;
+}
+
+void MainComponent::startSpectralAnalysis(std::vector<juce::File> files)
+{
+    if (embeddedUi || files.empty()) return;
+    if (spectralAnalysis == nullptr)
+        spectralAnalysis = std::make_unique<SpectralAnalysisService>();
+    if (spectralAnalysis->isRunning())
+    {
+        status.setText("Spectral analysis is already running.", juce::dontSendNotification);
+        return;
+    }
+    // Keep the folder bounded before a large run adds thousands of entries.
+    pruneSpectrumCache();
+    spectralAnalysis->start(std::move(files));
+    spectralStatusMs = 0;
+    status.setText("Spectral analysis: starting...", juce::dontSendNotification);
+}
+
+void MainComponent::pollSpectralAnalysis()
+{
+    if (spectralAnalysis == nullptr) return;
+    const auto now = juce::Time::getMillisecondCounter();
+    SpectralAnalysisService::Progress summary;
+    if (spectralAnalysis->takeFinished(summary))
+    {
+        juce::String text = "Spectral analysis: " + juce::String(summary.done) + " of "
+            + juce::String(summary.total) + " file(s)";
+        if (summary.skipped > 0) text << ", " << summary.skipped << " already cached";
+        if (summary.failed > 0) text << ", " << summary.failed << " failed";
+        status.setText(text, juce::dontSendNotification);
+        spectralStatusMs = now;
+        return;
+    }
+    if (! spectralAnalysis->isRunning()) return;
+    if (spectralStatusMs != 0 && now - spectralStatusMs < 300) return;
+    const auto progress = spectralAnalysis->progress();
+    juce::String text = "Spectral analysis: " + juce::String(progress.done) + "/"
+        + juce::String(progress.total);
+    if (progress.current.isNotEmpty()) text << " - " << progress.current;
+    status.setText(text, juce::dontSendNotification);
+    spectralStatusMs = now;
 }
 } // namespace sonicator

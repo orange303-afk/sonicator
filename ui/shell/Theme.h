@@ -11,6 +11,15 @@ inline juce::Colour text { 0xffeeeef0 }, muted { 0xffa3a5a9 };
 inline juce::Colour line { 0xff34363a }, accent { 0xfff39a43 };
 // Destructive actions only: Delete from disk, permanent disposal confirmations.
 inline juce::Colour danger { 0xffe05a5a };
+// Spectrum heat map, quiet to loud. The theme owns the ramp so the preview card stays readable
+// in both variants; the renderer only asks for a colour by level and never picks its own.
+inline juce::Colour spectroLow { 0xff0c0c10 }, spectroMid { 0xffa83d16 }, spectroHigh { 0xffffe3b8 };
+inline juce::Colour spectrogramColour(float level)
+{
+    const auto t = juce::jlimit(0.0f, 1.0f, level);
+    return t < 0.6f ? spectroLow.interpolatedWith(spectroMid, t / 0.6f)
+                    : spectroMid.interpolatedWith(spectroHigh, (t - 0.6f) / 0.4f);
+}
 inline bool isDark = true;
 
 inline bool systemPrefersDark()
@@ -28,6 +37,9 @@ inline void apply(ThemeMode mode)
         text = juce::Colour(0xffeeeef0); muted = juce::Colour(0xffa3a5a9);
         line = juce::Colour(0xff34363a); accent = juce::Colour(0xfff39a43);
         danger = juce::Colour(0xffe05a5a);
+        spectroLow = juce::Colour(0xff0c0c10);
+        spectroMid = juce::Colour(0xffa83d16);
+        spectroHigh = juce::Colour(0xffffe3b8);
     }
     else
     {
@@ -37,6 +49,11 @@ inline void apply(ThemeMode mode)
         text = juce::Colour(0xff1a1b1d); muted = juce::Colour(0xff63666a);
         line = juce::Colour(0xffd4d7db); accent = juce::Colour(0xffc2611c);
         danger = juce::Colour(0xffb3261e);
+        // On a light card the quiet end has to be the surface and the loud end the ink, or the
+        // whole map reads as one dark block.
+        spectroLow = juce::Colour(0xfffbfbfc);
+        spectroMid = juce::Colour(0xffd9812f);
+        spectroHigh = juce::Colour(0xff3a1106);
     }
 }
 // Tag colours are chosen for dots and borders; their label needs extra contrast on light panels.

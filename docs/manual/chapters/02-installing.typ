@@ -19,11 +19,11 @@ same commit; keep each installer with the source archive for its build.
   header: ("Artifact", "Platform", "Contents"),
   widths: (2.2fr, 1fr, 2.2fr),
   rows: (
-    ("`SONICATOR-0.3.3-macOS-universal.pkg`", "macOS 11 or newer", "Application, VST3 and AU, arm64 and x86_64"),
-    ("`SONICATOR-0.3.3-macOS-x86_64-10.15.pkg`", "macOS 10.15, Intel only", "Application, VST3 and AU for Macs that cannot install the universal package; no ONNX runtime"),
-    ("`SONICATOR-0.3.3-Windows-x64.msi`", "Windows 10 or newer, 64-bit", "Application and VST3 (AU is macOS-only)"),
-    ("`SONICATOR-0.3.3-sources.tar.gz`", "Universal and Windows builds", "Project and pinned dependency sources"),
-    ("`SONICATOR-0.3.3-sources-x86_64-10.15.tar.gz`", "Catalina build", "Project and pinned dependency sources for the Intel-only package"),
+    ("`SONICATOR-0.4.0-macOS-universal.pkg`", "macOS 11 or newer", "Application, VST3 and AU, arm64 and x86_64"),
+    ("`SONICATOR-0.4.0-macOS-x86_64-10.15.pkg`", "macOS 10.15, Intel only", "Application, VST3 and AU for Macs that cannot install the universal package; no ONNX runtime"),
+    ("`SONICATOR-0.4.0-Windows-x64.msi`", "Windows 10 or newer, 64-bit", "Application and VST3 (AU is macOS-only)"),
+    ("`SONICATOR-0.4.0-sources.tar.gz`", "Universal and Windows builds", "Project and pinned dependency sources"),
+    ("`SONICATOR-0.4.0-sources-x86_64-10.15.tar.gz`", "Catalina build", "Project and pinned dependency sources for the Intel-only package"),
   ),
 )
 
@@ -35,9 +35,9 @@ Every artifact has a `.sha256` file. If you downloaded the files by hand, compar
 before installing:
 
 ```sh
-shasum -a 256 SONICATOR-0.3.3-macOS-universal.pkg     # macOS 11+
-shasum -a 256 SONICATOR-0.3.3-macOS-x86_64-10.15.pkg  # macOS 10.15, Intel
-certutil -hashfile SONICATOR-0.3.3-Windows-x64.msi SHA256   # Windows
+shasum -a 256 SONICATOR-0.4.0-macOS-universal.pkg     # macOS 11+
+shasum -a 256 SONICATOR-0.4.0-macOS-x86_64-10.15.pkg  # macOS 10.15, Intel
+certutil -hashfile SONICATOR-0.4.0-Windows-x64.msi SHA256   # Windows
 ```
 
 Both installers are *unsigned and not notarised*. That is a fact about this build, not a mistake in

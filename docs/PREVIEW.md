@@ -37,6 +37,83 @@ REX2 selections are rendered from the decoded PCM kept for the preview, not thro
 
 External drag into DAWs/messengers is verified on macOS in this stage. Windows uses the same JUCE file-URL path but still needs separate verification.
 
+## Waveform and spectrum
+
+The card has two views of the same visible range: **Waveform** (peaks) and **Spectrum** (a
+spectrogram). The switch is the tab pair in the card's title row (with the `Log`/`Linear` pill), the `V` key, or
+the card's context menu;
+the choice and the frequency scale persist in `settings.json`. Only the content of the card
+changes: the visible range, selection, playhead, overview strip, loop drag, external drag, zoom,
+magnify and pan are one implementation shared by both views, so a range selected in one view is the
+range the other one draws.
+
+Spectrum details:
+
+- Frequency is logarithmic from 20 Hz to Nyquist with guides at 100 Hz, 1 kHz and 10 kHz; the
+  `Log`/`Linear` pill switches to a linear axis. Levels are dB against the loudest bin of the
+  displayed range, floor −90 dB. Channels are summed in the power domain, so anti-phase stereo
+  still has energy; there are no separate L/R lanes.
+- Analysis runs on a background worker (latest wins, cancelled when the source or range changes).
+  The card keeps the previous image on screen while a new one is computed, and the playhead never
+  waits for it. Requests are debounced by 150 ms, so a wheel zoom does not queue one analysis per
+  wheel event.
+- Columns follow the card width (64–4096) and rows its height (32–512). A range that needs more than
+  8192 frames grows the hop instead and is labelled **overview**: time detail is aggregated, never
+  silently truncated. The buffer is opened by the worker itself; the preview's own reader is not
+  shared across threads.
+- Every source the card can show gets a spectrum: ordinary files, edited PCM, REX2 slices, SF2,
+  EXS24/NKI, tracker samples and disc samples. A source that cannot be analysed says so in the card
+  instead of drawing silence. The whole-song tracker progress bar has no spectrum and the tabs are
+  hidden there, as the card itself is.
+- The heat ramp is part of the theme (`spectroLow/Mid/High`), with a light-theme variant where the
+  quiet end is the surface and the loud end is ink. Selection, playhead and the range label keep the
+  accent-on-panel treatment.
+
+### Instant spectrum and the cache
+
+The first view of a file computes a whole-file overview (8192 columns × 256 log rows) and writes a
+pair of files to `~/Library/Sonicator/spectra/`: the quantized grid (`.sps`) and a theme-independent
+PNG of the same picture. Selecting that file again — in this session or after a restart — reads the
+grid in milliseconds and draws it immediately; a zoom then asks for a detail pass after the usual
+150 ms debounce, and that pass never touches the disk. A file whose size or modification time
+changed is simply a cache miss.
+
+`Spectral analysis (N)…` in the sample context menu (Processing) and in the folder menu precomputes
+the same cache for a selection or a folder: two workers, progress in the status line, cancel, and a
+summary with skipped and failed counts. The plug-in hides it with the other processing jobs.
+Settings → Library has `Cache spectrograms`, the current size/count and `Clear cache`; pruning keeps
+the newest 2000 entries under 512 MB. Linear frequency mode is not cached (the store is a log grid)
+and is analysed on demand.
+
+### Selecting inside the spectrum
+
+The toolbar in the card's top-left corner switches the selection tool: **Time** (the ordinary
+waveform range), **Rect**, **Lasso** and **Wand**, each with its own cursor. Rectangle drags a
+time × frequency box, Lasso closes a freehand polygon on mouse-up, and the magic wand flood-fills
+the displayed dB grid within its tolerance (click the `dB` pill to cycle 3/6/12/24 dB). Shift adds
+to the mask, Alt subtracts, plain drag replaces it; Clear, Escape and the context-menu item empty
+it. The overlay is drawn only where the selection is — its time window and its frequency band — so
+what is highlighted is exactly what is exported. The time selection keeps working for Play, Loop
+and MIDI while the mask owns the export.
+
+A 2D selection is prepared as a masked WAV: the range is analysed with the same 2048/512 STFT, every
+bin is scaled by the mask with a one-row feather, and the inverse transform is overlap-added with
+Hann, so only the selected time and frequency survive and everything else in the window is silence.
+The fragment is as long as the selection, which keeps its place in a DAW.
+
+To drag it out, grab the highlighted area itself: a plain press on the selection lifts the fragment
+and dragging starts the ordinary prepared-file drag (the cursor changes to a hand over it). Shift
+and Alt still draw and edit the mask on top of it, and the magic wand always fills on click, so the
+selection never blocks the tools. Play auditions the masked result through the engine's separate
+matched transport (the card keeps showing the original spectrum, the playhead maps into the
+selection), Loop wraps inside it — the looped transport reads straight from the file, so no
+read-ahead buffer is attached and the second pass sounds like the first — and Stop returns to the
+original source. MIDI Preview plays the same prepared WAV as its whole sample, so a key sounds the
+selection and nothing else; clearing the mask hands the loaded file back. On container sources
+(REX2, tracker, disc, SoundFont) a MIDI voice can only be limited to the mask's time window, since
+the sampler cannot adopt a rendered WAV. Match and the spectral audition do not run together.
+Selections longer than 60 s are refused with a reason rather than exhausting memory.
+
 ## SoundFont 2 instruments and samples
 
 Loading a `.sf2` keeps the existing preset selector and adds a sample selector for the unique audio sources used by that preset. Unused bank headers are not listed, repeated zones over one source are one row, and a stereo pair is one row keyed by its left header. Each row carries a stable per-generation id, its name, key/velocity range and an explicit reason when its PCM is unusable. Identical names remain distinguishable by row position and id.

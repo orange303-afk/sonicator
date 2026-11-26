@@ -149,6 +149,8 @@ void AudioEngine::releaseFileTransport()
 bool AudioEngine::loadFile(const juce::File& file)
 {
     const bool midi = isMidiPreview();
+    // A fragment belonged to the previous source; the panel sets a new one with its next mask.
+    midiFragment = juce::File();
     releaseFileTransport();
     detachRender();
     sampler.clear();
@@ -287,9 +289,16 @@ void AudioEngine::applyMidiSelection()
 {
     sampler.clearRange();
     sampleVoices.clearRange();
+    const bool samplePath = ! sf2Mode && ! externalMode && ! rexMode;
+    if (midiFragment != juce::File() && samplePath)
+    {
+        // The fragment already is the selection: it holds exactly the mask window, so a voice
+        // plays it whole. The time range is in source seconds and does not apply to it.
+        return;
+    }
     if (! (midiSelectionEnd > midiSelectionStart)) return;
     if (trackerMode || discMode) sampleVoices.setRange(midiSelectionStart, midiSelectionEnd);
-    else if (! sf2Mode && ! externalMode && ! rexMode)
+    else if (samplePath)
         sampler.setRange(midiSelectionStart, midiSelectionEnd);
 }
 void AudioEngine::setMidiSelection(double startSeconds, double endSeconds)
@@ -813,8 +822,12 @@ void AudioEngine::attachMatched()
 {
     if (matchReader == nullptr) return;
     const bool streaming = deviceMode || hostMode;
-    matchedSource.setSource (matchReader.get(), streaming ? 32768 : 0,
-                             streaming ? &matchReadAhead : nullptr, matchedRate);
+    // The same rule as attach(): a looping reader must read straight from the file. The read-ahead
+    // buffer wraps on its own modulo the length, so after one pass it serves stale audio or
+    // nothing and the loop sticks. The spectral audition loops for as long as Loop is on.
+    const int readAheadSamples = streaming && ! matchReader->isLooping() ? 32768 : 0;
+    matchedSource.setSource (matchReader.get(), readAheadSamples,
+                             readAheadSamples > 0 ? &matchReadAhead : nullptr, matchedRate);
     matchedAttached = true;
 }
 
@@ -848,7 +861,7 @@ bool AudioEngine::setMatchedTransport(const juce::File& preparedFile)
     matchedAttached = false;
     matchReader = std::make_unique<PreviewReaderSource>(
         std::unique_ptr<juce::AudioFormatReader>(decoded.release()));
-    matchReader->setLooping(false);
+    matchReader->setLooping(looping);
     matchedRate = matchedRateIn;
     prepareMatchedTransport();
     attachMatched();
@@ -856,6 +869,30 @@ bool AudioEngine::setMatchedTransport(const juce::File& preparedFile)
     startAtNextPlay = true;
     matchedActive.store(true);
     return true;
+}
+
+void AudioEngine::setMatchedLooping(bool enabled)
+{
+    if (matchReader == nullptr || matchReader->isLooping() == enabled) return;
+    if (! matchedAttached)
+    {
+        matchReader->setLooping(enabled);
+        return;
+    }
+    // The read-ahead buffer is attached or removed by the loop state, exactly as setLooping()
+    // rebuilds the ordinary transport: detach, flip, re-attach, keep the position and playback.
+    const double positionBefore = matchedSource.getCurrentPosition();
+    const bool resume = matchedSource.isPlaying();
+    stopMatchedTransport();
+    matchedSource.setSource(nullptr);
+    matchedAttached = false;
+    matchReader->setLooping(enabled);
+    attachMatched();
+    const double lengthNow = matchedRate > 0.0
+        ? (double) matchReader->getTotalLength() / matchedRate : positionBefore;
+    matchedSource.setPosition(juce::jlimit(0.0, lengthNow, positionBefore));
+    startAtNextPlay = false;
+    if (resume) matchedSource.start();
 }
 
 void AudioEngine::clearMatchedTransport()
@@ -916,16 +953,55 @@ void AudioEngine::setSelectionLoop(bool enabled, double startSeconds, double end
     seek(positionBefore);
     if (resume) play();
 }
+void AudioEngine::setMidiFragment(const juce::File& preparedFile)
+{
+    const auto next = preparedFile.existsAsFile() ? preparedFile : juce::File();
+    if (next == midiFragment) return;
+    midiFragment = next;
+    // With MIDI preview off the sampler is empty anyway; the fragment is decoded on the next
+    // toggle through midiSourceFile().
+    if (! isMidiPreview()) return;
+    const bool samplePath = ! sf2Mode && ! externalMode && ! rexMode && ! trackerMode && ! discMode;
+    if (! samplePath)
+    {
+        // Container voices cannot adopt a WAV; the time window still restricts them.
+        applyMidiSelection();
+        return;
+    }
+    // Clearing the fragment must put the loaded source back, not leave the fragment's PCM behind.
+    const auto file = midiSourceFile();
+    lastError.clear();
+    MidiSampler::Decoded decoded;
+    if (file.existsAsFile())
+    {
+        lastError = MidiSampler::decode(file, decoded);
+        if (lastError.isNotEmpty())
+        {
+            midiFragment = juce::File();
+            return;
+        }
+    }
+    MidiSampler::Decoded previous;
+    {
+        const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());
+        previous = sampler.release();
+        sampleVoices.reset();
+        if (decoded.samples.getNumSamples() > 0) sampler.adopt(std::move(decoded));
+        applyMidiSelection();
+    }
+    previous = {}; // the old PCM dies only after the audio callback may run again
+}
+
 bool AudioEngine::setMidiPreview(bool enabled)
 {
     if (enabled == isMidiPreview()) return true;
     lastError.clear();
-    const bool wantsSample = enabled && loadedFile != juce::File() && ! sf2Mode && ! externalMode
-        && ! rexMode && ! trackerMode && ! discMode;
+    const bool wantsSample = enabled && midiSourceFile() != juce::File() && ! sf2Mode
+        && ! externalMode && ! rexMode && ! trackerMode && ! discMode;
     MidiSampler::Decoded decoded;
     // The whole file is decoded before any state is touched, so ordinary preview continues to play
     // while the MIDI sample is prepared. Only the buffer swap needs the callback lock.
-    if (wantsSample) lastError = MidiSampler::decode(loadedFile, decoded);
+    if (wantsSample) lastError = MidiSampler::decode(midiSourceFile(), decoded);
     MidiSampler::Decoded previous;
     {
         const juce::ScopedLock callbackGuard(devices.getAudioCallbackLock());

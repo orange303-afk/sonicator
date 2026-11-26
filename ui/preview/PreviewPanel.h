@@ -9,6 +9,7 @@
 #include "SongProgress.h"
 #include "PluginMatchControls.h"
 #include "core/match/MatchRenderService.h"
+#include "core/rex/Rex2Decoder.h"
 namespace sonicator {
 // Selector that also steps with Up/Down and the mouse wheel while closed. The popup keeps its
 // own keyboard behaviour when open.
@@ -84,6 +85,34 @@ public:
     void setOverwriteDisposal(files::DisposalPolicy policy) { overwriteDisposal = policy; }
     bool midiPreviewEnabled() const { return engine.isMidiPreview(); }
     bool skipSilenceEnabled() const { return engine.isSkipSilence(); }
+    // Waveform / spectrum view of the same card. The switch only changes what is drawn; the
+    // selection, zoom, playhead and drag stay shared, and the choice is persisted.
+    bool spectrumViewEnabled() const
+    {
+        return waveform.renderMode() == WaveformDisplay::RenderMode::spectrum;
+    }
+    bool spectrumLogScale() const { return waveform.spectrumLogScale(); }
+    void setSpectrumView(bool enabled, bool notify = true);
+    void setSpectrumLogScale(bool logScale, bool notify = true);
+    void toggleSpectrumView() { setSpectrumView(! spectrumViewEnabled()); }
+    // Test hooks: the tab strip exists only while the card shows a waveform, and the card has a
+    // rendered spectrum for the current request.
+    bool spectrumTabsVisible() const { return waveformTab.isVisible(); }
+    bool spectrumImageReady() const { return waveform.spectrumImageReadyForTest(); }
+    // A 2D spectral selection exists; the panel prepares the masked WAV for drag and can audition
+    // it through the engine's matched transport without replacing the card.
+    bool spectralSelectionActive() const { return waveform.spectralMask() != nullptr; }
+    bool spectralAuditionActive() const { return spectralAudition; }
+    void setSpectralCacheEnabled(bool enabled) { waveform.setSpectralCacheEnabled(enabled); }
+    void clearSpectralSelection();
+    bool waitForSpectralExport(int timeoutMs);
+    // Test hooks: install a mask without synthesising a lasso, and read the prepared export.
+    WaveformDisplay& waveformForTest() { return waveform; }
+    bool spectralExportReady() const
+    {
+        const auto state = exporter.state();
+        return state.isReady() && selectionExportMatches(state);
+    }
     bool autoPreviewEnabled() const { return autoPreview.getToggleState(); }
     bool loopEnabled() const { return loop.getToggleState(); }
     bool rexGateEnabled() const { return rexGate.getToggleState(); }
@@ -230,6 +259,22 @@ private:
     bool sourceIsMono() const;
     juce::TextButton clearSelectionButton { "Clear" };
     juce::Label selectionStatus;
+    // The two view tabs and the frequency-scale pill, laid out above the card.
+    studio::Chip waveformTab { "Waveform", true };
+    studio::Chip spectrumTab { "Spectrum", true };
+    studio::Chip scaleTab { "Log", true };
+    bool laidOutWithTabs = false;
+    // Spectral selection export and audition. The tag identifies the exact mask, so a prepared
+    // WAV can never be dragged after the mask changed.
+    juce::String spectralExportTag;
+    bool spectralAudition = false, spectralAutoPlayPending = false;
+    selection::Range effectiveExportRange() const;
+    SampleAudioPtr spectralSourceAudio();
+    juce::String spectralSourceStem() const;
+    void spectralMaskChanged();
+    void startSpectralAudition(const juce::File&);
+    void endSpectralAudition();
+    void refreshSpectrumTabs();
     void timerCallback() override;
     void togglePlayback();
     void applyTransportLooping();
@@ -245,6 +290,11 @@ private:
     selection::Range liveRange;
     void beginExternalDrag();
     void refreshInstrumentSamples();
+    // REX2 keeps its own decoded type; the spectrum wants the shared SampleAudio snapshot, so it
+    // is built once per loaded REX source and reused.
+    std::shared_ptr<const Rex2Audio> rexSpectrogramSource;
+    SampleAudioPtr rexSpectrogramSnapshot;
+    SampleAudioPtr rexSpectrogramAudio(const std::shared_ptr<const Rex2Audio>&);
     bool applyInstrumentSample(SampleId, bool manual);
     juce::String instrumentSampleStem() const;
     void fillTrackerChoices();

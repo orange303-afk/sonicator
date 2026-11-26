@@ -1,14 +1,138 @@
 #include "WaveformDisplay.h"
 #include "core/audio/SonicatorFormats.h"
+#include "core/preview/SpectrogramService.h"
+#include "core/spectral/SpectrogramCache.h"
+#include "SpectrogramRenderer.h"
 #include <algorithm>
+#include <queue>
+#include "ui/shell/AppFonts.h"
 #include "ui/shell/Theme.h"
 #include <cmath>
 namespace sonicator {
 namespace
 {
+constexpr int toolChipWidth = 34, toolChipGap = 3, spectralToolbarHeight = 18;
+constexpr int spectralToolbarCount = 4;
+const char* toolLabel(int index)
+{
+    static const char* labels[spectralToolbarCount] = { "Time", "Rect", "Lasso", "Wand" };
+    return labels[juce::jlimit(0, spectralToolbarCount - 1, index)];
+}
+
+bool gridCovers(const SpectrogramGrid& grid, waveview::View view)
+{
+    return grid.startSeconds <= view.start + 1.0e-6 && grid.endSeconds >= view.end - 1.0e-6;
+}
+
+// Draws `image`, which spans [start, end] seconds, into the slice of the card where that window
+// actually falls. A spectrum grid spans the whole view, but a mask is often a small window inside
+// it: stretching its picture over the full width would show the selection across the whole card.
+void drawWindowedImage(juce::Graphics& g, juce::Rectangle<float> area, double start, double end,
+                       const juce::Image& image, waveview::View view)
+{
+    if (! image.isValid() || image.getWidth() <= 0 || image.getHeight() <= 0) return;
+    if (! (end > start) || ! view.valid() || ! (view.length() > 0.0)) return;
+    const double from = juce::jmax(start, view.start);
+    const double to = juce::jmin(end, view.end);
+    if (! (to > from)) return;
+    const double span = end - start, viewLength = view.length();
+    const auto width = (double) image.getWidth();
+    const int sourceX = juce::jlimit(0, image.getWidth() - 1,
+                                     (int) std::floor((from - start) / span * width));
+    const int sourceWidth = juce::jlimit(
+        1, image.getWidth() - sourceX,
+        (int) std::ceil((to - start) / span * width) - sourceX);
+    const float left = area.getX()
+        + (float) ((from - view.start) / viewLength) * area.getWidth();
+    const float right = area.getX()
+        + (float) ((to - view.start) / viewLength) * area.getWidth();
+    const juce::Graphics::ScopedSaveState clipped(g);
+    g.reduceClipRegion(area.toNearestInt());
+    g.setImageResamplingQuality(juce::Graphics::mediumResamplingQuality);
+    g.drawImage(image, left, area.getY(), juce::jmax(1.0f, right - left), area.getHeight(),
+                sourceX, 0, sourceWidth, image.getHeight());
+}
+
+float yForFrequency(const SpectrogramGrid& grid, double hz, juce::Rectangle<float> area)
+{
+    const double minF = grid.minFrequency, maxF = grid.maxFrequency;
+    if (! (maxF > minF)) return area.getCentreY();
+    const double position = grid.logFrequency && minF > 0.0
+        ? std::log(juce::jlimit(minF, maxF, hz) / minF) / std::log(maxF / minF)
+        : (juce::jlimit(minF, maxF, hz) - minF) / (maxF - minF);
+    return area.getBottom() - (float) position * area.getHeight();
+}
+
 bool sameRange(selection::Range a, selection::Range b)
 {
     return a.start == b.start && a.end == b.end;
+}
+
+// Tool cursors drawn the way graphics applications draw them: a white glyph with a dark halo, so
+// it reads on both themes. Kind 0 = rectangle, 1 = lasso, 2 = magic wand.
+void drawCursorStroke(juce::Graphics& g, const juce::Path& path, float thickness)
+{
+    g.setColour(juce::Colours::black.withAlpha(0.85f));
+    g.strokePath(path, juce::PathStrokeType(thickness + 1.8f, juce::PathStrokeType::curved,
+                                            juce::PathStrokeType::rounded));
+    g.setColour(juce::Colours::white);
+    g.strokePath(path, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
+                                            juce::PathStrokeType::rounded));
+}
+
+void drawCursorCross(juce::Graphics& g, float cx, float cy, float arm)
+{
+    juce::Path cross;
+    cross.startNewSubPath(cx - arm, cy); cross.lineTo(cx - 2.0f, cy);
+    cross.startNewSubPath(cx + 2.0f, cy); cross.lineTo(cx + arm, cy);
+    cross.startNewSubPath(cx, cy - arm); cross.lineTo(cx, cy - 2.0f);
+    cross.startNewSubPath(cx, cy + 2.0f); cross.lineTo(cx, cy + arm);
+    drawCursorStroke(g, cross, 1.0f);
+}
+
+void drawSparkle(juce::Graphics& g, float cx, float cy, float radius)
+{
+    juce::Path star;
+    star.startNewSubPath(cx, cy - radius); star.lineTo(cx, cy + radius);
+    star.startNewSubPath(cx - radius, cy); star.lineTo(cx + radius, cy);
+    drawCursorStroke(g, star, 1.0f);
+}
+
+juce::MouseCursor spectralToolCursor(int kind)
+{
+    constexpr int extent = 28;
+    juce::Image image(juce::Image::ARGB, extent, extent, true);
+    {
+        juce::Graphics g(image);
+        if (kind == 0)
+        {
+            drawCursorCross(g, 8.0f, 8.0f, 7.0f);
+            juce::Path box;
+            box.addRectangle(12.0f, 13.0f, 11.0f, 8.0f);
+            drawCursorStroke(g, box, 1.0f);
+        }
+        else if (kind == 1)
+        {
+            juce::Path loop;
+            loop.addEllipse(6.0f, 6.0f, 15.0f, 11.0f);
+            drawCursorStroke(g, loop, 1.3f);
+            juce::Path rope;
+            rope.startNewSubPath(8.0f, 16.0f);
+            rope.cubicTo(5.0f, 23.0f, 12.0f, 26.0f, 16.0f, 21.0f);
+            drawCursorStroke(g, rope, 1.3f);
+        }
+        else
+        {
+            juce::Path wand;
+            wand.startNewSubPath(5.0f, 5.0f); wand.lineTo(17.0f, 21.0f);
+            drawCursorStroke(g, wand, 2.2f);
+            drawSparkle(g, 21.0f, 8.0f, 3.0f);
+            drawSparkle(g, 25.0f, 15.0f, 2.0f);
+            drawSparkle(g, 17.0f, 6.0f, 1.8f);
+        }
+    }
+    const int hotspot = kind == 2 ? 5 : (kind == 1 ? 6 : 8);
+    return juce::MouseCursor(image, hotspot, hotspot);
 }
 // The thumbnail cache is keyed by the hash of its input source, and JUCE's FileInputSource hashes
 // the path and the modification time only. An in-place save can land inside the same millisecond
@@ -63,6 +187,11 @@ void WaveformDisplay::setFile(const juce::File& file)
     viewRange = {};
     zoomReader.reset();
     zoomSampleRate = 0;
+    sourceFile = file.existsAsFile() ? file : juce::File();
+    spectroFile = sourceFile;
+    spectroAudio.reset();
+    spectroSource = sourceFile != juce::File() ? SpectrogramService::sourceKey(sourceFile) : juce::String();
+    invalidateSpectrum(true);
     if (file.existsAsFile())
     {
         thumbnail.setSource(new IdentifiedFileSource(file));
@@ -71,6 +200,7 @@ void WaveformDisplay::setFile(const juce::File& file)
     }
     else
         thumbnail.setSource(nullptr);
+    refreshFromCache();
     repaint();
 }
 void WaveformDisplay::setPeaks(const std::vector<float>& samples, int sampleRate,
@@ -85,6 +215,14 @@ void WaveformDisplay::setPeaks(const std::vector<float>& samples, int sampleRate
     zoomReader.reset();
     zoomSampleRate = sampleRate;
     customLength = sampleRate > 0 ? (double) samples.size() / sampleRate : 0;
+    // The thumbnail path cannot read these containers; PreviewPanel hands the decoded snapshot
+    // to setSpectrogramAudio right after this call.
+    sourceFile = {};
+    spectroFile = {};
+    spectroAudio.reset();
+    spectroSource.clear();
+    ++spectroRevision;
+    invalidateSpectrum(true);
     if (samples.empty() || customLength <= 0) { repaint(); return; }
     constexpr int bins = 2048;
     peakMin.assign((size_t) bins, 0.0f);
@@ -115,6 +253,8 @@ void WaveformDisplay::setEditedAudio(SampleAudioPtr audio, const std::vector<int
     if (viewRange.valid()) viewRange = waveview::clampView(viewRange, totalLength());
     if (editedAudio != nullptr && editedAudio->sampleRate > 0)
         setSampleRateForZoom(editedAudio->sampleRate);
+    // Every edit changes the PCM, so the revision moves and the spectrum is recomputed.
+    setSpectrogramAudio(editedAudio, ++spectroRevision);
     repaint();
 }
 
@@ -123,6 +263,12 @@ void WaveformDisplay::clearEditedAudio()
     editedAudio.reset();
     editedSlices.clear();
     columnCache.clear(); cachedWidth = 0;
+    // The file is the source again; its snapshot is gone.
+    spectroAudio.reset();
+    spectroFile = sourceFile;
+    spectroSource = sourceFile != juce::File() ? SpectrogramService::sourceKey(sourceFile) : juce::String();
+    invalidateSpectrum(true);
+    refreshFromCache();
     repaint();
 }
 
@@ -286,12 +432,18 @@ void WaveformDisplay::setView(waveview::View view)
 {
     const auto total = totalLength();
     viewRange = waveview::clampView(view, total);
+    // The new range needs its own analysis; the debounce keeps a wheel zoom from queueing one
+    // job per pixel.
+    spectroDirtyAt = juce::Time::getMillisecondCounter();
+    if (mode == RenderMode::spectrum) startTimer(60);
     repaint();
 }
 
 void WaveformDisplay::zoomToFit()
 {
     viewRange = waveview::whole(totalLength());
+    spectroDirtyAt = juce::Time::getMillisecondCounter();
+    if (mode == RenderMode::spectrum) startTimer(60);
     repaint();
 }
 
@@ -369,7 +521,11 @@ void WaveformDisplay::paint(juce::Graphics& g)
         }
         const auto view = effectiveView();
         const auto area = getLocalBounds().reduced(6,10).toFloat();
-        if (editedAudio != nullptr)
+        if (mode == RenderMode::spectrum)
+        {
+            drawSpectrum(g, area, view);
+        }
+        else if (editedAudio != nullptr)
         {
             drawEditedPeaks(g, area, view);
         }
@@ -464,6 +620,43 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         if (onContextMenu) onContextMenu(e.getScreenPosition());
         return;
     }
+    if (mode == RenderMode::spectrum)
+    {
+        const int hit = spectralToolbarHit(e.x, e.y);
+        if (hit >= 0)
+        {
+            if (hit < spectralToolbarCount)
+                setSelectionTool((SelectionTool) hit);
+            else
+            {
+                static const int tolerances[] = { 3, 6, 12, 24 };
+                int index = 0;
+                for (int i = 0; i < 4; ++i)
+                    if (tolerances[i] == wandToleranceDb) index = i;
+                wandToleranceDb = tolerances[(index + 1) % 4];
+                repaint();
+            }
+            return;
+        }
+        if (tool != SelectionTool::time)
+        {
+            // A plain press on the selection lifts the fragment: that is how a 2D selection is
+            // dragged into a DAW. Shift and Alt still draw, so the mask stays editable without
+            // clearing it first, and the wand always fills, since a click is its whole gesture.
+            if (tool != SelectionTool::wand && ! e.mods.isShiftDown() && ! e.mods.isAltDown()
+                && pointInMask(e.position, contentArea(), effectiveView()))
+            {
+                externalDragTriggered = false;
+                spectralDragTriggered = false;
+                spectralPressInMask = true;
+                dragOrigin = e.getPosition();
+                return;
+            }
+            spectralPressInMask = false;
+            beginSpectralGesture(e, contentArea(), effectiveView());
+            return;
+        }
+    }
     externalDragTriggered = false;
     selectionDragActive = false;
     pressInsideSelection = false;
@@ -498,6 +691,21 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 }
 void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 {
+    if (spectralPressInMask)
+    {
+        const auto delta = e.getPosition() - dragOrigin;
+        if (! spectralDragTriggered && selection::exceedsDragThreshold(delta.x, delta.y))
+        {
+            spectralDragTriggered = true;
+            if (onExternalDragRequested) onExternalDragRequested();
+        }
+        return;
+    }
+    if (spectralGesture)
+    {
+        updateSpectralGesture(e, contentArea(), effectiveView());
+        return;
+    }
     const auto total = totalLength();
     if (total <= 0) return;
     const auto delta = e.getPosition() - dragOrigin;
@@ -573,6 +781,20 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
         contextMenuClick = false;
         dragMode = DragMode::none;
         pressWasPrimary = false;
+        spectralPressInMask = false;
+        spectralDragTriggered = false;
+        return;
+    }
+    if (spectralPressInMask)
+    {
+        // A press on the selection without a drag is a plain click: leave everything as it is.
+        spectralPressInMask = false;
+        spectralDragTriggered = false;
+        return;
+    }
+    if (spectralGesture)
+    {
+        commitSpectralGesture(e, contentArea(), effectiveView());
         return;
     }
     const auto total = totalLength();
@@ -602,7 +824,60 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 {
     const auto total = totalLength();
     if (total <= 0) { setMouseCursor(juce::MouseCursor::NormalCursor); return; }
+    if (mode == RenderMode::spectrum)
+    {
+        if (spectralToolbarHit(e.x, e.y) >= 0)
+        {
+            setMouseCursor(juce::MouseCursor::PointingHandCursor);
+            return;
+        }
+        if (tool != SelectionTool::time)
+        {
+            refreshSpectrumCursor(pointInMask(e.position, contentArea(), effectiveView()));
+            return;
+        }
+    }
     updateCursorFor(waveview::timeAtX(e.position.x, getWidth(), effectiveView()));
+}
+void WaveformDisplay::mouseExit(const juce::MouseEvent&)
+{
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+}
+bool WaveformDisplay::pointInMask(juce::Point<float> position, juce::Rectangle<float> area,
+                                  waveview::View view) const
+{
+    if (mask == nullptr || mask->empty() || ! area.contains(position) || ! view.valid()) return false;
+    const int row = mask->rowForFrequency(frequencyAtY(position.y, area, view));
+    const int column = mask->columnForTime(waveview::timeAtX(position.x, getWidth(), view));
+    if (row < 0 || column < 0) return false;
+    // Two cells of slack: a one-row band would otherwise be impossible to grab.
+    for (int r = juce::jmax(0, row - 2); r <= juce::jmin(SpectralMask::rowCount - 1, row + 2); ++r)
+        for (int c = juce::jmax(0, column - 2); c <= juce::jmin(mask->columns - 1, column + 2); ++c)
+            if (mask->cell(r, c)) return true;
+    return false;
+}
+void WaveformDisplay::refreshSpectrumCursor(bool overMask)
+{
+    if (mode != RenderMode::spectrum || tool == SelectionTool::time)
+    {
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+        return;
+    }
+    if (overMask)
+    {
+        setMouseCursor(juce::MouseCursor::DraggingHandCursor);
+        return;
+    }
+    switch (tool)
+    {
+        case SelectionTool::rectangle:
+        case SelectionTool::lasso:
+        case SelectionTool::wand:
+            setMouseCursor(spectralToolCursor((int) tool - 1));
+            return;
+        default: break;
+    }
+    setMouseCursor(juce::MouseCursor::NormalCursor);
 }
 void WaveformDisplay::updateCursorFor(double time)
 {
@@ -666,5 +941,651 @@ void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
     const auto total = totalLength();
     if (! (total > 0) || ! std::isfinite(total)) return;
     setSelection({ 0.0, total });
+}
+
+void WaveformDisplay::setRenderMode(RenderMode next)
+{
+    if (mode == next) return;
+    mode = next;
+    spectralGesture = false;
+    spectralPressInMask = false;
+    lassoPointsHz.clear();
+    if (mode == RenderMode::spectrum)
+    {
+        spectroDirtyAt = juce::Time::getMillisecondCounter();
+        startTimer(60);
+    }
+    else
+    {
+        stopTimer();
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+    }
+    repaint();
+}
+
+void WaveformDisplay::setSelectionTool(SelectionTool next)
+{
+    if (tool == next) return;
+    tool = next;
+    spectralGesture = false;
+    spectralPressInMask = false;
+    lassoPointsHz.clear();
+    refreshSpectrumCursor(false);
+    if (onSelectionToolChanged) onSelectionToolChanged();
+    repaint();
+}
+
+const SpectralMask* WaveformDisplay::spectralMask() const
+{
+    return mask != nullptr && ! mask->empty() ? mask.get() : nullptr;
+}
+
+void WaveformDisplay::setSpectralMaskForTest(const SpectralMask& value)
+{
+    mask = std::make_unique<SpectralMask>(value);
+    notifyMaskChanged();
+}
+
+void WaveformDisplay::clearSpectralMask()
+{
+    if (mask == nullptr) return;
+    mask.reset();
+    notifyMaskChanged();
+}
+
+void WaveformDisplay::setSpectrogramAudio(SampleAudioPtr audio, juce::uint64 revision)
+{
+    spectroAudio = std::move(audio);
+    spectroRevision = revision;
+    spectroFile = {};
+    if (spectroAudio != nullptr)
+        spectroSource = "snapshot:" + juce::String((juce::int64) revision) + ":"
+            + juce::String((juce::int64) spectroAudio->frames) + ":"
+            + juce::String(spectroAudio->sampleRate) + ":" + juce::String(spectroAudio->channels);
+    else
+        spectroSource.clear();
+    invalidateSpectrum(true);
+}
+
+void WaveformDisplay::setSpectrumLogScale(bool logScale)
+{
+    if (spectroLog == logScale) return;
+    spectroLog = logScale;
+    // A linear chart cannot reuse the log overview; drop the detail pass and rebuild on demand.
+    detailGrid.reset();
+    detailImage = {};
+    maskImage = {};
+    spectroDirtyAt = juce::Time::getMillisecondCounter();
+    if (mode == RenderMode::spectrum) startTimer(60);
+    repaint();
+}
+
+bool WaveformDisplay::spectrumAvailable() const
+{
+    return (spectroAudio != nullptr && spectroAudio->frames > 0 && spectroAudio->sampleRate > 0)
+        || spectroFile.existsAsFile();
+}
+
+double WaveformDisplay::sourceDuration() const
+{
+    if (spectroAudio != nullptr && spectroAudio->sampleRate > 0)
+        return (double) spectroAudio->frames / (double) spectroAudio->sampleRate;
+    if (zoomReader != nullptr && zoomReader->sampleRate > 0.0)
+        return (double) zoomReader->lengthInSamples / zoomReader->sampleRate;
+    return totalLength();
+}
+
+juce::Rectangle<float> WaveformDisplay::contentArea() const
+{
+    return getLocalBounds().reduced(6, 10).toFloat();
+}
+
+SpectrogramService& WaveformDisplay::spectrumService()
+{
+    if (spectroService == nullptr)
+        spectroService = std::make_unique<SpectrogramService>(defaultSpectrumCacheFolder());
+    return *spectroService;
+}
+
+void WaveformDisplay::refreshFromCache()
+{
+    overviewGrid.reset();
+    overviewImage = {};
+    detailGrid.reset();
+    detailImage = {};
+    spectroReadyKey.clear();
+    if (! spectralCache || ! spectroLog || ! spectroFile.existsAsFile()) return;
+    if (auto cached = readSpectrumCache(spectroFile))
+    {
+        overviewGrid = std::make_shared<const SpectrogramGrid>(std::move(cached->grid));
+        overviewImage = cached->image;
+        spectroReadyKey = "cache|" + spectroSource;
+    }
+}
+
+void WaveformDisplay::invalidateSpectrum(bool dropResult)
+{
+    spectroDirtyAt = juce::Time::getMillisecondCounter();
+    if (dropResult)
+    {
+        const bool hadMask = mask != nullptr && ! mask->empty();
+        overviewGrid.reset(); overviewImage = {};
+        detailGrid.reset(); detailImage = {};
+        mask.reset(); maskImage = {};
+        spectroReadyKey.clear();
+        spectroRequestKey.clear();
+        spectroError.clear();
+        pendingIsOverview = false;
+        if (spectroService != nullptr) spectroService->cancel();
+        if (hadMask && onSpectralMaskChanged) onSpectralMaskChanged();
+    }
+    if (mode == RenderMode::spectrum) startTimer(60);
+}
+
+juce::String WaveformDisplay::spectrumKey(waveview::View view, juce::Rectangle<float> area,
+                                          bool overview) const
+{
+    juce::String key = spectroSource;
+    key << "|" << (overview ? "overview" : "detail")
+        << "|" << juce::String((juce::int64) std::llround(view.start * 1000.0))
+        << "|" << juce::String((juce::int64) std::llround(view.end * 1000.0))
+        << "|" << (int) area.getWidth() << "x" << (int) area.getHeight()
+        << "|" << (spectroLog ? 1 : 0);
+    return key;
+}
+
+void WaveformDisplay::ensureSpectrum(waveview::View view, juce::Rectangle<float> area)
+{
+    if (mode != RenderMode::spectrum || ! spectrumAvailable()) return;
+    if (area.getWidth() < 16.0f || area.getHeight() < 16.0f) return;
+    const auto duration = sourceDuration();
+    if (! (duration > 0)) return;
+    const auto viewStart = juce::jmax(0.0, view.start);
+    const auto viewEnd = juce::jmin(duration, view.end);
+    if (! (viewEnd > viewStart)) return;
+
+    // The cache holds a log overview. In linear mode there is no instant frame to reuse, so the
+    // visible range is analysed directly (the previous behaviour).
+    const bool canUseOverview = spectroLog;
+    if (canUseOverview && overviewGrid == nullptr)
+    {
+        SpectrogramRequest request;
+        request.key = spectrumKey(waveview::whole(duration), area, true);
+        if (request.key == spectroRequestKey) return;
+        request.startSeconds = 0.0;
+        request.endSeconds = duration;
+        request.params.fftSize = 2048;
+        request.params.columns = 8192;
+        request.params.rows = SpectralMask::rowCount;
+        request.params.maxFrames = 8192;
+        request.params.logFrequency = true;
+        request.params.minFrequency = 20.0;
+        request.params.floorDb = -90.0;
+        if (spectroAudio != nullptr)
+            request.audio = spectroAudio;
+        else
+        {
+            request.file = spectroFile;
+            if (spectralCache)
+            {
+                request.cacheSource = spectroFile;
+                request.cacheOverview = true;
+            }
+        }
+        spectrumService().prepare(std::move(request));
+        spectroRequestKey = spectrumKey(waveview::whole(duration), area, true);
+        pendingIsOverview = true;
+        spectroError.clear();
+        startTimer(60);
+        return;
+    }
+
+    bool needDetail = true;
+    if (canUseOverview && overviewGrid != nullptr)
+    {
+        const auto columnsInView = (double) overviewGrid->columns
+            * (viewEnd - viewStart) / duration;
+        needDetail = columnsInView < 2.0 * (double) area.getWidth();
+    }
+    if (! needDetail) return;
+
+    const auto key = spectrumKey({ viewStart, viewEnd }, area, false);
+    if (key == spectroRequestKey) return;
+    const auto now = juce::Time::getMillisecondCounter();
+    if (spectroDirtyAt != 0 && now - spectroDirtyAt < (juce::uint32) spectrumDebounceMs) return;
+    SpectrogramRequest request;
+    request.key = key;
+    request.startSeconds = viewStart;
+    request.endSeconds = viewEnd;
+    request.params.fftSize = 2048;
+    request.params.columns = juce::jlimit(64, 4096, (int) area.getWidth());
+    request.params.rows = juce::jlimit(32, 512, (int) area.getHeight());
+    request.params.logFrequency = spectroLog;
+    request.params.minFrequency = 20.0;
+    request.params.floorDb = -90.0;
+    if (spectroAudio != nullptr) request.audio = spectroAudio;
+    else request.file = spectroFile;
+    spectrumService().prepare(std::move(request));
+    spectroRequestKey = key;
+    pendingIsOverview = false;
+    spectroError.clear();
+    startTimer(60);
+}
+
+void WaveformDisplay::timerCallback()
+{
+    if (mode != RenderMode::spectrum)
+    {
+        stopTimer();
+        return;
+    }
+    const auto state = spectrumService().state();
+    if (state.key == spectroRequestKey)
+    {
+        if (state.phase == SpectrogramService::Phase::ready && state.grid != nullptr
+            && state.key != spectroReadyKey)
+        {
+            if (pendingIsOverview)
+            {
+                overviewGrid = state.grid;
+                overviewImage = spectrogramview::render(*state.grid);
+            }
+            else
+            {
+                detailGrid = state.grid;
+                detailImage = spectrogramview::render(*state.grid);
+            }
+            spectroReadyKey = state.key;
+            repaint();
+        }
+        else if (state.phase == SpectrogramService::Phase::failed && state.error != spectroError)
+        {
+            spectroError = state.error;
+            repaint();
+        }
+    }
+    ensureSpectrum(effectiveView(), contentArea());
+}
+
+const SpectrogramGrid* WaveformDisplay::displayedGrid(waveview::View view) const
+{
+    if (detailGrid != nullptr && gridCovers(*detailGrid, view)) return detailGrid.get();
+    if (overviewGrid != nullptr) return overviewGrid.get();
+    return nullptr;
+}
+
+const juce::Image* WaveformDisplay::displayedImage(waveview::View view) const
+{
+    if (detailGrid != nullptr && gridCovers(*detailGrid, view) && detailImage.isValid())
+        return &detailImage;
+    if (overviewImage.isValid()) return &overviewImage;
+    return nullptr;
+}
+
+void WaveformDisplay::drawSpectrum(juce::Graphics& g, juce::Rectangle<float> area, waveview::View view)
+{
+    ensureSpectrum(view, area);
+    const auto* grid = displayedGrid(view);
+    const auto* image = displayedImage(view);
+    if (spectrumAvailable() && grid != nullptr && image != nullptr && image->isValid())
+    {
+        drawWindowedImage(g, area, grid->startSeconds, grid->endSeconds, *image, view);
+        spectrogramview::drawFrequencyLabels(g, area, *grid, spectralToolbarBounds().toFloat());
+        if (grid->overview) spectrogramview::drawOverviewNote(g, area);
+        drawMask(g, area, view);
+        drawSpectralGesture(g, area, view);
+    }
+    else if (! spectrumAvailable())
+    {
+        g.setColour(theme::muted);
+        g.setFont(fonts::font(11));
+        g.drawText("Spectrum is unavailable for this source", area, juce::Justification::centred);
+    }
+    else if (spectroError.isNotEmpty())
+    {
+        g.setColour(theme::muted);
+        g.setFont(fonts::font(11));
+        g.drawText(spectroError, area, juce::Justification::centred);
+    }
+    else
+    {
+        g.setColour(theme::muted);
+        g.setFont(fonts::font(11));
+        g.drawText("Computing spectrum...", area, juce::Justification::centred);
+    }
+    drawSpectralToolbar(g, area);
+}
+
+void WaveformDisplay::rebuildMaskImage()
+{
+    maskImage = {};
+    if (mask == nullptr || mask->columns <= 0) return;
+    // The overlay is built on the frequency axis currently on screen, so it lands on exactly the
+    // bands it covers; the mask itself stays logarithmic and absolute.
+    const auto* grid = displayedGrid(effectiveView());
+    const bool logScale = grid == nullptr || grid->logFrequency;
+    const double minF = grid != nullptr ? grid->minFrequency : mask->minFrequency;
+    const double maxF = grid != nullptr ? grid->maxFrequency : mask->maxFrequency;
+    if (! (maxF > minF) || minF <= 0.0) return;
+    maskImageMinHz = minF;
+    maskImageMaxHz = maxF;
+    maskImageLog = logScale;
+    juce::Image image(juce::Image::ARGB, mask->columns, SpectralMask::rowCount, true);
+    juce::Image::BitmapData data(image, juce::Image::BitmapData::writeOnly);
+    const auto colour = theme::accent.withAlpha(0.42f).getPixelARGB();
+    const auto ratio = maxF / minF;
+    for (int row = 0; row < SpectralMask::rowCount; ++row)
+    {
+        const auto position = ((double) row + 0.5) / (double) SpectralMask::rowCount;
+        const double frequency = logScale ? minF * std::pow(ratio, position)
+                                          : minF + (maxF - minF) * position;
+        const int sourceRow = mask->rowForFrequency(frequency);
+        if (sourceRow < 0) continue;
+        auto* line = reinterpret_cast<juce::PixelARGB*>(
+            data.getLinePointer(SpectralMask::rowCount - 1 - row));
+        for (int column = 0; column < mask->columns; ++column)
+            if (mask->cell(sourceRow, column)) line[column] = colour;
+    }
+    maskImage = std::move(image);
+}
+
+void WaveformDisplay::drawMask(juce::Graphics& g, juce::Rectangle<float> area, waveview::View view)
+{
+    if (mask == nullptr || mask->empty()) return;
+    const auto* grid = displayedGrid(view);
+    const bool logScale = grid == nullptr || grid->logFrequency;
+    const double minF = grid != nullptr ? grid->minFrequency : mask->minFrequency;
+    const double maxF = grid != nullptr ? grid->maxFrequency : mask->maxFrequency;
+    if (! maskImage.isValid() || maskImageLog != logScale || maskImageMinHz != minF
+        || maskImageMaxHz != maxF)
+        rebuildMaskImage();
+    if (! maskImage.isValid()) return;
+    drawWindowedImage(g, area, mask->startSeconds, mask->endSeconds, maskImage, view);
+    // The window's edges stay visible even when the masked cells inside it are sparse.
+    g.setColour(theme::accent.withAlpha(0.6f));
+    for (const auto edge : { mask->startSeconds, mask->endSeconds })
+    {
+        if (edge < view.start || edge > view.end) continue;
+        const auto x = waveview::xAtTime(edge, getWidth(), view);
+        g.drawVerticalLine((int) x, area.getY(), area.getBottom());
+    }
+}
+
+void WaveformDisplay::drawSpectralGesture(juce::Graphics& g, juce::Rectangle<float> area,
+                                          waveview::View view)
+{
+    if (! spectralGesture) return;
+    const auto* grid = displayedGrid(view);
+    if (grid == nullptr) return;
+    if (tool == SelectionTool::rectangle)
+    {
+        const auto x1 = waveview::xAtTime(juce::jmin(gestureStartTime, gestureEndTime), getWidth(), view);
+        const auto x2 = waveview::xAtTime(juce::jmax(gestureStartTime, gestureEndTime), getWidth(), view);
+        const auto y1 = yForFrequency(*grid, juce::jmax(gestureStartHz, gestureEndHz), area);
+        const auto y2 = yForFrequency(*grid, juce::jmin(gestureStartHz, gestureEndHz), area);
+        const juce::Rectangle<float> bounds(x1, y1, juce::jmax(1.0f, x2 - x1),
+                                            juce::jmax(1.0f, y2 - y1));
+        g.setColour(theme::accent.withAlpha(0.22f));
+        g.fillRect(bounds);
+        g.setColour(theme::accent.withAlpha(0.9f));
+        g.drawRect(bounds, 1.0f);
+    }
+    else if (tool == SelectionTool::lasso && lassoPointsHz.size() >= 2)
+    {
+        juce::Path path;
+        for (size_t i = 0; i < lassoPointsHz.size(); ++i)
+        {
+            const auto x = waveview::xAtTime(lassoPointsHz[i].x, getWidth(), view);
+            const auto y = yForFrequency(*grid, lassoPointsHz[i].y, area);
+            if (i == 0) path.startNewSubPath(x, y);
+            else path.lineTo(x, y);
+        }
+        path.closeSubPath();
+        g.setColour(theme::accent.withAlpha(0.22f));
+        g.fillPath(path);
+        g.setColour(theme::accent.withAlpha(0.9f));
+        g.strokePath(path, juce::PathStrokeType(1.0f));
+    }
+}
+
+juce::Rectangle<int> WaveformDisplay::spectralToolbarBounds() const
+{
+    auto area = contentArea().toNearestInt().reduced(4);
+    const int width = spectralToolbarCount * toolChipWidth
+        + (spectralToolbarCount - 1) * toolChipGap
+        + (tool == SelectionTool::wand ? 4 + 38 : 0);
+    return { area.getX(), area.getY(), width, spectralToolbarHeight };
+}
+
+int WaveformDisplay::spectralToolbarHit(int x, int y) const
+{
+    const auto bounds = spectralToolbarBounds();
+    if (! bounds.contains(x, y)) return -1;
+    for (int i = 0; i < spectralToolbarCount; ++i)
+    {
+        const int left = bounds.getX() + i * (toolChipWidth + toolChipGap);
+        if (x >= left && x < left + toolChipWidth) return i;
+    }
+    if (tool == SelectionTool::wand && x >= bounds.getRight() - 38)
+        return spectralToolbarCount;
+    return -1;
+}
+
+void WaveformDisplay::drawSpectralToolbar(juce::Graphics& g, juce::Rectangle<float> area)
+{
+    juce::ignoreUnused(area);
+    const auto bounds = spectralToolbarBounds().toFloat();
+    g.setColour(theme::panel.withAlpha(0.86f));
+    g.fillRoundedRectangle(bounds, 3.0f);
+    g.setFont(fonts::font(10));
+    for (int i = 0; i < spectralToolbarCount; ++i)
+    {
+        const int left = spectralToolbarBounds().getX() + i * (toolChipWidth + toolChipGap);
+        const juce::Rectangle<float> chip((float) left, bounds.getY(),
+                                          (float) toolChipWidth, bounds.getHeight());
+        const bool active = (int) tool == i;
+        if (active)
+        {
+            g.setColour(theme::accent.withAlpha(0.9f));
+            g.fillRoundedRectangle(chip.reduced(1.0f), 3.0f);
+            g.setColour(theme::panel);
+        }
+        else
+        {
+            g.setColour(theme::muted);
+        }
+        g.drawText(toolLabel(i), chip, juce::Justification::centred);
+    }
+    if (tool == SelectionTool::wand)
+    {
+        const juce::Rectangle<float> chip(bounds.getRight() - 38.0f, bounds.getY(), 36.0f,
+                                          bounds.getHeight());
+        g.setColour(theme::raised);
+        g.fillRoundedRectangle(chip.reduced(1.0f), 3.0f);
+        g.setColour(theme::text);
+        g.drawText(juce::String(wandToleranceDb) + " dB", chip, juce::Justification::centred);
+    }
+}
+
+double WaveformDisplay::frequencyAtY(float y, juce::Rectangle<float> area, waveview::View view) const
+{
+    const auto* grid = displayedGrid(view);
+    const double minF = grid != nullptr ? grid->minFrequency : 20.0;
+    const double maxF = grid != nullptr ? grid->maxFrequency : nyquist();
+    const bool logScale = grid != nullptr ? grid->logFrequency : true;
+    const double position = juce::jlimit(0.0, 1.0,
+        (double) (area.getBottom() - y) / (double) juce::jmax(1.0f, area.getHeight()));
+    return logScale && minF > 0.0 ? minF * std::pow(maxF / minF, position)
+                                  : minF + (maxF - minF) * position;
+}
+
+double WaveformDisplay::nyquist() const
+{
+    if (spectroAudio != nullptr && spectroAudio->sampleRate > 0)
+        return spectroAudio->sampleRate * 0.5;
+    if (zoomReader != nullptr && zoomReader->sampleRate > 0.0)
+        return zoomReader->sampleRate * 0.5;
+    const auto* grid = displayedGrid(effectiveView());
+    return grid != nullptr ? grid->maxFrequency : 20000.0;
+}
+
+void WaveformDisplay::beginSpectralGesture(const juce::MouseEvent& e, juce::Rectangle<float> area,
+                                           waveview::View view)
+{
+    if (! area.contains(e.position)) return;
+    if (displayedGrid(view) == nullptr) return;
+    const double time = waveview::timeAtX(e.position.x, getWidth(), view);
+    const double hz = frequencyAtY(e.position.y, area, view);
+    if (tool == SelectionTool::wand)
+    {
+        runWand(e, area, view);
+        return;
+    }
+    spectralGesture = true;
+    gestureStartTime = gestureEndTime = time;
+    gestureStartHz = gestureEndHz = hz;
+    lassoPointsHz.clear();
+    if (tool == SelectionTool::lasso) lassoPointsHz.emplace_back(time, hz);
+    repaint();
+}
+
+void WaveformDisplay::updateSpectralGesture(const juce::MouseEvent& e, juce::Rectangle<float> area,
+                                            waveview::View view)
+{
+    if (! spectralGesture) return;
+    const double time = waveview::timeAtX(e.position.x, getWidth(), view);
+    const double hz = frequencyAtY(e.position.y, area, view);
+    gestureEndTime = time;
+    gestureEndHz = hz;
+    if (tool == SelectionTool::lasso)
+    {
+        if (lassoPointsHz.size() < 2000) lassoPointsHz.emplace_back(time, hz);
+    }
+    repaint();
+}
+
+void WaveformDisplay::commitSpectralGesture(const juce::MouseEvent& e, juce::Rectangle<float> area,
+                                            waveview::View view)
+{
+    juce::ignoreUnused(area, view);
+    if (! spectralGesture) return;
+    spectralGesture = false;
+    const bool subtract = e.mods.isAltDown();
+    const bool replace = ! e.mods.isShiftDown() && ! subtract;
+    if (tool == SelectionTool::rectangle)
+    {
+        const auto start = juce::jmin(gestureStartTime, gestureEndTime);
+        const auto end = juce::jmax(gestureStartTime, gestureEndTime);
+        if (end - start > 0.0)
+        {
+            commitMaskWindow(start, end, replace);
+            mask->addRectangle(start, end, juce::jmin(gestureStartHz, gestureEndHz),
+                               juce::jmax(gestureStartHz, gestureEndHz), subtract);
+        }
+    }
+    else if (tool == SelectionTool::lasso && lassoPointsHz.size() >= 3)
+    {
+        double start = lassoPointsHz.front().x, end = start;
+        for (const auto& point : lassoPointsHz)
+        {
+            start = juce::jmin(start, point.x);
+            end = juce::jmax(end, point.x);
+        }
+        if (end - start > 0.0)
+        {
+            commitMaskWindow(start, end, replace);
+            mask->addPolygon(lassoPointsHz, subtract);
+        }
+    }
+    lassoPointsHz.clear();
+    notifyMaskChanged();
+}
+
+void WaveformDisplay::commitMaskWindow(double start, double end, bool replace)
+{
+    if (! (end > start)) return;
+    // A small margin keeps a mask drawn at the window edge from losing its first/last cells.
+    const auto pad = juce::jmax(0.001, (end - start) * 0.001);
+    if (mask == nullptr) mask = std::make_unique<SpectralMask>();
+    const auto nyq = nyquist();
+    if (replace || mask->columns == 0 || mask->empty())
+    {
+        mask->clear();
+        mask->setWindow(start - pad, end + pad, nyq);
+    }
+    else
+    {
+        mask->setWindow(juce::jmin(mask->startSeconds, start - pad),
+                        juce::jmax(mask->endSeconds, end + pad), nyq);
+    }
+}
+
+void WaveformDisplay::runWand(const juce::MouseEvent& e, juce::Rectangle<float> area,
+                              waveview::View view)
+{
+    const auto* grid = displayedGrid(view);
+    if (grid == nullptr || ! grid->valid() || ! area.contains(e.position)) return;
+    const auto time = waveview::timeAtX(e.position.x, getWidth(), view);
+    const auto hz = frequencyAtY(e.position.y, area, view);
+    const auto column = juce::jlimit(0, grid->columns - 1,
+        (int) std::floor((time - grid->startSeconds) / (grid->endSeconds - grid->startSeconds)
+                         * (double) grid->columns));
+    const auto position = juce::jlimit(0.0, 1.0,
+        grid->logFrequency && grid->minFrequency > 0.0
+            ? std::log(hz / grid->minFrequency) / std::log(grid->maxFrequency / grid->minFrequency)
+            : (hz - grid->minFrequency) / (grid->maxFrequency - grid->minFrequency));
+    const auto row = juce::jlimit(0, grid->rows - 1, (int) std::floor(position * (double) grid->rows));
+    const auto base = grid->at(row, column);
+    const auto tolerance = (double) wandToleranceDb;
+    std::vector<uint8_t> filled((size_t) grid->rows * (size_t) grid->columns, 0);
+    std::vector<int> stack;
+    stack.push_back(row * grid->columns + column);
+    filled[(size_t) stack.back()] = 1;
+    int visited = 1;
+    constexpr int maxCells = 300000;
+    while (! stack.empty() && visited < maxCells)
+    {
+        const int index = stack.back();
+        stack.pop_back();
+        const int r = index / grid->columns, c = index % grid->columns;
+        const int neighbours[4][2] = { { r - 1, c }, { r + 1, c }, { r, c - 1 }, { r, c + 1 } };
+        for (const auto& neighbour : neighbours)
+        {
+            if (neighbour[0] < 0 || neighbour[0] >= grid->rows || neighbour[1] < 0
+                || neighbour[1] >= grid->columns)
+                continue;
+            const int next = neighbour[0] * grid->columns + neighbour[1];
+            if (filled[(size_t) next] != 0) continue;
+            if (std::abs((double) grid->at(neighbour[0], neighbour[1]) - (double) base) > tolerance)
+                continue;
+            filled[(size_t) next] = 1;
+            stack.push_back(next);
+            ++visited;
+        }
+    }
+
+    double start = time, end = time;
+    for (int r = 0; r < grid->rows; ++r)
+        for (int c = 0; c < grid->columns; ++c)
+        {
+            if (filled[(size_t) (r * grid->columns + c)] == 0) continue;
+            const auto cellTime = grid->startSeconds
+                + ((double) c + 0.5) / (double) grid->columns
+                    * (grid->endSeconds - grid->startSeconds);
+            start = juce::jmin(start, cellTime);
+            end = juce::jmax(end, cellTime);
+        }
+    const bool subtract = e.mods.isAltDown();
+    const bool replace = ! e.mods.isShiftDown() && ! subtract;
+    commitMaskWindow(start, end, replace);
+    mask->addRaster(*grid, filled, subtract);
+    notifyMaskChanged();
+}
+
+void WaveformDisplay::notifyMaskChanged()
+{
+    maskImage = {};
+    repaint();
+    if (onSpectralMaskChanged) onSpectralMaskChanged();
 }
 } // namespace sonicator

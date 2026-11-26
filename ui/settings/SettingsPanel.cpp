@@ -1,4 +1,5 @@
 #include "SettingsPanel.h"
+#include "core/spectral/SpectrogramCache.h"
 #include "HotkeysPanel.h"
 #include "ui/commands/CommandRegistry.h"
 #include "ui/shell/Theme.h"
@@ -51,13 +52,14 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     setWantsKeyboardFocus(true);
 
     // --- general page controls -------------------------------------------------------------
-    for (auto* c : std::array<juce::Component*, 26> {
+    for (auto* c : std::array<juce::Component*, 29> {
              &appearance, &themeLabel, &scaleLabel, &languageHeading, &languageLabel, &languageNote,
              &libraryHeading, &databaseKey, &databaseLabel, &libraryNote, &databaseStatus,
              &searchHeading, &searchHistoryOnClickToggle, &searchHistoryNote,
              &tagsHeading, &roundTagMenuToggle, &roundTagMenuNote,
              &editingHeading, &alwaysOverwriteToggle, &alwaysOverwriteNote,
-             &workspaceHeading, &workspaceNote, &themeBox, &scaleBox, &languageBox, &moveDatabase })
+             &workspaceHeading, &workspaceNote, &themeBox, &scaleBox, &languageBox, &moveDatabase,
+             &spectrumCacheToggle, &clearSpectrumCache, &spectrumCacheNote })
         generalContent.addAndMakeVisible(c);
     for (auto* c : std::array<juce::Component*, 8> {
              &openDatabase, &backupDatabase, &relocateDatabase, &contributeDataToggle,
@@ -165,6 +167,27 @@ SettingsPanel::SettingsPanel(const AppSettings& initial, juce::File file, bool b
     databaseLabel.setMinimumHorizontalScale(0.8f);
     libraryNote.setFont(noteFont()); libraryNote.setJustificationType(juce::Justification::centredLeft);
     databaseStatus.setFont(noteFont()); databaseStatus.setJustificationType(juce::Justification::centredLeft);
+    spectrumCacheToggle.setComponentID("settingsSpectrumCache");
+    spectrumCacheToggle.setToggleState(initial.spectralCache, juce::dontSendNotification);
+    spectrumCacheToggle.setTooltip("Keep a whole-file spectrogram per file so the Preview card opens "
+                                   "instantly; rebuilt whenever a file changes");
+    spectrumCacheToggle.onClick = [this]
+    {
+        current.spectralCache = spectrumCacheToggle.getToggleState();
+        refreshSpectrumCacheNote();
+        notifySettings();
+    };
+    clearSpectrumCache.setComponentID("settingsClearSpectrumCache");
+    clearSpectrumCache.setTooltip("Delete every cached spectrogram and PNG; files are recalculated on next view");
+    clearSpectrumCache.onClick = [this]
+    {
+        pruneSpectrumCache(defaultSpectrumCacheFolder(), 0, 0);
+        refreshSpectrumCacheNote();
+    };
+    spectrumCacheNote.setFont(noteFont());
+    spectrumCacheNote.setJustificationType(juce::Justification::centredLeft);
+    spectrumCacheNote.setColour(juce::Label::textColourId, theme::muted);
+    refreshSpectrumCacheNote();
     searchHeading.setText("SEARCH", juce::dontSendNotification);
     searchHeading.setFont(sectionFont());
     searchHeading.setColour(juce::Label::textColourId, theme::muted);
@@ -507,20 +530,20 @@ void SettingsPanel::updateSectionVisibility()
 
     // Plugin mode hides the controls the host owns, not the whole General page.
     const bool showLibrary = !pluginMode;
-    for (auto* c : std::array<juce::Component*, 14> {
+    for (auto* c : std::array<juce::Component*, 17> {
              &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
              &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
              &contributeDataToggle, &contributionNote, &contributionStatus, &contributionPreview,
-             &contributionDelete })
+             &contributionDelete, &spectrumCacheToggle, &clearSpectrumCache, &spectrumCacheNote })
         if (!showLibrary) c->setVisible(false);
     if (showLibrary)
     {
         // Restore the ordinary state; the values are already owned by the controls.
-        for (auto* c : std::array<juce::Component*, 14> {
+        for (auto* c : std::array<juce::Component*, 17> {
                  &libraryHeading, &databaseKey, &databaseLabel, &libraryNote,
                  &databaseStatus, &moveDatabase, &openDatabase, &relocateDatabase, &backupDatabase,
                  &contributeDataToggle, &contributionNote, &contributionStatus, &contributionPreview,
-                 &contributionDelete })
+                 &contributionDelete, &spectrumCacheToggle, &clearSpectrumCache, &spectrumCacheNote })
             c->setVisible(true);
         contributionStatus.setVisible(contributionStatus.getText().isNotEmpty());
     }
@@ -863,6 +886,14 @@ void SettingsPanel::layoutGeneralPage(juce::Rectangle<int> area)
         });
         note(libraryNote, 36, 6);
         note(databaseStatus, 22, 2);
+        add(26, 6, [this](juce::Rectangle<int> area)
+        {
+            auto right = area.withTrimmedLeft(labelColumn);
+            spectrumCacheToggle.setBounds(right.removeFromLeft(220));
+            right.removeFromLeft(8);
+            clearSpectrumCache.setBounds(right.removeFromLeft(120));
+        });
+        note(spectrumCacheNote, 24, 2);
     }
 
     // Search behaviour is not a catalog control, so the plugin window shows it too: typing in the
@@ -1077,5 +1108,14 @@ bool SettingsPanel::keyPressed(const juce::KeyPress& key)
         return true;
     }
     return false;
+}
+
+void SettingsPanel::refreshSpectrumCacheNote()
+{
+    const auto folder = defaultSpectrumCacheFolder();
+    const auto megabytes = (double) spectrumCacheBytes(folder) / (1024.0 * 1024.0);
+    spectrumCacheNote.setText("Spectral cache: " + juce::String(spectrumCacheFileCount(folder))
+        + " file(s), " + juce::String(megabytes, 1) + " MB. A cached file opens instantly; "
+        "changing a file drops its entry.", juce::dontSendNotification);
 }
 } // namespace sonicator

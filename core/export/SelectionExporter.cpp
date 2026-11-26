@@ -19,11 +19,11 @@ SelectionExporter::~SelectionExporter()
     if (worker.joinable()) worker.join();
 }
 void SelectionExporter::prepare(const juce::File& source, double start, double end,
-                                ExportFunction custom)
+                                ExportFunction custom, juce::String tag)
 {
     {
         std::lock_guard lock(stateMutex);
-        pendingRequest = { source, start, end, ++generation, std::move(custom) };
+        pendingRequest = { source, start, end, ++generation, std::move(custom), std::move(tag) };
         hasPendingRequest = true;
         jobFinished = false;
         current = {};
@@ -31,6 +31,7 @@ void SelectionExporter::prepare(const juce::File& source, double start, double e
         current.start = start;
         current.end = end;
         current.generation = generation;
+        current.tag = pendingRequest.tag;
     }
     workCondition.notify_one();
 }
@@ -86,6 +87,7 @@ void SelectionExporter::run()
                 current.status = result.success ? Status::ready : Status::failed;
                 current.file = result.file;
                 current.error = result.error;
+                current.tag = request.tag;
                 jobFinished = true;
             }
         }

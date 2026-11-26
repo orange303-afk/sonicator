@@ -142,6 +142,9 @@ AppSettings SettingsStore::load() const
     settings.autoPreview = readBool("autoPreview", settings.autoPreview);
     settings.loopPreview = readBool("loopPreview", settings.loopPreview);
     settings.rexGate = readBool("rexGate", settings.rexGate);
+    settings.spectrumView = readBool("spectrumView", settings.spectrumView);
+    settings.spectrumLogScale = readBool("spectrumLogScale", settings.spectrumLogScale);
+    settings.spectralCache = readBool("spectralCache", settings.spectralCache);
     settings.alwaysOverwriteOriginalFiles = readBool("alwaysOverwriteOriginalFiles",
                                                     settings.alwaysOverwriteOriginalFiles);
     settings.overwriteOriginalDisposal = files::disposalPolicyFromString(
@@ -229,6 +232,9 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("autoPreview", settings.autoPreview);
     object->setProperty("loopPreview", settings.loopPreview);
     object->setProperty("rexGate", settings.rexGate);
+    object->setProperty("spectrumView", settings.spectrumView);
+    object->setProperty("spectrumLogScale", settings.spectrumLogScale);
+    object->setProperty("spectralCache", settings.spectralCache);
     object->setProperty("alwaysOverwriteOriginalFiles", settings.alwaysOverwriteOriginalFiles);
     object->setProperty("overwriteOriginalDisposal",
                         files::disposalPolicyToString(settings.overwriteOriginalDisposal));

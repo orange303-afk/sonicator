@@ -325,6 +325,69 @@ ExportResult AudioExporter::exportSampleSelection(const SampleAudio& audio, cons
     }
     return { false, {}, "Cannot allocate a unique export file name" };
 }
+ExportResult AudioExporter::exportBuffer(const juce::AudioBuffer<float>& audio, int sampleRate,
+                                         int bitsPerSample, bool floatingPoint,
+                                         const juce::String& stem, double startSeconds,
+                                         double endSeconds, const juce::File& folder,
+                                         CancelCheck cancel) const
+{
+    const int channels = juce::jlimit(1, maxChannels, audio.getNumChannels());
+    const int frames = audio.getNumSamples();
+    if (sampleRate <= 0 || channels <= 0 || frames <= 0)
+        return { false, {}, "The rendered selection has no audio" };
+    if (cancel && cancel()) return { false, {}, "Export cancelled" };
+    if (! folder.createDirectory())
+        return { false, {}, "Cannot create export folder: " + folder.getFullPathName() };
+    const int bits = floatingPoint ? 32 : (bitsPerSample <= 16 ? 16 : 24);
+    const auto base = sanitizeStem(stem) + "_spectral_" + rangeSuffix(startSeconds, endSeconds) + "_";
+    for (int attempt = 0; attempt < 20; ++attempt)
+    {
+        const auto suffix = juce::Uuid().toString().replace("-", "").substring(0, 6).toLowerCase();
+        const auto destination = folder.getChildFile(base + suffix + ".wav");
+        const auto part = juce::File(destination.getFullPathName() + ".part");
+        if (destination.existsAsFile() || part.existsAsFile()) continue;
+        part.deleteFile();
+        std::unique_ptr<juce::OutputStream> stream(part.createOutputStream());
+        if (stream == nullptr)
+            return { false, {}, "Cannot create export file: " + destination.getFileName() };
+        juce::WavAudioFormat wav;
+        auto options = juce::AudioFormatWriterOptions{}.withSampleRate((double) sampleRate)
+            .withNumChannels(channels).withBitsPerSample(bits)
+            .withSampleFormat(floatingPoint ? juce::AudioFormatWriterOptions::SampleFormat::floatingPoint
+                                            : juce::AudioFormatWriterOptions::SampleFormat::integral);
+        auto writer = wav.createWriterFor(stream, options);
+        if (writer == nullptr)
+        {
+            stream.reset();
+            return failure(part, "WAV writer rejected the rendered selection");
+        }
+        juce::AudioBuffer<float> chunk(channels,
+            (int) juce::jmin<juce::int64>(exportChunkFrames, frames));
+        int frame = 0;
+        while (frame < frames)
+        {
+            if (cancel && cancel()) return failure(part, "Export cancelled");
+            const int count = juce::jmin((int) exportChunkFrames, frames - frame);
+            for (int channel = 0; channel < channels; ++channel)
+                chunk.copyFrom(channel, 0, audio, channel, frame, count);
+            if (! writer->writeFromFloatArrays(chunk.getArrayOfReadPointers(), channels, count))
+                return failure(part, "Cannot write export audio: " + destination.getFileName());
+            frame += count;
+        }
+        if (! writer->flush())
+            return failure(part, "Cannot finalise export file: " + destination.getFileName());
+        writer.reset();
+        const auto validation = validateWavOutput(part, frames, (double) sampleRate, channels, bits,
+                                                  floatingPoint);
+        if (validation.isNotEmpty()) return failure(part, validation);
+        if (! part.existsAsFile() || part.getSize() <= 0)
+            return failure(part, "Cannot finalise export file: " + destination.getFileName());
+        if (! part.moveFileTo(destination))
+            return failure(part, "Cannot finalise export file: " + destination.getFileName());
+        return { true, destination, {} };
+    }
+    return { false, {}, "Cannot allocate a unique export file name" };
+}
 ExportResult AudioExporter::exportSelection(const juce::File& source, double start, double end,
                                             const juce::File& folder, CancelCheck cancel) const
 {

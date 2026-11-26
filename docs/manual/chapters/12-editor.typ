@@ -21,6 +21,48 @@ place; everything else saves a copy.
 REX2 loops, Reason patches, a tracker's *whole song* view and an instrument with no selected source
 are not editable. Their preview has no single editable buffer.
 
+#section("Waveform or spectrum")
+
+The tabs above the card switch between the amplitude waveform and a spectrogram of the same visible
+range. Frequency is logarithmic from 20 Hz to Nyquist with guides at 100 Hz, 1 kHz and 10 kHz; the
+*Log* / *Linear* pill changes the axis, and levels run from −90 dB up to the loudest bin in view.
+Selection, zoom, playhead, loop drag and dragging a range into a DAW work the same in both views.
+A long range is analysed with a coarser time step and labelled *overview*. The view and the scale are
+remembered between launches.
+
+#plate("/docs/manual/assets/preview-spectrum.png", [Figure 12.1 — The same preview card in spectrum mode. The Waveform / Spectrum tabs and the Log / Linear pill sit in the title row; the time range, selection and playhead are shared with the waveform.])
+
+#section("Selecting inside the spectrum")
+
+The strip in the card's top-left corner switches the selection tool: *Time* keeps the ordinary
+waveform range, *Rect* drags a time × frequency box, *Lasso* closes a freehand polygon, and *Wand*
+flood-fills around the clicked point within its tolerance — click the `dB` pill to cycle
+3 / 6 / 12 / 24 dB. Shift adds to the selection, Alt subtracts, a plain drag replaces it; *Clear*,
+Escape and the context menu empty it. Zoom, pan, Loop and the playhead keep working while a 2D
+selection exists. The time range and the spectral mask are separate: Play, Loop and MIDI follow the
+time range, while the mask decides what is exported and dragged.
+
+The selected time and frequencies are prepared as audio: the range is analysed, every bin outside
+the mask is removed, and the result has the length of the selection with silence around it, so it
+keeps its place when dropped into a DAW. The overlay is drawn exactly on the highlighted time and
+frequency band, and each tool has its own cursor. To drag the fragment out, grab the highlighted
+area itself — the cursor turns into a hand over it — or press Play to audition it: the card keeps
+showing the original spectrum and the playhead follows the selection. Loop repeats the fragment,
+and MIDI Preview plays it too, so a key sounds the selected band and time only; clearing the
+selection returns the ordinary sample. Shift and Alt keep drawing on top of the selection, and the
+wand always fills on click. Selections longer than a minute are refused with a plain message
+instead of exhausting memory.
+
+#plate("/docs/manual/assets/preview-spectral-selection.png", [Figure 12.2 — A rectangular spectral selection: only this time and frequency band will be exported, dragged or auditioned.])
+
+#section("The spectral cache")
+
+`Spectral analysis (N)…` in the sample context menu (under *Processing*) and in the folder menu
+precomputes a whole-file spectrogram for the selected files, so their preview opens at once; the
+status line shows progress and the run can be cancelled. Settings → Library has *Cache spectrograms*,
+the current size and a *Clear cache* button. A cache entry belongs to the file's path, size and
+modification time, so editing or replacing a file simply rebuilds its picture.
+
 #section("Commands")
 
 Operations act on the waveform selection; without a selection, on the whole file. Delete, Crop and
@@ -43,6 +85,7 @@ Silence require a selection. Trim silence always works on the file edges.
     ("Trim silence", "T", "Removes leading and trailing near-silence."),
     ("Zoom to selection / fit", "Z / Cmd+0", "Changes the view, not the audio."),
     ("Save…", "Cmd+S", "Opens the save dialog described below."),
+    ("Waveform / spectrum view", "V", "Draws peaks or a spectrogram of the same range."),
   ),
 )
 

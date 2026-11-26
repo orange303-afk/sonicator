@@ -163,6 +163,19 @@ public:
     // to exactly the source the user selected. Message thread only.
     bool setMatchedTransport(const juce::File& preparedFile);
     void clearMatchedTransport();
+    // Loop inside the prepared result (used by the spectral audition); the ordinary transport's
+    // Loop toggle keeps its own state.
+    void setMatchedLooping(bool enabled);
+    // MIDI preview source override: a prepared fragment (the masked spectral selection) becomes
+    // the sampler's whole sample, so a key plays exactly what Play auditions. An empty file
+    // restores the loaded source. The time selection still restricts container voices.
+    void setMidiFragment(const juce::File& preparedFile);
+    juce::File midiFragmentFile() const { return midiFragment; }
+    // The file MIDI preview decodes: the fragment while one is set, otherwise the loaded file.
+    juce::File midiSourceFile() const
+    {
+        return midiFragment.existsAsFile() ? midiFragment : loadedFile;
+    }
     bool hasMatchedTransport() const { return matchedActive.load(); }
     juce::File matchedTransportFile() const { return matchedFile; }
     juce::AudioDeviceManager& deviceManager() { return devices; }
@@ -207,6 +220,9 @@ private:
     juce::File matchedFile;
     bool matchedAttached = false;
     double matchedRate = 44100.0;
+    // Set by the panel when a 2D spectral selection has a prepared WAV; MIDI preview then plays
+    // that fragment instead of the untouched source.
+    juce::File midiFragment;
     bool stopMatchedTransport();
     void attachMatched();
     void prepareMatchedTransport();

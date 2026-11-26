@@ -73,6 +73,12 @@ struct AppSettings
     bool autoPreview = true;
     bool loopPreview = false;
     bool rexGate = true;
+    // The preview card draws a waveform or a spectrogram of the same visible range.
+    bool spectrumView = false;
+    bool spectrumLogScale = true;
+    // Whole-file spectrogram overviews are cached under Sonicator/spectra; the card opens on the
+    // cached frame immediately. Off means every view is analysed on demand.
+    bool spectralCache = true;
     // Skips the Save / Normalize confirmation dialogs and replaces the original file directly.
     // Formats without a writer still get a copy.
     bool alwaysOverwriteOriginalFiles = false;

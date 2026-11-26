@@ -109,6 +109,10 @@ private:
     juce::ToggleButton roundTagMenuToggle { "Round tag menu" };
     juce::ToggleButton searchHistoryOnClickToggle { "Open search history on click" };
     juce::ToggleButton alwaysOverwriteToggle { "Always overwrite original files" };
+    juce::ToggleButton spectrumCacheToggle { "Cache spectrograms" };
+    juce::TextButton clearSpectrumCache { "Clear cache" };
+    juce::Label spectrumCacheNote;
+    void refreshSpectrumCacheNote();
     juce::Label contributionNote;
     // What the last upload attempt did; filled by the application, empty until one runs.
     juce::Label contributionStatus;

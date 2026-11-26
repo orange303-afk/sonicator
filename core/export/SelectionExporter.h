@@ -18,6 +18,9 @@ public:
         juce::String error;
         double start = 0, end = 0;
         juce::uint64 generation = 0;
+        // Extra identity of the request (the spectral mask, when there is one). The owner compares
+        // it so a prepared mask can never be dragged after the mask changed.
+        juce::String tag;
         bool isReady() const { return status == Status::ready && file.existsAsFile(); }
     };
     using ExportFunction = std::function<ExportResult(const juce::File&, double, double,
@@ -26,7 +29,8 @@ public:
     ~SelectionExporter();
     // custom overrides the exporter for this request only (e.g. REX2 decoded PCM). It runs on
     // the worker thread and must not touch the audio engine or UI.
-    void prepare(const juce::File& source, double start, double end, ExportFunction custom = {});
+    void prepare(const juce::File& source, double start, double end, ExportFunction custom = {},
+                 juce::String tag = {});
     void cancel();
     State state() const;
     // Waits for the current generation to finish; returns false on timeout.
@@ -38,6 +42,7 @@ private:
         double start = 0, end = 0;
         juce::uint64 generation = 0;
         ExportFunction custom;
+        juce::String tag;
     };
     juce::File folder;
     ExportFunction exporter;

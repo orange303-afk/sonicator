@@ -11,6 +11,10 @@
 - Dedicated preview read-ahead thread: JUCE buffering source, independent of the analyzer. While **Loop** is on with a waveform selection, the ordinary preview is re-attached without read-ahead so the range loop is sample-accurate and live edits are heard immediately; clearing the loop restores read-ahead.
 - Dedicated tracker render thread: libxmp decodes the whole module into a bounded preallocated ring; the device callback only copies stereo frames from that ring. Loading, seeking and source decoding run on the message thread while the output is detached, or on the render thread, never inside the device callback.
 - Dedicated thumbnail cache thread: waveform extraction, independent of preview.
+- Dedicated spectrogram worker per preview card (`core/preview/SpectrogramService`): latest-wins,
+  cancels a superseded request, opens its own reader and never shares the preview's streaming
+  reader. The card polls its state from the existing 30 Hz preview timer and draws the last ready
+  image while the next one is computed; nothing runs on the audio callback.
 - Device callback: JUCE AudioSourcePlayer → AudioTransportSource → buffering/resampling source, or the tracker ring, or a preallocated MIDI voice bank. No project DB, FFT analysis, file scanning or ML runs here. JUCE transport internally locks; do not claim strict lock-free safety.
 
 UI and worker use separate SQLite connections in WAL mode. Each connection's repository operations are serialized by its own mutex. Progress is a small locked snapshot polled at 10 Hz, not a callback posted for every discovered file. No callbacks capture a raw window pointer. Folder chooser uses a JUCE SafePointer.
@@ -274,6 +278,63 @@ columns of an existing ML feedback row (hash, v1, v2) so the contribution pass r
 A copy becomes a new row that inherits the template's tags and star but not its feedback. Switching
 samples, opening a disc image, clearing the selection or quitting while edits are unsaved asks
 Save / Discard / Cancel; Cancel puts the library selection back on the edited file.
+
+## Preview spectrum
+
+The preview card draws either peaks or a spectrogram. The time axis, selection, playhead, overview
+strip and every gesture belong to `WaveformDisplay`; only the content branch of `paint()` switches,
+so the two views cannot disagree about a range. The card's context menu and `preview.toggleSpectrum`
+(`V`) change the mode; `AppSettings` stores the mode and `Log`/`Linear`.
+
+`core/dsp/Spectrogram` is the whole maths: Hann window, power-domain channel sum (anti-phase stereo
+survives), one-sided magnitudes, log or linear row mapping and column aggregation into the card's
+pixel budget. It has no file or GUI dependency; its reader is a callback that returns false to
+cancel. Levels are dB against the loudest bin of the request, floor −90 dB, so a quiet source still
+reads.
+
+`core/preview/SpectrogramService` is one persistent worker per card: latest wins, cancel bumps a
+generation counter, and a superseded job publishes nothing. A request is either a file (the worker
+opens its own `AudioFormatManager` reader) or an immutable `SampleAudio` snapshot for REX2, sampler,
+tracker, disc and edited sources. The preview's streaming reader is never shared across threads.
+Columns follow the card width (64..4096), rows its height (32..512), and a range that would need
+more than 8192 frames grows the hop and is marked `overview` instead of truncating silently. Requests
+are debounced by 150 ms; the card keeps the previous image while the next one computes and never
+waits for it in `paint()`.
+
+`ui/waveform/SpectrogramRenderer` turns a grid into one ARGB image (heat ramp from
+`theme::spectroLow/Mid/High`, with a light-theme variant) and draws the frequency guides as an
+overlay: the mouse mapping uses the full card width, so a reserved gutter would have shifted every
+selection and seek.
+
+`core/spectral/SpectrogramCache` stores a whole-file overview per source: a 8192 × 256 log grid as
+one byte per cell (floor..0 dB) plus a fixed-palette PNG, keyed by path+size+mtime in the name and
+in the header. `WaveformDisplay::setFile` reads it synchronously and draws immediately; a zoom
+requests a detail pass from the same `SpectrogramService`, which writes the cache only for the
+overview request. `SpectralAnalysisService` runs the identical computation over a list of files on
+two workers with progress, cancel and skipped/failed counts, so the sample and folder menus can
+prepare a corpus ahead of time. Pruning keeps 2000 entries / 512 MB; the cache is an accelerator,
+never a source of truth.
+
+`core/spectral/SpectralMask` is the 2D selection: a 256-row log raster over 20 Hz..Nyquist with a
+time window of about 2000 columns per second, so every tool rasterises into one absolute grid and
+zoom/pan never move it. `WaveformDisplay` owns the tools (Rect, Lasso, Wand), the overlay image and
+the gestures; the time range, transport and MIDI remain independent. The overlay is drawn through a
+window mapping — the mask image spans its own time window, never the whole card — and its rows are
+rebuilt on the frequency axis currently displayed, so a linear scale does not move the picture. A
+plain press on the selection lifts the fragment and starts the external drag (the wand always
+fills, Shift/Alt always edit), which is the only way a masked WAV reaches a DAW.
+`core/spectral/SpectralRender`
+applies the mask to a Hann STFT (2048/512) and overlap-adds with the same window, dividing by the
+accumulated window energy; frames outside the mask's time window are skipped entirely so the edges
+keep their level. `SelectionExporter` carries a `tag` for the exact mask, which the panel compares
+before a drag. The masked WAV is auditioned through `AudioEngine::setMatchedTransport`, the separate
+transport introduced for Match, with its own loop flag and a playhead mapped into the selection; the
+card keeps showing the original source. Two rules keep that transport honest: it attaches no
+read-ahead buffer while its reader loops (the buffer wraps on its own modulo the length, so the
+second pass goes silent and choppy), and `setMatchedLooping` rebuilds the source the way
+`setLooping` rebuilds the ordinary one. The same WAV becomes the MIDI sampler's whole sample
+(`AudioEngine::setMidiFragment`), so MIDI Preview plays the selection rather than the source;
+clearing the mask re-decodes the loaded file.
 
 ## Split by silence and background jobs
 

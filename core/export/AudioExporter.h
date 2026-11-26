@@ -38,6 +38,13 @@ public:
     ExportResult exportSampleSelection(const SampleAudio& audio, const juce::String& stem,
                                        double start, double end, const juce::File& folder,
                                        CancelCheck cancel = {}) const;
+    // Writes an already rendered buffer with the same naming, part-file and validation policy as
+    // a source range. Used by the masked spectral selection, whose audio no longer exists in the
+    // source in that form.
+    ExportResult exportBuffer(const juce::AudioBuffer<float>& audio, int sampleRate,
+                              int bitsPerSample, bool floatingPoint, const juce::String& stem,
+                              double startSeconds, double endSeconds, const juce::File& folder,
+                              CancelCheck cancel = {}) const;
     // True when every channel holds only zeros. Used to keep silent embedded samples out of a
     // batch export; the test is exact, so very quiet but non-zero audio still counts as audio.
     static bool isEntirelySilent(const SampleAudio&);

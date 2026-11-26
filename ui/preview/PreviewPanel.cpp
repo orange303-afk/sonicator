@@ -1,4 +1,5 @@
 #include "PreviewPanel.h"
+#include "core/spectral/SpectralRender.h"
 #include "core/match/MatchPolicy.h"
 #include "core/edit/AudioEditWriter.h"
 #include "core/audio/SonicatorFormats.h"
@@ -97,9 +98,10 @@ void PreviewPanel::refreshSourceList()
 PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,const juce::File& exportFolder)
     : engine(audio),waveform(cacheFolder),exporter(exportFolder),matchFolder(exportFolder.getChildFile("match"))
 {
-    for (auto* c : std::array<juce::Component*,20>{&waveform, &songProgress, &filename, &time, &formatLine, &play, &stop, &loop, &volume,
+    for (auto* c : std::array<juce::Component*,23>{&waveform, &songProgress, &filename, &time, &formatLine, &play, &stop, &loop, &volume,
                                                    &midi, &skipSilence, &autoPreview, &clearSelectionButton, &selectionStatus,
-                                                   &presetBox, &sampleBox, &rexGate, &rexInfo, &trackerBox, &sampleDragButton})
+                                                   &presetBox, &sampleBox, &rexGate, &rexInfo, &trackerBox, &sampleDragButton,
+                                                   &waveformTab, &spectrumTab, &scaleTab})
         addAndMakeVisible(c);
     formatLine.setComponentID("previewFormat");
     formatLine.setFont(studio::captionFont());
@@ -245,6 +247,7 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     waveform.onSelectionChanged = [this](selection::Range range) { selectionChanged(range); };
     waveform.onExternalDragRequested = [this] { beginExternalDrag(); };
     waveform.onContextMenu = [this](juce::Point<int> position) { showWaveformMenu(position); };
+    waveform.onSpectralMaskChanged = [this] { spectralMaskChanged(); };
     play.onClick = [this] { togglePlayback(); };
     play.setComponentID("previewPlay");
     stop.setComponentID("previewStop");
@@ -279,12 +282,23 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
     clearSelectionButton.setComponentID("clearSelection");
     clearSelectionButton.setTooltip("Clear the waveform selection");
     clearSelectionButton.setVisible(false);
-    clearSelectionButton.onClick = [this] { clearSelection(); };
+    clearSelectionButton.onClick = [this] { clearSpectralSelection(); };
+    waveformTab.setComponentID("waveformTab");
+    spectrumTab.setComponentID("spectrumTab");
+    scaleTab.setComponentID("spectrumScale");
+    waveformTab.setTooltip("Draw the waveform of the selected source");
+    spectrumTab.setTooltip("Draw a spectrogram of the visible range; selection, zoom and drag stay shared");
+    scaleTab.setTooltip("Log or linear frequency scale");
+    waveformTab.onClick = [this] { setSpectrumView(false); };
+    spectrumTab.onClick = [this] { setSpectrumView(true); };
+    scaleTab.onClick = [this] { setSpectrumLogScale(! waveform.spectrumLogScale()); };
+    waveformTab.setToggleState(true, juce::dontSendNotification);
     selectionStatus.setComponentID("selectionStatus");
     selectionStatus.setColour(juce::Label::textColourId,theme::muted);
     selectionStatus.setFont(fonts::font(12));
     selectionStatus.setJustificationType(juce::Justification::centredLeft);
-    for (auto* button : std::array<juce::Button*,8>{&play,&stop,&loop,&midi,&skipSilence,&autoPreview,&clearSelectionButton,&rexGate})
+    for (auto* button : std::array<juce::Button*,11>{&play,&stop,&loop,&midi,&skipSilence,&autoPreview,&clearSelectionButton,&rexGate,
+                                                     &waveformTab,&spectrumTab,&scaleTab})
     {
         button->setWantsKeyboardFocus(false); button->setMouseClickGrabsKeyboardFocus(false);
         auto action = button->onClick;
@@ -296,6 +310,8 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
 }
 bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
 {
+    if (spectralAudition) endSpectralAudition();
+    if (waveform.spectralMask() != nullptr) waveform.clearSpectralMask();
     // A result prepared for the previous file must never be played or dragged for this one.
     clearMatchedPreview (false);
     if (hasUnsavedEdits())
@@ -455,7 +471,10 @@ bool PreviewPanel::loadFile(const juce::File& file, bool allowAutoPlay)
     else if (rex)
     {
         if (auto audio = engine.rexAudio())
+        {
             waveform.setPeaks(audio->left, audio->sampleRate, engine.rexSliceStarts());
+            waveform.setSpectrogramAudio(rexSpectrogramAudio(audio));
+        }
         else
             waveform.setFile(juce::File());
     }
@@ -495,7 +514,11 @@ bool PreviewPanel::applyReasonReference(int index, bool autoPlay)
     {
         if (engine.isRex2Mode())
         {
-            if (auto audio=engine.rexAudio()) waveform.setPeaks(audio->left,audio->sampleRate,engine.rexSliceStarts());
+            if (auto audio=engine.rexAudio())
+            {
+                waveform.setPeaks(audio->left,audio->sampleRate,engine.rexSliceStarts());
+                waveform.setSpectrogramAudio(rexSpectrogramAudio(audio));
+            }
         }
         else waveform.setFile(engine.reasonPatch().references[(size_t)index].file);
     }
@@ -508,6 +531,22 @@ bool PreviewPanel::applyReasonReference(int index, bool autoPlay)
     refreshSourceList(); resized();
     return ok;
 }
+SampleAudioPtr PreviewPanel::rexSpectrogramAudio(const std::shared_ptr<const Rex2Audio>& audio)
+{
+    if (audio == nullptr) return {};
+    if (audio == rexSpectrogramSource && rexSpectrogramSnapshot != nullptr)
+        return rexSpectrogramSnapshot;
+    auto snapshot = std::make_shared<SampleAudio>();
+    snapshot->sampleRate = audio->sampleRate;
+    snapshot->channels = audio->right.empty() ? 1 : 2;
+    snapshot->frames = (int64_t) audio->left.size();
+    snapshot->left = audio->left;
+    if (snapshot->channels > 1) snapshot->right = audio->right;
+    rexSpectrogramSource = audio;
+    rexSpectrogramSnapshot = snapshot;
+    return snapshot;
+}
+
 void PreviewPanel::refreshInstrumentSamples()
 {
     instrumentSamples = engine.instrumentSamples();
@@ -533,7 +572,10 @@ void PreviewPanel::refreshInstrumentSamples()
     sampleBox.setSelectedId(selectedRow + 1, juce::dontSendNotification);
     currentSampleId = engine.instrumentSampleId();
     if (auto audio = engine.instrumentSampleAudio())
+    {
         waveform.setPeaks(audio->left, audio->sampleRate, {});
+        waveform.setSpectrogramAudio(audio);
+    }
     else
         waveform.setFile(juce::File());
     juce::String midiHint, tips;
@@ -578,7 +620,10 @@ bool PreviewPanel::applyInstrumentSample(SampleId id, bool manual)
             break;
         }
     if (auto audio = engine.instrumentSampleAudio())
+    {
         waveform.setPeaks(audio->left, audio->sampleRate, {});
+        waveform.setSpectrogramAudio(audio);
+    }
     else
         waveform.setFile(juce::File());
     selectionStatus.setText({}, juce::dontSendNotification);
@@ -681,7 +726,10 @@ bool PreviewPanel::applyTrackerSample(SampleId id, bool manual)
     refreshSourceList();
     currentSampleId = id;
     if (auto audio = engine.trackerSampleAudio())
+    {
         waveform.setPeaks(audio->left, audio->sampleRate, {});
+        waveform.setSpectrogramAudio(audio);
+    }
     else
         waveform.setFile(juce::File());
     sampleDragButton.setVisible(true);
@@ -765,6 +813,7 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
     sampleBox.setVisible(false);
     trackerBox.setVisible(false);
     waveform.setPeaks(discAudioRef->left, discAudioRef->sampleRate, {});
+    waveform.setSpectrogramAudio(discAudioRef);
     refreshSourceList();
     waveform.setVisible(true);
     songProgress.setVisible(false);
@@ -789,11 +838,14 @@ bool PreviewPanel::loadDiscSample(const juce::File& container, const juce::Strin
 void PreviewPanel::stopPlayback()
 {
     matchAutoPlayPending = false;
+    if (spectralAudition) endSpectralAudition();
     engine.stop();
 }
 
 void PreviewPanel::clearSource()
 {
+    if (spectralAudition) endSpectralAudition();
+    if (waveform.spectralMask() != nullptr) waveform.clearSpectralMask();
     resetEditSession();
     clearMatchedPreview(false);
     engine.stop();
@@ -881,6 +933,37 @@ void PreviewPanel::applyPersistedSettings(const AppSettings& settings)
     applyTransportLooping();
     alwaysOverwrite = settings.alwaysOverwriteOriginalFiles;
     overwriteDisposal = settings.overwriteOriginalDisposal;
+    setSpectrumView(settings.spectrumView, false);
+    setSpectrumLogScale(settings.spectrumLogScale, false);
+    waveform.setSpectralCacheEnabled(settings.spectralCache);
+}
+
+void PreviewPanel::setSpectrumView(bool enabled, bool notify)
+{
+    waveform.setRenderMode(enabled ? WaveformDisplay::RenderMode::spectrum
+                                   : WaveformDisplay::RenderMode::peaks);
+    refreshSpectrumTabs();
+    if (notify && onSettingsChanged) onSettingsChanged();
+}
+
+void PreviewPanel::setSpectrumLogScale(bool logScale, bool notify)
+{
+    waveform.setSpectrumLogScale(logScale);
+    refreshSpectrumTabs();
+    if (notify && onSettingsChanged) onSettingsChanged();
+}
+
+void PreviewPanel::refreshSpectrumTabs()
+{
+    const bool spectrum = spectrumViewEnabled();
+    waveformTab.setToggleState(! spectrum, juce::dontSendNotification);
+    spectrumTab.setToggleState(spectrum, juce::dontSendNotification);
+    scaleTab.setButtonText(waveform.spectrumLogScale() ? "Log" : "Linear");
+    scaleTab.setVisible(waveformTab.isVisible() && spectrum);
+    const bool source = waveform.isVisible() && waveform.totalLength() > 0;
+    waveformTab.setEnabled(source);
+    spectrumTab.setEnabled(source && waveform.spectrumAvailable());
+    scaleTab.setEnabled(source && waveform.spectrumAvailable());
 }
 
 bool PreviewPanel::hasUnsavedEditsFor(const juce::File& file) const
@@ -896,6 +979,19 @@ void PreviewPanel::selectRange(double start, double end)
 }
 void PreviewPanel::selectionChanged(selection::Range range)
 {
+    if (waveform.spectralMask() != nullptr)
+    {
+        // While a spectral mask owns the export, the time range stays a transport control; the
+        // mask window is what a MIDI voice may play (the masked fragment on an ordinary file).
+        liveRange = range;
+        const auto* activeMask = waveform.spectralMask();
+        if (! matchApplied)
+            engine.setMidiSelection(activeMask->startSeconds, activeMask->endSeconds);
+        clearSelectionButton.setVisible(range.valid());
+        applyTransportLooping();
+        refreshSelectionStatus();
+        return;
+    }
     if (! range.valid())
     {
         exportPending = false;
@@ -915,6 +1011,17 @@ void PreviewPanel::selectionChanged(selection::Range range)
 void PreviewPanel::selectionChanging(selection::Range range)
 {
     if (! range.valid()) return;
+    if (waveform.spectralMask() != nullptr)
+    {
+        followPlayheadInto(range);
+        const auto* activeMask = waveform.spectralMask();
+        if (! matchApplied)
+            engine.setMidiSelection(activeMask->startSeconds, activeMask->endSeconds);
+        applyTransportLooping();
+        liveRange = range;
+        clearSelectionButton.setVisible(true);
+        return;
+    }
     // Dragging or resizing while audio runs keeps the playhead at the same relative point inside
     // the window, so the material under it changes with the mouse instead of only at the edges.
     followPlayheadInto(range);
@@ -931,6 +1038,9 @@ void PreviewPanel::selectionChanging(selection::Range range)
 }
 void PreviewPanel::followPlayheadInto(selection::Range range)
 {
+    // While the masked WAV is auditioned, the engine plays the matched transport: seeking the
+    // ordinary transport through a time-range drag would fight it.
+    if (spectralAudition) return;
     if (! engine.isPlaying() || ! liveRange.valid() || liveRange.length() <= 0) return;
     const auto positionBefore = engine.position();
     if (! selection::contains(liveRange, positionBefore)) return;
@@ -938,17 +1048,89 @@ void PreviewPanel::followPlayheadInto(selection::Range range)
     const auto target = range.start + relative * range.length();
     if (std::abs(target - positionBefore) > 0.002) engine.seek(target);
 }
+selection::Range PreviewPanel::effectiveExportRange() const
+{
+    if (const auto* mask = waveform.spectralMask())
+        return { mask->startSeconds, mask->endSeconds };
+    return waveform.selection();
+}
+
 bool PreviewPanel::selectionExportMatches(const SelectionExporter::State& state) const
 {
-    const auto range = waveform.selection();
+    const auto range = effectiveExportRange();
     return range.valid() && std::abs(state.start - range.start) < 1.0e-6
-        && std::abs(state.end - range.end) < 1.0e-6;
+        && std::abs(state.end - range.end) < 1.0e-6 && state.tag == spectralExportTag;
 }
+
+SampleAudioPtr PreviewPanel::spectralSourceAudio()
+{
+    if (engine.isTrackerMode()) return engine.trackerSampleAudio();
+    if (engine.isDiscMode()) return engine.discSampleAudio();
+    if (engine.isSamplerInstrumentMode()) return engine.instrumentSampleAudio();
+    if (engine.isRex2Mode())
+    {
+        if (auto rex = engine.rexAudio()) return rexSpectrogramAudio(rex);
+    }
+    return nullptr;
+}
+
+juce::String PreviewPanel::spectralSourceStem() const
+{
+    if (engine.isTrackerMode()) return trackerSampleStem();
+    if (engine.isDiscMode()) return discStem;
+    if (engine.isSamplerInstrumentMode()) return instrumentSampleStem();
+    return loadedFile.getFileNameWithoutExtension();
+}
+
 void PreviewPanel::prepareSelectionExport()
 {
-    const auto range = waveform.selection();
+    const auto range = effectiveExportRange();
     if (! range.valid()) return;
-    selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
+    const auto* activeMask = waveform.spectralMask();
+    selectionStatus.setText(juce::String::fromUTF8(activeMask != nullptr
+        ? "Preparing spectral selection…" : "Preparing selection…"), juce::dontSendNotification);
+    if (activeMask != nullptr)
+    {
+        if (matchApplied)
+        {
+            selectionStatus.setText("Read-only matched preview; turn Match off to use the spectrum",
+                                    juce::dontSendNotification);
+            return;
+        }
+        const SpectralMask maskCopy = *activeMask;
+        const auto tag = spectralExportTag;
+        if (auto audio = spectralSourceAudio())
+        {
+            const auto stem = spectralSourceStem();
+            const int bits = audio->bitsPerSample;
+            const bool floating = audio->floatingPoint;
+            exporter.prepare(loadedFile, range.start, range.end,
+                [audio, maskCopy, stem, bits, floating](const juce::File&, double start, double end,
+                                                        const juce::File& folder, CancelCheck cancel)
+                {
+                    return exportSpectralSelection({}, audio, start, end, maskCopy, stem, bits,
+                                                   floating, folder, cancel);
+                }, tag);
+        }
+        else if (loadedFile.existsAsFile())
+        {
+            const auto file = loadedFile;
+            const auto stem = loadedFile.getFileNameWithoutExtension();
+            exporter.prepare(file, range.start, range.end,
+                [file, maskCopy, stem](const juce::File&, double start, double end,
+                                       const juce::File& folder, CancelCheck cancel)
+                {
+                    return exportSpectralSelection(file, {}, start, end, maskCopy, stem, 16, false,
+                                                   folder, cancel);
+                }, tag);
+        }
+        else
+        {
+            exporter.cancel();
+        }
+        refreshSelectionStatus();
+        return;
+    }
     if (matchApplied && matchPreparedFile.existsAsFile())
     {
         // Crop the prepared result; no second stretch or pitch shift is applied.
@@ -1030,12 +1212,19 @@ void PreviewPanel::refreshSelectionStatus()
         selectionStatus.setText(juce::String::fromUTF8("Отключите луп"), juce::dontSendNotification);
         return;
     }
-    const auto range = waveform.selection();
-    if (! range.valid()) return;
+    const bool spectral = waveform.spectralMask() != nullptr;
+    const auto range = effectiveExportRange();
+    if (! range.valid())
+    {
+        if (! spectral) selectionStatus.setText({}, juce::dontSendNotification);
+        return;
+    }
+    const auto preparing = spectral ? juce::String::fromUTF8("Preparing spectral selection…")
+                                    : juce::String::fromUTF8("Preparing selection…");
     const auto state = exporter.state();
     if (exportPending || state.status == SelectionExporter::Status::preparing)
     {
-        selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
+        selectionStatus.setText(preparing, juce::dontSendNotification);
         return;
     }
     if (state.status == SelectionExporter::Status::idle)
@@ -1045,13 +1234,15 @@ void PreviewPanel::refreshSelectionStatus()
     }
     if (! selectionExportMatches(state))
     {
-        selectionStatus.setText(juce::String::fromUTF8("Preparing selection…"),juce::dontSendNotification);
+        selectionStatus.setText(preparing, juce::dontSendNotification);
         return;
     }
     if (state.status == SelectionExporter::Status::ready)
         selectionStatus.setText(loop.getToggleState()
-            ? "Ready - turn Loop off to drag the selection into a DAW"
-            : "Ready - drag the selection into a DAW",juce::dontSendNotification);
+            ? (spectral ? "Ready - turn Loop off to drag the spectral selection into a DAW"
+                        : "Ready - turn Loop off to drag the selection into a DAW")
+            : (spectral ? "Ready - drag the spectral selection into a DAW"
+                        : "Ready - drag the selection into a DAW"), juce::dontSendNotification);
     else if (state.status == SelectionExporter::Status::failed)
         selectionStatus.setText(state.error,juce::dontSendNotification);
 }
@@ -1074,7 +1265,7 @@ bool PreviewPanel::waitForSelectionPreparation(int timeoutMs)
 }
 void PreviewPanel::beginExternalDrag()
 {
-    const auto range = waveform.selection();
+    const auto range = effectiveExportRange();
     // Match owns the drag while it is on: the OS gets the prepared result or nothing, never the
     // original presented as matched audio.
     const bool matchOn = matchControls != nullptr
@@ -1120,6 +1311,26 @@ void PreviewPanel::beginExternalDrag()
 void PreviewPanel::togglePlayback()
 {
     if (engine.isPlaying()) { engine.pause(); return; }
+    if (spectralAudition) { engine.play(); return; }
+    if (const auto* activeMask = waveform.spectralMask())
+    {
+        if (matchApplied)
+        {
+            selectionStatus.setText("Read-only matched preview; turn Match off to audition the spectrum",
+                                    juce::dontSendNotification);
+            return;
+        }
+        const auto state = exporter.state();
+        if (state.isReady() && selectionExportMatches(state))
+        {
+            startSpectralAudition(state.file);
+            return;
+        }
+        spectralAutoPlayPending = true;
+        exportPending = false;
+        prepareSelectionExport();
+        return;
+    }
     const auto range = waveform.selection();
     if (range.valid()) engine.seek(range.start);
     engine.play();
@@ -1130,6 +1341,13 @@ void PreviewPanel::applyTransportLooping()
     if (! loopEnabled) loopDragBlocked = false;
     engine.setMidiLooping(loopEnabled);
     waveform.setLoopArmed(loopEnabled);
+    if (spectralAudition)
+    {
+        // The matched transport loops the masked fragment itself; leaving the ordinary selection
+        // loop alone keeps the two transports from rebuilding under each other.
+        engine.setMatchedLooping(loopEnabled);
+        return;
+    }
     const auto range = waveform.selection();
     if (range.valid())
     {
@@ -1147,6 +1365,7 @@ void PreviewPanel::applyTransportLooping()
 }
 void PreviewPanel::updateSelectionPlayback()
 {
+    if (spectralAudition) return;
     const auto range = waveform.selection();
     if (! range.valid()) return;
     const bool loopWanted = loop.getToggleState();
@@ -1165,6 +1384,7 @@ void PreviewPanel::updateSelectionPlayback()
 }
 void PreviewPanel::stopAndClearSelection()
 {
+    if (waveform.spectralMask() != nullptr) waveform.clearSpectralMask();
     if (engine.isSamplerInstrumentMode())
     {
         if (waveform.selection().valid()) clearSelection();
@@ -1214,6 +1434,12 @@ bool PreviewPanel::keyPressed(const juce::KeyPress& k)
 }
 void PreviewPanel::timerCallback()
 {
+    // The card is shown and hidden by source loading; keep the tab row in step without making
+    // every call site remember it.
+    if (laidOutWithTabs != waveform.isVisible())
+        resized();
+    // Source changes enable the Spectrum chip without going through loadFile in every path.
+    refreshSpectrumTabs();
     tickMatch(juce::Time::getMillisecondCounter());
     refreshMidiFollow();
     updateSelectionPlayback();
@@ -1225,14 +1451,48 @@ void PreviewPanel::timerCallback()
         prepareSelectionExport();
     }
     refreshSelectionStatus();
-    waveform.setPosition(engine.position());
+    if (spectralAutoPlayPending)
+    {
+        const auto exportState = exporter.state();
+        if (exportState.isReady() && selectionExportMatches(exportState))
+        {
+            spectralAutoPlayPending = false;
+            startSpectralAudition(exportState.file);
+        }
+        else if (exportState.status == SelectionExporter::Status::failed)
+            spectralAutoPlayPending = false;
+    }
+    if (spectralAudition)
+    {
+        if (const auto* activeMask = waveform.spectralMask())
+            waveform.setPosition(activeMask->startSeconds + engine.position());
+        else
+            waveform.setPosition(engine.position());
+    }
+    else
+    {
+        waveform.setPosition(engine.position());
+    }
+    // MIDI preview follows the same selection Play auditions: the prepared masked fragment, never
+    // the untouched source. The engine compares the file and ignores a repeat.
+    if (waveform.spectralMask() != nullptr)
+    {
+        const auto midiState = exporter.state();
+        if (midiState.isReady() && selectionExportMatches(midiState))
+            engine.setMidiFragment(midiState.file);
+    }
     if (songProgress.isVisible())
     {
         songProgress.setLength(engine.length());
         songProgress.setPosition(engine.position());
     }
     if (engine.isRex2Mode()) waveform.setActiveSlices(engine.rexActiveSlices());
-    time.setText(juce::String(engine.position(),2) + " / " + juce::String(engine.length(),2) + " s",juce::dontSendNotification);
+    // The matched transport counts from the selection start; show the source's own time.
+    const auto* auditionMask = spectralAudition ? waveform.spectralMask() : nullptr;
+    const auto shownPosition = auditionMask != nullptr
+        ? auditionMask->startSeconds + engine.position() : engine.position();
+    const auto shownLength = auditionMask != nullptr ? waveformLength() : engine.length();
+    time.setText(juce::String(shownPosition,2) + " / " + juce::String(shownLength,2) + " s",juce::dontSendNotification);
     if (! waveform.selection().valid() && engine.isSamplerInstrumentMode())
     {
         const int note = engine.lastInstrumentMidiNote();
@@ -1334,9 +1594,32 @@ void PreviewPanel::resized()
 
     // Title row. A bank program or a tracker overview takes the right half of it, so the fixed
     // rows below never have to make room for a combo.
-    auto title = r.removeFromTop(20);
+    auto title = r.removeFromTop(22);
     juce::Component* selector = presetBox.isVisible() ? static_cast<juce::Component*>(&presetBox)
         : trackerBox.isVisible() ? static_cast<juce::Component*>(&trackerBox) : nullptr;
+    // The Waveform / Spectrum tabs close the title row: at the default 156 px panel a row of
+    // their own would take a third of the card's height. The scale pill keeps its slot in both
+    // modes, so switching never shifts the name or the selector.
+    const bool tabs = waveform.isVisible();
+    waveformTab.setVisible(tabs);
+    spectrumTab.setVisible(tabs);
+    if (tabs)
+    {
+        auto tabArea = title.removeFromRight(74 + 4 + 74 + 4 + 46).reduced(0, 1);
+        waveformTab.setBounds(tabArea.removeFromLeft(74));
+        tabArea.removeFromLeft(4);
+        spectrumTab.setBounds(tabArea.removeFromLeft(74));
+        tabArea.removeFromLeft(4);
+        scaleTab.setBounds(tabArea.removeFromLeft(46));
+        title.removeFromRight(studio::spacingTight);
+    }
+    else
+    {
+        waveformTab.setBounds({});
+        spectrumTab.setBounds({});
+        scaleTab.setBounds({});
+    }
+    refreshSpectrumTabs();
     if (selector != nullptr)
     {
         selector->setBounds(title.removeFromRight(juce::jmin(220, title.getWidth() / 2)).reduced(0, 1));
@@ -1374,6 +1657,7 @@ void PreviewPanel::resized()
     clearSelectionButton.setBounds(selection.removeFromRight(58));
     selection.removeFromRight(studio::spacingTight);
     selectionStatus.setBounds(selection);
+    laidOutWithTabs = waveform.isVisible();
     waveform.setBounds(r);
     songProgress.setBounds(r);
 
@@ -1647,6 +1931,28 @@ void PreviewPanel::showWaveformMenu(juce::Point<int> screenPosition)
     const bool undo = editing && editBuffer->canUndo();
     const bool redo = editing && editBuffer->canRedo();
     juce::PopupMenu menu;
+    // View items keep ids outside the EditCommands table (1..N) so the two catalogues cannot
+    // collide. Every edit command below still runs while the spectrum is shown.
+    menu.addItem(9001, "Waveform view", true, ! spectrumViewEnabled());
+    menu.addItem(9002, "Spectrum view", true, spectrumViewEnabled());
+    menu.addItem(9003, "Log frequency scale",
+                 waveform.spectrumAvailable() && spectrumViewEnabled(),
+                 waveform.spectrumLogScale());
+    if (spectrumViewEnabled())
+    {
+        juce::PopupMenu tools;
+        tools.addItem(9101, "Time range", true,
+                      waveform.selectionTool() == WaveformDisplay::SelectionTool::time);
+        tools.addItem(9102, "Rectangle", true,
+                      waveform.selectionTool() == WaveformDisplay::SelectionTool::rectangle);
+        tools.addItem(9103, "Lasso", true,
+                      waveform.selectionTool() == WaveformDisplay::SelectionTool::lasso);
+        tools.addItem(9104, "Magic wand", true,
+                      waveform.selectionTool() == WaveformDisplay::SelectionTool::wand);
+        menu.addSubMenu("Selection tool", tools);
+        menu.addItem(9105, "Clear spectral selection", waveform.spectralMask() != nullptr);
+    }
+    menu.addSeparator();
     int lastGroup = -1;
     for (const auto& spec : editCommandTable())
     {
@@ -1677,6 +1983,15 @@ void PreviewPanel::showWaveformMenu(juce::Point<int> screenPosition)
         [safe](int result)
         {
             if (safe == nullptr || result <= 0) return;
+            if (result == 9001) { safe->setSpectrumView(false); return; }
+            if (result == 9002) { safe->setSpectrumView(true); return; }
+            if (result == 9003) { safe->setSpectrumLogScale(! safe->spectrumLogScale()); return; }
+            if (result >= 9101 && result <= 9104)
+            {
+                safe->waveform.setSelectionTool((WaveformDisplay::SelectionTool) (result - 9101));
+                return;
+            }
+            if (result == 9105) { safe->waveform.clearSpectralMask(); return; }
             if (const auto* spec = findEditCommandById(result))
                 safe->applyEditCommand(spec->action);
         });
@@ -1851,6 +2166,7 @@ void PreviewPanel::discardEdits()
     {
         engine.setDiscSample(disc, false, 0, 0, false);
         waveform.setPeaks(disc->left, disc->sampleRate, {});
+        waveform.setSpectrogramAudio(disc);
         return;
     }
     if (file.existsAsFile())
@@ -2144,6 +2460,8 @@ void PreviewPanel::activateMatchedPreview(const MatchRenderService::State& state
 {
     if (state.file == juce::File() || ! state.file.existsAsFile()) return;
     if (matchActivatedKey == state.key && matchApplied && matchPreparedFile == state.file) return;
+    if (spectralAudition) endSpectralAudition();
+    if (waveform.spectralMask() != nullptr) waveform.clearSpectralMask();
     if (! engine.setMatchedTransport (state.file))
     {
         matchControls->setStatus ("Matched WAV cannot be played", true);
@@ -2171,6 +2489,7 @@ void PreviewPanel::activateMatchedPreview(const MatchRenderService::State& state
 
 void PreviewPanel::clearMatchedPreview(bool restoreMidiSelection)
 {
+    if (spectralAudition) endSpectralAudition();
     const bool hadEngineResult = engine.hasMatchedTransport();
     if (matchApplied || hadEngineResult)
     {
@@ -2234,5 +2553,74 @@ void PreviewPanel::withUnsavedEditsConfirmed(std::function<void(bool)> done)
                 safe->saveEdits([done](bool saved) { if (done) done(saved); });
             else if (done) done(false);
         });
+}
+
+void PreviewPanel::spectralMaskChanged()
+{
+    const auto* activeMask = waveform.spectralMask();
+    spectralExportTag.clear();
+    if (activeMask != nullptr)
+        spectralExportTag = "spectral:" + juce::String(activeMask->startSeconds, 6) + ":"
+            + juce::String(activeMask->endSeconds, 6) + ":"
+            + juce::String(activeMask->maskedCellCount()) + ":"
+            + juce::String(activeMask->columns);
+    if (spectralAudition) endSpectralAudition();
+    spectralAutoPlayPending = false;
+    exportPending = false;
+    if (activeMask == nullptr)
+    {
+        exporter.cancel();
+        // With the mask gone, MIDI plays the source again, limited by the time range if any.
+        engine.setMidiFragment({});
+        const auto range = waveform.selection();
+        if (! matchApplied)
+            engine.setMidiSelection(range.valid() ? range.start : 0.0,
+                                    range.valid() ? range.end : 0.0);
+        refreshSelectionStatus();
+        return;
+    }
+    // Prepare immediately so the selection can be dragged as soon as it is drawn.
+    prepareSelectionExport();
+    refreshSelectionStatus();
+}
+
+void PreviewPanel::startSpectralAudition(const juce::File& file)
+{
+    if (! file.existsAsFile()) return;
+    if (! engine.setMatchedTransport(file))
+    {
+        selectionStatus.setText("The spectral selection cannot be played", juce::dontSendNotification);
+        return;
+    }
+    engine.setMatchedLooping(loop.getToggleState());
+    spectralAudition = true;
+    engine.play();
+}
+
+void PreviewPanel::endSpectralAudition()
+{
+    if (! spectralAudition) return;
+    spectralAudition = false;
+    engine.clearMatchedTransport();
+    if (const auto* activeMask = waveform.spectralMask())
+        engine.seek(activeMask->startSeconds);
+}
+
+void PreviewPanel::clearSpectralSelection()
+{
+    if (waveform.spectralMask() != nullptr) waveform.clearSpectralMask();
+    clearSelection();
+}
+
+bool PreviewPanel::waitForSpectralExport(int timeoutMs)
+{
+    if (exportPending)
+    {
+        exportPending = false;
+        prepareSelectionExport();
+    }
+    const bool finished = exporter.waitUntilFinished(timeoutMs);
+    refreshSelectionStatus();
+    return finished && exporter.state().status != SelectionExporter::Status::preparing;
 }
 } // namespace sonicator

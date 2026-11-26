@@ -9,6 +9,7 @@
 #include "ui/library/TagStrip.h"
 #include "ui/cloud/CloudView.h"
 #include "core/cloud/CloudBuildService.h"
+#include "core/spectral/SpectralAnalysisService.h"
 #include "ui/disc/DiscBrowserPanel.h"
 #include "ui/preview/PreviewPanel.h"
 #include "core/indexing/IndexingService.h"
@@ -230,6 +231,11 @@ private:
     std::unique_ptr<cloud::CloudView> cloudPanel;
     std::unique_ptr<cloud::CloudBuildService> cloudBuilder;
     std::unique_ptr<juce::ThreadPool> hoverPool;
+    // Precomputes the spectrogram cache for a selection or a folder; created on first use.
+    std::unique_ptr<SpectralAnalysisService> spectralAnalysis;
+    juce::uint32 spectralStatusMs = 0;
+    void startSpectralAnalysis(std::vector<juce::File> files);
+    void pollSpectralAnalysis();
     // The round tag menu overlay and the screen anchor its "All tags…" fallback opens at.
     std::unique_ptr<RoundTagMenu> roundTagMenu;
     juce::Point<int> roundTagAnchorScreen;
