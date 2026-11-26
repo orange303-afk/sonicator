@@ -281,6 +281,40 @@ TEST_CASE("Repository stores a stable contribution id and a per-catalog watermar
     CHECK(repo.contributionRecords(rows[0].updatedAt, 10).empty());
 }
 
+TEST_CASE("Feedback of one sample is a point lookup, not a table scan", "[contribute][database]")
+{
+    TestDirectory t;
+    Database db(t.dir.getChildFile("lookup.sqlite"));
+    SampleRepository repo(db); repo.createTables();
+    auto add = [&](const juce::String& name)
+    {
+        SampleRecord r; r.filePath = t.dir.getChildFile(name).getFullPathName(); r.fileName = name;
+        repo.upsert(r);
+        for (const auto& row : repo.page(10, 0))
+            if (row.fileName == name) return row.id;
+        return (int64_t) -1;
+    };
+    const auto first = add("a.wav"), second = add("b.wav");
+    std::vector<float> features(14, 0.25f);
+    repo.recordFeedback(first, "kick", { "acoustic" }, features, FeedbackOrigin::user);
+    repo.recordFeedback(second, "snare", { "organic" }, features, FeedbackOrigin::user);
+
+    const auto a = repo.feedbackFor(first);
+    REQUIRE(a.has_value());
+    CHECK(a->sampleId == first);
+    CHECK(a->targetType == "kick");
+    CHECK(a->features.size() == 14);
+    CHECK(a->tags.contains("acoustic"));
+
+    const auto b = repo.feedbackFor(second);
+    REQUIRE(b.has_value());
+    CHECK(b->targetType == "snare");
+
+    CHECK_FALSE(repo.feedbackFor(9999).has_value());
+    // The whole-table read still works and sees the same rows.
+    CHECK(repo.allFeedback().size() == 2);
+}
+
 TEST_CASE("Only user-origin feedback is eligible for contribution", "[contribute][database]")
 {
     TestDirectory t;

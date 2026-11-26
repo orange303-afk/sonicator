@@ -3814,6 +3814,37 @@ void SampleRepository::removeFeedback(int64_t sampleId)
     catch (...) {}
 }
 
+namespace
+{
+SampleRepository::FeedbackRecord readFeedbackRow(const detail::Statement& s)
+{
+    SampleRepository::FeedbackRecord r;
+    r.sampleId = s.integer(0);
+    r.fileHash = s.text(1);
+    r.targetType = s.text(2);
+    r.tags.addTokens(s.text(3), ",", "");
+    r.tags.trim();
+    r.tags.removeEmptyStrings();
+    const auto* blobData = reinterpret_cast<const float*>(s.blob(4));
+    const int numBytes = s.bytes(4);
+    if (blobData != nullptr && numBytes > 0)
+    {
+        const size_t numFloats = numBytes / sizeof(float);
+        r.features.assign(blobData, blobData + numFloats);
+    }
+    r.updatedAt = s.integer(5);
+    r.featureSchema = (int) s.integer(6);
+    const auto* v2Data = reinterpret_cast<const float*>(s.blob(7));
+    const int v2Bytes = s.bytes(7);
+    if (v2Data != nullptr && v2Bytes > 0)
+    {
+        const size_t numFloats = v2Bytes / sizeof(float);
+        r.featuresV2.assign(v2Data, v2Data + numFloats);
+    }
+    return r;
+}
+} // namespace
+
 std::vector<SampleRepository::FeedbackRecord> SampleRepository::allFeedback() const
 {
     std::lock_guard lock(db.mutex);
@@ -3821,34 +3852,19 @@ std::vector<SampleRepository::FeedbackRecord> SampleRepository::allFeedback() co
         "SELECT sample_id, file_hash, target_type, tags, features, updated_at, feature_schema, features_v2"
         " FROM ml_feedback_samples ORDER BY sample_id");
     std::vector<FeedbackRecord> out;
-    while (s.step())
-    {
-        FeedbackRecord r;
-        r.sampleId = s.integer(0);
-        r.fileHash = s.text(1);
-        r.targetType = s.text(2);
-        r.tags.addTokens(s.text(3), ",", "");
-        r.tags.trim();
-        r.tags.removeEmptyStrings();
-        const auto* blobData = reinterpret_cast<const float*>(s.blob(4));
-        const int numBytes = s.bytes(4);
-        if (blobData != nullptr && numBytes > 0)
-        {
-            const size_t numFloats = numBytes / sizeof(float);
-            r.features.assign(blobData, blobData + numFloats);
-        }
-        r.updatedAt = s.integer(5);
-        r.featureSchema = (int) s.integer(6);
-        const auto* v2Data = reinterpret_cast<const float*>(s.blob(7));
-        const int v2Bytes = s.bytes(7);
-        if (v2Data != nullptr && v2Bytes > 0)
-        {
-            const size_t numFloats = v2Bytes / sizeof(float);
-            r.featuresV2.assign(v2Data, v2Data + numFloats);
-        }
-        out.push_back(std::move(r));
-    }
+    while (s.step()) out.push_back(readFeedbackRow(s));
     return out;
+}
+
+std::optional<SampleRepository::FeedbackRecord> SampleRepository::feedbackFor(int64_t sampleId) const
+{
+    std::lock_guard lock(db.mutex);
+    detail::Statement s(db.handle,
+        "SELECT sample_id, file_hash, target_type, tags, features, updated_at, feature_schema, features_v2"
+        " FROM ml_feedback_samples WHERE sample_id=?");
+    s.integer(1, sampleId);
+    if (! s.step()) return std::nullopt;
+    return readFeedbackRow(s);
 }
 
 std::vector<SampleRepository::ContributionRecord> SampleRepository::contributionRecords(

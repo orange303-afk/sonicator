@@ -6200,13 +6200,11 @@ void MainComponent::triggerAdaptiveLearning(const std::vector<int64_t>& ids)
 
             std::vector<float> features;
             int featureSchema = 0;
-            for (const auto& fb : repo->allFeedback())
-                if (fb.sampleId == id)
-                {
-                    features = fb.features;
-                    featureSchema = fb.featureSchema;
-                    break;
-                }
+            if (const auto feedback = repo->feedbackFor(id))
+            {
+                features = feedback->features;
+                featureSchema = feedback->featureSchema;
+            }
             const bool needV1 = features.empty();
             const bool needV2 = featureSchema < 2;
             AnalysisAudio audio;

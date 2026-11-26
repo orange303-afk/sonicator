@@ -239,11 +239,8 @@ void AutoTagService::prepare()
                     if (adaptive.hasTagPrototypes())
                     {
                         std::vector<float> features;
-                        auto allFb = repo.allFeedback();
-                        for (const auto& fb : allFb)
-                        {
-                            if (fb.sampleId == id) { features = fb.features; break; }
-                        }
+                        if (const auto feedback = repo.feedbackFor(id))
+                            features = feedback->features;
                         if (features.empty())
                         {
                             const juce::File file(record->filePath);
@@ -514,13 +511,11 @@ void AutoTagService::apply()
 
             std::vector<float> features;
             int featureSchema = 0;
-            for (const auto& fb : repo.allFeedback())
-                if (fb.sampleId == id)
-                {
-                    features = fb.features;
-                    featureSchema = fb.featureSchema;
-                    break;
-                }
+            if (const auto feedback = repo.feedbackFor(id))
+            {
+                features = feedback->features;
+                featureSchema = feedback->featureSchema;
+            }
             const bool needV1 = features.empty();
             const bool needV2 = featureSchema < 2;
             AnalysisAudio audio;

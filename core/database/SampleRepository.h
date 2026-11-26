@@ -310,6 +310,10 @@ public:
     void touchFeedback(const std::vector<int64_t>& sampleIds);
     void removeFeedback(int64_t sampleId);
     std::vector<FeedbackRecord> allFeedback() const;
+    // One row of the feedback table for a sample. sample_id is the primary key, so this is a point
+    // lookup: per-sample loops must use it instead of scanning allFeedback() once per id, which
+    // copies every feature blob for every selected file and holds the catalog lock while it does.
+    std::optional<FeedbackRecord> feedbackFor(int64_t sampleId) const;
 
     // A confirmed sample shaped for the contribution intake: no path, no file hash and no
     // sample id, only what the model learns from.
