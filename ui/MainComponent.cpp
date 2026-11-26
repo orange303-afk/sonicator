@@ -456,6 +456,17 @@ void MainComponent::registerCommands()
 
     {
         CommandSpec spec;
+        spec.id = "preview.toggleSnapToZero";
+        spec.name = "Snap selection to zero crossings";
+        spec.description = "Land a dragged range edge on the nearest zero crossing so the cut does not click";
+        spec.scope = CommandScope::waveform;
+        spec.category = "Preview";
+        spec.defaults = { juce::KeyPress('z') };
+        addCommand(std::move(spec), [] { return CommandState::ready(); },
+                   [this] { preview.toggleSnapToZeroCrossing(); });
+    }
+    {
+        CommandSpec spec;
         spec.id = "app.settings";
         spec.name = "Settings";
         spec.description = "Open Settings on the last used page";
@@ -1504,6 +1515,7 @@ void MainComponent::persistPreviewSettings()
 {
     appSettings.midiPreview = preview.midiPreviewEnabled();
     appSettings.skipSilence = preview.skipSilenceEnabled();
+    appSettings.snapToZeroCrossing = preview.snapToZeroCrossing();
     appSettings.autoPreview = preview.autoPreviewEnabled();
     appSettings.loopPreview = preview.loopEnabled();
     appSettings.rexGate = preview.rexGateEnabled();
@@ -1515,6 +1527,7 @@ void MainComponent::persistPreviewSettings()
         {
             saved.midiPreview = appSettings.midiPreview;
             saved.skipSilence = appSettings.skipSilence;
+            saved.snapToZeroCrossing = appSettings.snapToZeroCrossing;
             saved.autoPreview = appSettings.autoPreview;
             saved.loopPreview = appSettings.loopPreview;
             saved.rexGate = appSettings.rexGate;

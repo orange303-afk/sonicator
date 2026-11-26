@@ -139,6 +139,7 @@ AppSettings SettingsStore::load() const
     settings.extractTuneToSong = readBool("extractTuneToSong", settings.extractTuneToSong);
     settings.extractOutputFolder = object->getProperty("extractOutputFolder").toString();
     settings.skipSilence = readBool("skipSilence", settings.skipSilence);
+    settings.snapToZeroCrossing = readBool("snapToZeroCrossing", settings.snapToZeroCrossing);
     settings.autoPreview = readBool("autoPreview", settings.autoPreview);
     settings.loopPreview = readBool("loopPreview", settings.loopPreview);
     settings.rexGate = readBool("rexGate", settings.rexGate);
@@ -229,6 +230,7 @@ void SettingsStore::save(const AppSettings& settings) const
     object->setProperty("extractOutputFolder", settings.extractOutputFolder);
     object->setProperty("midiPreview", settings.midiPreview);
     object->setProperty("skipSilence", settings.skipSilence);
+    object->setProperty("snapToZeroCrossing", settings.snapToZeroCrossing);
     object->setProperty("autoPreview", settings.autoPreview);
     object->setProperty("loopPreview", settings.loopPreview);
     object->setProperty("rexGate", settings.rexGate);

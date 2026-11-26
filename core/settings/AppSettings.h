@@ -70,6 +70,8 @@ struct AppSettings
     // Preview panel toggles. Persisted so a restart keeps the same audition behaviour.
     bool midiPreview = false;
     bool skipSilence = false;
+    // Dragged selection edges land on the nearest zero crossing of the source.
+    bool snapToZeroCrossing = false;
     bool autoPreview = true;
     bool loopPreview = false;
     bool rexGate = true;

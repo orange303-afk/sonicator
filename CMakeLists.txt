@@ -271,6 +271,7 @@ add_library(SonicatorCore STATIC core/Version.cpp resources/sqlite/sqlite3.c
     core/updates/UpdateCheck.cpp
     core/ml/MelSpectrogram.cpp
     core/dsp/Spectrogram.cpp
+    core/dsp/ZeroCrossing.cpp
     core/preview/SpectrogramService.cpp
     core/spectral/SpectrogramCache.cpp
     core/spectral/SpectralAnalysisService.cpp

@@ -1,5 +1,6 @@
 #include "WaveformDisplay.h"
 #include "core/audio/SonicatorFormats.h"
+#include "core/dsp/ZeroCrossing.h"
 #include "core/preview/SpectrogramService.h"
 #include "core/spectral/SpectrogramCache.h"
 #include "SpectrogramRenderer.h"
@@ -66,6 +67,35 @@ float yForFrequency(const SpectrogramGrid& grid, double hz, juce::Rectangle<floa
 bool sameRange(selection::Range a, selection::Range b)
 {
     return a.start == b.start && a.end == b.end;
+}
+
+// The magnet distance of a zero-crossing snap, in frames, for a given sample rate.
+int snapRadius(double rate)
+{
+    return juce::jlimit(1, 4096,
+                        (int) std::lround(rate * zeroCrossing::defaultSearchMilliseconds / 1000.0));
+}
+
+// Snaps `seconds` to a crossing inside a decoded snapshot (an edit buffer or a container's PCM).
+double snapInSnapshot(const SampleAudio& audio, double seconds, double total)
+{
+    const auto rate = (double) audio.sampleRate;
+    if (rate <= 0.0 || audio.frames <= 1) return seconds;
+    const auto frame = (std::int64_t) std::llround(seconds * rate);
+    const int radius = snapRadius(rate);
+    const auto low = juce::jmax<std::int64_t>(0, frame - radius);
+    const auto high = juce::jmin<std::int64_t>(audio.frames - 1, frame + radius);
+    if (high <= low) return seconds;
+    const bool stereo = ! audio.right.empty() && audio.right.size() == audio.left.size();
+    juce::AudioBuffer<float> window(stereo ? 2 : 1, (int) (high - low + 1));
+    for (int channel = 0; channel < window.getNumChannels(); ++channel)
+    {
+        const auto& source = channel == 1 ? audio.right : audio.left;
+        for (int i = 0; i < window.getNumSamples(); ++i)
+            window.setSample(channel, i, source[(size_t) (low + i)]);
+    }
+    const auto snapped = zeroCrossing::snapFrame(window, frame - low, radius) + low;
+    return juce::jlimit(0.0, total, (double) snapped / rate);
 }
 
 // Tool cursors drawn the way graphics applications draw them: a white glyph with a dark halo, so
@@ -479,8 +509,39 @@ void WaveformDisplay::updateSelectionDuringDrag(double time)
 {
     publishLiveSelection(selection::orderedRange(dragAnchor, time, totalLength()));
 }
+double WaveformDisplay::snappedTime(double seconds)
+{
+    if (! snapToZero || ! std::isfinite(seconds)) return seconds;
+    const auto total = totalLength();
+    if (! (total > 0.0) || seconds <= 0.0 || seconds >= total) return seconds;
+    if (editedAudio != nullptr) return snapInSnapshot(*editedAudio, seconds, total);
+    if (zoomReader != nullptr && zoomReader->sampleRate > 0.0 && zoomReader->lengthInSamples > 1)
+    {
+        const auto rate = zoomReader->sampleRate;
+        const auto frame = (std::int64_t) std::llround(seconds * rate);
+        const int radius = snapRadius(rate);
+        const auto low = juce::jmax<std::int64_t>(0, frame - radius);
+        const auto high = juce::jmin<std::int64_t>(zoomReader->lengthInSamples - 1, frame + radius);
+        if (high > low)
+        {
+            const int channels = juce::jlimit(1, 2, (int) zoomReader->numChannels);
+            juce::AudioBuffer<float> window(channels, (int) (high - low + 1));
+            window.clear();
+            zoomReader->read(&window, 0, window.getNumSamples(), low, true, channels > 1);
+            const auto snapped = zeroCrossing::snapFrame(window, frame - low, radius) + low;
+            return juce::jlimit(0.0, total, (double) snapped / rate);
+        }
+    }
+    if (spectroAudio != nullptr) return snapInSnapshot(*spectroAudio, seconds, total);
+    return seconds;
+}
 void WaveformDisplay::publishLiveSelection(selection::Range r)
 {
+    if (r.valid() && snapToZero)
+    {
+        const auto start = snappedTime(r.start), end = snappedTime(r.end);
+        if (end > start) r = { start, end };
+    }
     if (! r.valid() || sameRange(r, currentSelection)) return;
     currentSelection = r;
     repaint();

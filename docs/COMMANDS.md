@@ -98,6 +98,7 @@ plugin) falls back to General.
 | `preview.seekForward` | Seek forward one second | → | |
 | `preview.clearSelection` | Clear selection / stop | Escape | Instrument mode keeps its pin |
 | `preview.toggleSpectrum` | Waveform / spectrum view | V | The card keeps selection, zoom and drag in both modes |
+| `preview.toggleSnapToZero` | Snap selection to zero crossings | Z | A dragged range edge lands on the nearest crossing of the source, so the cut does not click |
 
 ## Menu-only commands (not yet rebindable)
 

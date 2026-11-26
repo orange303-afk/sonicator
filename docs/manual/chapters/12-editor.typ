@@ -27,8 +27,11 @@ The tabs above the card switch between the amplitude waveform and a spectrogram 
 range. Frequency is logarithmic from 20 Hz to Nyquist with guides at 100 Hz, 1 kHz and 10 kHz; the
 *Log* / *Linear* pill changes the axis, and levels run from −90 dB up to the loudest bin in view.
 Selection, zoom, playhead, loop drag and dragging a range into a DAW work the same in both views.
-A long range is analysed with a coarser time step and labelled *overview*. The view and the scale are
-remembered between launches.
+*Snap* in the card's toggle row (or the `Z` command) makes a dragged range edge land on the nearest
+zero crossing of the source, so an exported fragment or a loop starts and ends at silence instead of
+on a step and does not click; the magnet reaches five milliseconds either side of the pointer, and a
+range set by the application stays exact. A long range is analysed with a coarser time step and
+labelled *overview*. The view and the scale are remembered between launches.
 
 #plate("/docs/manual/assets/preview-spectrum.png", [Figure 12.1 — The same preview card in spectrum mode. The Waveform / Spectrum tabs and the Log / Linear pill sit in the title row; the time range, selection and playhead are shared with the waveform.])
 

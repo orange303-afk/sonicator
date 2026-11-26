@@ -66,6 +66,10 @@ public:
     void setPosition(double p) { position = p; repaint(); }
     void setSelection(selection::Range);
     selection::Range selection() const { return currentSelection; }
+    // While on, a dragged selection edge lands on the nearest zero crossing of the source, so the
+    // cut starts and ends at silence instead of at a step.
+    void setSnapToZeroCrossing(bool enabled) { snapToZero = enabled; }
+    bool snapToZeroCrossing() const { return snapToZero; }
     void clearSelection();
     // While armed (Loop on), dragging inside the range moves it and dragging an edge resizes it,
     // instead of starting the external DAW drag. The wheel always resizes the range around its
@@ -127,11 +131,15 @@ private:
     double dragAnchor = 0;
     bool pressInsideSelection = false, selectionDragActive = false, externalDragTriggered = false;
     bool pressWasPrimary = false, loopArmed = false, contextMenuClick = false;
+    bool snapToZero = false;
     enum class DragMode { none, select, move, resizeStart, resizeEnd, overview };
     DragMode dragMode = DragMode::none;
     selection::Range dragStartRange;
     double dragStartTime = 0;
     void updateSelectionDuringDrag(double time);
+    // The zero-crossing snap of one edge; returns `seconds` when snapping is off or the source is
+    // unavailable.
+    double snappedTime(double seconds);
     void publishLiveSelection(selection::Range);
     void notifySelection();
     void notifySelectionChanging();

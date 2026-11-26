@@ -111,9 +111,9 @@ TEST_CASE("Preview controls leave keyboard navigation with the library", "[ui][f
     for (auto* child : preview.getChildren())
         if (auto* button = dynamic_cast<juce::Button*>(child))
         { ++buttons; REQUIRE_FALSE(button->getWantsKeyboardFocus()); REQUIRE_FALSE(button->getMouseClickGrabsKeyboardFocus()); }
-    // Play, stop, Loop, MIDI, Skip Silence, Auto Preview, Clear, REx gate, Drag sample, and the
-    // three view chips (Waveform, Spectrum, Log/Linear).
-    REQUIRE(buttons == 12);
+    // Play, stop, Loop, MIDI, Skip Silence, Auto Preview, Snap, Clear, REx gate, Drag sample, and
+    // the three view chips (Waveform, Spectrum, Log/Linear).
+    REQUIRE(buttons == 13);
 }
 TEST_CASE("Added folder tree includes deep descendants and responds to arrow keys", "[ui][folders]")
 {

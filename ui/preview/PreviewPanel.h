@@ -115,6 +115,9 @@ public:
     }
     bool autoPreviewEnabled() const { return autoPreview.getToggleState(); }
     bool loopEnabled() const { return loop.getToggleState(); }
+    bool snapToZeroCrossing() const { return snap.getToggleState(); }
+    void setSnapToZeroCrossing(bool enabled, bool notify = true);
+    void toggleSnapToZeroCrossing() { setSnapToZeroCrossing(! snap.getToggleState()); }
     bool rexGateEnabled() const { return rexGate.getToggleState(); }
     int soundFontSampleCount() const { return (int) instrumentSamples.size(); }
     SampleId selectedSoundFontSampleId() const { return currentSampleId; }
@@ -237,6 +240,8 @@ private:
     studio::CheckChip loop { "Loop", true };
     studio::CheckChip midi { "MIDI Preview", true }, skipSilence { "Skip Silence", true };
     studio::CheckChip autoPreview { "Auto Preview", true };
+    // Dragging a range edge lands it on the nearest zero crossing of the source.
+    studio::CheckChip snap { "Snap", true };
     juce::Slider volume;
     SelectionExporter exporter;
     std::optional<edit::AudioEditBuffer> editBuffer;

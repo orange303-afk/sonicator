@@ -98,8 +98,8 @@ void PreviewPanel::refreshSourceList()
 PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,const juce::File& exportFolder)
     : engine(audio),waveform(cacheFolder),exporter(exportFolder),matchFolder(exportFolder.getChildFile("match"))
 {
-    for (auto* c : std::array<juce::Component*,23>{&waveform, &songProgress, &filename, &time, &formatLine, &play, &stop, &loop, &volume,
-                                                   &midi, &skipSilence, &autoPreview, &clearSelectionButton, &selectionStatus,
+    for (auto* c : std::array<juce::Component*,24>{&waveform, &songProgress, &filename, &time, &formatLine, &play, &stop, &loop, &volume,
+                                                   &midi, &skipSilence, &autoPreview, &snap, &clearSelectionButton, &selectionStatus,
                                                    &presetBox, &sampleBox, &rexGate, &rexInfo, &trackerBox, &sampleDragButton,
                                                    &waveformTab, &spectrumTab, &scaleTab})
         addAndMakeVisible(c);
@@ -263,6 +263,13 @@ PreviewPanel::PreviewPanel(AudioEngine& audio,const juce::File& cacheFolder,cons
         if (onSettingsChanged) onSettingsChanged();
     };
     skipSilence.setTooltip("Next trigger starts one frame before the first nonzero frame; original audio is unchanged");
+    snap.setComponentID("previewSnap");
+    snap.setTooltip("Dragged range edges land on the nearest zero crossing, so the cut starts and ends without a click (Z)");
+    snap.onClick = [this]
+    {
+        waveform.setSnapToZeroCrossing(snap.getToggleState());
+        if (onSettingsChanged) onSettingsChanged();
+    };
     midi.setTooltip("16 voices for ordinary files; 128 voices and a 2 s release for instruments and a selected tracker sample. Note 60 = original pitch. Inputs: Audio settings");
     midi.onClick = [this]
     {
@@ -933,6 +940,7 @@ void PreviewPanel::applyPersistedSettings(const AppSettings& settings)
     applyTransportLooping();
     alwaysOverwrite = settings.alwaysOverwriteOriginalFiles;
     overwriteDisposal = settings.overwriteOriginalDisposal;
+    setSnapToZeroCrossing(settings.snapToZeroCrossing, false);
     setSpectrumView(settings.spectrumView, false);
     setSpectrumLogScale(settings.spectrumLogScale, false);
     waveform.setSpectralCacheEnabled(settings.spectralCache);
@@ -943,6 +951,13 @@ void PreviewPanel::setSpectrumView(bool enabled, bool notify)
     waveform.setRenderMode(enabled ? WaveformDisplay::RenderMode::spectrum
                                    : WaveformDisplay::RenderMode::peaks);
     refreshSpectrumTabs();
+    if (notify && onSettingsChanged) onSettingsChanged();
+}
+
+void PreviewPanel::setSnapToZeroCrossing(bool enabled, bool notify)
+{
+    snap.setToggleState(enabled, juce::dontSendNotification);
+    waveform.setSnapToZeroCrossing(enabled);
     if (notify && onSettingsChanged) onSettingsChanged();
 }
 
@@ -1701,9 +1716,10 @@ void PreviewPanel::resized()
     }
     {
         auto row = rowA.withY(rowA.getBottom() + gap);
-        const int width = (row.getWidth() - gap) / 2;
+        const int width = (row.getWidth() - 2 * gap) / 3;
         midi.setBounds(row.removeFromLeft(width)); row.removeFromLeft(gap);
-        skipSilence.setBounds(row);
+        skipSilence.setBounds(row.removeFromLeft(width)); row.removeFromLeft(gap);
+        snap.setBounds(row);
     }
 }
 
