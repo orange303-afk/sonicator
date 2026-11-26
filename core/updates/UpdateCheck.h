@@ -15,6 +15,7 @@ struct Release
 {
     juce::String tag;         // as published, e.g. "v0.2.0"
     juce::String url;         // the release page
+    juce::String notes;       // the release body: what changed in this version, Markdown
     std::vector<Asset> assets;
     bool published = false;   // a release exists to compare against
     bool newer = false;       // that release is above the running version

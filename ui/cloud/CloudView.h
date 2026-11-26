@@ -106,6 +106,7 @@ private:
     void rebuildLayers();
     void rebuildPointLayer();
     void rebuildLabels();
+    void rebuildIslandCounts();
     float introAlpha() const;
     juce::Point<float> ambientSway() const;
     float pointDrift(size_t index, bool vertical) const;
@@ -126,6 +127,7 @@ private:
     CloudIndex index;
     std::map<uint32_t, std::vector<size_t>> byColour; // built once per layout, keeps setColour rare
     std::vector<bool> matches;
+    std::vector<int> islandVisibleCounts; // per island, how many points the filter leaves
     std::map<int64_t, juce::String> labels;
     std::vector<size_t> visibleScratch;
     // The visible set is recomputed only when the camera (not a hover) changes.

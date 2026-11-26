@@ -235,6 +235,34 @@ test("the local label wins a tie within the margin and loses beyond it", () => {
   assert.equal(mergeForApp(globalRanked, new Map())[0].label, "hat");
 });
 
+test("the global-only policy ignores local evidence of any strength", () => {
+  const globalRanked = [
+    { label: "hat", score: 0.8 },
+    { label: "kick", score: 0.4 },
+  ];
+  const local = new Map([["snare", 0.99], ["kick", 0.95]]);
+  const ranked = mergeForApp(globalRanked, local, { localPolicy: "global-only" });
+  assert.deepEqual(ranked.map((entry) => entry.label), ["hat", "kick"]);
+  assert.equal(ranked[0].source, "global");
+  assert.ok(ranked.every((entry) => entry.localScore === 0));
+});
+
+test("evaluateContributed reports the policy it used", () => {
+  const model = toyModel();
+  const rows = [
+    row("kick", 0, 0),
+    row("hat", 1, 1),
+  ];
+  const shipped = shippedOf(model);
+  const merged = evaluateContributed({ rows, shipped });
+  assert.equal(merged.localPolicy, "prefer-local");
+  const modelOnly = evaluateContributed({ rows, shipped, localPolicy: "global-only" });
+  assert.equal(modelOnly.localPolicy, "global-only");
+  // The toy rows are their own local prototypes, so only the model-only rule guarantees the answer.
+  assert.equal(modelOnly.standard.app.precision, 1);
+  assert.equal(modelOnly.standard.app.coverage, 1);
+});
+
 test("a loop shorter than 1.2 s cannot vote as a loop", () => {
   const short = new Array(DIMENSIONS).fill(0);
   short[12] = 0.01;

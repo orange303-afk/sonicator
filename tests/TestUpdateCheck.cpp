@@ -23,13 +23,33 @@ TEST_CASE("The newest published release is read from the GitHub answer", "[updat
     SECTION("a newer release")
     {
         const auto release = parseLatestRelease(
-            R"([{"tag_name":"v0.2.0","html_url":"https://github.com/orange303-afk/sonicator/releases/tag/v0.2.0"}])",
+            R"([{"tag_name":"v0.2.0","html_url":"https://github.com/orange303-afk/sonicator/releases/tag/v0.2.0",
+                 "body":"## What changed\n\n- The Cloud map follows the filter.\n"}])",
             "0.1.0");
         REQUIRE(release.error.isEmpty());
         REQUIRE(release.published);
         REQUIRE(release.newer);
         REQUIRE(release.tag == "v0.2.0");
         REQUIRE(release.url == "https://github.com/orange303-afk/sonicator/releases/tag/v0.2.0");
+        CHECK(release.notes == "## What changed\n\n- The Cloud map follows the filter.");
+    }
+
+    SECTION("a release without notes keeps the update usable")
+    {
+        const auto release = parseLatestRelease(
+            R"([{"tag_name":"v0.2.0","html_url":"https://example.test"}])", "0.1.0");
+        REQUIRE(release.published);
+        REQUIRE(release.newer);
+        CHECK(release.notes.isEmpty());
+    }
+
+    SECTION("notes that are not a string are ignored")
+    {
+        const auto release = parseLatestRelease(
+            R"([{"tag_name":"v0.2.0","html_url":"https://example.test","body":{"unexpected":true}}])",
+            "0.1.0");
+        REQUIRE(release.published);
+        CHECK(release.notes.isEmpty());
     }
 
     SECTION("the running version")

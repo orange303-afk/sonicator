@@ -121,11 +121,13 @@ The About page shows the running version under the product name and offers `Chec
 That button asks `api.github.com` for the newest release of `orange303-afk/sonicator` on a worker
 thread (`core/updates/UpdateCheck`), compares dotted tags against `version()` and reports the
 answer inline; an empty release list is a normal state, not an error. The standalone also checks
-once, three seconds after launch, and only a genuinely newer release opens a dialog with `Release
-notes`, a platform-specific `Download from GitHub` (`.pkg` universal first, `.msi`, AppImage before
-`.deb`) and `Gumroad`; a failed or equal check stays silent, and the dialog waits for any open modal
-instead of stacking on it. The plugin never checks. Nothing about the library, files or machine is
-sent. See `docs/PRIVACY.md`.
+once, three seconds after launch, and only a genuinely newer release opens a dialog with the notes
+of that release in a read-only scrolling field, an accent `Support SONICATOR` row (Ko-fi, Boosty),
+`Release notes`, a platform-specific `Download from GitHub` (`.pkg` universal first, `.msi`,
+AppImage before `.deb`) and `Gumroad`; empty or missing notes say so and leave the download
+available. A failed or equal check stays silent, and the dialog waits for any open modal instead of
+stacking on it. The plugin never checks. Nothing about the library, files or machine is sent.
+See `docs/PRIVACY.md`.
 
 Typography is Manrope, embedded in the binary (`resources/fonts/`, SIL Open Font License): the four
 static faces are registered by `fonts::install()` at start-up, and the default LookAndFeel points the

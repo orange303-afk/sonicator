@@ -108,7 +108,7 @@ TEST_CASE("Zoom keeps the world point under the cursor", "[cloud][view]")
     REQUIRE(after.y == Catch::Approx(before.y).margin(1.0f));
 }
 
-TEST_CASE("Cloud view hit test always activates a point", "[cloud][view]")
+TEST_CASE("A filter hides a point from the hit test, the hover and the click", "[cloud][view]")
 {
     CloudView view;
     view.setSize(800, 600);
@@ -122,15 +122,26 @@ TEST_CASE("Cloud view hit test always activates a point", "[cloud][view]")
     std::vector<bool> matches(view.layout().points.size(), false);
     matches[0] = true;
     view.setFilter(matches);
-    // The cloud is the whole tagged library; the list filter must not hide or dim its points.
-    REQUIRE(view.isPointVisible(index));
+    // The map still shows every point's position, but the hidden one is gone from the map and from
+    // the interaction: no hit, no hover audition, no activation.
+    REQUIRE_FALSE(view.isPointVisible(index));
+    REQUIRE(view.isPointVisible(0));
+    REQUIRE(view.pointAtScreen({ (int) screen.x, (int) screen.y }) == CloudIndex::none);
+
+    int hovers = 0;
+    view.onHover = [&hovers](int64_t) { ++hovers; };
+    view.hoverForTest({ (int) screen.x, (int) screen.y });
+    REQUIRE(hovers == 0);
 
     int64_t activated = 0;
     view.onActivate = [&](int64_t id) { activated = id; };
     view.activatePointForTest(index);
-    REQUIRE(activated == 104);
+    REQUIRE(activated == 0);
     view.activatePointForTest(0);
     REQUIRE(activated == 100);
+
+    view.setFilter({});
+    REQUIRE(view.isPointVisible(index));
 }
 
 TEST_CASE("Hover reports once per point and ends on leaving", "[cloud][view]")
@@ -420,7 +431,7 @@ TEST_CASE("The hover lens eases in and out and never moves the hit test", "[clou
     REQUIRE(view.lensStrengthForTest() < 0.02f);
 }
 
-TEST_CASE("The list filter never reflows or empties the cloud", "[cloud][view]")
+TEST_CASE("A tag or type filter hides points without reflowing the map", "[cloud][view]")
 {
     CloudView view;
     view.setSize(800, 600);
@@ -430,7 +441,7 @@ TEST_CASE("The list filter never reflows or empties the cloud", "[cloud][view]")
     std::vector<bool> matches(view.layout().points.size(), false);
     matches[0] = true;
     view.setFilter(matches);
-    REQUIRE(view.isPointVisible(1));
+    REQUIRE_FALSE(view.isPointVisible(1));
     REQUIRE(view.isPointVisible(0));
     const auto after = view.worldToScreen(300, 300);
     REQUIRE(after.x == Catch::Approx(before.x).margin(0.001f));

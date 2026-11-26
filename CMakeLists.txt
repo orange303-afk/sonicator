@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.22)
 # systems). 10.15 is the last system the Intel Macs that cannot run Big Sur receive; an arm64 slice
 # is promoted to 11.0 by the toolchain because no Apple Silicon Mac runs anything older.
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum macOS version")
-project(Sonicator VERSION 0.3.2 LANGUAGES C CXX)
+project(Sonicator VERSION 0.3.3 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -313,7 +313,7 @@ juce_add_binary_data(SonicatorAssets SOURCES
     resources/fonts/Manrope-Bold.ttf
     resources/ml/global_prototypes.json
     resources/ml/global_model.json)
-add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/shell/AppFonts.cpp ui/shell/AppIcon.cpp ui/shell/WrappedText.cpp ui/analysis/AnalysisCard.cpp ui/analysis/KeyBpmBlock.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/RoundTagMenu.cpp ui/library/TagsMenuPill.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/PluginMatchControls.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/shell/StudioControls.cpp ui/shell/PanelLayout.cpp ui/shell/PanelSplitter.cpp ui/commands/CommandRegistry.cpp ui/commands/ShortcutBindings.cpp ui/commands/CommandRouter.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/shell/DialogSurface.cpp ui/settings/SettingsPanel.cpp ui/settings/HotkeysPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp ui/batch/BatchProcessingDialog.cpp ui/cloud/CloudIndex.cpp ui/cloud/CloudView.cpp ui/library/DuplicateCleanupDialog.cpp)
+add_library(SonicatorUI STATIC ui/MainComponent.cpp ui/shell/AppFonts.cpp ui/shell/AppIcon.cpp ui/shell/WrappedText.cpp ui/analysis/AnalysisCard.cpp ui/analysis/KeyBpmBlock.cpp ui/library/FileListPanel.cpp ui/library/FolderTree.cpp ui/library/TagStrip.cpp ui/library/RoundTagMenu.cpp ui/library/TagsMenuPill.cpp ui/library/TapTempoDialog.cpp ui/waveform/WaveformView.cpp ui/waveform/WaveformDisplay.cpp ui/preview/PreviewPanel.cpp ui/preview/EditCommands.cpp ui/preview/PluginMatchControls.cpp ui/preview/SongProgress.cpp ui/shell/ActionIcons.cpp ui/shell/StudioControls.cpp ui/shell/PanelLayout.cpp ui/shell/PanelSplitter.cpp ui/commands/CommandRegistry.cpp ui/commands/ShortcutBindings.cpp ui/commands/CommandRouter.cpp ui/tagging/AutoTagDialog.cpp ui/split/SplitDialog.cpp ui/extract/ExtractDialog.cpp ui/shell/ThemedDialogs.cpp ui/shell/DialogSurface.cpp ui/updates/UpdateDialog.cpp ui/settings/SettingsPanel.cpp ui/settings/HotkeysPanel.cpp ui/settings/RelocateFoldersPanel.cpp ui/shell/WindowBounds.cpp ui/disc/DiscBrowserPanel.cpp ui/batch/BatchProcessingDialog.cpp ui/cloud/CloudIndex.cpp ui/cloud/CloudView.cpp ui/library/DuplicateCleanupDialog.cpp)
 if(APPLE)
     target_sources(SonicatorUI PRIVATE ui/platform/FileClipboard.mm)
 else()

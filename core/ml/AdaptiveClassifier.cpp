@@ -49,7 +49,8 @@ bool isPlausibleAdaptiveTag(const juce::String& tag, const std::vector<float>& f
 
 // Global evidence is worth slightly less than a person's own confirmation.
 constexpr float globalPenalty = 0.95f;
-// A local label wins when the global best is not clearly better than it.
+// A local label wins when the global best is not clearly better than it. Schema-1 queries only:
+// a schema-2 query uses the shipped model alone when it is loaded (see predictTypeWithSchema).
 constexpr float localPriorityMargin = 0.02f;
 
 } // namespace
@@ -350,7 +351,13 @@ std::vector<AdaptiveClassifier::Prediction> AdaptiveClassifier::predictTypeWithS
             else agg.localScore = std::max(agg.localScore, sim);
         }
     };
-    accumulate(impl->prototypes, false);
+    // A schema-2 query with the shipped model loaded is answered by that model alone. The model's
+    // score is a calibrated precision, a local prototype's score is a raw 84-dimension cosine, and
+    // merging the two compared different scales: on a second person's library the local label won
+    // 2914 of 3157 rows and top-1 fell from 55.7% to 10.5% (docs/AUTODETECT.md). Local prototypes
+    // still answer when no model is shipped, and schema-1 queries keep their earlier behaviour.
+    const bool modelOnly = schema == 2 && impl->globalModel.loaded();
+    if (! modelOnly) accumulate(impl->prototypes, false);
     if (schema == 1)
     {
         accumulate(impl->globalPrototypes, true);

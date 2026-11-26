@@ -5,8 +5,10 @@ Model: `resources/ml/global_model.json`, generated 2026-11-12T00:00:00.000Z, 28 
 Test data: `data/contributions/latest/contribute.jsonl` — 8071 records from 3 install(s), of which 3148 are schema-1 with the old 14 features and cannot be scored by this model.
 
 Nothing here trained, tuned or selected the model. The file is read exactly as the app reads it,
-and the acceptance rule is the app's own: the global score carries the 0.95 penalty, a local label
-wins when the global best is not more than 0.02 above it, and a type is published from 0.80.
+and the acceptance rule is the app's own: the global score carries the 0.95 penalty, a type is
+published from 0.80, and a schema-2 query is answered by the model alone when it is loaded. The
+previous merge, where a local label won when the global best was not more than 0.02 above it, is
+kept as the comparison row in "The merge policy".
 
 The export is downloaded by `node tools/contribution-sync.mjs` and stays git-ignored; the numbers
 below are reproducible only against the same snapshot.
@@ -18,7 +20,8 @@ below are reproducible only against the same snapshot.
   those published answers are right. The library shows both.
 - **Cold start** is a person the model has never met: the shipped model alone.
 - **With own confirmations** adds that person's other confirmed rows as local prototypes, one
-  record out at a time, and merges them the way `AdaptiveClassifier::predictTypeWithSchema` does.
+  record out at a time, and applies the app's rule. Under the shipped rule the model answers on its
+  own; the comparison block shows what the earlier local merge did on the same rows.
 - **Own confirmations only** drops the model, to show what the acceptance threshold means on a
   raw cosine.
 
@@ -166,6 +169,20 @@ outside the public datasets.
 | `kick` | `snare` | 2 |
 | `kick` | `rim` | 1 |
 | `vocal` | `clap` | 1 |
+
+### The merge policy
+
+Since the schema-2 fix the app answers a query with the shipped model alone when the model is
+loaded: a raw local cosine is no longer compared with a calibrated probability. The table holds the
+same test rows under both rules, so the change is measured rather than described.
+
+| rule for a schema-2 query | records | top-1 | coverage | precision at acceptance (95% CI) |
+|---|---|---|---|---|
+| local cosine merged (previous) | 1423 | 92.5% | 100.0% | 92.5% (91.0%–93.7%) |
+| shipped model alone (current) | 1423 | 73.4% | 29.1% | 91.8% (88.7%–94.1%) |
+
+The local label won **1562** rows under the previous rule. A local prototype still answers
+when no model is shipped; the schema-1 path is unchanged.
 
 ## Tag-derived labels
 
@@ -317,6 +334,20 @@ outside the public datasets.
 | `percussion` | `hat` | 1 |
 | `percussion` | `rim` | 1 |
 | `percussion` | `snare` | 1 |
+
+### The merge policy
+
+Since the schema-2 fix the app answers a query with the shipped model alone when the model is
+loaded: a raw local cosine is no longer compared with a calibrated probability. The table holds the
+same test rows under both rules, so the change is measured rather than described.
+
+| rule for a schema-2 query | records | top-1 | coverage | precision at acceptance (95% CI) |
+|---|---|---|---|---|
+| local cosine merged (previous) | 3157 | 10.5% | 96.6% | 10.3% (9.3%–11.4%) |
+| shipped model alone (current) | 3157 | 55.7% | 15.0% | 83.3% (79.6%–86.4%) |
+
+The local label won **2914** rows under the previous rule. A local prototype still answers
+when no model is shipped; the schema-1 path is unchanged.
 
 ## Reading the numbers
 

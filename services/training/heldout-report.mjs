@@ -298,6 +298,39 @@ function mistakesBlock(summary, level) {
   return lines.join("\n");
 }
 
+function policyBlock(summary, modelOnly, level) {
+  if (modelOnly == null || modelOnly.standard == null) return "";
+  const merged = summary.standard.app;
+  const model = modelOnly.standard.app;
+  if (merged.records === 0) return "";
+  const localWins = summary.installs.reduce((total, install) => total + install.appLocalWins, 0);
+  const lines = [heading(level, "The merge policy"), ""];
+  lines.push("Since the schema-2 fix the app answers a query with the shipped model alone when the model is");
+  lines.push("loaded: a raw local cosine is no longer compared with a calibrated probability. The table holds the");
+  lines.push("same test rows under both rules, so the change is measured rather than described.");
+  lines.push("");
+  lines.push(table(
+    ["rule for a schema-2 query", "records", "top-1", "coverage", "precision at acceptance (95% CI)"],
+    [
+      [
+        "local cosine merged (previous)",
+        merged.records, pct(merged.top1), pct(merged.coverage),
+        `${pct(merged.precision)} (${interval(merged.precisionInterval)})`,
+      ],
+      [
+        "shipped model alone (current)",
+        model.records, pct(model.top1), pct(model.coverage),
+        `${pct(model.precision)} (${interval(model.precisionInterval)})`,
+      ],
+    ],
+  ));
+  lines.push("");
+  lines.push(`The local label won **${localWins}** rows under the previous rule. A local prototype still answers`);
+  lines.push("when no model is shipped; the schema-1 path is unchanged.");
+  lines.push("");
+  return lines.join("\n");
+}
+
 function scoreBlock(summary, data, level) {
   return [
     summaryBlock(summary, level),
@@ -312,7 +345,7 @@ function scoreBlock(summary, data, level) {
   ].filter((part) => part.length > 0).join("\n");
 }
 
-export function renderHeldOutReport({ summary, tagSummary, data, snapshot, modelPath, command }) {
+export function renderHeldOutReport({ summary, tagSummary, modelOnly = null, data, snapshot, modelPath, command }) {
   const classes = summary.dataset.classes;
   const lines = [];
   lines.push("# Held-out evaluation of the shipped type model");
@@ -325,8 +358,10 @@ export function renderHeldOutReport({ summary, tagSummary, data, snapshot, model
     "schema-1 with the old 14 features and cannot be scored by this model.");
   lines.push("");
   lines.push("Nothing here trained, tuned or selected the model. The file is read exactly as the app reads it,");
-  lines.push("and the acceptance rule is the app's own: the global score carries the 0.95 penalty, a local label");
-  lines.push("wins when the global best is not more than 0.02 above it, and a type is published from 0.80.");
+  lines.push("and the acceptance rule is the app's own: the global score carries the 0.95 penalty, a type is");
+  lines.push("published from 0.80, and a schema-2 query is answered by the model alone when it is loaded. The");
+  lines.push("previous merge, where a local label won when the global best was not more than 0.02 above it, is");
+  lines.push("kept as the comparison row in \"The merge policy\".");
   lines.push("");
   lines.push("The export is downloaded by `node tools/contribution-sync.mjs` and stays git-ignored; the numbers");
   lines.push("below are reproducible only against the same snapshot.");
@@ -338,7 +373,8 @@ export function renderHeldOutReport({ summary, tagSummary, data, snapshot, model
   lines.push("  those published answers are right. The library shows both.");
   lines.push("- **Cold start** is a person the model has never met: the shipped model alone.");
   lines.push("- **With own confirmations** adds that person's other confirmed rows as local prototypes, one");
-  lines.push("  record out at a time, and merges them the way `AdaptiveClassifier::predictTypeWithSchema` does.");
+  lines.push("  record out at a time, and applies the app's rule. Under the shipped rule the model answers on its");
+  lines.push("  own; the comparison block shows what the earlier local merge did on the same rows.");
   lines.push("- **Own confirmations only** drops the model, to show what the acceptance threshold means on a");
   lines.push("  raw cosine.");
   lines.push("");
@@ -358,6 +394,7 @@ export function renderHeldOutReport({ summary, tagSummary, data, snapshot, model
   lines.push("only one that can judge the type field as the library stores it.");
   lines.push("");
   lines.push(scoreBlock(summary, data, 3));
+  lines.push(policyBlock(summary, modelOnly === null ? null : modelOnly.summary, 3));
   if (tagSummary !== null && tagSummary.dataset.records > 0) {
     lines.push("## Tag-derived labels");
     lines.push("");
@@ -370,6 +407,7 @@ export function renderHeldOutReport({ summary, tagSummary, data, snapshot, model
     lines.push(`**${data.stats.tagsOnly}**.`);
     lines.push("");
     lines.push(scoreBlock(tagSummary, data, 3));
+    lines.push(policyBlock(tagSummary, modelOnly === null ? null : modelOnly.tags, 3));
   }
   lines.push("## Reading the numbers");
   lines.push("");

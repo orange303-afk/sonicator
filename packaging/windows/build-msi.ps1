@@ -24,6 +24,10 @@ New-Item -ItemType Directory -Path "$Stage/app", "$Stage/vst3" | Out-Null
 try {
     Copy-Item $Exe, "$BuildDir/Sonicator_artefacts/Release/onnxruntime.dll" "$Stage/app/"
     Copy-Item "$Plugin/*" "$Stage/vst3/" -Recurse
+    # A bundle from an earlier packaging run can still carry a Licenses folder; the notice set must
+    # be generated from this build's pinned sources, so the staged copy starts without one.
+    $StagedLicenses = "$Stage/vst3/Contents/Resources/Licenses"
+    if (Test-Path $StagedLicenses) { Remove-Item $StagedLicenses -Recurse -Force }
     # juceaide builds this .ico from the branding PNG for the exe; the MSI embeds the same file
     # for the Apps & features entry.
     $AppIcon = "$BuildDir/Sonicator_artefacts/JuceLibraryCode/icon.ico"
@@ -31,9 +35,20 @@ try {
     Copy-Item $AppIcon "$Stage/app-icon.ico"
     # ONNX's prebuilt Windows runtime uses the MSVC runtime. Ship Microsoft redistributable
     # DLLs app-locally in BOTH loading directories, without a system-wide redist custom action.
-    $VsWhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
-    $Vs = & $VsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    Check-NativeExit 'vswhere'
+    # The CRT has to come from the Visual Studio that built these binaries. A second installation
+    # (VS 18 keeps VC145 next to VS 2022's VC143) makes vswhere's "latest" ambiguous, so the CMake
+    # cache's generator instance decides first.
+    $Vs = $null
+    $Cache = Join-Path $BuildDir 'CMakeCache.txt'
+    if (Test-Path $Cache) {
+        $match = [regex]::Match((Get-Content $Cache -Raw), '(?m)^CMAKE_GENERATOR_INSTANCE:INTERNAL=(.+)$')
+        if ($match.Success) { $Vs = $match.Groups[1].Value.Trim().Replace('/', '\') }
+    }
+    if (!$Vs -or !(Test-Path $Vs)) {
+        $VsWhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+        $Vs = & $VsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        Check-NativeExit 'vswhere'
+    }
     $Crt = & "$PSScriptRoot/find-crt.ps1" -VisualStudioRoot $Vs
     foreach ($Destination in @("$Stage/app", "$Stage/vst3/Contents/x86_64-win")) {
         Copy-Item "$($Crt.FullName)/*.dll" $Destination

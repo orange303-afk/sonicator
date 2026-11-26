@@ -75,6 +75,10 @@ Release parseLatestRelease(const juce::String& json, const juce::String& current
 
     release.tag = item->getProperty("tag_name").toString().trim();
     release.url = item->getProperty("html_url").toString().trim();
+    // The release body is the "what changed" text GitHub shows on the release page. It arrives in
+    // the same answer as the tag, so the dialog needs no second request.
+    const auto body = item->getProperty("body");
+    if (body.isString()) release.notes = body.toString().trim();
     if (release.tag.isEmpty())
     {
         release.error = "The newest release has no version number.";

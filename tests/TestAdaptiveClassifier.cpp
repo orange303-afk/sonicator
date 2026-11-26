@@ -111,3 +111,67 @@ TEST_CASE("the global model serves schema-2 queries as global_model", "[ml][adap
     std::vector<float> v1(14, 0.0f);
     CHECK(classifier.predictType(v1, 1).empty());
 }
+
+TEST_CASE("A local prototype never outranks the shipped schema-2 model", "[ml][adaptive]")
+{
+    const auto model = [](const juce::String& weights)
+    {
+        return juce::String(R"({
+          "schema": "model.v1", "featureSchema": 2, "generatedAt": "2026-11-26T00:00:00.000Z",
+          "featureIndices": [0, 1], "mu": [0.0, 0.0], "sd": [1.0, 1.0],
+          "model": { "kind": "M2", "labels": ["kick", "hat"], "W": )") + weights
+            + R"(, "b": [0.0, 0.0], "temperature": 1.0 },
+          "similarityMap": [[0.0, 0.0], [1.0, 1.0]],
+          "groups": { "kick": "percussion", "hat": "percussion" },
+          "datasets": []
+        })";
+    };
+
+    SECTION("a confident model answer keeps its label and source")
+    {
+        AdaptiveClassifier classifier;
+        REQUIRE(classifier.loadGlobalModel(model("[[1.0, 0.0], [0.0, 1.0]]")));
+        std::vector<float> v2(84, 0.0f);
+        v2[0] = 4.0f; // the model answers kick with a high precision
+        // A person's prototype of the same audio carries a label the model cannot name.
+        classifier.updatePrototype(9, "Snare", { "snare" }, v2, v2);
+
+        const auto preds = classifier.predictTypeV2(v2, 3);
+        REQUIRE_FALSE(preds.empty());
+        CHECK(preds[0].label == "kick");
+        CHECK(preds[0].source == "global_model");
+        CHECK(preds[0].score > 0.9f);
+        for (const auto& prediction : preds) CHECK(prediction.label != "Snare");
+    }
+
+    SECTION("a weak model answer is not turned into a local one")
+    {
+        AdaptiveClassifier classifier;
+        // Both labels get the same logit: the probability is 0.5 and the similarity table keeps it,
+        // below the app's 0.80 publication threshold.
+        REQUIRE(classifier.loadGlobalModel(model("[[0.0, 0.0], [0.0, 0.0]]")));
+        std::vector<float> v2(84, 0.0f);
+        v2[0] = 1.0f;
+        classifier.updatePrototype(9, "Snare", { "snare" }, v2, v2);
+
+        const auto preds = classifier.predictTypeV2(v2, 3);
+        REQUIRE(preds.size() == 2); // the model's own labels only
+        for (const auto& prediction : preds)
+        {
+            CHECK(prediction.source == "global_model");
+            CHECK(prediction.score < 0.80f);
+        }
+    }
+}
+
+TEST_CASE("Without a shipped model local schema-2 prototypes still answer", "[ml][adaptive]")
+{
+    AdaptiveClassifier classifier;
+    std::vector<float> v2(84, 0.0f);
+    v2[0] = 1.0f;
+    classifier.updatePrototype(9, "Snare", { "snare" }, v2, v2);
+    const auto preds = classifier.predictTypeV2(v2, 1);
+    REQUIRE_FALSE(preds.empty());
+    CHECK(preds[0].label == "Snare");
+    CHECK(preds[0].source == "user_adaptive");
+}

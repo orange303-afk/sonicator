@@ -37,10 +37,18 @@ export function main(argv = process.argv.slice(2)) {
   const data = readContributedRows(input);
   const typed = data.rows.filter((row) => row.labelSource === "type");
   const tagged = data.rows.filter((row) => row.labelSource === "tag");
-  const summary = evaluateContributed({ rows: typed, shipped });
+  // "prefer-local" is the rule the app used before the schema-2 fix; "global-only" is the shipped
+  // rule. Both run on the same rows so the report can show what the change did.
+  const summary = evaluateContributed({ rows: typed, shipped, localPolicy: "prefer-local" });
   const tagSummary = tagged.length === 0
     ? null
-    : evaluateContributed({ rows: tagged, prototypes: typed, shipped });
+    : evaluateContributed({ rows: tagged, prototypes: typed, shipped, localPolicy: "prefer-local" });
+  const modelOnly = {
+    summary: evaluateContributed({ rows: typed, shipped, localPolicy: "global-only" }),
+    tags: tagged.length === 0
+      ? null
+      : evaluateContributed({ rows: tagged, prototypes: typed, shipped, localPolicy: "global-only" }),
+  };
 
   const snapshot = relative(REPOSITORY, input).replaceAll("\\", "/");
   const modelPath = relative(REPOSITORY, modelFile).replaceAll("\\", "/");
@@ -55,16 +63,17 @@ export function main(argv = process.argv.slice(2)) {
   mkdirSync(out, { recursive: true });
   writeFileSync(
     join(out, "summary.json"),
-    `${JSON.stringify({ snapshot, stats: data.stats, summary, tags: tagSummary }, null, 2)}\n`,
+    `${JSON.stringify({ snapshot, stats: data.stats, summary, tags: tagSummary, modelOnly }, null, 2)}\n`,
     "utf8",
   );
   if (doc !== null) {
     mkdirSync(resolve(doc, ".."), { recursive: true });
-    writeFileSync(doc, renderHeldOutReport({ summary, tagSummary, data, snapshot, modelPath, command }), "utf8");
+    writeFileSync(doc, renderHeldOutReport({ summary, tagSummary, modelOnly, data, snapshot, modelPath, command }), "utf8");
   }
 
   const cold = summary.standard.cold;
   const app = summary.standard.app;
+  const modelApp = modelOnly.summary.standard.app;
   const tagCold = tagSummary === null ? null : tagSummary.standard.cold;
   process.stdout.write(
     `${summary.dataset.records} confirmed types from ${summary.installs.length} install(s), `
@@ -78,6 +87,8 @@ export function main(argv = process.argv.slice(2)) {
       : `tag-derived labels: ${tagSummary.dataset.records} rows, cold start top-1 `
         + `${(tagCold.top1 * 100).toFixed(1)}%, coverage ${(tagCold.coverage * 100).toFixed(1)}%, `
         + `precision ${(tagCold.precision * 100).toFixed(1)}%\n`)
+    + `model alone (shipped policy): top-1 ${(modelApp.top1 * 100).toFixed(1)}%, `
+    + `coverage ${(modelApp.coverage * 100).toFixed(1)}%, precision ${(modelApp.precision * 100).toFixed(1)}%\n`
     + `summary: ${join(out, "summary.json")}${doc === null ? "" : `\nreport: ${doc}`}\n`
   );
   return 0;

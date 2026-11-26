@@ -124,8 +124,8 @@ band is described in chapter 10; chapters 11 and 12 cover selection and editing.
 #section("List and Cloud")
 
 *Cloud* replaces the table with a map of the tagged library: one point per tagged file, islands per
-tag, hover audition and drag out. The list filter does not apply to the map — it always shows the
-whole tagged library — and the camera keeps its position while you switch back and forth. Chapter 14
+tag, hover audition and drag out. The tag and Type filters apply to the map as well; search, folder
+and paging do not, and the camera keeps its position while you switch back and forth. Chapter 14
 covers it.
 
 

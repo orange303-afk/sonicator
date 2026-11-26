@@ -26,6 +26,7 @@
 #include "ui/settings/RelocateFoldersPanel.h"
 #include "ui/settings/SettingsPanel.h"
 #include "ui/shell/ThemedDialogs.h"
+#include "ui/updates/UpdateDialog.h"
 #include "ui/platform/FileClipboard.h"
 #include "core/dsp/AnalysisAudio.h"
 #include "core/smart/AcousticClassifierService.h"
@@ -63,18 +64,7 @@ void presentUpdateDialog(juce::Component::SafePointer<MainComponent> safe, updat
         });
         return;
     }
-    const auto download = updates::downloadUrlFor(release, updates::currentPlatform());
-    dialogs::showAlert(*safe, "SONICATOR " + release.tag + " is available",
-        juce::String("You are running ") + version() + ".\n\n"
-        "Download the installer for this platform from GitHub, read what changed, or get the "
-        "release from Gumroad.",
-        { { "Download from GitHub", 1 }, { "Release notes", 2 }, { "Gumroad", 3 }, { "Later", 0 } },
-        [download, page = release.url](int id)
-        {
-            if (id == 1) juce::URL(download).launchInDefaultBrowser();
-            else if (id == 2) juce::URL(page).launchInDefaultBrowser();
-            else if (id == 3) juce::URL(updates::gumroadUrl()).launchInDefaultBrowser();
-        }, juce::MessageBoxIconType::InfoIcon);
+    ui::updates::showUpdateDialog(*safe, release);
 }
 // The file ships in the bundle (an empty label list when there is not enough data), so a broken
 // resource degrades to today's local-only behaviour instead of stopping startup.
@@ -1573,6 +1563,7 @@ void MainComponent::showLastCachedCloudMap()
         const auto points = last->points.size();
         cloudPanel->setLayout(std::move(*last));
         cloudPanel->setSelectedSample(selectedSampleId);
+        updateCloudMatches();
         juce::Logger::writeToLog("[cloud] showing the last cached map, "
                                  + juce::String((int) points) + " points");
     }
@@ -1613,13 +1604,54 @@ void MainComponent::updateCloudMatches()
 {
     if (cloudPanel == nullptr || ! cloudPanel->hasLayout() || readRepo == nullptr) return;
     const auto& points = cloudPanel->layout().points;
-    // The map is the whole tagged library; the list's filter is for the list. Running a narrowing
-    // query here only left a handful of points on a dark field, which read as a broken map.
-    cloudPanel->setFilter({});
-    cloudPanel->setNotice({});
+    // The Cloud map follows the chosen tags and the Type filter: both are whole-catalog facts that
+    // the map itself is built from. Search text, the folder, paging and the structure toggles stay
+    // with the list, because they describe what the table shows rather than what a file is.
+    LibraryFilter cloudFilter;
+    cloudFilter.includeTags = filter.includeTags;
+    cloudFilter.excludeTags = filter.excludeTags;
+    cloudFilter.matchAnyTag = filter.matchAnyTag;
+    cloudFilter.types = filter.types;
+    const bool narrowed = ! cloudFilter.includeTags.empty() || ! cloudFilter.excludeTags.empty()
+        || ! cloudFilter.types.empty();
     cloudMatches.clear();
-    countLabel.setText(juce::String((int) points.size()) + " tagged files on the map",
-                       juce::dontSendNotification);
+    bool filtered = false;
+    if (narrowed)
+    {
+        try
+        {
+            std::set<int64_t> keep;
+            for (auto id : readRepo->queryIds(cloudFilter)) keep.insert(id);
+            cloudMatches.assign(points.size(), false);
+            for (size_t i = 0; i < points.size(); ++i)
+                cloudMatches[i] = keep.count(points[i].sampleId) > 0;
+            filtered = true;
+        }
+        catch (const std::exception& e)
+        {
+            // Showing the whole map is the honest answer when the filter cannot be evaluated; it
+            // is better than hiding every point behind a failed query.
+            cloudMatches.clear();
+            status.setText("Cannot apply the filter to the map: " + juce::String::fromUTF8(e.what()),
+                           juce::dontSendNotification);
+        }
+    }
+    cloudPanel->setFilter(cloudMatches);
+    int matching = 0;
+    for (bool match : cloudMatches) matching += match ? 1 : 0;
+    cloudPanel->setNotice(filtered && matching == 0 ? "Nothing matches the tags and type filter"
+                                                    : juce::String());
+    updateCloudCaption();
+}
+
+void MainComponent::updateCloudCaption()
+{
+    if (cloudPanel == nullptr || ! cloudPanel->hasLayout()) return;
+    int matching = 0;
+    for (bool match : cloudMatches) matching += match ? 1 : 0;
+    auto text = juce::String((int) cloudPanel->layout().points.size()) + " tagged files on the map";
+    if (! cloudMatches.empty()) text += "  |  " + juce::String(matching) + " matching";
+    countLabel.setText(text, juce::dontSendNotification);
 }
 
 void MainComponent::cloudActivate(int64_t sampleId)
@@ -2190,15 +2222,6 @@ void MainComponent::reloadLibrary()
             juce::String text = juce::String(catalogCount) + (filter.hasTextOrTagFilter() ? " matching" : " samples")
                 + "  |  " + juce::String(shown) + " on page " + juce::String(pageOffset/pageSize+1);
             if (filter.matchAnyTag && ! filter.includeTags.empty()) text += "  |  any tag";
-            if (cloudVisible && cloudPanel != nullptr && cloudPanel->hasLayout())
-            {
-                // In the cloud the list page is not what the user is looking at: report the map.
-                const auto total = (int) cloudPanel->layout().points.size();
-                int matching = 0;
-                for (bool match : cloudMatches) matching += match ? 1 : 0;
-                text = juce::String(total) + " tagged files on the map";
-                if (! cloudMatches.empty()) text += "  |  " + juce::String(matching) + " matching";
-            }
             countLabel.setText(text,juce::dontSendNotification);
             previousPage.setEnabled(pageOffset > 0); nextPage.setEnabled(pageOffset+pageSize < catalogCount);
         }
@@ -2214,18 +2237,7 @@ void MainComponent::reloadLibrary()
         else selectionStatus.setText("No sample selected",juce::dontSendNotification);
         (void) shown;
         if (cloudVisible)
-        {
             updateCloudMatches();
-            if (cloudPanel != nullptr && cloudPanel->hasLayout())
-            {
-                const auto total = (int) cloudPanel->layout().points.size();
-                int matching = 0;
-                for (bool match : cloudMatches) matching += match ? 1 : 0;
-                auto text = juce::String(total) + " tagged files on the map";
-                if (! cloudMatches.empty()) text += "  |  " + juce::String(matching) + " matching";
-                countLabel.setText(text, juce::dontSendNotification);
-            }
-        }
     }
     catch (const std::exception& e) { status.setText(juce::String::fromUTF8(e.what()),juce::dontSendNotification); }
 }

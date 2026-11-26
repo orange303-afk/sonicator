@@ -31,7 +31,7 @@ excluded — thousands of files share the same one-second length, and including 
 in stripes. Files without measurements sit at the centre of their island, and files with identical
 vectors are spread on a spiral instead of overlapping.
 
-#plate("/docs/manual/assets/cloud.png", [Figure 14.1 — The cloud map in overview. Islands are tags; points are files. The map always shows the whole tagged library, not the current list filter.])
+#plate("/docs/manual/assets/cloud.png", [Figure 14.1 — The cloud map in overview. Islands are tags; points are files. Without a tag or Type filter the map shows the whole tagged library.])
 
 #section("Hover")
 
@@ -51,8 +51,17 @@ work.
 - *Overview* fits the whole map.
 - Double-clicking an island zooms to it.
 
-The camera keeps its position when you switch to List and back, and when a filter changes. The map
-does not rebuild on a filter change: filtering is a property of the list, not of the layout.
+#section("Tag and Type filters on the map")
+
+The map follows the tags you picked in the toolbar and the *Type* filter: a file that does not match
+is not drawn, does not answer hover and cannot be clicked or dragged. The search field, the folder
+tree, paging and the structure checkboxes stay filters of the list — they describe what the table
+shows, not what a file is. When nothing matches, the map keeps its shape and shows
+*Nothing matches the tags and type filter* over it; clearing the filters brings every point back in
+place.
+
+The camera keeps its position when you switch to List and back, and when a filter changes. A filter
+never rebuilds the layout or moves a point.
 
 Labels name the ten largest islands in overview, skip overlaps, and fade in after the camera stops.
 Zooming in reveals the remaining island labels; hovering a point shows its file name.

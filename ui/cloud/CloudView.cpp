@@ -57,11 +57,14 @@ void CloudView::setLayout(CloudLayout layout)
     const auto sameFingerprint = current.valid() && layout.fingerprint == current.fingerprint
         && layout.points.size() == current.points.size();
     current = std::move(layout);
+    // A mask belongs to one set of points; the owner recomputes it for the new layout.
+    matches.clear();
     index.build(current);
     visibleValid = false;
     frameValid = false;
     rebuildColours();
     rebuildLayers();
+    rebuildIslandCounts();
     hovered = CloudIndex::none;
     selectedIndex = CloudIndex::none;
     for (size_t i = 0; i < current.points.size(); ++i)
@@ -80,16 +83,38 @@ void CloudView::setLayout(CloudLayout layout)
     repaint();
 }
 
-void CloudView::setFilter(std::vector<bool>)
+void CloudView::setFilter(std::vector<bool> mask)
 {
-    // The map is the whole tagged library. The list's search/folder/tag filter belongs to the
-    // list; applying it here left a handful of bright points on a dark field, which read as a
-    // broken map. All points keep the same brightness.
-    if (matches.empty()) return;
-    matches.clear();
+    // The mask is parallel to layout().points; an empty or mismatched mask means "everything
+    // matches". The layout itself never changes: the camera, the positions and the cached map stay,
+    // so switching a filter cannot reflow the view.
+    if (mask.size() != current.points.size()) mask.clear();
+    if (mask == matches) return;
+    matches = std::move(mask);
     frameValid = false;
+    visibleValid = false;
+    rebuildIslandCounts();
+    // A hidden point cannot keep the hover: its caption and its audition would describe a file the
+    // map no longer shows.
+    if (hovered != CloudIndex::none && ! isPointVisible(hovered)) setHovered(CloudIndex::none);
     repaint();
     if (isShowing()) updateTimerRate();
+}
+
+void CloudView::rebuildIslandCounts()
+{
+    islandVisibleCounts.assign(current.islands.size(), 0);
+    if (matches.empty())
+    {
+        for (size_t i = 0; i < current.islands.size(); ++i) islandVisibleCounts[i] = current.islands[i].count;
+        return;
+    }
+    for (size_t i = 0; i < current.points.size() && i < matches.size(); ++i)
+    {
+        if (! matches[i]) continue;
+        const auto island = current.points[i].islandIndex;
+        if (island >= 0 && (size_t) island < islandVisibleCounts.size()) ++islandVisibleCounts[(size_t) island];
+    }
 }
 
 void CloudView::setLabel(int64_t sampleId, juce::String text)
@@ -298,7 +323,26 @@ size_t CloudView::pointAtScreen(juce::Point<int> screen) const
     if (! current.valid()) return CloudIndex::none;
     const auto world = screenToWorld({ (float) screen.x, (float) screen.y });
     const auto radius = juce::jmax(6.0f, 8.0f / (float) viewScale);
-    return index.hitTest(world.x, world.y, radius);
+    const auto hit = index.hitTest(world.x, world.y, radius);
+    if (hit == CloudIndex::none || isPointVisible(hit)) return hit;
+    // A hidden point under the cursor must not swallow a click meant for a visible neighbour: take
+    // the nearest visible point inside the same disc.
+    size_t best = CloudIndex::none;
+    float bestDistance = radius * radius;
+    for (auto candidate : index.within({ world.x - radius, world.y - radius, radius * 2.0f, radius * 2.0f }))
+    {
+        if (! isPointVisible(candidate)) continue;
+        const auto& point = current.points[candidate];
+        const auto dx = point.x - world.x;
+        const auto dy = point.y - world.y;
+        const auto distance = dx * dx + dy * dy;
+        if (distance <= bestDistance)
+        {
+            bestDistance = distance;
+            best = candidate;
+        }
+    }
+    return best;
 }
 
 void CloudView::rebuildColours()
@@ -481,6 +525,8 @@ void CloudView::drawLabels(juce::Graphics& g, const std::vector<size_t>& visible
             || centre.x - radius > getWidth() || centre.y - radius > getHeight())
             continue;
         if (islandIndex >= islandLabels.size()) continue;
+        if ((size_t) islandIndex < islandVisibleCounts.size() && islandVisibleCounts[(size_t) islandIndex] == 0)
+            continue; // the filter hides every file in this island
         const auto width = islandLabelWidths[islandIndex];
         const juce::Rectangle<int> box((int) (centre.x - width / 2), (int) (centre.y - radius - 16), width, 14);
         bool collides = false;
@@ -597,7 +643,8 @@ void CloudView::paint(juce::Graphics& g)
 
 void CloudView::paintDynamic(juce::Graphics& g, juce::Point<float> sway)
 {
-    if (selectedIndex != CloudIndex::none && selectedSample != 0 && selectedIndex < current.points.size())
+    if (selectedIndex != CloudIndex::none && selectedSample != 0 && selectedIndex < current.points.size()
+        && isPointVisible(selectedIndex))
     {
         const auto& point = current.points[selectedIndex];
         auto screen = worldToScreen(point.x, point.y) + sway;
@@ -611,7 +658,7 @@ void CloudView::paintDynamic(juce::Graphics& g, juce::Point<float> sway)
         g.drawEllipse(screen.x - 5, screen.y - 5, 10, 10, 1.4f);
     }
 
-    if (hovered != CloudIndex::none && hovered < current.points.size())
+    if (hovered != CloudIndex::none && hovered < current.points.size() && isPointVisible(hovered))
     {
         const auto& point = current.points[hovered];
         auto screen = worldToScreen(point.x, point.y) + sway;
@@ -748,6 +795,7 @@ void CloudView::timerCallback()
 
 void CloudView::setHovered(size_t newHovered)
 {
+    if (newHovered != CloudIndex::none && ! isPointVisible(newHovered)) newHovered = CloudIndex::none;
     if (newHovered == hovered) return;
     hovered = newHovered;
     if (hovered != CloudIndex::none)
@@ -825,8 +873,9 @@ void CloudView::mouseDrag(const juce::MouseEvent& event)
 void CloudView::activate(size_t found)
 {
     if (found == CloudIndex::none || found >= current.points.size()) return;
-    // A dimmed point is still a real file: the filter says it does not match, not that it cannot
-    // be inspected. Clicking it must always open it.
+    // A hidden point is not on the map: the filter says the file is excluded right now, so a press
+    // over the empty field behind it must not open it.
+    if (! isPointVisible(found)) return;
     if (onActivate) onActivate(current.points[found].sampleId);
 }
 

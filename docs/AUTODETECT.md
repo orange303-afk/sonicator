@@ -1,7 +1,8 @@
 # Type detection: what the shipped model does on real libraries
 
 Date: 2026-11-25. Measured with `services/training/evaluate-shipped.mjs`; the tables are generated in
-`docs/AUTODETECT_HELDOUT.md`.
+`docs/AUTODETECT_HELDOUT.md`. The local-domain fix landed on 2026-11-26; the section on it records the
+measured result on the same export.
 
 ## What is measured
 
@@ -42,6 +43,25 @@ The owner's own confirmed types (in-sample, 1378 records): kick 94.4% top-1 and 
 answers right; snare 54.8% top-1, and only 9.6% of snares are published at all, 58.1% of those right.
 His 22 confident snare mistakes are `clap`.
 
+## The local-domain fix (2026-11-26)
+
+The first defect above is fixed in `AdaptiveClassifier`: a schema-2 query answered while the shipped
+model is loaded now uses that model alone. Local prototypes still answer when no model is shipped or
+the query is schema 1; a manual Type on a file was never touched by this path. No model file, no
+feature schema and no retraining changed.
+
+The same export, measured again with `evaluate-shipped.mjs`:
+
+| independent set (3157 tag-derived rows) | top-1 | coverage | precision |
+|---|---|---|---|
+| local cosine merged (previous rule) | 10.5% | 96.6% | 10.3% |
+| shipped model alone (current rule) | **55.7%** | 15.0% | **83.3%** |
+
+On the owner's own typed rows the "with own confirmations" number falls from 92.5% to 73.4% top-1,
+because that set supplied the prototypes that were outvoting the model: it is an in-sample fit, and
+the independent set is the one that measures a second person. The full comparison, per install and
+per label, is `docs/AUTODETECT_HELDOUT.md`.
+
 ## Five things the data says
 
 1. **The local path, not the model, is what breaks type accuracy for a second person.** The app's
@@ -65,12 +85,10 @@ His 22 confident snare mistakes are `clap`.
 
 ## What to do, in order
 
-1. **Stop comparing a cosine with a calibrated probability.** Either ship a local
-   similarity-to-precision map in the model file (the pipeline already fits one in
-   `v2/calibration.mjs`, but `GlobalLinearModel` has no such field and `AdaptiveClassifier` does not
-   apply it), or let local evidence decide only labels the model cannot name. Measure either against
-   `evaluate-shipped.mjs`: the target is the model's own 55.7% top-1 and 83.3% precision on the
-   independent set, and today's merge is 10.5% and 10.3%.
+1. **Stop comparing a cosine with a calibrated probability.** Done on 2026-11-26: the model answers
+   schema-2 queries on its own when it is loaded, and the independent set measured 55.7% top-1 and
+   83.3% precision instead of 10.5% and 10.3%. What remains from this list is the vocabulary and the
+   percussion families below, both of which need labelled data rather than a merge rule.
 2. **Give the model the missing vocabulary, or stop promising it.** A real `fx` cluster is not in the
    public wave; the FSD50K mapping was tried and reverted (`docs/TRAINING_REPORT_V2.md`). Until a
    labelled source exists, the honest behaviour is the current one: publish nothing for those types

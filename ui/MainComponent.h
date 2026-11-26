@@ -369,6 +369,7 @@ private:
     void requestCloudBuild();
     void pollCloudBuild();
     void updateCloudMatches();
+    void updateCloudCaption();
     void cloudActivate(int64_t sampleId);
     void cloudHover(int64_t sampleId);
     void cloudHoverEnd();

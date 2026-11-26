@@ -1,8 +1,10 @@
 // Held-out measurement of the model that ships in resources/ml/global_model.json against contributed
 // records. Nothing is trained, tuned or selected here: the model file is read exactly as the app reads
 // it, and the contributed rows are the test set. The acceptance rule mirrors AdaptiveClassifier:
-// the global score is multiplied by 0.95, a local label wins when the global best is not more than
-// 0.02 above it, and a type is published only at or above 0.80.
+// the global score is multiplied by 0.95, a type is published only at or above 0.80, and since the
+// local-domain fix a schema-2 query is answered by the shipped model alone when it is loaded
+// (`localPolicy: "global-only"`). The earlier merge — a local label wins when the global best is not
+// more than 0.02 above it — stays available as "prefer-local" for comparison.
 //
 // Cold start is the number for a person the model has never met. "app" adds that person's own earlier
 // confirmations as local prototypes and merges them the way the app does; it answers "what does the
@@ -291,8 +293,12 @@ function byScore(a, b) {
 }
 
 // Global evidence is already mapped to a stated precision by the model's similarityMap, so only the
-// app's 0.95 penalty applies here. A local label keeps its raw cosine and wins the tie.
-export function mergeForApp(globalRanked, local) {
+// app's 0.95 penalty applies here. A local label keeps its raw cosine and wins the tie under
+// "prefer-local", which is what the app did until 0.3.3. "global-only" is the shipped rule since
+// then: a schema-2 query answered by the loaded model alone.
+export function mergeForApp(globalRanked, local, { localPolicy = "prefer-local" } = {}) {
+  if (localPolicy === "global-only")
+    return globalRanked.map((entry) => ({ ...entry, globalScore: entry.score, localScore: 0, source: "global" }));
   if (local === null || local.size === 0) return globalRanked;
   const byLabel = new Map();
   for (const entry of globalRanked)
@@ -402,7 +408,13 @@ function bucketKey(score) {
   return key;
 }
 
-export function evaluateContributed({ rows, prototypes = null, shipped, threshold = TYPE_THRESHOLD }) {
+export function evaluateContributed({
+  rows,
+  prototypes = null,
+  shipped,
+  threshold = TYPE_THRESHOLD,
+  localPolicy = "prefer-local",
+}) {
   const labelSet = shipped.labelSet;
   const indexed = rows.map((row) => ({ ...row, class: classOf(row, labelSet), unit: unitVector(row.features) }));
   // The local path only ever holds rows whose Type a person set: a tag is not a type prototype in the
@@ -445,7 +457,7 @@ export function evaluateContributed({ rows, prototypes = null, shipped, threshol
       probability: entry.probability,
     }));
     const { matches: local, twins } = localScores(row.unit, row.features, indexes.get(row.installId), row.recordId);
-    const appRanked = mergeForApp(globalRanked, local);
+    const appRanked = mergeForApp(globalRanked, local, { localPolicy });
     const localRanked = [...local.entries()]
       .map(([label, score]) => ({ label, score, source: "local" }))
       .sort(byScore);
@@ -584,6 +596,7 @@ export function evaluateContributed({ rows, prototypes = null, shipped, threshol
 
   return {
     threshold,
+    localPolicy,
     generatedAt: shipped.generatedAt,
     modelFile: shipped.file,
     labels: shipped.labels,

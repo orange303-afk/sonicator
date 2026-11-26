@@ -85,8 +85,10 @@ components and has no effect in this build. Neither page changes what the librar
 
 *Settings → About → Check for updates* asks `api.github.com` for the newest published release and
 compares it with the running version. The standalone also checks once, three seconds after launch;
-only a genuinely newer release opens a window with *Release notes*, *Download from GitHub* for this
-platform and *Gumroad*. A failed check is silent. The request carries the application version in its
+only a genuinely newer release opens a window that shows what changed in that version, with *Release
+notes*, *Download from GitHub* for this platform, *Gumroad* and a *Support SONICATOR* row with
+*Ko-fi* and *Boosty*. If the release carries no notes, the window says so and the download still
+works. A failed check is silent. The request carries the application version in its
 user agent and the project name in the URL. It sends no catalog, file, path, machine or account data.
 The plugin never checks.
 
