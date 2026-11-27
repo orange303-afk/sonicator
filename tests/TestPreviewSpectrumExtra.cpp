@@ -82,6 +82,10 @@ TEST_CASE("The spectral overlay covers its band and nothing else", "[spectral][u
     TestDirectory t;
     CacheFolderScope scope(t.dir.getChildFile("spectra"));
     WaveformDisplay display(t.dir.getChildFile("waveforms"));
+    bool logScale = true;
+    SECTION("Logarithmic axis") {}
+    SECTION("Linear axis starting at zero Hz") { logScale = false; }
+    display.setSpectrumLogScale(logScale);
     prepareDisplay(display, t.wave("sine.wav", 440.0, 1, 22050));
     REQUIRE(pumpUntil([&] { return display.spectrumImageReadyForTest(); }, 20000));
     const auto before = display.createComponentSnapshot(display.getLocalBounds(), true);
@@ -90,6 +94,12 @@ TEST_CASE("The spectral overlay covers its band and nothing else", "[spectral][u
     display.setSpectralMaskForTest(bandMask());
     const auto after = display.createComponentSnapshot(display.getLocalBounds(), true);
     REQUIRE(after.isValid());
+
+    // The fill stays inside the band; not even the time edges mark the rest of the card.
+    const int bandCentreY = logScale ? 84 : 144;
+    CHECK(before.getPixelAt(287, bandCentreY) != after.getPixelAt(287, bandCentreY));
+    for (int x = 0; x < before.getWidth(); ++x)
+        REQUIRE(before.getPixelAt(x, 30) == after.getPixelAt(x, 30));
 
     int left = before.getWidth(), right = -1;
     for (int y = 0; y < before.getHeight(); ++y)
@@ -119,8 +129,36 @@ TEST_CASE("The spectral overlay covers its band and nothing else", "[spectral][u
             }
     REQUIRE(bottom > top);
     INFO("changed rows " << top << ".." << bottom);
-    REQUIRE(top >= 58);   // 1500 Hz sits at y = 64
-    REQUIRE(bottom <= 112); // 200 Hz sits at y = 104
+    REQUIRE(top >= (logScale ? 58 : 137));
+    REQUIRE(bottom <= (logScale ? 112 : 149));
+}
+
+TEST_CASE("Spectral tools hide the Time overlay without discarding the range", "[spectral][ui]")
+{
+    using Tool = WaveformDisplay::SelectionTool;
+    TestDirectory t;
+    CacheFolderScope scope(t.dir.getChildFile("spectra"));
+    WaveformDisplay display(t.dir.getChildFile("waveforms"));
+    prepareDisplay(display, t.wave("sine.wav", 440.0, 1, 22050));
+    REQUIRE(pumpUntil([&] { return display.spectrumImageReadyForTest(); }, 20000));
+
+    const auto visiblePixel = [&]
+    {
+        return display.createComponentSnapshot(display.getLocalBounds(), true).getPixelAt(287, 80);
+    };
+    const auto unselected = visiblePixel();
+    display.setSelection({ 0.2, 0.4 });
+    const auto selected = visiblePixel();
+    REQUIRE(selected != unselected);
+
+    for (const auto tool : { Tool::rectangle, Tool::lasso, Tool::wand })
+    {
+        display.setSelectionTool(tool);
+        CHECK(visiblePixel() == unselected);
+        CHECK(display.selection().valid());
+    }
+    display.setSelectionTool(Tool::time);
+    CHECK(visiblePixel() == selected);
 }
 
 TEST_CASE("A press on the selection lifts it as it always did", "[spectral][ui]")
@@ -446,6 +484,26 @@ TEST_CASE("Clicking the Rect chip and dragging makes a mask", "[spectral][ui]")
     display.mouseUp(spectralMouseEvent(display, to, from, true));
     REQUIRE(display.spectralMask() != nullptr);
     CHECK(display.spectralMask()->maskedCellCount() > 0);
+}
+
+TEST_CASE("A wand drag fills and never starts a time selection", "[spectral][ui]")
+{
+    TestDirectory t;
+    CacheFolderScope scope(t.dir.getChildFile("spectra"));
+    WaveformDisplay display(t.dir.getChildFile("waveforms"));
+    prepareDisplay(display, t.wave("tone.wav", 440.0, 1, 22050));
+    REQUIRE(pumpUntil([&] { return display.spectrumImageReadyForTest(); }, 20000));
+    display.setSelectionTool(WaveformDisplay::SelectionTool::wand);
+
+    const auto onTone = spectrumPoint(0.3, 440.0, 480, 160);
+    const auto away = spectrumPoint(0.5, 3000.0, 480, 160);
+    display.mouseDown(spectralMouseEvent(display, onTone, onTone, false));
+    display.mouseDrag(spectralMouseEvent(display, away, onTone, true));
+    display.mouseUp(spectralMouseEvent(display, away, onTone, true));
+    REQUIRE(display.spectralMask() != nullptr);
+    CHECK(display.spectralMask()->maskedCellCount() > 0);
+    // The Time tool would have made a range; the wand must not.
+    CHECK_FALSE(display.selection().valid());
 }
 
 TEST_CASE("A spectral mask prepares a masked export and auditions it", "[spectral][ui]")

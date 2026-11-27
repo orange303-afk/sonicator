@@ -20,7 +20,8 @@ Verified against a Debug build with `SonicatorTests` (Catch2).
 | The exported WAV is exactly the range length | `TestSpectralRender.cpp` |
 | Batch caches both files, a rerun skips them, failures are counted | `TestSpectralAnalysis.cpp` |
 | A cached file has its image before any timer runs | `TestPreviewSpectrumExtra.cpp` |
-| The overlay covers its band and nothing else (columns and rows measured on a snapshot) | `TestPreviewSpectrumExtra.cpp` |
+| The overlay fills its band and nothing else on both log and linear (0 Hz) axes, verified by snapshot pixels | `TestPreviewSpectrumExtra.cpp` |
+| Spectral tools hide the Time overlay without losing the range; returning to Time shows it again | `TestPreviewSpectrumExtra.cpp` |
 | Lasso and wand fill the region under the pointer | `TestPreviewSpectrumExtra.cpp` |
 | A press on the selection lifts it; outside it draws; Shift edits on top | `TestPreviewSpectrumExtra.cpp` |
 | Each tool has its own cursor and the selection answers with a hand | `TestPreviewSpectrumExtra.cpp` |

@@ -629,7 +629,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
             else
                 thumbnail.drawChannels(g,area.toNearestInt(),view.start,view.end,0.85f);
         }
-        if (currentSelection.valid())
+        if (currentSelection.valid() && (mode != RenderMode::spectrum || tool == SelectionTool::time))
         {
             const auto x1 = waveview::xAtTime(currentSelection.start, getWidth(), view);
             const auto x2 = waveview::xAtTime(currentSelection.end, getWidth(), view);
@@ -1327,14 +1327,15 @@ void WaveformDisplay::rebuildMaskImage()
     const bool logScale = grid == nullptr || grid->logFrequency;
     const double minF = grid != nullptr ? grid->minFrequency : mask->minFrequency;
     const double maxF = grid != nullptr ? grid->maxFrequency : mask->maxFrequency;
-    if (! (maxF > minF) || minF <= 0.0) return;
+    // A linear spectrum starts at DC; only the logarithmic mapping requires a positive minimum.
+    if (! (maxF > minF) || minF < 0.0 || (logScale && minF == 0.0)) return;
     maskImageMinHz = minF;
     maskImageMaxHz = maxF;
     maskImageLog = logScale;
     juce::Image image(juce::Image::ARGB, mask->columns, SpectralMask::rowCount, true);
     juce::Image::BitmapData data(image, juce::Image::BitmapData::writeOnly);
     const auto colour = theme::text.withAlpha(0.18f).getPixelARGB();
-    const auto ratio = maxF / minF;
+    const auto ratio = logScale ? maxF / minF : 1.0;
     for (int row = 0; row < SpectralMask::rowCount; ++row)
     {
         const auto position = ((double) row + 0.5) / (double) SpectralMask::rowCount;
@@ -1362,14 +1363,6 @@ void WaveformDisplay::drawMask(juce::Graphics& g, juce::Rectangle<float> area, w
         rebuildMaskImage();
     if (! maskImage.isValid()) return;
     drawWindowedImage(g, area, mask->startSeconds, mask->endSeconds, maskImage, view);
-    // The window's edges stay visible even when the masked cells inside it are sparse.
-    g.setColour(theme::accent.withAlpha(0.6f));
-    for (const auto edge : { mask->startSeconds, mask->endSeconds })
-    {
-        if (edge < view.start || edge > view.end) continue;
-        const auto x = waveview::xAtTime(edge, getWidth(), view);
-        g.drawVerticalLine((int) x, area.getY(), area.getBottom());
-    }
 }
 
 void WaveformDisplay::drawSpectralGesture(juce::Graphics& g, juce::Rectangle<float> area,
@@ -1499,7 +1492,12 @@ void WaveformDisplay::beginSpectralGesture(const juce::MouseEvent& e, juce::Rect
     const double hz = frequencyAtY(e.position.y, area, view);
     if (tool == SelectionTool::wand)
     {
+        // A click fills; the gesture flag keeps the following drag from falling through to the
+        // ordinary time selection, which made the wand look like the Time tool.
         runWand(e, area, view);
+        spectralGesture = true;
+        gestureStartTime = gestureEndTime = time;
+        gestureStartHz = gestureEndHz = hz;
         return;
     }
     spectralGesture = true;
