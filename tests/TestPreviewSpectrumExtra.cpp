@@ -123,7 +123,7 @@ TEST_CASE("The spectral overlay covers its band and nothing else", "[spectral][u
     REQUIRE(bottom <= 112); // 200 Hz sits at y = 104
 }
 
-TEST_CASE("A press on the selection lifts it only when the drag leaves the card", "[spectral][ui]")
+TEST_CASE("A press on the selection lifts it as it always did", "[spectral][ui]")
 {
     TestDirectory t;
     CacheFolderScope scope(t.dir.getChildFile("spectra"));
@@ -148,15 +148,15 @@ TEST_CASE("A press on the selection lifts it only when the drag leaves the card"
     REQUIRE(display.spectralMask() != nullptr);
     REQUIRE(display.spectralMask()->maskedCellCount() == mask.maskedCellCount());
 
-    // A drag that stays inside the card draws a new selection instead of lifting anything.
+    // A press on the selection lifts it: any drag from inside asks for the external file drag and
+    // the mask stays as it is (the behaviour the card had when the tools worked).
     const auto insideEnd = spectrumPoint(0.42, 1200.0, 480, 160);
     display.mouseDown(spectralMouseEvent(display, inside, inside, false));
     display.mouseDrag(spectralMouseEvent(display, insideEnd, inside, true));
     display.mouseUp(spectralMouseEvent(display, insideEnd, inside, true));
-    REQUIRE(requests == 1);
+    REQUIRE(requests == 2);
     REQUIRE(display.spectralMask() != nullptr);
-    REQUIRE(display.spectralMask()->startSeconds > 0.29);
-    REQUIRE(display.spectralMask()->endSeconds < 0.43);
+    REQUIRE(display.spectralMask()->maskedCellCount() == mask.maskedCellCount());
 
     // A press outside the selection keeps drawing there, replacing it.
     const auto outside = spectrumPoint(0.45, 5000.0, 480, 160);
@@ -164,7 +164,7 @@ TEST_CASE("A press on the selection lifts it only when the drag leaves the card"
     display.mouseDown(spectralMouseEvent(display, outside, outside, false));
     display.mouseDrag(spectralMouseEvent(display, faraway, outside, true));
     display.mouseUp(spectralMouseEvent(display, faraway, outside, true));
-    REQUIRE(requests == 1);
+    REQUIRE(requests == 2);
     REQUIRE(display.spectralMask() != nullptr);
     REQUIRE(display.spectralMask()->startSeconds > 0.4);
     REQUIRE(display.spectralMask()->endSeconds < 0.5);
@@ -177,7 +177,7 @@ TEST_CASE("A press on the selection lifts it only when the drag leaves the card"
     display.mouseDown(spectralMouseEvent(display, inside, inside, false, shift));
     display.mouseDrag(spectralMouseEvent(display, outside, inside, true, shift));
     display.mouseUp(spectralMouseEvent(display, outside, inside, true, shift));
-    REQUIRE(requests == 1);
+    REQUIRE(requests == 2);
     REQUIRE(display.spectralMask() != nullptr);
     REQUIRE(display.spectralMask()->maskedCellCount() > cellsBefore);
 }
